@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "devai"
+version = "0.1.0"
+description = "AI-powered development lifecycle automation platform"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "anthropic>=0.52.0",
+    "openai>=1.82.0",
+    "nats-py>=2.9.0",
+    "redis[hiredis]>=5.2.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "typer[all]>=0.15.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "PyGithub>=2.6.0",
+    "httpx>=0.28.0",
+    "structlog>=24.4.0",
+    "opentelemetry-api>=1.29.0",
+    "opentelemetry-sdk>=1.29.0",
+    "python-ulid>=3.0.0",
+    "rich>=13.9.0",
+    "playwright>=1.49.0",
+    "cryptography>=44.0.0",
+    "PyJWT>=2.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pytest-cov>=6.0.0",
+    "respx>=0.22.0",
+    "fakeredis>=2.26.0",
+]
+
+[project.scripts]
+devai = "devai.cli.commands:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/devai"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TCH"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

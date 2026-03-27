@@ -1,0 +1,51 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/tesserix/devai/devai
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+env:
+  DEVAI_NATS_URL: "nats://nats.nats.svc.cluster.local:4222"
+  DEVAI_REDIS_URL: "redis://:@redis.redis-devai.svc.cluster.local:6379"
+  DEVAI_LOG_LEVEL: "info"
+  DEVAI_HOST: "0.0.0.0"
+  DEVAI_PORT: "8080"
+  DEVAI_GITHUB_ORG: "tesserix"
+  DEVAI_DASHBOARD_BASE_URL: "https://devai.tesserix.app"
+
+secrets:
+  externalSecretName: devai-secrets
+  gcpProject: tesseracthub-480811
+
+podAnnotations:
+  traffic.sidecar.istio.io/excludeOutboundPorts: "4222,6379"
+  traffic.sidecar.istio.io/excludeOutboundIPRanges: "169.254.169.254/32"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+gcp:
+  projectId: "tesseracthub-480811"
+  workloadIdentity:
+    enabled: true
+    gcpServiceAccount: "app-secrets-devai-prod@tesseracthub-480811.iam.gserviceaccount.com"
+
+serviceAccount:
+  create: true
+  name: devai
+  annotations: {}
+
+istio:
+  enabled: true
+  gateway: istio-system/default-gateway
+  host: devai.tesserix.app
