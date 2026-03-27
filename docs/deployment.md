@@ -29,6 +29,7 @@ CLI ───────────────►│  │             │◄�
 | NATS JetStream | `nats` | `nats.nats.svc.cluster.local:4222` | Shared with other services, 3 replicas |
 | Redis | `redis-devai` | `redis.redis-devai.svc.cluster.local:6379` | Dedicated, no auth, 2Gi PVC |
 | Dashboard | — | `https://devai.tesserix.app` | Istio VirtualService |
+| Keycloak (auth) | `identity-internal` | `https://internal-identity.tesserix.app` | Internal realm, OIDC |
 
 ## GCP Resources
 
@@ -87,6 +88,48 @@ gcloud secrets versions add prod-devai-github-app-private-key \
    - **Install** the app on the `tesserix` organization
    - Note the **Installation ID** from the URL → save to `prod-devai-github-app-installation-id`
    - Go to **OAuth** section, note **Client ID** and **Client Secret** → save to respective GCP secrets
+
+## Keycloak OIDC Setup (Dashboard Auth)
+
+The dashboard authenticates via the **internal Keycloak** at `internal-identity.tesserix.app` (realm: `tesserix-internal`).
+
+### Create the Keycloak Client
+
+1. Log in to Keycloak admin: `https://internal-identity.tesserix.app/admin/`
+2. Select realm: **tesserix-internal**
+3. Go to **Clients** → **Create client**
+4. Settings:
+   - **Client ID:** `devai-dashboard`
+   - **Client Protocol:** openid-connect
+   - **Access Type:** confidential
+   - **Valid Redirect URIs:**
+     - `https://devai.tesserix.app/dashboard/auth/callback`
+     - `http://localhost:8080/dashboard/auth/callback` (for local dev)
+   - **Web Origins:** `+`
+5. Go to **Credentials** tab → copy the **Client Secret**
+6. Save to GCP:
+   ```bash
+   echo -n "<client-secret>" | gcloud secrets versions add prod-devai-keycloak-client-secret \
+     --project=tesseracthub-480811 --data-file=-
+   ```
+
+### Identity URL
+
+- **Public URL:** `https://internal-identity.tesserix.app`
+- **Internal URL:** `keycloak.identity-internal.svc.cluster.local:8080`
+- **Realm:** `tesserix-internal`
+- **VirtualService:** Added in `tesserix-k8s/charts/thirdparty/istio-config/values-prod.yaml` (internalIdentityAliases)
+
+### Auth Flow
+
+```
+User → devai.tesserix.app/dashboard/auth/login
+  → Redirect to internal-identity.tesserix.app/realms/tesserix-internal/protocol/openid-connect/auth
+  → Keycloak login form
+  → Callback to devai.tesserix.app/dashboard/auth/callback
+  → Session stored in Redis, cookie set
+  → Redirect to /dashboard
+```
 
 ## ArgoCD Manifests (in tesserix-k8s)
 

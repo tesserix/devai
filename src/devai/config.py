@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # --- Dashboard ---
     dashboard_base_url: str = "http://localhost:8080"
 
+    # --- Keycloak OIDC (primary auth for dashboard) ---
+    keycloak_url: str = "https://internal-identity.tesserix.app"
+    keycloak_realm: str = "tesserix-internal"
+    keycloak_client_id: str = "devai-dashboard"
+    keycloak_client_secret: str = ""
+    auth_provider: str = "keycloak"  # "keycloak" or "github"
+
     # --- OpenAI / Codex ---
     openai_api_key: str = ""
     openai_model: str = "o3"

@@ -55,7 +55,7 @@ class EventBus:
             name=self.stream_name,
             subjects=["devai.>"],
             retention=RetentionPolicy.WORK_QUEUE,
-            max_age=7 * 24 * 3600 * 1_000_000_000,  # 7 days in nanoseconds
+            max_age=7 * 24 * 3600,  # 7 days in seconds
             storage=StorageType.FILE,
             num_replicas=1,
         )

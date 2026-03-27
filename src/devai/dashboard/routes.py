@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from devai.core.pipeline import PipelineOrchestrator
 from devai.dashboard.auth import GitHubOAuth
+from devai.dashboard.keycloak_auth import KeycloakOIDC
 from devai.dashboard.templates import INDEX_HTML
 from devai.models import TriggerType
 
@@ -32,27 +33,31 @@ async def dashboard_page() -> str:
     return INDEX_HTML
 
 
-# --- OAuth ---
+# --- Auth (supports Keycloak OIDC or GitHub OAuth) ---
 
 @router.get("/auth/login")
-async def oauth_login(request: Request) -> RedirectResponse:
-    """Redirect to GitHub OAuth authorization."""
+async def auth_login(request: Request) -> RedirectResponse:
+    """Redirect to the configured auth provider (Keycloak or GitHub)."""
     config = request.app.state.config
-    oauth = GitHubOAuth(config)
     state = secrets.token_urlsafe(32)
+    redirect_uri = f"{config.dashboard_base_url}/dashboard/auth/callback"
 
-    # Store state in Redis for verification
     redis = request.app.state.state_manager.redis
     await redis.set(f"devai:oauth:state:{state}", "1", ex=600)
 
-    redirect_uri = f"{config.dashboard_base_url}/dashboard/auth/callback"
-    url = oauth.get_authorize_url(redirect_uri, state)
+    if config.auth_provider == "keycloak":
+        kc = KeycloakOIDC(config)
+        url = kc.get_authorize_url(redirect_uri, state)
+    else:
+        oauth = GitHubOAuth(config)
+        url = oauth.get_authorize_url(redirect_uri, state)
+
     return RedirectResponse(url)
 
 
 @router.get("/auth/callback")
-async def oauth_callback(request: Request, code: str, state: str) -> RedirectResponse:
-    """Handle GitHub OAuth callback."""
+async def auth_callback(request: Request, code: str, state: str) -> RedirectResponse:
+    """Handle auth callback from Keycloak or GitHub."""
     config = request.app.state.config
     redis = request.app.state.state_manager.redis
 
@@ -62,25 +67,52 @@ async def oauth_callback(request: Request, code: str, state: str) -> RedirectRes
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
     await redis.delete(f"devai:oauth:state:{state}")
 
-    # Exchange code for token
-    oauth = GitHubOAuth(config)
-    token_data = await oauth.exchange_code(code)
-    access_token = token_data.get("access_token")
-    if not access_token:
-        raise HTTPException(status_code=400, detail="Failed to get access token")
+    redirect_uri = f"{config.dashboard_base_url}/dashboard/auth/callback"
 
-    # Get user info
-    user = await oauth.get_user(access_token)
-    await oauth.close()
+    if config.auth_provider == "keycloak":
+        kc = KeycloakOIDC(config)
+        token_data = await kc.exchange_code(code, redirect_uri)
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token", "")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Failed to get access token")
 
-    # Create session
-    session_id = secrets.token_urlsafe(48)
-    session_data = json.dumps({
-        "access_token": access_token,
-        "user_login": user["login"],
-        "user_name": user.get("name", ""),
-        "avatar_url": user.get("avatar_url", ""),
-    })
+        userinfo = await kc.get_userinfo(access_token)
+        await kc.close()
+
+        session_id = secrets.token_urlsafe(48)
+        session_data = json.dumps({
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "auth_provider": "keycloak",
+            "user_login": userinfo.get("preferred_username", userinfo.get("sub", "")),
+            "user_name": userinfo.get("name", ""),
+            "user_email": userinfo.get("email", ""),
+            "avatar_url": "",
+            "roles": userinfo.get("realm_access", {}).get("roles", []),
+        })
+    else:
+        oauth = GitHubOAuth(config)
+        token_data = await oauth.exchange_code(code)
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Failed to get access token")
+
+        user = await oauth.get_user(access_token)
+        await oauth.close()
+
+        session_id = secrets.token_urlsafe(48)
+        session_data = json.dumps({
+            "access_token": access_token,
+            "refresh_token": "",
+            "auth_provider": "github",
+            "user_login": user["login"],
+            "user_name": user.get("name", ""),
+            "user_email": user.get("email", ""),
+            "avatar_url": user.get("avatar_url", ""),
+            "roles": [],
+        })
+
     await redis.set(f"devai:session:{session_id}", session_data, ex=86400)
 
     response = RedirectResponse("/dashboard")

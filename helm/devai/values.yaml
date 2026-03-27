@@ -17,6 +17,10 @@ env:
   DEVAI_PORT: "8080"
   DEVAI_GITHUB_ORG: "tesserix"
   DEVAI_DASHBOARD_BASE_URL: "https://devai.tesserix.app"
+  DEVAI_AUTH_PROVIDER: "keycloak"
+  DEVAI_KEYCLOAK_URL: "https://internal-identity.tesserix.app"
+  DEVAI_KEYCLOAK_REALM: "tesserix-internal"
+  DEVAI_KEYCLOAK_CLIENT_ID: "devai-dashboard"
 
 secrets:
   externalSecretName: devai-secrets
