@@ -70,6 +70,23 @@ In CI, it's set as the `PKG_READ_TOKEN` GitHub Actions secret on each repo.
 - **GKE Cluster:** `tesseract-prod-in-gke`
 - **GitHub Org:** `tesserix` (all repos live here, not under `sam123ben`)
 
+### 6. No Manual kubectl apply — ArgoCD Only
+
+**NEVER** use `kubectl apply`, `kubectl create`, `kubectl patch`, `kubectl edit`, or `kubectl set` to deploy or modify cluster resources directly. All changes must go through ArgoCD:
+
+1. Make changes in the `tesserix-k8s` repo (Helm charts, values, external-secrets, ArgoCD app definitions)
+2. Commit and push to `main`
+3. ArgoCD auto-syncs (or trigger manually: `kubectl patch app <name> -n argocd --type merge -p '{"operation":{"sync":{"syncStrategy":{"apply":{"force":false}}}}}'`)
+
+**Why:** Manual applies drift from Git state, get overwritten by ArgoCD self-heal, and are not auditable. The only exception is emergency debugging (e.g., `kubectl logs`, `kubectl describe`, `kubectl exec` for read-only investigation).
+
+**Key ArgoCD patterns:**
+- **Helm charts:** `tesserix-k8s/charts/apps/<service>/` — templates + values
+- **ArgoCD apps:** `tesserix-k8s/argocd/prod/apps/<project>/` — app-of-apps pattern
+- **External Secrets:** `tesserix-k8s/external-secrets/prod/<namespace>/` — GHCR secrets, DB passwords via GCP Secret Manager
+- **Istio config:** `tesserix-k8s/charts/thirdparty/istio-config/` — namespace labels, mTLS, gateway config
+- **Namespace labels** (e.g., `istio-injection=enabled`): managed by `istio-config` chart, not manual `kubectl label`
+
 ---
 
 ## Repo Map
