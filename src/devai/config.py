@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     gcp_secret_groq_api_key: str = "prod-devai-groq-api-key"
 
+    # --- NemoClaw / Nemotron (self-hosted GPU inference) ---
+    nemoclaw_api_key: str = ""  # "not-needed" for local vLLM/NIM
+    nemoclaw_endpoint: str = ""  # e.g. http://nemoclaw-inference.devai.svc.cluster.local:8000/v1
+    nemoclaw_model: str = "nvidia/nemotron-3-super-120b-a12b"
+    nemoclaw_max_tokens: int = 8192
+    nemoclaw_max_iterations: int = 25
+    nemoclaw_fallback_to_groq: bool = True  # Fall back to Groq if GPU unavailable
+
     # --- Server ---
     host: str = "0.0.0.0"
     port: int = 8080

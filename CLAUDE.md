@@ -113,6 +113,7 @@ devai/
 
 | Provider | Model | Used By |
 |----------|-------|---------|
+| **NemoClaw (GPU)** | `nemotron-3-super-120b-a12b` | Primary self-hosted inference (falls back to Groq if GPU unavailable) |
 | **Groq** | `llama-3.3-70b-versatile` | DocumentAnalyzer, TechDetector, RequirementsAnalyst, CIMonitor, ReleaseManager |
 | **Claude (Anthropic)** | `claude-sonnet-4` | EngineeringManager, SeniorDeveloper, DBEngineer, SecurityExpert, QATester, InfraProvisioner, ChatAgent, IncidentResponder |
 | **OpenAI** | `o3` | ProductDirector, StaffReviewer (Codex sandbox) |
@@ -208,6 +209,10 @@ Key settings:
 - `DEVAI_OPENAI_API_KEY` — OpenAI API key
 - `DEVAI_GROQ_API_KEY` — Groq API key (also via GCP Secret Manager: `DEVAI_GCP_SECRET_GROQ_API_KEY`)
 - `DEVAI_GROQ_MODEL` — default: `llama-3.3-70b-versatile`
+- `DEVAI_NEMOCLAW_ENDPOINT` — vLLM/NIM endpoint (default: K8s service discovery)
+- `DEVAI_NEMOCLAW_MODEL` — default: `nvidia/nemotron-3-super-120b-a12b`
+- `DEVAI_NEMOCLAW_MAX_TOKENS` — default: `8192`
+- `DEVAI_NEMOCLAW_FALLBACK_TO_GROQ` — fall back to Groq if GPU unavailable (default: `true`)
 - `DEVAI_CLAUDE_MODEL` — default: `claude-sonnet-4-20250514`
 - `DEVAI_LANGCHAIN_TRACING_V2` — enable LangSmith tracing
 - `DEVAI_LANGCHAIN_API_KEY` — LangSmith API key
