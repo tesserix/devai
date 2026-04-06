@@ -21,17 +21,17 @@ Connection flow:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class SCMProvider(str, Enum):
+class SCMProvider(StrEnum):
     GITHUB = "github"
     GITLAB = "gitlab"
     AZURE_DEVOPS = "azure_devops"
 
 
-class AuthMethod(str, Enum):
+class AuthMethod(StrEnum):
     GITHUB_APP = "github_app"      # JWT + Installation Token
     PAT = "pat"                     # Personal Access Token (GitHub/GitLab)
     OAUTH = "oauth"                 # OAuth2 token

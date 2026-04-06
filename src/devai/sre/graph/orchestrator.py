@@ -28,15 +28,16 @@ cluster access (kubectl). The Discovery Agent maps everything.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from devai.config import Settings
 from devai.services.tracing import traceable_if_enabled
+
+if TYPE_CHECKING:
+    from devai.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ class SREOrchestrator:
         memory = None
         try:
             import redis.asyncio as redis_lib
+
             from devai.services.memory import AgentMemory
             r = redis_lib.from_url(self.config.redis_url, decode_responses=True)
             memory = AgentMemory(r)
@@ -139,11 +141,11 @@ class SREOrchestrator:
             return {"infra_findings": [], "log_findings": [], "perf_findings": [],
                     "cost_findings": [], "capacity_findings": []}
 
+        from devai.sre.agents.capacity_planner import CapacityPlannerAgent
+        from devai.sre.agents.cost_analyzer import CostAnalyzerAgent
         from devai.sre.agents.infra_monitor import InfraMonitorAgent
         from devai.sre.agents.log_analyzer import LogAnalyzerAgent
         from devai.sre.agents.perf_monitor import PerfMonitorAgent
-        from devai.sre.agents.cost_analyzer import CostAnalyzerAgent
-        from devai.sre.agents.capacity_planner import CapacityPlannerAgent
 
         start = time.monotonic()
 
@@ -246,6 +248,7 @@ class SREOrchestrator:
         """Store learnings from this scan for future reference."""
         try:
             import redis.asyncio as redis_lib
+
             from devai.services.memory import AgentMemory
 
             r = redis_lib.from_url(self.config.redis_url, decode_responses=True)

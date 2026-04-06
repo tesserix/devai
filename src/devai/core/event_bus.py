@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 import nats
-from nats.aio.client import Client as NATSClient
 from nats.js.api import (
     AckPolicy,
     ConsumerConfig,
@@ -15,10 +15,11 @@ from nats.js.api import (
     StorageType,
     StreamConfig,
 )
-from nats.js.client import JetStreamContext
 
 if TYPE_CHECKING:
+    from nats.aio.client import Client as NATSClient
     from nats.aio.msg import Msg
+    from nats.js.client import JetStreamContext
 
 logger = logging.getLogger(__name__)
 

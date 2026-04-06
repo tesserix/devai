@@ -58,7 +58,7 @@ DEFAULT_URLS = {
 }
 
 
-def create_scm_client(config: "Settings") -> SCMClient:
+def create_scm_client(config: Settings) -> SCMClient:
     """Create an SCM client from the application configuration.
 
     Reads config.scm_provider and config.scm_auth_method to determine

@@ -16,12 +16,13 @@ The A2A bus reads from and writes to ALMState["a2a_messages"].
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from ulid import ULID
 
-from devai.graph.state import A2AMessageDict
+if TYPE_CHECKING:
+    from devai.graph.state import A2AMessageDict
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class A2ABus:
             "body": body,
             "payload": payload or {},
             "in_reply_to": in_reply_to,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         self._outbox.append(msg)
         logger.debug("A2A [%s -> %s] %s: %s", self.agent_name, to_agent, message_type, subject)

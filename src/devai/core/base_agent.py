@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from devai.graph.a2a import A2ABus
 from devai.graph.state import ALMState
-from devai.services.tracing import is_tracing_enabled, traceable_if_enabled
+from devai.services.tracing import is_tracing_enabled
 
 if TYPE_CHECKING:
     from nats.aio.msg import Msg
@@ -55,10 +55,10 @@ class BaseAgent(ABC):
 
     def __init__(
         self,
-        github: "GitHubClient",
-        state_manager: "StateManager",
-        config: "Settings",
-        event_bus: "EventBus | None" = None,
+        github: GitHubClient,
+        state_manager: StateManager,
+        config: Settings,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.github = github
         self.state = state_manager
@@ -126,7 +126,7 @@ class BaseAgent(ABC):
         )
         logger.info("Agent %s started (worker=%s, mode=nats)", self.name, self.worker_id)
 
-    async def _handle_message(self, msg: "Msg") -> None:
+    async def _handle_message(self, msg: Msg) -> None:
         """Deserialize context, acquire lock, execute, publish downstream (legacy)."""
         from devai.models import PipelineContext
 

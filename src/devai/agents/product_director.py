@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
 from devai.graph.a2a import A2ABus
-from devai.graph.state import ALMState
 from devai.providers.openai_codex import CodexLiteProvider
+
+if TYPE_CHECKING:
+    from devai.graph.state import ALMState
 
 logger = logging.getLogger(__name__)
 

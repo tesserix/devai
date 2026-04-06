@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.graph.a2a import A2ABus
-from devai.graph.state import ALMState
 from devai.providers.groq_provider import GroqProvider
+
+if TYPE_CHECKING:
+    from devai.graph.a2a import A2ABus
+    from devai.graph.state import ALMState
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ class CIMonitorAgent(BaseAgent):
         """Monitor the CI build for the PR branch."""
         repo = state.get("repo_full_name", "")
         branch = state.get("branch_name")
-        pr_number = state.get("pr_number")
+        state.get("pr_number")
 
         if not branch:
             a2a.escalate(

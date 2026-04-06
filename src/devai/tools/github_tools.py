@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from devai.core.github_client import GitHubClient
+if TYPE_CHECKING:
+    from devai.core.github_client import GitHubClient
 
 # Tool schemas for Claude's tool-use API
 GITHUB_TOOLS: list[dict[str, Any]] = [

@@ -8,9 +8,8 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from devai.dashboard.auth import GitHubOAuth
 from devai.dashboard.keycloak_auth import KeycloakOIDC

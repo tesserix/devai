@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import subprocess
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
 
-from devai.config import Settings
+if TYPE_CHECKING:
+    from devai.config import Settings
 
 logger = logging.getLogger(__name__)
 

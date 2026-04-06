@@ -10,7 +10,10 @@ import functools
 import logging
 import random
 import time
-from typing import Any, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +101,7 @@ async def with_timeout(coro: Any, timeout_seconds: float, description: str = "op
     """
     try:
         return await asyncio.wait_for(coro, timeout=timeout_seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("%s timed out after %.0fs", description, timeout_seconds)
         raise TimeoutError(f"{description} timed out after {timeout_seconds}s")
 
@@ -127,9 +130,8 @@ class CircuitBreaker:
 
     @property
     def state(self) -> str:
-        if self._state == "open":
-            if time.time() - self._last_failure_time > self.recovery_timeout:
-                self._state = "half_open"
+        if self._state == "open" and time.time() - self._last_failure_time > self.recovery_timeout:
+            self._state = "half_open"
         return self._state
 
     async def call(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
@@ -141,7 +143,7 @@ class CircuitBreaker:
             result = await func(*args, **kwargs)
             self._on_success()
             return result
-        except Exception as e:
+        except Exception:
             self._on_failure()
             raise
 
@@ -205,7 +207,6 @@ class StateCheckpoint:
 
     async def cleanup(self, run_id: str) -> None:
         """Clean up all checkpoints for a completed run."""
-        import asyncio
 
         keys = []
         async for key in self.redis.scan_iter(f"devai:checkpoint:{run_id}:*"):

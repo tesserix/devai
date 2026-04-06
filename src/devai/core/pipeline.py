@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from devai.config import Settings
-from devai.core.event_bus import EventBus
-from devai.core.state import StateManager
 from devai.models import (
     PipelineContext,
     PipelineStage,
     ReviewDecision,
     TriggerType,
 )
+
+if TYPE_CHECKING:
+    from devai.config import Settings
+    from devai.core.event_bus import EventBus
+    from devai.core.state import StateManager
 
 logger = logging.getLogger(__name__)
 

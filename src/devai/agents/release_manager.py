@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.graph.a2a import A2ABus
-from devai.graph.state import ALMState
 from devai.providers.groq_provider import GroqProvider
+
+if TYPE_CHECKING:
+    from devai.graph.a2a import A2ABus
+    from devai.graph.state import ALMState
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +139,7 @@ class ReleaseManagerAgent(BaseAgent):
         # For now, we check if the GitHub deployment API shows success
 
         try:
-            for attempt in range(HEALTH_CHECK_RETRIES):
+            for _attempt in range(HEALTH_CHECK_RETRIES):
                 resp = await self.github._request(
                     "GET",
                     f"/repos/{repo}/deployments",

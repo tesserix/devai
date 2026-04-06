@@ -9,6 +9,7 @@ Takes findings from all other SRE agents, correlates them, and:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from typing import Any
@@ -169,7 +170,7 @@ class IncidentResponderAgent:
                 logger.info("Created SRE issue #%s on %s: %s", issue_number, repo, title)
 
                 # Remember this incident
-                try:
+                with contextlib.suppress(Exception):
                     await memory.remember(
                         agent=self.name,
                         content=f"Created issue #{issue_number}: {title}",
@@ -177,8 +178,6 @@ class IncidentResponderAgent:
                         repo=repo,
                         tags=[category, finding.get("title", "")[:30]],
                     )
-                except Exception:
-                    pass
 
             except Exception as e:
                 logger.error("Failed to create issue on %s: %s", repo, e)

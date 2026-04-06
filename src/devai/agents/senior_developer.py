@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.graph.a2a import A2ABus
-from devai.graph.state import ALMState
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
 from devai.tools.validation_tools import VALIDATION_TOOLS, ValidationToolExecutor
+
+if TYPE_CHECKING:
+    from devai.graph.a2a import A2ABus
+    from devai.graph.state import ALMState
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +167,7 @@ Use the existing branch if one exists (branch: {branch}), or create a new one.""
         a2a.notify(
             "ci_monitor",
             "Code Pushed",
-            f"New code pushed to branch for PR review. Watch for CI builds.",
+            "New code pushed to branch for PR review. Watch for CI builds.",
         )
 
         return {

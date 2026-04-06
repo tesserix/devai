@@ -12,13 +12,15 @@ infrastructure code.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.graph.a2a import A2ABus
-from devai.graph.state import ALMState
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
+
+if TYPE_CHECKING:
+    from devai.graph.a2a import A2ABus
+    from devai.graph.state import ALMState
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +117,7 @@ class InfraProvisionerAgent(BaseAgent):
         # Determine deployment target from various signals
         deploy_target = self._determine_target(state, inbox_context)
 
-        if deploy_target == "vm":
-            system_prompt = VM_SYSTEM_PROMPT
-        else:
-            system_prompt = K8S_SYSTEM_PROMPT
+        system_prompt = VM_SYSTEM_PROMPT if deploy_target == "vm" else K8S_SYSTEM_PROMPT
 
         story_refs = "\n".join(f"- {s.get('title', '')}" for s in stories[:10])
 

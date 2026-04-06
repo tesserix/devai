@@ -415,7 +415,7 @@ class SecurityToolExecutor:
     async def _handle_security_check_owasp(self, inp: dict[str, Any]) -> dict[str, Any]:
         """Check diff against OWASP Top 10 categories."""
         diff = inp.get("diff", "")
-        lang = inp.get("language", "unknown")
+        inp.get("language", "unknown")
 
         # OWASP Top 10 (2021) checklist
         checks: list[dict[str, Any]] = [
@@ -565,6 +565,6 @@ class SecurityToolExecutor:
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return stdout.decode(errors="replace")
-        except (FileNotFoundError, asyncio.TimeoutError, Exception) as e:
+        except (TimeoutError, FileNotFoundError, Exception) as e:
             logger.debug("Command %s failed: %s", cmd[0], e)
             return ""

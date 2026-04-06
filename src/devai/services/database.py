@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 logger = logging.getLogger(__name__)
 

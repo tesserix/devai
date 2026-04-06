@@ -13,8 +13,6 @@ Repo format: "group/project" or numeric project ID
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import logging
 from typing import Any
 from urllib.parse import quote_plus

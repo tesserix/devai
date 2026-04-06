@@ -366,7 +366,7 @@ class K8sToolExecutor:
                 logger.debug("kubectl %s failed: %s", args[0], stderr.decode()[:200])
                 return ""
             return stdout.decode(errors="replace")
-        except (FileNotFoundError, asyncio.TimeoutError) as e:
+        except (TimeoutError, FileNotFoundError) as e:
             logger.debug("kubectl unavailable: %s", e)
             return ""
 

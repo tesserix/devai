@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from devai.providers.groq_provider import GroqProvider
-from devai.sre.tools.k8s_tools import K8S_TOOLS, K8sToolExecutor
+from devai.sre.tools.k8s_tools import K8sToolExecutor
 
 logger = logging.getLogger(__name__)
 

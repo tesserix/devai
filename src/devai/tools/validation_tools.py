@@ -244,5 +244,5 @@ class ValidationToolExecutor:
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return stdout.decode(errors="replace")
-        except (FileNotFoundError, asyncio.TimeoutError, Exception) as e:
+        except (TimeoutError, FileNotFoundError, Exception) as e:
             return f"Command failed: {e}"

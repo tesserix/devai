@@ -7,12 +7,14 @@ where speed matters more than deep reasoning.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from groq import AsyncGroq
 
-from devai.config import Settings
 from devai.services.tracing import wrap_openai_client
+
+if TYPE_CHECKING:
+    from devai.config import Settings
 
 logger = logging.getLogger(__name__)
 

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from devai.config import Settings
+if TYPE_CHECKING:
+    from devai.config import Settings
 
 logger = logging.getLogger(__name__)
 

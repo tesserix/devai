@@ -42,20 +42,22 @@ Features:
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, StateGraph
 
-from devai.config import Settings
-from devai.core.github_client import GitHubClient
-from devai.core.state import StateManager
 from devai.graph.state import ALMState
 from devai.services.resilience import StateCheckpoint, with_timeout
 from devai.services.tracing import traceable_if_enabled
+
+if TYPE_CHECKING:
+    from devai.config import Settings
+    from devai.core.github_client import GitHubClient
+    from devai.core.state import StateManager
 
 logger = logging.getLogger(__name__)
 
@@ -211,14 +213,11 @@ class ALMOrchestrator:
         agent = agent_cls(self.github, self.state_manager, self.config)
 
         # Inject memory context
-        memory_context = await self._get_memory_context(agent.name, state)
+        await self._get_memory_context(agent.name, state)
 
         # Execute with timeout
         try:
-            if method == "run":
-                coro = agent.run(state)
-            else:
-                coro = getattr(agent, method)(state)
+            coro = agent.run(state) if method == "run" else getattr(agent, method)(state)
 
             result = await with_timeout(coro, NODE_TIMEOUT, f"agent:{node_name}")
         except TimeoutError:
@@ -447,10 +446,8 @@ class ALMOrchestrator:
     def _report_progress(self, state: ALMState, step: str, status: str, detail: str) -> None:
         callback = state.get("on_progress")
         if callback and callable(callback):
-            try:
+            with contextlib.suppress(Exception):
                 callback(step, status, detail)
-            except Exception:
-                pass
         logger.info("Pipeline [%s] %s: %s — %s", state.get("run_id", "?"), step, status, detail)
 
     # --- Public API ---

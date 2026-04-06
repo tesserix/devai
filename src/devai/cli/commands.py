@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 
 import typer
 from rich.console import Console
@@ -228,7 +227,7 @@ async def _serve(host: str, port: int) -> None:
     from devai.webhook.app import create_app
 
     state = StateManager(settings.redis_url, settings.redis_result_ttl, settings.redis_lock_ttl)
-    github = GitHubClient(settings)
+    GitHubClient(settings)
 
     # Create the webhook app with LangGraph orchestrator
     from devai.core.event_bus import EventBus

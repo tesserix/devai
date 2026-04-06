@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from devai.scm.base import AuthMethod, SCMClient, SCMProvider
+from devai.scm.base import SCMClient, SCMProvider
 
 logger = logging.getLogger(__name__)
 

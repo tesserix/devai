@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from anthropic import AsyncAnthropic
 from anthropic.types import Message, TextBlock, ToolUseBlock
 
-from devai.config import Settings
 from devai.services.resilience import CircuitBreaker, retry_async, with_timeout
+
+if TYPE_CHECKING:
+    from devai.config import Settings
 
 logger = logging.getLogger(__name__)
 

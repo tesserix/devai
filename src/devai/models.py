@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import time
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 from ulid import ULID
-
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
 
-class PipelineStage(str, Enum):
+class PipelineStage(StrEnum):
     """Full ALM lifecycle stages."""
 
     TRIGGERED = "triggered"
@@ -35,19 +33,19 @@ class PipelineStage(str, Enum):
     FAILED = "failed"
 
 
-class TriggerType(str, Enum):
+class TriggerType(StrEnum):
     GITHUB_ISSUE = "github_issue"
     PROJECT_CARD = "project_card"
     CLI = "cli"
     WEBHOOK = "webhook"
 
 
-class ReviewDecision(str, Enum):
+class ReviewDecision(StrEnum):
     APPROVED = "approved"
     CHANGES_REQUESTED = "changes_requested"
 
 
-class AgentRole(str, Enum):
+class AgentRole(StrEnum):
     REQUIREMENTS_ANALYST = "requirements_analyst"
     PRODUCT_DIRECTOR = "product_director"
     ENGINEERING_MANAGER = "engineering_manager"
@@ -58,7 +56,7 @@ class AgentRole(str, Enum):
     RELEASE_MANAGER = "release_manager"
 
 
-class A2AMessageType(str, Enum):
+class A2AMessageType(StrEnum):
     """Agent-to-Agent message types."""
 
     REQUEST = "request"
@@ -69,7 +67,7 @@ class A2AMessageType(str, Enum):
     HANDOFF = "handoff"
 
 
-class BuildStatus(str, Enum):
+class BuildStatus(StrEnum):
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"
     SUCCESS = "success"
@@ -77,7 +75,7 @@ class BuildStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class DeploymentStatus(str, Enum):
+class DeploymentStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     SUCCESS = "success"
@@ -101,7 +99,7 @@ class A2AMessage(BaseModel):
     body: str
     payload: dict[str, Any] = Field(default_factory=dict)
     in_reply_to: str | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def reply(self, body: str, payload: dict[str, Any] | None = None) -> A2AMessage:
         """Create a reply to this message."""
@@ -241,12 +239,12 @@ class PipelineContext(BaseModel):
     review_iteration: int = 0
     artifacts: dict[str, Any] = Field(default_factory=dict)
     a2a_messages: list[A2AMessage] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def advance_stage(self, new_stage: PipelineStage) -> None:
         self.stage = new_stage
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def send_a2a(self, message: A2AMessage) -> None:
         """Record an A2A message in the pipeline context."""

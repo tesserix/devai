@@ -12,6 +12,7 @@ common format, so the pipeline runs identically regardless of source.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -62,7 +63,7 @@ async def scm_webhook(request: Request) -> dict[str, str]:
     if normalized:
         # Check if the event should trigger the pipeline
         labels = normalized.get("labels", [])
-        action = normalized.get("action", "")
+        normalized.get("action", "")
         command = normalized.get("command", "")
 
         should_trigger = (
@@ -173,7 +174,7 @@ async def _trigger_from_issue(request: Request, payload: dict[str, Any]) -> None
     repo = payload["repository"]["full_name"]
     issue_number = issue["number"]
     issue_title = issue.get("title", "")
-    issue_body = issue.get("body", "") or ""
+    issue.get("body", "") or ""
 
     # Build the full requirements text from the issue
     requirements = _build_requirements_from_issue(issue)
@@ -204,10 +205,7 @@ async def _trigger_from_issue_comment(request: Request, payload: dict[str, Any])
     parts = comment_body.split(maxsplit=2)
     override_reqs = parts[2] if len(parts) > 2 else ""
 
-    if override_reqs:
-        requirements = override_reqs
-    else:
-        requirements = _build_requirements_from_issue(issue)
+    requirements = override_reqs or _build_requirements_from_issue(issue)
 
     logger.info("Pipeline triggered from comment on #%d on %s", issue_number, repo)
 
@@ -254,7 +252,7 @@ async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) 
         return
 
     # Resolve the issue via GitHub API
-    org = payload.get("organization", {}).get("login", config.github_org)
+    payload.get("organization", {}).get("login", config.github_org)
 
     try:
         from devai.core.github_client import GitHubClient
@@ -441,15 +439,13 @@ async def _run_pipeline(
 
         # Post failure comment
         if trigger_ref.isdigit():
-            try:
+            with contextlib.suppress(Exception):
                 await scm.add_comment(
                     repo, int(trigger_ref),
                     f"## Pipeline Failed\n\n"
                     f":x: Error: `{str(e)[:200]}`\n\n"
                     f"Check the DevAI dashboard for details.",
                 )
-            except Exception:
-                pass
 
     finally:
         await scm.close()
