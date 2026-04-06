@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from devai.core.base_agent import BaseAgent
-from devai.models import AgentResult, PipelineContext, PipelineStage, TechnicalPlan
+from devai.graph.a2a import A2ABus
+from devai.graph.state import ALMState
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
 
@@ -63,35 +63,50 @@ class EngineeringManagerAgent(BaseAgent):
     subscribe_subject = "devai.pipeline.stories_ready"
     publish_subject = "devai.pipeline.plan_ready"
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.claude = ClaudeProvider(self.config)
-        self.tool_executor = GitHubToolExecutor(self.github)
-
-    async def execute(self, ctx: PipelineContext) -> AgentResult:
+    async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Analyze stories and create a technical plan."""
-        # Build context from previous agent's output
-        stories_info = ctx.artifacts.get("product_director", {})
-        issues = stories_info.get("issues", [])
+        claude = ClaudeProvider(self.config)
+        tool_executor = GitHubToolExecutor(self.github)
+
+        repo = state.get("repo_full_name", "")
+        stories = state.get("stories", [])
+        requirements = state.get("requirements", "")
+        analyzed_reqs = state.get("analyzed_requirements", [])
+
+        # Build story references
         issue_refs = "\n".join(
-            f"- #{i['number']}: {i['title']} (priority: {i['priority']})"
-            for i in issues
+            f"- #{s.get('number', '?')}: {s.get('title', '')} (priority: {s.get('priority', 'medium')})"
+            for s in stories
         )
 
-        user_message = f"""Repository: {ctx.repo_full_name}
+        # Build requirement context
+        req_context = ""
+        if analyzed_reqs:
+            req_context = "\n## Analyzed Requirements\n" + "\n".join(
+                f"- [{r.get('category', 'functional')}] {r.get('title', '')}"
+                for r in analyzed_reqs[:10]
+            )
+
+        # Check for A2A messages (handoffs, gaps, etc.)
+        inbox_context = a2a.format_inbox_context()
+
+        user_message = f"""Repository: {repo}
 
 ## User Stories to Implement
 {issue_refs}
 
 ## Original Requirements
-{ctx.requirements}
+{requirements[:2000]}
+{req_context}
+
+{inbox_context}
 
 Please analyze the repository structure and these user stories, then create a detailed technical implementation plan.
 
 Start by exploring the repo structure, then read relevant files to understand the codebase patterns."""
 
-        # If this is a revision after review feedback, include it
-        review_feedback = ctx.artifacts.get("review_feedback", [])
+        # If this is a revision after review feedback
+        review_feedback = state.get("review_feedback", [])
         if review_feedback:
             feedback_text = "\n\n".join(review_feedback)
             user_message += f"""
@@ -100,33 +115,44 @@ Start by exploring the repo structure, then read relevant files to understand th
 The Staff Reviewer requested changes. Please incorporate this feedback into your revised plan:
 {feedback_text}"""
 
-        # Inject CLAUDE.md governance rules into system prompt
+        # Inject governance
         system = SYSTEM_PROMPT
-        governance = ctx.artifacts.get("governance", "")
+        governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance (CLAUDE.md)\nYou MUST follow these rules:\n\n{governance}"
 
-        plan_text = await self.claude.run_agent_loop(
+        plan_text = await claude.run_agent_loop(
             system_prompt=system,
             user_message=user_message,
             tools=EM_TOOLS,
-            tool_executor=self.tool_executor.execute,
+            tool_executor=tool_executor.execute,
         )
 
-        # Post the plan as a comment on the first issue
-        if issues:
-            first_issue = issues[0]["number"]
-            plan_comment = f"## Technical Implementation Plan\n\n{plan_text}"
-            await self.github.add_comment(ctx.repo_full_name, first_issue, plan_comment)
+        # Post plan as a comment on the first story
+        if stories:
+            first_issue = stories[0].get("number")
+            if first_issue:
+                await self.github.add_comment(
+                    repo, first_issue,
+                    f"## Technical Implementation Plan\n\n{plan_text}",
+                )
 
-        ctx.advance_stage(PipelineStage.PLAN_CREATED)
-
-        return AgentResult(
-            agent_name=self.name,
-            status="success",
-            output={
-                "plan": plan_text,
-                "issues_analyzed": len(issues),
-            },
-            summary=f"Technical plan created for {len(issues)} user stories",
+        # Handoff to Senior Developer via A2A
+        a2a.handoff(
+            "senior_developer",
+            "Technical Plan Ready",
+            f"Technical plan created for {len(stories)} stories.\n\n{plan_text[:500]}...",
+            payload={"stories_count": len(stories)},
         )
+
+        # Notify QA about what to expect
+        a2a.notify(
+            "qa_tester",
+            "Implementation Starting",
+            f"Technical plan approved for {len(stories)} stories. "
+            "Prepare test strategy based on the requirements.",
+        )
+
+        return {
+            "technical_plan": plan_text,
+        }

@@ -1,0 +1,10 @@
+DROP VIEW IF EXISTS v_sre_app_reliability;
+DROP VIEW IF EXISTS v_sre_cluster_health;
+DROP TABLE IF EXISTS sre_scan_runs;
+DROP TABLE IF EXISTS sre_remediations;
+DROP TABLE IF EXISTS sre_cost_reports;
+DROP TABLE IF EXISTS sre_metrics;
+DROP TABLE IF EXISTS sre_health_checks;
+DROP TABLE IF EXISTS sre_incidents;
+DROP TABLE IF EXISTS sre_apps;
+DROP TABLE IF EXISTS sre_clusters;

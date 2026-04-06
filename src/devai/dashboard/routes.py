@@ -12,11 +12,9 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from devai.core.pipeline import PipelineOrchestrator
 from devai.dashboard.auth import GitHubOAuth
 from devai.dashboard.keycloak_auth import KeycloakOIDC
 from devai.dashboard.templates import INDEX_HTML
-from devai.models import TriggerType
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -302,7 +300,9 @@ async def move_item(request: Request, org: str, project_number: int) -> dict[str
 
 @router.post("/api/pipeline/trigger")
 async def trigger_pipeline(request: Request) -> dict[str, Any]:
-    """Trigger a DevAI pipeline run from the dashboard."""
+    """Trigger a DevAI ALM pipeline run from the dashboard (LangGraph)."""
+    import asyncio
+
     session = await _get_session(request)
     if not session:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -312,34 +312,59 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     requirements = body.get("requirements", "")
     issue_number = body.get("issue_number")
 
-    event_bus = request.app.state.event_bus
     state = request.app.state.state_manager
     config = request.app.state.config
 
-    if issue_number and not requirements:
+    trigger_type = "cli"
+    trigger_ref = "dashboard"
+
+    if issue_number:
         from devai.core.github_client import GitHubClient
         github = GitHubClient(config)
         issue = await github.get_issue(repo, issue_number)
-        requirements = f"Issue #{issue_number}: {issue['title']}\n\n{issue.get('body', '')}"
-        trigger_type = TriggerType.GITHUB_ISSUE
+        # Build full requirements from issue (same as webhook)
+        labels = [l.get("name", "") for l in issue.get("labels", [])]
+        requirements = (
+            f"# Requirement: Issue #{issue_number} — {issue.get('title', '')}\n"
+            f"**Labels:** {', '.join(labels)}\n\n"
+            f"## Description\n\n{issue.get('body', '')}"
+        )
+        trigger_type = "github_issue"
         trigger_ref = str(issue_number)
         await github.close()
-    else:
-        trigger_type = TriggerType.CLI
-        trigger_ref = "dashboard"
 
-    orchestrator = PipelineOrchestrator(event_bus, state, config)
-    ctx = await orchestrator.trigger(
-        repo_full_name=repo,
-        trigger_type=trigger_type,
-        trigger_ref=trigger_ref,
-        requirements=requirements,
-    )
+    if not requirements:
+        raise HTTPException(status_code=400, detail="Requirements text or issue number required")
+
+    # Create a run ID immediately for the response
+    from ulid import ULID
+    run_id = str(ULID())
+
+    # Run the LangGraph pipeline in the background
+    async def _run_bg() -> None:
+        from devai.core.github_client import GitHubClient
+        from devai.graph.orchestrator import ALMOrchestrator
+
+        github = GitHubClient(config)
+        try:
+            orchestrator = ALMOrchestrator(github, state, config)
+            await orchestrator.run(
+                repo_full_name=repo,
+                requirements=requirements,
+                trigger_type=trigger_type,
+                trigger_ref=trigger_ref,
+            )
+        except Exception:
+            logger.exception("Background pipeline failed for %s", repo)
+        finally:
+            await github.close()
+
+    asyncio.create_task(_run_bg())
 
     return {
-        "run_id": ctx.run_id,
-        "stage": ctx.stage.value,
-        "repo": ctx.repo_full_name,
+        "run_id": run_id,
+        "stage": "triggered",
+        "repo": repo,
     }
 
 

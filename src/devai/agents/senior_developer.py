@@ -6,13 +6,15 @@ import logging
 from typing import Any
 
 from devai.core.base_agent import BaseAgent
-from devai.models import AgentResult, PipelineContext, PipelineStage
+from devai.graph.a2a import A2ABus
+from devai.graph.state import ALMState
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
+from devai.tools.validation_tools import VALIDATION_TOOLS, ValidationToolExecutor
 
 logger = logging.getLogger(__name__)
 
-# Sr Dev gets full read/write tools
+# Sr Dev gets full read/write tools + validation tools
 SR_DEV_TOOLS = [
     t for t in GITHUB_TOOLS
     if t["name"] in {
@@ -24,7 +26,7 @@ SR_DEV_TOOLS = [
         "github_create_pull_request",
         "github_add_comment",
     }
-]
+] + VALIDATION_TOOLS
 
 SYSTEM_PROMPT = """You are a Senior Software Engineer implementing features based on a technical plan.
 
@@ -55,7 +57,23 @@ Important:
 - Each commit message should describe what changed and why
 - The PR description should reference the original issue(s)
 - Never commit secrets, API keys, or credentials
-- Ensure all file paths are correct relative to the repo root"""
+- Ensure all file paths are correct relative to the repo root
+
+## Mandatory Guardrails (MUST follow before creating PR)
+
+After implementing code, you MUST run these validation checks:
+1. `validate_compile` — ensure the code compiles/type-checks with zero errors
+2. `validate_lint` — ensure the code passes the project linter with zero errors
+3. `validate_unit_tests` — ensure all unit tests pass
+4. `validate_format` — ensure code formatting matches project standards
+
+If ANY validation fails:
+- Fix the issue immediately
+- Re-commit the fix
+- Re-run the failing validation
+- Only create the PR after ALL validations pass
+
+Do NOT skip validations. Do NOT create a PR with failing checks."""
 
 
 class SeniorDeveloperAgent(BaseAgent):
@@ -65,20 +83,38 @@ class SeniorDeveloperAgent(BaseAgent):
     subscribe_subject = "devai.pipeline.plan_ready"
     publish_subject = "devai.pipeline.code_ready"
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.claude = ClaudeProvider(self.config)
-        self.tool_executor = GitHubToolExecutor(self.github)
-
-    async def execute(self, ctx: PipelineContext) -> AgentResult:
+    async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Implement code based on the technical plan."""
-        plan = ctx.artifacts.get("engineering_manager", {}).get("plan", "")
-        stories = ctx.artifacts.get("product_director", {}).get("issues", [])
+        claude = ClaudeProvider(self.config)
+        github_tools = GitHubToolExecutor(self.github)
+        validation_tools = ValidationToolExecutor()
 
-        issue_refs = "\n".join(f"- #{s['number']}: {s['title']}" for s in stories)
+        async def tool_executor(tool_name: str, tool_input: dict[str, Any]) -> str:
+            if tool_name.startswith("github_"):
+                return await github_tools.execute(tool_name, tool_input)
+            if tool_name.startswith("validate_"):
+                return await validation_tools.execute(tool_name, tool_input)
+            return f"Unknown tool: {tool_name}"
 
-        user_message = f"""Repository: {ctx.repo_full_name}
-Run ID: {ctx.run_id}
+        repo = state.get("repo_full_name", "")
+        plan = state.get("technical_plan", "")
+        stories = state.get("stories", [])
+        requirements = state.get("requirements", "")
+
+        issue_refs = "\n".join(f"- #{s.get('number', '?')}: {s.get('title', '')}" for s in stories)
+
+        # Check for A2A messages (escalations from CI, review feedback, etc.)
+        inbox_context = a2a.format_inbox_context()
+
+        # Check for escalations from CI Monitor
+        escalations = a2a.get_escalations()
+        ci_fix_context = ""
+        if escalations:
+            ci_issues = "\n".join(f"- {e['subject']}: {e['body'][:200]}" for e in escalations)
+            ci_fix_context = f"\n\n## CI Issues to Fix\n{ci_issues}"
+
+        user_message = f"""Repository: {repo}
+Run ID: {state.get('run_id', '')}
 
 ## Technical Plan
 {plan}
@@ -87,56 +123,53 @@ Run ID: {ctx.run_id}
 {issue_refs}
 
 ## Original Requirements
-{ctx.requirements}
+{requirements[:2000]}
+{ci_fix_context}
+{inbox_context}
 
 Implement the code changes described in the technical plan. Create a feature branch, commit all changes, and open a pull request."""
 
         # If revision iteration, include review feedback
-        review_feedback = ctx.artifacts.get("review_feedback", [])
+        review_feedback = state.get("review_feedback", [])
         if review_feedback:
             feedback_text = "\n\n".join(review_feedback)
+            branch = state.get("branch_name", "")
             user_message += f"""
 
-## Review Feedback (Iteration {ctx.review_iteration})
+## Review Feedback (Iteration {state.get('review_iteration', 0)})
 The Staff Reviewer requested the following changes. Address ALL of them:
 {feedback_text}
 
-Use the existing branch if one exists (branch: {ctx.branch_name}), or create a new one."""
+Use the existing branch if one exists (branch: {branch}), or create a new one."""
 
-        # Inject CLAUDE.md governance rules into system prompt
         system = SYSTEM_PROMPT
-        governance = ctx.artifacts.get("governance", "")
+        governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance (CLAUDE.md)\nYou MUST follow these rules:\n\n{governance}"
 
-        result_text = await self.claude.run_agent_loop(
+        result_text = await claude.run_agent_loop(
             system_prompt=system,
             user_message=user_message,
             tools=SR_DEV_TOOLS,
-            tool_executor=self.tool_executor.execute,
+            tool_executor=tool_executor,
         )
 
-        # Try to extract branch name and PR number from the result
-        # The agent should have created these via tools
-        branch_name = ctx.branch_name
-        pr_number = ctx.pr_number
-
-        # Parse branch/PR info from artifacts if the tools set them
-        # (The tool executor returns commit/PR data that Claude sees)
-
-        ctx.advance_stage(PipelineStage.CODE_IMPLEMENTED)
-        if branch_name:
-            ctx.branch_name = branch_name
-        if pr_number:
-            ctx.pr_number = pr_number
-
-        return AgentResult(
-            agent_name=self.name,
-            status="success",
-            output={
-                "implementation_summary": result_text,
-                "branch": branch_name,
-                "pr_number": pr_number,
-            },
-            summary=f"Code implemented on branch {branch_name}, PR #{pr_number}",
+        # Notify reviewer that code is ready
+        a2a.handoff(
+            "staff_reviewer",
+            "Code Ready for Review",
+            f"Implementation complete. PR created on repo {repo}.\n\n{result_text[:300]}...",
         )
+
+        # Notify CI Monitor to watch the build
+        a2a.notify(
+            "ci_monitor",
+            "Code Pushed",
+            f"New code pushed to branch for PR review. Watch for CI builds.",
+        )
+
+        return {
+            "implementation_summary": result_text,
+            "branch_name": state.get("branch_name"),
+            "pr_number": state.get("pr_number"),
+        }

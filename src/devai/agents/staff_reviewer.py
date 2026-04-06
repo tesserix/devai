@@ -7,14 +7,9 @@ import logging
 from typing import Any
 
 from devai.core.base_agent import BaseAgent
-from devai.models import (
-    AgentResult,
-    CodeReview,
-    PipelineContext,
-    PipelineStage,
-    ReviewDecision,
-)
-from devai.core.pipeline import PipelineOrchestrator
+from devai.graph.a2a import A2ABus
+from devai.graph.state import ALMState
+from devai.models import CodeReview, ReviewDecision
 from devai.providers.openai_codex import CodexSandboxProvider
 
 logger = logging.getLogger(__name__)
@@ -25,27 +20,32 @@ class StaffReviewerAgent(BaseAgent):
 
     name = "staff_reviewer"
     subscribe_subject = "devai.pipeline.code_ready"
-    publish_subject = ""  # Routing handled manually based on review decision
+    publish_subject = ""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.codex = CodexSandboxProvider(self.config)
-
-    async def execute(self, ctx: PipelineContext) -> AgentResult:
+    async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Review the PR code using Codex sandbox."""
-        pr_number = ctx.pr_number
-        branch = ctx.branch_name
-        repo = ctx.repo_full_name
+        codex = CodexSandboxProvider(self.config)
+
+        pr_number = state.get("pr_number")
+        branch = state.get("branch_name")
+        repo = state.get("repo_full_name", "")
 
         if not pr_number or not branch:
-            return AgentResult(
-                agent_name=self.name,
-                status="failed",
-                summary="No PR or branch found in pipeline context",
+            a2a.escalate(
+                "engineering_manager",
+                "Review Blocked",
+                "No PR or branch found in pipeline context for review.",
             )
+            return {
+                "review_decision": "changes_requested",
+                "review_summary": "No PR or branch found in pipeline context",
+            }
 
-        # Get the PR diff for context
+        # Get the PR diff
         diff = await self.github.get_pr_diff(repo, pr_number)
+
+        # Check for messages from other agents
+        inbox_context = a2a.format_inbox_context()
 
         review_prompt = f"""Review this pull request:
 
@@ -58,7 +58,9 @@ Branch: {branch}
 ```
 
 ## Requirements
-{ctx.requirements}
+{state.get('requirements', '')[:2000]}
+
+{inbox_context}
 
 Focus on:
 1. Code quality and adherence to project conventions
@@ -69,14 +71,12 @@ Focus on:
 
 Be thorough but fair. Only request changes for genuine issues, not style preferences."""
 
-        # Run review in Codex sandbox
-        result = await self.codex.run_review(
+        result = await codex.run_review(
             repo_url=f"https://github.com/{repo}.git",
             branch=branch,
             review_prompt=review_prompt,
         )
 
-        # Parse the review output
         review = self._parse_review(result)
 
         # Post the review on the PR
@@ -89,34 +89,50 @@ Be thorough but fair. Only request changes for genuine issues, not style prefere
             event=event,
         )
 
-        # Route based on decision using the pipeline orchestrator
-        orchestrator = PipelineOrchestrator(self.event_bus, self.state, self.config)
-        await orchestrator.handle_review_decision(
-            ctx=ctx,
-            decision=review.decision,
-            feedback=review.summary,
-        )
+        # A2A communication based on review decision
+        if review.decision == ReviewDecision.APPROVED:
+            a2a.handoff(
+                "ci_monitor",
+                "Code Approved — Monitor Build",
+                f"PR #{pr_number} approved. Monitor the CI build.",
+            )
+            a2a.notify(
+                "qa_tester",
+                "Code Approved",
+                f"PR #{pr_number} approved by review. Prepare for E2E testing.",
+            )
+        else:
+            a2a.escalate(
+                "senior_developer",
+                "Changes Requested",
+                f"Review of PR #{pr_number} requested changes:\n\n{review.summary}",
+                payload={
+                    "security_issues": review.security_issues,
+                    "performance_issues": review.performance_issues,
+                },
+            )
 
-        return AgentResult(
-            agent_name=self.name,
-            status="success",
-            output={
-                "decision": review.decision.value,
-                "summary": review.summary,
-                "security_issues": review.security_issues,
-                "performance_issues": review.performance_issues,
-                "comments_count": len(review.comments),
-            },
-            summary=f"Review: {review.decision.value} — {review.summary}",
-        )
+        # Update review iteration
+        current_iteration = state.get("review_iteration", 0)
+        feedback = state.get("review_feedback", [])
+        if review.decision == ReviewDecision.CHANGES_REQUESTED:
+            feedback = feedback + [review.summary]
+
+        return {
+            "review_decision": review.decision.value,
+            "review_summary": review.summary,
+            "review_comments": review.comments,
+            "security_issues": review.security_issues,
+            "performance_issues": review.performance_issues,
+            "review_iteration": current_iteration + (1 if review.decision == ReviewDecision.CHANGES_REQUESTED else 0),
+            "review_feedback": feedback,
+        }
 
     def _parse_review(self, codex_result: dict[str, Any]) -> CodeReview:
         """Parse Codex sandbox output into a structured CodeReview."""
         output = codex_result.get("output", "")
 
-        # Try to extract JSON from the output
         try:
-            # Find JSON in the output
             start = output.find("{")
             end = output.rfind("}") + 1
             if start >= 0 and end > start:
@@ -133,14 +149,12 @@ Be thorough but fair. Only request changes for genuine issues, not style prefere
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # Fallback: if Codex failed or output isn't parseable
         if not codex_result.get("success", False):
             return CodeReview(
                 decision=ReviewDecision.CHANGES_REQUESTED,
                 summary=f"Review failed: {codex_result.get('error', 'Unknown error')}",
             )
 
-        # Default: request changes if we can't parse
         return CodeReview(
             decision=ReviewDecision.CHANGES_REQUESTED,
             summary=f"Review completed but output could not be parsed. Raw output:\n{output[:1000]}",

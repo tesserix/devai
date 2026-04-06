@@ -7,13 +7,14 @@ import sys
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from devai.config import settings
 
 app = typer.Typer(
     name="devai",
-    help="AI-powered development lifecycle automation",
+    help="AI-powered development lifecycle automation (LangGraph + LangSmith)",
     no_args_is_help=True,
 )
 console = Console()
@@ -25,7 +26,7 @@ def run(
     requirements: str = typer.Option(None, "--requirements", "-m", help="Requirements text"),
     from_issue: int = typer.Option(None, "--from-issue", "-i", help="GitHub issue number to use as input"),
 ) -> None:
-    """Trigger a new DevAI pipeline run."""
+    """Trigger a new DevAI ALM pipeline run (LangGraph)."""
     if not requirements and not from_issue:
         console.print("[red]Error:[/red] Provide --requirements or --from-issue")
         raise typer.Exit(1)
@@ -34,51 +35,100 @@ def run(
 
 
 async def _trigger_pipeline(repo: str, requirements: str | None, from_issue: int | None) -> None:
-    from devai.core.event_bus import EventBus
     from devai.core.github_client import GitHubClient
-    from devai.core.pipeline import PipelineOrchestrator
     from devai.core.state import StateManager
-    from devai.models import TriggerType
+    from devai.graph.orchestrator import ALMOrchestrator
+    from devai.services.tracing import init_langsmith
 
-    event_bus = EventBus(
-        stream_name=settings.nats_stream,
-        max_deliver=settings.nats_max_deliver,
-        ack_wait=settings.nats_ack_wait,
-    )
+    # Initialize LangSmith tracing
+    settings.export_langsmith_env()
+    init_langsmith()
+
     state = StateManager(settings.redis_url)
     github = GitHubClient(settings)
 
     try:
-        await event_bus.connect(settings.nats_url)
-
         # If from-issue, fetch the issue body as requirements
+        trigger_type = "cli"
+        trigger_ref = "cli"
         if from_issue and not requirements:
             issue = await github.get_issue(repo, from_issue)
             requirements = f"Issue #{from_issue}: {issue['title']}\n\n{issue['body']}"
-            trigger_type = TriggerType.GITHUB_ISSUE
+            trigger_type = "github_issue"
             trigger_ref = str(from_issue)
-        else:
-            trigger_type = TriggerType.CLI
-            trigger_ref = "cli"
 
-        orchestrator = PipelineOrchestrator(event_bus, state, settings)
-        ctx = await orchestrator.trigger(
+        # Progress callback for CLI output
+        def on_progress(step: str, status: str, detail: str) -> None:
+            icon = {"running": "[yellow]...[/yellow]", "completed": "[green]OK[/green]"}.get(status, status)
+            console.print(f"  {icon} {step}: {detail}")
+
+        # Run the LangGraph pipeline
+        orchestrator = ALMOrchestrator(github, state, settings)
+
+        console.print(Panel(
+            f"[bold]DevAI ALM Pipeline[/bold]\n"
+            f"Repo: {repo}\n"
+            f"Mode: LangGraph + LangSmith",
+            title="Starting Pipeline",
+            border_style="green",
+        ))
+
+        final_state = await orchestrator.run(
             repo_full_name=repo,
+            requirements=requirements or "",
             trigger_type=trigger_type,
             trigger_ref=trigger_ref,
-            requirements=requirements or "",
+            on_progress=on_progress,
         )
 
-        console.print(f"\n[green]Pipeline triggered successfully![/green]")
-        console.print(f"  Run ID:  [bold]{ctx.run_id}[/bold]")
-        console.print(f"  Repo:    {ctx.repo_full_name}")
-        console.print(f"  Stage:   {ctx.stage.value}")
-        console.print(f"\nTrack progress: [cyan]devai status {ctx.run_id}[/cyan]")
+        # Display results
+        console.print("\n")
+        _display_results(final_state)
 
     finally:
-        await event_bus.close()
         await state.close()
         await github.close()
+
+
+def _display_results(state: dict) -> None:
+    """Display pipeline results in a rich table."""
+    console.print(Panel(
+        f"[bold]Run ID:[/bold] {state.get('run_id', 'unknown')}\n"
+        f"[bold]Stage:[/bold] {state.get('stage', 'unknown')}\n"
+        f"[bold]Build:[/bold] {state.get('build_status', 'n/a')}\n"
+        f"[bold]Deploy:[/bold] {state.get('deploy_status', 'n/a')}",
+        title="Pipeline Complete",
+        border_style="green" if state.get("stage") == "deployed" else "red",
+    ))
+
+    # Agent timings
+    timings = state.get("agent_timings", {})
+    if timings:
+        table = Table(title="Agent Timings")
+        table.add_column("Agent", style="cyan")
+        table.add_column("Duration", style="yellow")
+
+        for agent, duration in timings.items():
+            table.add_row(agent, f"{duration:.1f}s")
+        console.print(table)
+
+    # A2A Messages
+    messages = state.get("a2a_messages", [])
+    if messages:
+        table = Table(title=f"A2A Messages ({len(messages)} total)")
+        table.add_column("From", style="cyan")
+        table.add_column("To", style="green")
+        table.add_column("Type", style="yellow")
+        table.add_column("Subject")
+
+        for msg in messages[-15:]:  # Show last 15
+            table.add_row(
+                msg.get("from_agent", ""),
+                msg.get("to_agent", ""),
+                msg.get("message_type", ""),
+                msg.get("subject", "")[:50],
+            )
+        console.print(table)
 
 
 @app.command()
@@ -98,7 +148,6 @@ async def _show_status(run_id: str | None, repo: str | None, last: int) -> None:
 
     try:
         if run_id:
-            # Show detailed status for a specific run
             run_data = await state.get_run(run_id)
             if not run_data:
                 console.print(f"[red]Run {run_id} not found[/red]")
@@ -109,7 +158,6 @@ async def _show_status(run_id: str | None, repo: str | None, last: int) -> None:
             console.print(f"  Repo:    {run_data.get('repo', 'unknown')}")
             console.print(f"  Created: {run_data.get('created_at', 'unknown')}")
 
-            # Agent statuses
             agents = await state.get_agent_statuses(run_id)
             if agents:
                 console.print("\n[bold]Agent Status:[/bold]")
@@ -123,11 +171,11 @@ async def _show_status(run_id: str | None, repo: str | None, last: int) -> None:
                         "completed": "[green]completed[/green]",
                         "running": "[yellow]running[/yellow]",
                         "failed": "[red]failed[/red]",
+                        "waiting_approval": "[blue]waiting_approval[/blue]",
                     }.get(info["status"], info["status"])
                     table.add_row(name, status_style, info.get("error", "") or "")
                 console.print(table)
         else:
-            # List recent runs
             if repo:
                 run_ids = await state.list_runs_by_repo(repo, last)
             else:
@@ -162,79 +210,101 @@ def serve(
     host: str = typer.Option(settings.host, "--host", help="Server host"),
     port: int = typer.Option(settings.port, "--port", "-p", help="Server port"),
 ) -> None:
-    """Run the webhook server and all agent workers."""
+    """Run the webhook server with LangGraph pipeline."""
     asyncio.run(_serve(host, port))
 
 
 async def _serve(host: str, port: int) -> None:
     import uvicorn
 
-    from devai.core.event_bus import EventBus
+    from devai.services.tracing import init_langsmith
+
+    # Initialize LangSmith tracing
+    settings.export_langsmith_env()
+    init_langsmith()
+
     from devai.core.github_client import GitHubClient
     from devai.core.state import StateManager
-    from devai.agents.product_director import ProductDirectorAgent
-    from devai.agents.engineering_manager import EngineeringManagerAgent
-    from devai.agents.senior_developer import SeniorDeveloperAgent
-    from devai.agents.staff_reviewer import StaffReviewerAgent
-    from devai.agents.qa_tester import QATesterAgent
+    from devai.webhook.app import create_app
 
-    # Initialize shared resources
+    state = StateManager(settings.redis_url, settings.redis_result_ttl, settings.redis_lock_ttl)
+    github = GitHubClient(settings)
+
+    # Create the webhook app with LangGraph orchestrator
+    from devai.core.event_bus import EventBus
+
     event_bus = EventBus(
         stream_name=settings.nats_stream,
         max_deliver=settings.nats_max_deliver,
         ack_wait=settings.nats_ack_wait,
     )
-    state = StateManager(settings.redis_url, settings.redis_result_ttl, settings.redis_lock_ttl)
-    github = GitHubClient(settings)
-
     await event_bus.connect(settings.nats_url)
-
-    # Start all agents as background tasks
-    agents = [
-        ProductDirectorAgent(event_bus, state, github, settings),
-        EngineeringManagerAgent(event_bus, state, github, settings),
-        SeniorDeveloperAgent(event_bus, state, github, settings),
-        StaffReviewerAgent(event_bus, state, github, settings),
-        QATesterAgent(event_bus, state, github, settings),
-    ]
-
-    for agent in agents:
-        asyncio.create_task(agent.start())
-
-    console.print(f"[green]DevAI agents started ({len(agents)} agents)[/green]")
-
-    # Inject shared resources into the webhook app
-    from devai.webhook.app import create_app
 
     webhook_app = create_app(event_bus, state, settings)
 
-    # Start the webhook server
+    console.print(Panel(
+        f"[bold]DevAI Server[/bold]\n"
+        f"Host: {host}:{port}\n"
+        f"Pipeline: LangGraph\n"
+        f"Tracing: LangSmith",
+        title="Server Starting",
+        border_style="green",
+    ))
+
     config = uvicorn.Config(webhook_app, host=host, port=port, log_level=settings.log_level)
     server = uvicorn.Server(config)
-    console.print(f"[green]Webhook server starting on {host}:{port}[/green]")
     await server.serve()
 
 
 @app.command()
 def agents() -> None:
-    """List all DevAI agents and their configuration."""
-    from devai.models import AgentRole
-
-    table = Table(title="DevAI Agents")
+    """List all DevAI ALM agents and their configuration."""
+    table = Table(title="DevAI ALM Agents (LangGraph Pipeline)")
     table.add_column("Agent", style="cyan")
     table.add_column("AI Provider")
-    table.add_column("Subscribe Subject")
-    table.add_column("Publish Subject")
+    table.add_column("Role in ALM")
+    table.add_column("A2A Connections")
 
     agent_info = [
-        ("Product Director", "OpenAI Codex (Responses API)", "devai.pipeline.trigger", "devai.pipeline.stories_ready"),
-        ("Engineering Manager", "Claude (Messages API + Tools)", "devai.pipeline.stories_ready", "devai.pipeline.plan_ready"),
-        ("Senior Developer", "Claude (Messages API + Tools)", "devai.pipeline.plan_ready", "devai.pipeline.code_ready"),
-        ("Staff Reviewer", "OpenAI Codex (Sandbox)", "devai.pipeline.code_ready", "devai.pipeline.review_complete"),
-        ("QA Tester", "Claude (Messages API + Tools)", "devai.pipeline.review_complete", "devai.pipeline.tests_complete"),
+        ("Document Analyzer", "Groq (Llama 3.3)", "Ingest PDFs, URLs, specs", "-> Requirements Analyst"),
+        ("Tech Detector", "Groq (Llama 3.3)", "Auto-detect tech stack", "-> All downstream agents"),
+        ("Requirements Analyst", "Groq (Llama 3.3)", "Analyze & refine requirements", "-> Product Director, EM"),
+        ("Product Director", "OpenAI (o3)", "Create Epics & User Stories", "-> Engineering Manager"),
+        ("Engineering Manager", "Claude (Sonnet 4)", "Technical planning", "-> Senior Developer, QA"),
+        ("Senior Developer", "Claude (Sonnet 4)", "Implement + compile/lint/test", "-> DB Engineer"),
+        ("DB Engineer", "Claude (Sonnet 4)", "Schema migrations (Liquibase)", "-> Staff Reviewer"),
+        ("Staff Reviewer", "OpenAI Codex (Sandbox)", "Code review", "-> Security Expert / Sr Dev"),
+        ("Security Expert", "Claude (Sonnet 4)", "SAST/SCA/Secrets/OWASP scan", "-> CI Monitor / Sr Dev"),
+        ("CI Monitor", "Groq (Llama 3.3)", "Monitor GitHub Actions builds", "-> QA Tester / Sr Dev"),
+        ("QA Tester", "Claude (Sonnet 4)", "Write & run E2E tests", "-> Infra Provisioner"),
+        ("Infra Provisioner", "Claude (Sonnet 4)", "Helm charts / VM deploy scripts", "-> Release Manager"),
+        ("Release Manager", "Groq (Llama 3.3)", "Merge PR & deploy to prod", "-> All (broadcast)"),
     ]
 
-    for name, provider, sub, pub in agent_info:
-        table.add_row(name, provider, sub, pub)
+    for name, provider, role, a2a in agent_info:
+        table.add_row(name, provider, role, a2a)
 
     console.print(table)
+
+    # Show pipeline flow
+    console.print("\n[bold]Pipeline Flow (LangGraph):[/bold]")
+    console.print(
+        "  Document Analyzer -> Tech Detector -> Requirements Analyst\n"
+        "  -> Product Director (Epic) -> Product Director (Stories)\n"
+        "  -> Engineering Manager -> Senior Developer (compile+lint+test)\n"
+        "  -> DB Engineer (migrations) -> Staff Reviewer\n"
+        "  -> [if approved] Security Expert (SAST/SCA/Secrets/OWASP)\n"
+        "  -> [if pass] CI Monitor -> QA Tester\n"
+        "  -> Infra Provisioner -> Release Manager\n"
+        "  -> [if changes/block] -> Senior Developer (loop, max 3)"
+    )
+
+    console.print("\n[bold]Guardrails:[/bold]")
+    console.print(
+        "  - Security Expert: SAST + SCA + Secret Detection + OWASP + Container\n"
+        "  - Approval Gates: configurable per-agent human approval\n"
+        "  - Memory: cross-run learning (episodic/semantic/procedural)\n"
+        "  - Checkpointing: resume from last successful stage\n"
+        "  - Circuit Breakers: API failure isolation\n"
+        "  - Timeouts: 15-min per agent, 3-min per API call"
+    )

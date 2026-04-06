@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    # --- PostgreSQL (persistent lifecycle store) ---
+    database_url: str = "postgresql://devai:devai@localhost:5432/devai"
+
     # --- NATS ---
     nats_url: str = "nats://localhost:4222"
     nats_stream: str = "DEVAI"
@@ -25,7 +28,14 @@ class Settings(BaseSettings):
     redis_result_ttl: int = 86400 * 30  # 30 days
     redis_lock_ttl: int = 360  # seconds
 
-    # --- GitHub ---
+    # --- SCM Provider (GitHub / GitLab / Azure DevOps) ---
+    scm_provider: str = "github"          # github | gitlab | azure_devops
+    scm_auth_method: str = "github_app"   # github_app | pat | oauth | ado_pat | gitlab_token
+    scm_base_url: str = ""                # Override default API URL (for self-hosted)
+    scm_token: str = ""                   # PAT / OAuth token / GitLab token
+    scm_organization: str = ""            # ADO org name (if using azure_devops)
+
+    # --- GitHub (legacy + GitHub App auth) ---
     github_app_id: int = 0
     github_app_private_key: str = ""
     github_app_installation_id: int = 0
@@ -56,6 +66,11 @@ class Settings(BaseSettings):
     claude_max_tokens: int = 8192
     claude_max_iterations: int = 25
 
+    # --- Groq ---
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    gcp_secret_groq_api_key: str = "prod-devai-groq-api-key"
+
     # --- Server ---
     host: str = "0.0.0.0"
     port: int = 8080
@@ -66,6 +81,12 @@ class Settings(BaseSettings):
     pipeline_label: str = "devai:automate"
     project_ready_column: str = "Ready for DevAI"
 
+    # --- LangSmith ---
+    langchain_tracing_v2: str = ""  # Set to "true" to enable
+    langchain_api_key: str = ""  # LangSmith API key (lsv2_pt_xxx)
+    langchain_project: str = "devai"  # Project name in LangSmith UI
+    langchain_endpoint: str = "https://api.smith.langchain.com"
+
     # --- Observability ---
     otel_endpoint: str = ""
     metrics_enabled: bool = True
@@ -73,6 +94,17 @@ class Settings(BaseSettings):
     @property
     def is_github_app_configured(self) -> bool:
         return self.github_app_id > 0 and len(self.github_app_private_key) > 0
+
+    def export_langsmith_env(self) -> None:
+        """Export LangSmith config as environment variables (required by LangChain)."""
+        import os
+
+        if self.langchain_api_key:
+            os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key
+            os.environ["LANGCHAIN_PROJECT"] = self.langchain_project
+            os.environ["LANGCHAIN_ENDPOINT"] = self.langchain_endpoint
+            if self.langchain_tracing_v2:
+                os.environ["LANGCHAIN_TRACING_V2"] = self.langchain_tracing_v2
 
 
 settings = Settings()

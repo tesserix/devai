@@ -6,7 +6,8 @@ import logging
 from typing import Any
 
 from devai.core.base_agent import BaseAgent
-from devai.models import AgentResult, PipelineContext, PipelineStage, TestResult
+from devai.graph.a2a import A2ABus
+from devai.graph.state import ALMState
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
 from devai.tools.test_tools import TEST_TOOLS, TestToolExecutor
@@ -65,33 +66,39 @@ class QATesterAgent(BaseAgent):
     subscribe_subject = "devai.pipeline.review_complete"
     publish_subject = "devai.pipeline.tests_complete"
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.claude = ClaudeProvider(self.config)
-        self.github_tools = GitHubToolExecutor(self.github)
-        self.test_tools = TestToolExecutor()
-
-    async def _tool_executor(self, tool_name: str, tool_input: dict[str, Any]) -> str:
-        """Route tool calls to the appropriate executor."""
-        if tool_name.startswith("github_"):
-            return await self.github_tools.execute(tool_name, tool_input)
-        return await self.test_tools.execute(tool_name, tool_input)
-
-    async def execute(self, ctx: PipelineContext) -> AgentResult:
+    async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Write and run E2E tests for the implemented changes."""
-        pr_number = ctx.pr_number
-        branch = ctx.branch_name
-        repo = ctx.repo_full_name
+        claude = ClaudeProvider(self.config)
+        github_tools = GitHubToolExecutor(self.github)
+        test_tools = TestToolExecutor()
+
+        async def tool_executor(tool_name: str, tool_input: dict[str, Any]) -> str:
+            if tool_name.startswith("github_"):
+                return await github_tools.execute(tool_name, tool_input)
+            return await test_tools.execute(tool_name, tool_input)
+
+        pr_number = state.get("pr_number")
+        branch = state.get("branch_name")
+        repo = state.get("repo_full_name", "")
 
         if not pr_number or not branch:
-            return AgentResult(
-                agent_name=self.name,
-                status="failed",
-                summary="No PR or branch found in pipeline context",
+            a2a.escalate(
+                "engineering_manager",
+                "Testing Blocked",
+                "No PR or branch found in pipeline state for testing.",
             )
+            return {
+                "test_total": 0,
+                "test_passed": 0,
+                "test_failed": 0,
+                "test_summary": "No PR or branch found in pipeline context",
+            }
 
-        stories = ctx.artifacts.get("product_director", {}).get("issues", [])
-        issue_refs = "\n".join(f"- #{s['number']}: {s['title']}" for s in stories)
+        stories = state.get("stories", [])
+        issue_refs = "\n".join(f"- #{s.get('number', '?')}: {s.get('title', '')}" for s in stories)
+
+        # Check for A2A messages
+        inbox_context = a2a.format_inbox_context()
 
         user_message = f"""Repository: {repo}
 PR: #{pr_number}
@@ -101,26 +108,27 @@ Branch: {branch}
 {issue_refs}
 
 ## Original Requirements
-{ctx.requirements}
+{state.get('requirements', '')[:2000]}
+
+{inbox_context}
 
 Write comprehensive E2E tests for the changes in this PR. Then run them and report the results.
 
 Start by reading the PR diff to understand what was changed, explore existing tests for patterns, then write and commit test files, and finally run them."""
 
-        # Inject CLAUDE.md governance rules into system prompt
         system = SYSTEM_PROMPT
-        governance = ctx.artifacts.get("governance", "")
+        governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance (CLAUDE.md)\nYou MUST follow these rules:\n\n{governance}"
 
-        result_text = await self.claude.run_agent_loop(
+        result_text = await claude.run_agent_loop(
             system_prompt=system,
             user_message=user_message,
             tools=QA_TOOLS,
-            tool_executor=self._tool_executor,
+            tool_executor=tool_executor,
         )
 
-        # Post final results as a PR comment
+        # Post results as a PR comment
         if pr_number:
             await self.github.add_comment(
                 repo=repo,
@@ -128,11 +136,23 @@ Start by reading the PR diff to understand what was changed, explore existing te
                 body=f"## QA Test Results\n\n{result_text}",
             )
 
-        ctx.advance_stage(PipelineStage.TESTS_COMPLETE)
-
-        return AgentResult(
-            agent_name=self.name,
-            status="success",
-            output={"test_summary": result_text},
-            summary=f"E2E tests completed for PR #{pr_number}",
+        # Notify Release Manager about test completion
+        a2a.handoff(
+            "release_manager",
+            "Tests Complete",
+            f"E2E tests completed for PR #{pr_number}.\n\n{result_text[:300]}...",
         )
+
+        # Notify CI Monitor
+        a2a.notify(
+            "ci_monitor",
+            "Test Suite Committed",
+            f"Test files committed to branch '{branch}'. Monitor for CI.",
+        )
+
+        return {
+            "test_summary": result_text,
+            "test_total": 0,  # Will be populated from actual test results
+            "test_passed": 0,
+            "test_failed": 0,
+        }

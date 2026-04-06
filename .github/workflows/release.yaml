@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  GCP_PROJECT_ID: tesseracthub-480811
+  GKE_CLUSTER: tesseract-prod-in-gke
+  GKE_REGION: asia-south1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release-alm:
+    name: Release ALM
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build & push ALM image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai:latest
+
+      - name: Build & push SRE image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.sre
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai-sre:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai-sre:latest
+
+  release-dashboards:
+    name: Release Dashboards
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build & push ALM Dashboard
+        uses: docker/build-push-action@v6
+        with:
+          context: ./dashboard
+          file: ./dashboard/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai-dashboard:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai-dashboard:latest
+
+      - name: Build & push SRE Dashboard
+        uses: docker/build-push-action@v6
+        with:
+          context: ./sre-dashboard
+          file: ./sre-dashboard/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai-sre-dashboard:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/devai-sre-dashboard:latest
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [release-alm, release-dashboards]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          prev_tag=$(git tag --sort=-v:refname | head -2 | tail -1)
+          if [[ -z "$prev_tag" ]]; then
+            changelog="Initial release"
+          else
+            changelog=$(git log ${prev_tag}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "## DevAI ${{ steps.version.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "### Container Images" >> "$GITHUB_OUTPUT"
+          echo "- \`ghcr.io/${{ github.repository }}/devai:${{ steps.version.outputs.tag }}\` — ALM Pipeline" >> "$GITHUB_OUTPUT"
+          echo "- \`ghcr.io/${{ github.repository }}/devai-sre:${{ steps.version.outputs.tag }}\` — SRE Monitoring" >> "$GITHUB_OUTPUT"
+          echo "- \`ghcr.io/${{ github.repository }}/devai-dashboard:${{ steps.version.outputs.tag }}\` — ALM Dashboard" >> "$GITHUB_OUTPUT"
+          echo "- \`ghcr.io/${{ github.repository }}/devai-sre-dashboard:${{ steps.version.outputs.tag }}\` — SRE Dashboard" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "### Changes" >> "$GITHUB_OUTPUT"
+          echo "$changelog" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: DevAI ${{ steps.version.outputs.tag }}
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-rc') || contains(steps.version.outputs.tag, '-beta') }}

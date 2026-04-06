@@ -21,6 +21,9 @@ env:
   DEVAI_KEYCLOAK_URL: "https://internal-identity.tesserix.app"
   DEVAI_KEYCLOAK_REALM: "tesserix-internal"
   DEVAI_KEYCLOAK_CLIENT_ID: "devai-dashboard"
+  DEVAI_GROQ_MODEL: "llama-3.3-70b-versatile"
+  DEVAI_LANGCHAIN_TRACING_V2: "true"
+  DEVAI_LANGCHAIN_PROJECT: "devai"
 
 secrets:
   externalSecretName: devai-secrets
