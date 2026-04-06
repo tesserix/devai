@@ -9,8 +9,9 @@ import { A2AFeed } from "@/components/a2a-feed";
 import { RunList } from "@/components/run-list";
 import { TriggerDialog } from "@/components/trigger-dialog";
 import { ApprovalBanner } from "@/components/approval-banner";
+import { ChatPanel } from "@/components/chat-panel";
 
-type Tab = "overview" | "agents" | "a2a" | "config";
+type Tab = "overview" | "agents" | "a2a" | "chat" | "config";
 
 export default function DashboardPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
@@ -176,6 +177,7 @@ export default function DashboardPage() {
                   { key: "overview", label: "Overview" },
                   { key: "agents", label: "Agents" },
                   { key: "a2a", label: "A2A Messages" },
+                  { key: "chat", label: "Chat" },
                   { key: "config", label: "Config" },
                 ] as const).map((t) => (
                   <button
@@ -200,6 +202,7 @@ export default function DashboardPage() {
               )}
               {tab === "agents" && <AgentsTab run={selectedRun} />}
               {tab === "a2a" && <A2ATab messages={a2aMessages} />}
+              {tab === "chat" && <ChatPanel />}
               {tab === "config" && <ConfigTab />}
             </div>
           </>

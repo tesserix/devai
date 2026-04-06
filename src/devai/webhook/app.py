@@ -37,6 +37,11 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
 
     app.include_router(dashboard_router)
 
+    # Chat routes (chatbot API + WebSocket)
+    from devai.chat.routes import router as chat_router
+
+    app.include_router(chat_router)
+
     # Serve dashboard static files (CSS, JS)
     static_dir = Path(__file__).parent.parent / "dashboard" / "static"
     if static_dir.exists():
