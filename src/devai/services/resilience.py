@@ -103,7 +103,7 @@ async def with_timeout(coro: Any, timeout_seconds: float, description: str = "op
         return await asyncio.wait_for(coro, timeout=timeout_seconds)
     except TimeoutError:
         logger.error("%s timed out after %.0fs", description, timeout_seconds)
-        raise TimeoutError(f"{description} timed out after {timeout_seconds}s")
+        raise TimeoutError(f"{description} timed out after {timeout_seconds}s") from None
 
 
 class CircuitBreaker:

@@ -2,7 +2,6 @@
 
 from devai.models import (
     AgentResult,
-    AgentRole,
     CodeReview,
     PipelineContext,
     PipelineStage,

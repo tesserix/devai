@@ -246,7 +246,7 @@ async def get_board(request: Request, org: str, project_number: int) -> dict[str
             "body": (content.get("body") or "")[:200],
             "state": content["state"],
             "url": content["url"],
-            "labels": [l["name"] for l in content.get("labels", {}).get("nodes", [])],
+            "labels": [lbl["name"] for lbl in content.get("labels", {}).get("nodes", [])],
             "assignees": [a["login"] for a in content.get("assignees", {}).get("nodes", [])],
         }
         columns[status_name].append(card)
@@ -322,7 +322,7 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
         github = GitHubClient(config)
         issue = await github.get_issue(repo, issue_number)
         # Build full requirements from issue (same as webhook)
-        labels = [l.get("name", "") for l in issue.get("labels", [])]
+        labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
         requirements = (
             f"# Requirement: Issue #{issue_number} — {issue.get('title', '')}\n"
             f"**Labels:** {', '.join(labels)}\n\n"

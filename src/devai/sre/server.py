@@ -20,6 +20,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -243,8 +244,6 @@ async def _run_single_scan(db: Any, cluster_id: str, trigger: str) -> None:
     except Exception as e:
         logger.error("Failed to record scan run: %s", e)
 
-
-import json
 
 # CLI entrypoint
 if __name__ == "__main__":

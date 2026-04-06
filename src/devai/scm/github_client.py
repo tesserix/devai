@@ -237,7 +237,7 @@ class GitHubSCMClient(SCMClient):
                 "issue_number": issue["number"],
                 "title": issue.get("title", ""),
                 "body": issue.get("body", "") or "",
-                "labels": [l["name"] for l in issue.get("labels", [])],
+                "labels": [lbl["name"] for lbl in issue.get("labels", [])],
                 "action": payload["action"],
                 "trigger_type": "github_issue",
             }
@@ -251,7 +251,7 @@ class GitHubSCMClient(SCMClient):
                     "issue_number": issue["number"],
                     "title": issue.get("title", ""),
                     "body": issue.get("body", "") or "",
-                    "labels": [l["name"] for l in issue.get("labels", [])],
+                    "labels": [lbl["name"] for lbl in issue.get("labels", [])],
                     "action": "command",
                     "command": comment,
                     "trigger_type": "github_issue",

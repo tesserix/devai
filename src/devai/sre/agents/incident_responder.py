@@ -136,15 +136,12 @@ class IncidentResponderAgent:
 
                 # Assign to owners
                 if owners and issue_number:
-                    try:
-                        # GitHub assignees via API
+                    with contextlib.suppress(Exception):
                         await scm._request(
                             "POST",
                             f"/repos/{repo}/issues/{issue_number}/assignees",
                             json={"assignees": owners[:3]},
                         )
-                    except Exception:
-                        pass
 
                 # Record in database
                 await self.db.execute(

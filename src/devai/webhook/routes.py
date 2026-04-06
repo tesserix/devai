@@ -137,8 +137,8 @@ async def _route_event(request: Request, event_type: str, payload: dict[str, Any
 
     # --- 2. Issue opened with requirement label already on it ---
     if event_type == "issues" and payload.get("action") == "opened":
-        labels = [l.get("name", "") for l in payload.get("issue", {}).get("labels", [])]
-        if any(l in (config.pipeline_label, "requirement", "devai:requirement") for l in labels):
+        labels = [lbl.get("name", "") for lbl in payload.get("issue", {}).get("labels", [])]
+        if any(name in (config.pipeline_label, "requirement", "devai:requirement") for name in labels):
             await _trigger_from_issue(request, payload)
             return
 
@@ -304,7 +304,7 @@ def _build_requirements_from_issue(issue: dict[str, Any]) -> str:
     number = issue.get("number", "?")
     title = issue.get("title", "")
     body = issue.get("body", "") or ""
-    labels = [l.get("name", "") for l in issue.get("labels", [])]
+    labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
     milestone = issue.get("milestone", {})
     milestone_title = milestone.get("title", "") if milestone else ""
     assignees = [a.get("login", "") for a in issue.get("assignees", [])]

@@ -201,7 +201,7 @@ class GitLabSCMClient(SCMClient):
                 "issue_number": attrs.get("iid"),
                 "title": attrs.get("title", ""),
                 "body": attrs.get("description", "") or "",
-                "labels": [l.get("title", "") for l in payload.get("labels", [])],
+                "labels": [lbl.get("title", "") for lbl in payload.get("labels", [])],
                 "action": attrs.get("action", ""),
                 "trigger_type": "gitlab_issue",
             }
@@ -216,7 +216,7 @@ class GitLabSCMClient(SCMClient):
                     "issue_number": issue.get("iid"),
                     "title": issue.get("title", ""),
                     "body": issue.get("description", "") or "",
-                    "labels": [l.get("title", "") for l in issue.get("labels", [])],
+                    "labels": [lbl.get("title", "") for lbl in issue.get("labels", [])],
                     "action": "command",
                     "command": body,
                     "trigger_type": "gitlab_issue",

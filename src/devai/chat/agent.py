@@ -47,7 +47,6 @@ from langchain_core.tools import tool
 from devai.services.tracing import traceable_if_enabled
 
 if TYPE_CHECKING:
-    import redis.asyncio as aioredis
 
     from devai.config import Settings
     from devai.core.state import StateManager
@@ -96,9 +95,9 @@ class DevAIChatAgent:
 
     def __init__(
         self,
-        config: "Settings",
-        state_manager: "StateManager",
-        database: "Database | None" = None,
+        config: Settings,
+        state_manager: StateManager,
+        database: Database | None = None,
     ) -> None:
         self.config = config
         self.state = state_manager
@@ -480,7 +479,7 @@ class DevAIChatAgent:
                     "number": issue.get("number") or issue.get("iid"),
                     "title": issue.get("title", ""),
                     "state": issue.get("state", ""),
-                    "labels": [l.get("name", l) if isinstance(l, dict) else l for l in issue.get("labels", [])],
+                    "labels": [lbl.get("name", lbl) if isinstance(lbl, dict) else lbl for lbl in issue.get("labels", [])],
                     "body": issue.get("body", issue.get("description", ""))[:2000],
                 }, indent=2, default=str)
             except Exception as e:
@@ -561,10 +560,7 @@ class DevAIChatAgent:
 
         # Extract final text response
         final = history[-1]
-        if isinstance(final, AIMessage):
-            response_text = final.content
-        else:
-            response_text = str(final)
+        response_text = final.content if isinstance(final, AIMessage) else str(final)
 
         # Trim conversation to last 30 messages to prevent context overflow
         if len(history) > 32:
