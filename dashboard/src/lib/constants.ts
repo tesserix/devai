@@ -118,9 +118,11 @@ export const STAGE_TO_AGENT: Record<string, string> = {
   stories_created: "engineering_manager",
   plan_created: "senior_developer",
   code_implemented: "db_engineer",
+  db_migrated: "staff_reviewer",
   code_reviewed: "security_expert",
   security_cleared: "ci_monitor",
   build_monitoring: "qa_tester",
   tests_complete: "infra_provisioner",
   deploying: "release_manager",
+  deployed: "release_manager",
 };

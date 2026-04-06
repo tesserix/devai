@@ -63,13 +63,14 @@ class ProductDirectorAgent(BaseAgent):
     publish_subject = "devai.pipeline.stories_ready"
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
-        """Default execution — creates stories (backward compat)."""
-        return await self.run_stories(state)
+        """Default execution — creates stories, passing A2A bus through."""
+        return await self.run_stories(state, a2a)
 
-    async def run_epic(self, state: ALMState) -> dict[str, Any]:
+    async def run_epic(self, state: ALMState, a2a: A2ABus | None = None) -> dict[str, Any]:
         """Create a GitHub Epic from analyzed requirements."""
         codex = CodexLiteProvider(self.config)
-        a2a = A2ABus(self.name, state.get("a2a_messages", []))
+        if a2a is None:
+            a2a = A2ABus(self.name, state.get("a2a_messages", []))
 
         repo = state.get("repo_full_name", "")
         requirements = state.get("requirements", "")
@@ -141,14 +142,15 @@ Create a GitHub Epic that encompasses all these requirements."""
         result: dict[str, Any] = {
             "epics": [epic_result],
             "epic_issue_number": issue["number"],
-            "a2a_messages": state.get("a2a_messages", []) + a2a.collect_outbox(),
+            # a2a messages are merged by BaseAgent.run() automatically
         }
         return result
 
-    async def run_stories(self, state: ALMState) -> dict[str, Any]:
+    async def run_stories(self, state: ALMState, a2a: A2ABus | None = None) -> dict[str, Any]:
         """Create user stories from the epic and requirements."""
         codex = CodexLiteProvider(self.config)
-        a2a = A2ABus(self.name, state.get("a2a_messages", []))
+        if a2a is None:
+            a2a = A2ABus(self.name, state.get("a2a_messages", []))
 
         repo = state.get("repo_full_name", "")
         requirements = state.get("requirements", "")
@@ -242,5 +244,5 @@ Break these requirements into user stories. Consider the repository context and 
         return {
             "stories": created_stories,
             "story_issue_numbers": story_numbers,
-            "a2a_messages": state.get("a2a_messages", []) + a2a.collect_outbox(),
+            # a2a messages are merged by BaseAgent.run() automatically
         }

@@ -93,9 +93,17 @@ class BaseAgent(ABC):
 
         result = await _run_fn(state, a2a)
 
-        # Merge A2A outbox into state
+        # Merge A2A messages: start with existing, add agent's outbox,
+        # and include any messages the agent may have added to the result directly
         existing_messages = list(state.get("a2a_messages", []))
-        existing_messages.extend(a2a.collect_outbox())
+        existing_ids = {m.get("id") for m in existing_messages if isinstance(m, dict)}
+
+        # Add outbox messages (sent via the a2a bus parameter)
+        for msg in a2a.collect_outbox():
+            if msg.get("id") not in existing_ids:
+                existing_messages.append(msg)
+                existing_ids.add(msg.get("id"))
+
         result["a2a_messages"] = existing_messages
 
         return result
