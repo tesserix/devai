@@ -156,9 +156,7 @@ class GitHubOAuth:
         resp.raise_for_status()
         return resp.json()["data"]["createProjectV2"]["projectV2"]
 
-    async def get_project_items(
-        self, access_token: str, org: str, project_number: int
-    ) -> list[dict[str, Any]]:
+    async def get_project_items(self, access_token: str, org: str, project_number: int) -> list[dict[str, Any]]:
         """Get all items (issues) in a GitHub Project v2."""
         query = """
         query($org: String!, $number: Int!) {
@@ -202,13 +200,7 @@ class GitHubOAuth:
         )
         resp.raise_for_status()
         data = resp.json()
-        items = (
-            data.get("data", {})
-            .get("organization", {})
-            .get("projectV2", {})
-            .get("items", {})
-            .get("nodes", [])
-        )
+        items = data.get("data", {}).get("organization", {}).get("projectV2", {}).get("items", {}).get("nodes", [])
         return items
 
     async def move_project_item(

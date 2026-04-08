@@ -136,21 +136,20 @@ class K8sToolExecutor:
         for node in node_list:
             conditions = {c["type"]: c["status"] for c in node.get("status", {}).get("conditions", [])}
             allocatable = node.get("status", {}).get("allocatable", {})
-            node_health.append({
-                "name": node["metadata"]["name"],
-                "ready": conditions.get("Ready", "Unknown"),
-                "cpu": allocatable.get("cpu", "?"),
-                "memory": allocatable.get("memory", "?"),
-                "pods": allocatable.get("pods", "?"),
-            })
+            node_health.append(
+                {
+                    "name": node["metadata"]["name"],
+                    "ready": conditions.get("Ready", "Unknown"),
+                    "cpu": allocatable.get("cpu", "?"),
+                    "memory": allocatable.get("memory", "?"),
+                    "pods": allocatable.get("pods", "?"),
+                }
+            )
 
         # System pods
         sys_pods = await self._kubectl("get", "pods", "-n", "kube-system", "-o", "json")
         sys_pod_list = json.loads(sys_pods).get("items", []) if sys_pods else []
-        unhealthy_sys = [
-            p["metadata"]["name"] for p in sys_pod_list
-            if p.get("status", {}).get("phase") != "Running"
-        ]
+        unhealthy_sys = [p["metadata"]["name"] for p in sys_pod_list if p.get("status", {}).get("phase") != "Running"]
 
         return {
             "total_nodes": len(node_health),
@@ -214,11 +213,13 @@ class K8sToolExecutor:
         for line in output.strip().split("\n"):
             parts = line.split()
             if len(parts) >= 3:
-                pods.append({
-                    "name": parts[0],
-                    "cpu": parts[1],
-                    "memory": parts[2],
-                })
+                pods.append(
+                    {
+                        "name": parts[0],
+                        "cpu": parts[1],
+                        "memory": parts[2],
+                    }
+                )
 
         return {"namespace": ns, "pods": pods}
 
@@ -234,7 +235,8 @@ class K8sToolExecutor:
 
         if errors_only:
             filtered = [
-                line for line in output.split("\n")
+                line
+                for line in output.split("\n")
                 if any(kw in line.lower() for kw in ["error", "err", "warn", "fatal", "panic", "exception", "fail"])
             ]
             output = "\n".join(filtered[-50:])  # Last 50 error lines
@@ -262,14 +264,16 @@ class K8sToolExecutor:
         # Sort by last timestamp, take recent
         results = []
         for e in events[-30:]:
-            results.append({
-                "namespace": e["metadata"].get("namespace", ""),
-                "reason": e.get("reason", ""),
-                "message": e.get("message", "")[:200],
-                "object": f"{e.get('involvedObject', {}).get('kind', '')}/{e.get('involvedObject', {}).get('name', '')}",
-                "count": e.get("count", 1),
-                "last_seen": e.get("lastTimestamp", ""),
-            })
+            results.append(
+                {
+                    "namespace": e["metadata"].get("namespace", ""),
+                    "reason": e.get("reason", ""),
+                    "message": e.get("message", "")[:200],
+                    "object": f"{e.get('involvedObject', {}).get('kind', '')}/{e.get('involvedObject', {}).get('name', '')}",
+                    "count": e.get("count", 1),
+                    "last_seen": e.get("lastTimestamp", ""),
+                }
+            )
 
         return {"type": event_type, "total": len(results), "events": results}
 
@@ -284,21 +288,22 @@ class K8sToolExecutor:
             status = d.get("status", {})
             containers = spec.get("template", {}).get("spec", {}).get("containers", [])
 
-            results.append({
-                "name": d["metadata"]["name"],
-                "replicas": spec.get("replicas", 0),
-                "ready": status.get("readyReplicas", 0),
-                "available": status.get("availableReplicas", 0),
-                "images": [c.get("image", "") for c in containers],
-                "cpu_request": sum(
-                    self._parse_cpu(c.get("resources", {}).get("requests", {}).get("cpu", "0"))
-                    for c in containers
-                ),
-                "memory_request": sum(
-                    self._parse_memory(c.get("resources", {}).get("requests", {}).get("memory", "0"))
-                    for c in containers
-                ),
-            })
+            results.append(
+                {
+                    "name": d["metadata"]["name"],
+                    "replicas": spec.get("replicas", 0),
+                    "ready": status.get("readyReplicas", 0),
+                    "available": status.get("availableReplicas", 0),
+                    "images": [c.get("image", "") for c in containers],
+                    "cpu_request": sum(
+                        self._parse_cpu(c.get("resources", {}).get("requests", {}).get("cpu", "0")) for c in containers
+                    ),
+                    "memory_request": sum(
+                        self._parse_memory(c.get("resources", {}).get("requests", {}).get("memory", "0"))
+                        for c in containers
+                    ),
+                }
+            )
 
         return {"namespace": ns, "deployments": results}
 
@@ -320,13 +325,15 @@ class K8sToolExecutor:
         for cert in certs:
             status = cert.get("status", {})
             conditions = {c["type"]: c for c in status.get("conditions", [])}
-            results.append({
-                "name": cert["metadata"]["name"],
-                "namespace": cert["metadata"].get("namespace", ""),
-                "ready": conditions.get("Ready", {}).get("status", "Unknown"),
-                "expiry": status.get("notAfter", "unknown"),
-                "renewal": status.get("renewalTime", ""),
-            })
+            results.append(
+                {
+                    "name": cert["metadata"]["name"],
+                    "namespace": cert["metadata"].get("namespace", ""),
+                    "ready": conditions.get("Ready", {}).get("status", "Unknown"),
+                    "expiry": status.get("notAfter", "unknown"),
+                    "renewal": status.get("renewalTime", ""),
+                }
+            )
 
         return {"certificates": results}
 
@@ -339,15 +346,17 @@ class K8sToolExecutor:
         for h in hpas:
             spec = h.get("spec", {})
             status = h.get("status", {})
-            results.append({
-                "name": h["metadata"]["name"],
-                "target": spec.get("scaleTargetRef", {}).get("name", ""),
-                "min_replicas": spec.get("minReplicas", 1),
-                "max_replicas": spec.get("maxReplicas", 1),
-                "current_replicas": status.get("currentReplicas", 0),
-                "desired_replicas": status.get("desiredReplicas", 0),
-                "current_cpu_pct": status.get("currentCPUUtilizationPercentage"),
-            })
+            results.append(
+                {
+                    "name": h["metadata"]["name"],
+                    "target": spec.get("scaleTargetRef", {}).get("name", ""),
+                    "min_replicas": spec.get("minReplicas", 1),
+                    "max_replicas": spec.get("maxReplicas", 1),
+                    "current_replicas": status.get("currentReplicas", 0),
+                    "desired_replicas": status.get("desiredReplicas", 0),
+                    "current_cpu_pct": status.get("currentCPUUtilizationPercentage"),
+                }
+            )
 
         return {"namespace": ns, "hpas": results}
 
@@ -356,7 +365,8 @@ class K8sToolExecutor:
     async def _kubectl(self, *args: str) -> str:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "kubectl", *args,
+                "kubectl",
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env={**os.environ},
@@ -382,7 +392,7 @@ class K8sToolExecutor:
         multipliers = {"Ki": 1024, "Mi": 1024**2, "Gi": 1024**3}
         for suffix, mult in multipliers.items():
             if mem_str.endswith(suffix):
-                return float(mem_str[:-len(suffix)]) * mult
+                return float(mem_str[: -len(suffix)]) * mult
         try:
             return float(mem_str)
         except ValueError:

@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 # Sr Dev gets full read/write tools + validation tools
 SR_DEV_TOOLS = [
-    t for t in GITHUB_TOOLS
-    if t["name"] in {
+    t
+    for t in GITHUB_TOOLS
+    if t["name"]
+    in {
         "github_get_file_content",
         "github_list_files",
         "github_get_repo_tree",
@@ -116,7 +118,7 @@ class SeniorDeveloperAgent(BaseAgent):
             ci_fix_context = f"\n\n## CI Issues to Fix\n{ci_issues}"
 
         user_message = f"""Repository: {repo}
-Run ID: {state.get('run_id', '')}
+Run ID: {state.get("run_id", "")}
 
 ## Technical Plan
 {plan}
@@ -138,7 +140,7 @@ Implement the code changes described in the technical plan. Create a feature bra
             branch = state.get("branch_name", "")
             user_message += f"""
 
-## Review Feedback (Iteration {state.get('review_iteration', 0)})
+## Review Feedback (Iteration {state.get("review_iteration", 0)})
 The Staff Reviewer requested the following changes. Address ALL of them:
 {feedback_text}
 

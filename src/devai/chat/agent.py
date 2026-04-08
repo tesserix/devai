@@ -47,7 +47,6 @@ from langchain_core.tools import tool
 from devai.services.tracing import traceable_if_enabled
 
 if TYPE_CHECKING:
-
     from devai.config import Settings
     from devai.core.state import StateManager
     from devai.services.database import Database
@@ -134,13 +133,15 @@ class DevAIChatAgent:
                 if run_data:
                     agents = await state.get_agent_statuses(rid)
                     completed = sum(1 for a in agents.values() if a.get("status") == "completed")
-                    runs.append({
-                        "run_id": rid,
-                        "repo": run_data.get("repo", ""),
-                        "stage": run_data.get("stage", ""),
-                        "created": run_data.get("created_at", ""),
-                        "agents_completed": f"{completed}/{len(agents)}",
-                    })
+                    runs.append(
+                        {
+                            "run_id": rid,
+                            "repo": run_data.get("repo", ""),
+                            "stage": run_data.get("stage", ""),
+                            "created": run_data.get("created_at", ""),
+                            "agents_completed": f"{completed}/{len(agents)}",
+                        }
+                    )
 
             return json.dumps(runs, indent=2) if runs else "No pipeline runs found."
 
@@ -179,20 +180,21 @@ class DevAIChatAgent:
 
             if agent_filter:
                 messages = [
-                    m for m in messages
-                    if m.get("from_agent") == agent_filter or m.get("to_agent") == agent_filter
+                    m for m in messages if m.get("from_agent") == agent_filter or m.get("to_agent") == agent_filter
                 ]
 
             # Summarize for readability
             summary = []
             for m in messages[-30:]:  # Last 30
-                summary.append({
-                    "from": m.get("from_agent", "?"),
-                    "to": m.get("to_agent", "?"),
-                    "type": m.get("message_type", "?"),
-                    "subject": m.get("subject", ""),
-                    "body": m.get("body", "")[:200],
-                })
+                summary.append(
+                    {
+                        "from": m.get("from_agent", "?"),
+                        "to": m.get("to_agent", "?"),
+                        "type": m.get("message_type", "?"),
+                        "subject": m.get("subject", ""),
+                        "body": m.get("body", "")[:200],
+                    }
+                )
 
             return json.dumps(summary, indent=2) if summary else "No A2A messages found."
 
@@ -218,15 +220,17 @@ class DevAIChatAgent:
 
             results = []
             for e in entries:
-                results.append({
-                    "agent": e.agent,
-                    "repo": e.repo,
-                    "type": e.memory_type,
-                    "content": e.content,
-                    "tags": e.tags,
-                    "access_count": e.access_count,
-                    "age_days": round(((__import__("time").time() - e.created_at) / 86400), 1),
-                })
+                results.append(
+                    {
+                        "agent": e.agent,
+                        "repo": e.repo,
+                        "type": e.memory_type,
+                        "content": e.content,
+                        "tags": e.tags,
+                        "access_count": e.access_count,
+                        "age_days": round(((__import__("time").time() - e.created_at) / 86400), 1),
+                    }
+                )
 
             return json.dumps(results, indent=2) if results else "No memories found."
 
@@ -381,7 +385,9 @@ class DevAIChatAgent:
                 if run_data:
                     ctx = run_data.get("context", {})
                     if isinstance(ctx, dict) and query.lower() in json.dumps(ctx).lower():
-                        matching_runs.append({"run_id": rid, "repo": run_data.get("repo", ""), "stage": run_data.get("stage", "")})
+                        matching_runs.append(
+                            {"run_id": rid, "repo": run_data.get("repo", ""), "stage": run_data.get("stage", "")}
+                        )
             if matching_runs:
                 results["pipeline_runs"] = matching_runs[:5]
 
@@ -424,7 +430,10 @@ class DevAIChatAgent:
             try:
                 files = await scm.list_files(repo, path, ref=branch or None)
                 if isinstance(files, list):
-                    return json.dumps([{"name": f.get("name", f.get("path", "")), "type": f.get("type", "")} for f in files[:50]], indent=2)
+                    return json.dumps(
+                        [{"name": f.get("name", f.get("path", "")), "type": f.get("type", "")} for f in files[:50]],
+                        indent=2,
+                    )
                 return str(files)
             except Exception as e:
                 return f"Error listing files: {e}"
@@ -455,13 +464,17 @@ class DevAIChatAgent:
             try:
                 pr = await scm.get_pull_request(repo, pr_number)
                 diff = await scm.get_pr_diff(repo, pr_number)
-                return json.dumps({
-                    "number": pr.get("number") or pr.get("iid"),
-                    "title": pr.get("title", ""),
-                    "state": pr.get("state", ""),
-                    "body": pr.get("body", pr.get("description", ""))[:1000],
-                    "diff_preview": diff[:3000],
-                }, indent=2, default=str)
+                return json.dumps(
+                    {
+                        "number": pr.get("number") or pr.get("iid"),
+                        "title": pr.get("title", ""),
+                        "state": pr.get("state", ""),
+                        "body": pr.get("body", pr.get("description", ""))[:1000],
+                        "diff_preview": diff[:3000],
+                    },
+                    indent=2,
+                    default=str,
+                )
             except Exception as e:
                 return f"Error: {e}"
             finally:
@@ -475,13 +488,19 @@ class DevAIChatAgent:
             scm = create_scm_client(config)
             try:
                 issue = await scm.get_issue(repo, issue_number)
-                return json.dumps({
-                    "number": issue.get("number") or issue.get("iid"),
-                    "title": issue.get("title", ""),
-                    "state": issue.get("state", ""),
-                    "labels": [lbl.get("name", lbl) if isinstance(lbl, dict) else lbl for lbl in issue.get("labels", [])],
-                    "body": issue.get("body", issue.get("description", ""))[:2000],
-                }, indent=2, default=str)
+                return json.dumps(
+                    {
+                        "number": issue.get("number") or issue.get("iid"),
+                        "title": issue.get("title", ""),
+                        "state": issue.get("state", ""),
+                        "labels": [
+                            lbl.get("name", lbl) if isinstance(lbl, dict) else lbl for lbl in issue.get("labels", [])
+                        ],
+                        "body": issue.get("body", issue.get("description", ""))[:2000],
+                    },
+                    indent=2,
+                    default=str,
+                )
             except Exception as e:
                 return f"Error: {e}"
             finally:
@@ -547,16 +566,20 @@ class DevAIChatAgent:
                 if tool_fn:
                     try:
                         result = await tool_fn.ainvoke(tc["args"])
-                        history.append(ToolMessage(
-                            content=str(result),
-                            tool_call_id=tc["id"],
-                        ))
+                        history.append(
+                            ToolMessage(
+                                content=str(result),
+                                tool_call_id=tc["id"],
+                            )
+                        )
                     except Exception as e:
                         logger.error("Tool %s failed: %s", tc["name"], e)
-                        history.append(ToolMessage(
-                            content=f"Error: {e}",
-                            tool_call_id=tc["id"],
-                        ))
+                        history.append(
+                            ToolMessage(
+                                content=f"Error: {e}",
+                                tool_call_id=tc["id"],
+                            )
+                        )
 
         # Extract final text response
         final = history[-1]

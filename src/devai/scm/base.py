@@ -32,11 +32,11 @@ class SCMProvider(StrEnum):
 
 
 class AuthMethod(StrEnum):
-    GITHUB_APP = "github_app"      # JWT + Installation Token
-    PAT = "pat"                     # Personal Access Token (GitHub/GitLab)
-    OAUTH = "oauth"                 # OAuth2 token
-    ADO_PAT = "ado_pat"            # Azure DevOps PAT
-    GITLAB_TOKEN = "gitlab_token"   # GitLab project/group token
+    GITHUB_APP = "github_app"  # JWT + Installation Token
+    PAT = "pat"  # Personal Access Token (GitHub/GitLab)
+    OAUTH = "oauth"  # OAuth2 token
+    ADO_PAT = "ado_pat"  # Azure DevOps PAT
+    GITLAB_TOKEN = "gitlab_token"  # GitLab project/group token
 
 
 class SCMClient(ABC):
@@ -54,7 +54,11 @@ class SCMClient(ABC):
 
     @abstractmethod
     async def create_issue(
-        self, repo: str, title: str, body: str, labels: list[str] | None = None,
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create an issue (GitHub/GitLab) or work item (ADO)."""
         ...
@@ -105,7 +109,13 @@ class SCMClient(ABC):
 
     @abstractmethod
     async def create_or_update_file(
-        self, repo: str, path: str, content: str, message: str, branch: str, sha: str | None = None,
+        self,
+        repo: str,
+        path: str,
+        content: str,
+        message: str,
+        branch: str,
+        sha: str | None = None,
     ) -> dict[str, Any]:
         """Create or update a file by committing it to a branch."""
         ...
@@ -114,7 +124,12 @@ class SCMClient(ABC):
 
     @abstractmethod
     async def create_pull_request(
-        self, repo: str, title: str, body: str, head: str, base: str | None = None,
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str | None = None,
     ) -> dict[str, Any]:
         """Create a pull request (GitHub), merge request (GitLab), or PR (ADO)."""
         ...
@@ -131,7 +146,11 @@ class SCMClient(ABC):
 
     @abstractmethod
     async def create_pr_review(
-        self, repo: str, pr_id: int, body: str, event: str = "COMMENT",
+        self,
+        repo: str,
+        pr_id: int,
+        body: str,
+        event: str = "COMMENT",
         comments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Submit a review on a pull request."""
@@ -198,7 +217,10 @@ class SCMClient(ABC):
         return info.get("visibility", "private")
 
     async def get_all_workflow_runs(
-        self, repo: str, status: str = "in_progress", limit: int = 20,
+        self,
+        repo: str,
+        status: str = "in_progress",
+        limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Get all workflow runs with a given status.
 

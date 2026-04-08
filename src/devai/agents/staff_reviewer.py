@@ -60,7 +60,7 @@ Branch: {branch}
 ```
 
 ## Requirements
-{state.get('requirements', '')[:2000]}
+{state.get("requirements", "")[:2000]}
 
 {inbox_context}
 

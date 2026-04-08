@@ -33,8 +33,10 @@ logger = logging.getLogger(__name__)
 
 # Security Expert gets read-only GitHub tools + all security tools
 SECURITY_AGENT_TOOLS = [
-    t for t in GITHUB_TOOLS
-    if t["name"] in {
+    t
+    for t in GITHUB_TOOLS
+    if t["name"]
+    in {
         "github_get_file_content",
         "github_list_files",
         "github_get_repo_tree",

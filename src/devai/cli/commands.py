@@ -64,13 +64,13 @@ async def _trigger_pipeline(repo: str, requirements: str | None, from_issue: int
         # Run the LangGraph pipeline
         orchestrator = ALMOrchestrator(github, state, settings)
 
-        console.print(Panel(
-            f"[bold]DevAI ALM Pipeline[/bold]\n"
-            f"Repo: {repo}\n"
-            f"Mode: LangGraph + LangSmith",
-            title="Starting Pipeline",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold]DevAI ALM Pipeline[/bold]\nRepo: {repo}\nMode: LangGraph + LangSmith",
+                title="Starting Pipeline",
+                border_style="green",
+            )
+        )
 
         final_state = await orchestrator.run(
             repo_full_name=repo,
@@ -91,14 +91,16 @@ async def _trigger_pipeline(repo: str, requirements: str | None, from_issue: int
 
 def _display_results(state: dict) -> None:
     """Display pipeline results in a rich table."""
-    console.print(Panel(
-        f"[bold]Run ID:[/bold] {state.get('run_id', 'unknown')}\n"
-        f"[bold]Stage:[/bold] {state.get('stage', 'unknown')}\n"
-        f"[bold]Build:[/bold] {state.get('build_status', 'n/a')}\n"
-        f"[bold]Deploy:[/bold] {state.get('deploy_status', 'n/a')}",
-        title="Pipeline Complete",
-        border_style="green" if state.get("stage") == "deployed" else "red",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Run ID:[/bold] {state.get('run_id', 'unknown')}\n"
+            f"[bold]Stage:[/bold] {state.get('stage', 'unknown')}\n"
+            f"[bold]Build:[/bold] {state.get('build_status', 'n/a')}\n"
+            f"[bold]Deploy:[/bold] {state.get('deploy_status', 'n/a')}",
+            title="Pipeline Complete",
+            border_style="green" if state.get("stage") == "deployed" else "red",
+        )
+    )
 
     # Agent timings
     timings = state.get("agent_timings", {})
@@ -241,14 +243,13 @@ async def _serve(host: str, port: int) -> None:
 
     webhook_app = create_app(event_bus, state, settings)
 
-    console.print(Panel(
-        f"[bold]DevAI Server[/bold]\n"
-        f"Host: {host}:{port}\n"
-        f"Pipeline: LangGraph\n"
-        f"Tracing: LangSmith",
-        title="Server Starting",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            f"[bold]DevAI Server[/bold]\nHost: {host}:{port}\nPipeline: LangGraph\nTracing: LangSmith",
+            title="Server Starting",
+            border_style="green",
+        )
+    )
 
     config = uvicorn.Config(webhook_app, host=host, port=port, log_level=settings.log_level)
     server = uvicorn.Server(config)

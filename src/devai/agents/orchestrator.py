@@ -146,26 +146,20 @@ class OrchestratorAgent(BaseAgent):
         # Include review feedback if any
         review_feedback = state.get("review_feedback", [])
         if review_feedback:
-            context_parts.append(
-                "\n## Review Feedback\n" + "\n".join(f"- {fb}" for fb in review_feedback[-3:])
-            )
+            context_parts.append("\n## Review Feedback\n" + "\n".join(f"- {fb}" for fb in review_feedback[-3:]))
 
         # Include security findings if any
         security_findings = state.get("security_findings", [])
         if security_findings:
             findings_text = "\n".join(
-                f"- [{f.get('severity', 'medium')}] {f.get('title', '')}"
-                for f in security_findings[:5]
+                f"- [{f.get('severity', 'medium')}] {f.get('title', '')}" for f in security_findings[:5]
             )
             context_parts.append(f"\n## Security Findings\n{findings_text}")
 
         # Include test failures if any
         test_failures = state.get("test_failures", [])
         if test_failures:
-            failures_text = "\n".join(
-                f"- {f.get('test', '')}: {f.get('error', '')[:100]}"
-                for f in test_failures[:5]
-            )
+            failures_text = "\n".join(f"- {f.get('test', '')}: {f.get('error', '')[:100]}" for f in test_failures[:5])
             context_parts.append(f"\n## Test Failures\n{failures_text}")
 
         if inbox_context:
@@ -250,8 +244,7 @@ class OrchestratorAgent(BaseAgent):
         timing_lines = ""
         if agent_timings:
             timing_lines = "\n".join(
-                f"| {agent} | {dur:.1f}s | :white_check_mark: |"
-                for agent, dur in agent_timings.items()
+                f"| {agent} | {dur:.1f}s | :white_check_mark: |" for agent, dur in agent_timings.items()
             )
             timing_lines = f"\n| Agent | Duration | Status |\n|---|---|---|\n{timing_lines}\n"
 

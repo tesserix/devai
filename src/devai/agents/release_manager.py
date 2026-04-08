@@ -106,7 +106,12 @@ class ReleaseManagerAgent(BaseAgent):
         # Step 5: Post deployment comment on PR and tracking issue
         is_healthy = deploy_status == "healthy"
         await self._post_deployment_comment(
-            repo, pr_number, deploy_status, merge_sha, release_summary, deploy_result,
+            repo,
+            pr_number,
+            deploy_status,
+            merge_sha,
+            release_summary,
+            deploy_result,
         )
         await self._update_tracking_issue(state, deploy_status, merge_sha, deploy_result)
 
@@ -137,7 +142,9 @@ class ReleaseManagerAgent(BaseAgent):
             return {"merged": False, "message": str(e)}
 
     async def _wait_for_argocd_deployment(
-        self, app_name: str, a2a: A2ABus,
+        self,
+        app_name: str,
+        a2a: A2ABus,
     ) -> dict[str, Any]:
         """Wait for ArgoCD Application to sync and become healthy."""
         try:
@@ -150,7 +157,9 @@ class ReleaseManagerAgent(BaseAgent):
                 status = await argocd.get_app_status(app_name)
                 logger.info(
                     "ArgoCD app %s: sync=%s health=%s",
-                    app_name, status["sync_status"], status["health_status"],
+                    app_name,
+                    status["sync_status"],
+                    status["health_status"],
                 )
             except Exception:
                 # App might not exist yet (first deployment)
@@ -182,7 +191,8 @@ class ReleaseManagerAgent(BaseAgent):
             else:
                 logger.error(
                     "ArgoCD deployment issue for %s: %s",
-                    app_name, result.get("result"),
+                    app_name,
+                    result.get("result"),
                 )
 
             return result
@@ -220,20 +230,17 @@ class ReleaseManagerAgent(BaseAgent):
             groq = GroqProvider(self.config)
 
             stories = state.get("stories", [])
-            story_list = "\n".join(
-                f"- {s.get('title', 'untitled')}"
-                for s in stories[:10]
-            )
+            story_list = "\n".join(f"- {s.get('title', 'untitled')}" for s in stories[:10])
 
             response = await groq.generate(
                 prompt=f"""Generate a brief release summary for these changes:
 
-Requirements: {state.get('requirements', '')[:500]}
+Requirements: {state.get("requirements", "")[:500]}
 
 User Stories:
 {story_list}
 
-Test Results: {state.get('test_passed', 0)} passed, {state.get('test_failed', 0)} failed
+Test Results: {state.get("test_passed", 0)} passed, {state.get("test_failed", 0)} failed
 
 Write a concise 2-3 sentence release note suitable for a changelog.""",
                 system="You are a technical writer. Write concise, professional release notes.",
@@ -280,7 +287,11 @@ Write a concise 2-3 sentence release note suitable for a changelog.""",
             logger.error("Failed to post deployment comment: %s", e)
 
     async def _update_tracking_issue(
-        self, state: ALMState, status: str, sha: str, argocd_result: dict[str, Any],
+        self,
+        state: ALMState,
+        status: str,
+        sha: str,
+        argocd_result: dict[str, Any],
     ) -> None:
         """Post deployment result on the Supervisor's tracking issue."""
         repo = state.get("repo_full_name", "")

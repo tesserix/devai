@@ -132,8 +132,11 @@ def create_scm_from_connection(
         from devai.scm.github_client import GitHubSCMClient
 
         return GitHubSCMClient(
-            base_url=url, auth_method=scm_auth, token=token,
-            app_id=app_id, app_private_key=app_private_key,
+            base_url=url,
+            auth_method=scm_auth,
+            token=token,
+            app_id=app_id,
+            app_private_key=app_private_key,
             installation_id=installation_id,
         )
 

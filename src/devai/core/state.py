@@ -80,11 +80,13 @@ class StateManager:
         error: str | None = None,
     ) -> None:
         """Update an agent's status within a pipeline run."""
-        payload = json.dumps({
-            "status": status,
-            "updated_at": time.time(),
-            "error": error,
-        })
+        payload = json.dumps(
+            {
+                "status": status,
+                "updated_at": time.time(),
+                "error": error,
+            }
+        )
         await self.redis.hset(f"devai:run:{run_id}:agents", agent_name, payload)
 
     async def get_agent_statuses(self, run_id: str) -> dict[str, Any]:

@@ -24,7 +24,10 @@ SCM_TOOLS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "repo": {"type": "string", "description": "Repository identifier (e.g., org/repo for GitHub, group/project for GitLab, org/project/repo for ADO)"},
+                "repo": {
+                    "type": "string",
+                    "description": "Repository identifier (e.g., org/repo for GitHub, group/project for GitLab, org/project/repo for ADO)",
+                },
                 "issue_id": {"type": "integer", "description": "Issue number or work item ID"},
             },
             "required": ["repo", "issue_id"],
@@ -261,13 +264,12 @@ class SCMToolExecutor:
                 from devai.services.guardrails import OutputFilter
 
                 warnings = OutputFilter().validate_commit_content(
-                    tool_input.get("path", ""), tool_input["content"],
+                    tool_input.get("path", ""),
+                    tool_input["content"],
                 )
                 blocking = [w for w in warnings if w.startswith("BLOCK:")]
                 if blocking:
-                    raise PermissionError(
-                        f"Commit blocked by guardrails: {'; '.join(blocking)}"
-                    )
+                    raise PermissionError(f"Commit blocked by guardrails: {'; '.join(blocking)}")
 
         except ImportError:
             pass  # Guardrails not available
@@ -276,6 +278,7 @@ class SCMToolExecutor:
         """Filter tool output through secret masking."""
         try:
             from devai.services.guardrails import OutputFilter
+
             return OutputFilter().filter_for_scm(text)
         except ImportError:
             return text
@@ -285,7 +288,10 @@ class SCMToolExecutor:
 
     async def _handle_scm_create_issue(self, inp: dict[str, Any]) -> dict[str, Any]:
         return await self.scm.create_issue(
-            inp["repo"], inp["title"], inp["body"], inp.get("labels"),
+            inp["repo"],
+            inp["title"],
+            inp["body"],
+            inp.get("labels"),
         )
 
     async def _handle_scm_add_comment(self, inp: dict[str, Any]) -> dict[str, Any]:
@@ -307,12 +313,20 @@ class SCMToolExecutor:
 
     async def _handle_scm_commit_file(self, inp: dict[str, Any]) -> dict[str, Any]:
         return await self.scm.create_or_update_file(
-            inp["repo"], inp["path"], inp["content"], inp["message"], inp["branch"],
+            inp["repo"],
+            inp["path"],
+            inp["content"],
+            inp["message"],
+            inp["branch"],
         )
 
     async def _handle_scm_create_pull_request(self, inp: dict[str, Any]) -> dict[str, Any]:
         return await self.scm.create_pull_request(
-            inp["repo"], inp["title"], inp["body"], inp["head"], inp.get("base"),
+            inp["repo"],
+            inp["title"],
+            inp["body"],
+            inp["head"],
+            inp.get("base"),
         )
 
     async def _handle_scm_get_pr_diff(self, inp: dict[str, Any]) -> str:
@@ -320,17 +334,24 @@ class SCMToolExecutor:
 
     async def _handle_scm_create_pr_review(self, inp: dict[str, Any]) -> dict[str, Any]:
         return await self.scm.create_pr_review(
-            inp["repo"], inp["pr_id"], inp["body"], inp["event"],
+            inp["repo"],
+            inp["pr_id"],
+            inp["body"],
+            inp["event"],
         )
 
     async def _handle_scm_merge_pull_request(self, inp: dict[str, Any]) -> dict[str, Any]:
         return await self.scm.merge_pull_request(
-            inp["repo"], inp["pr_id"], inp.get("method", "squash"),
+            inp["repo"],
+            inp["pr_id"],
+            inp.get("method", "squash"),
         )
 
     async def _handle_scm_get_pipeline_runs(self, inp: dict[str, Any]) -> list[dict[str, Any]]:
         return await self.scm.get_pipeline_runs(
-            inp["repo"], inp.get("branch"), inp.get("limit", 5),
+            inp["repo"],
+            inp.get("branch"),
+            inp.get("limit", 5),
         )
 
 

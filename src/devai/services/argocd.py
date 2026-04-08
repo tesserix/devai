@@ -56,12 +56,17 @@ class ArgocdClient:
             from langsmith import traceable
 
             for method_name in (
-                "get_app_status", "list_apps", "trigger_sync",
-                "wait_for_sync", "wait_for_health", "rollback",
+                "get_app_status",
+                "list_apps",
+                "trigger_sync",
+                "wait_for_sync",
+                "wait_for_health",
+                "rollback",
             ):
                 original = getattr(self, method_name)
                 traced = traceable(
-                    name=f"argocd.{method_name}", run_type="tool",
+                    name=f"argocd.{method_name}",
+                    run_type="tool",
                 )(original)
                 setattr(self, method_name, traced)
         except ImportError:
@@ -93,8 +98,11 @@ class ArgocdClient:
     async def get_app(self, app_name: str) -> dict[str, Any]:
         """Get the full ArgoCD Application resource."""
         return await self._kubectl_json(
-            "get", "application", app_name,
-            "-n", self.namespace,
+            "get",
+            "application",
+            app_name,
+            "-n",
+            self.namespace,
         )
 
     async def get_app_status(self, app_name: str) -> dict[str, Any]:
@@ -120,8 +128,10 @@ class ArgocdClient:
     async def list_apps(self, project: str | None = None) -> list[dict[str, Any]]:
         """List all ArgoCD Applications, optionally filtered by project."""
         result = await self._kubectl_json(
-            "get", "applications",
-            "-n", self.namespace,
+            "get",
+            "applications",
+            "-n",
+            self.namespace,
         )
         apps = result.get("items", [])
 
@@ -129,13 +139,15 @@ class ArgocdClient:
         for app in apps:
             name = app.get("metadata", {}).get("name", "")
             status = app.get("status", {})
-            summaries.append({
-                "name": name,
-                "project": app.get("spec", {}).get("project", "default"),
-                "sync_status": status.get("sync", {}).get("status", "Unknown"),
-                "health_status": status.get("health", {}).get("status", "Unknown"),
-                "namespace": app.get("spec", {}).get("destination", {}).get("namespace", ""),
-            })
+            summaries.append(
+                {
+                    "name": name,
+                    "project": app.get("spec", {}).get("project", "default"),
+                    "sync_status": status.get("sync", {}).get("status", "Unknown"),
+                    "health_status": status.get("health", {}).get("status", "Unknown"),
+                    "namespace": app.get("spec", {}).get("destination", {}).get("namespace", ""),
+                }
+            )
 
         if project:
             summaries = [s for s in summaries if s["project"] == project]
@@ -147,22 +159,29 @@ class ArgocdClient:
     async def trigger_sync(self, app_name: str) -> dict[str, Any]:
         """Trigger an ArgoCD Application sync via kubectl patch."""
         # Patch the Application to trigger a sync by setting the operation field
-        patch = json.dumps({
-            "operation": {
-                "initiatedBy": {"username": "devai-agent"},
-                "sync": {
-                    "syncStrategy": {
-                        "apply": {"force": False},
+        patch = json.dumps(
+            {
+                "operation": {
+                    "initiatedBy": {"username": "devai-agent"},
+                    "sync": {
+                        "syncStrategy": {
+                            "apply": {"force": False},
+                        },
                     },
                 },
-            },
-        })
+            }
+        )
 
         await self._kubectl(
-            "patch", "application", app_name,
-            "-n", self.namespace,
-            "--type", "merge",
-            "-p", patch,
+            "patch",
+            "application",
+            app_name,
+            "-n",
+            self.namespace,
+            "--type",
+            "merge",
+            "-p",
+            patch,
         )
 
         logger.info("Triggered sync for ArgoCD app: %s", app_name)
@@ -187,14 +206,19 @@ class ArgocdClient:
 
                 logger.debug(
                     "ArgoCD %s: sync=%s health=%s phase=%s (elapsed=%ds)",
-                    app_name, sync, health, phase, elapsed,
+                    app_name,
+                    sync,
+                    health,
+                    phase,
+                    elapsed,
                 )
 
                 # Sync complete + healthy = done
                 if sync == "Synced" and health == "Healthy":
                     logger.info(
                         "ArgoCD app %s is synced and healthy (took %ds)",
-                        app_name, elapsed,
+                        app_name,
+                        elapsed,
                     )
                     return {**status, "result": "healthy", "elapsed": elapsed}
 
@@ -284,19 +308,26 @@ class ArgocdClient:
         target_revision = target["revision"]
 
         # Patch the Application source to use the target revision
-        patch = json.dumps({
-            "spec": {
-                "source": {
-                    "targetRevision": target_revision,
+        patch = json.dumps(
+            {
+                "spec": {
+                    "source": {
+                        "targetRevision": target_revision,
+                    },
                 },
-            },
-        })
+            }
+        )
 
         await self._kubectl(
-            "patch", "application", app_name,
-            "-n", self.namespace,
-            "--type", "merge",
-            "-p", patch,
+            "patch",
+            "application",
+            app_name,
+            "-n",
+            self.namespace,
+            "--type",
+            "merge",
+            "-p",
+            patch,
         )
 
         # Trigger sync to the target revision

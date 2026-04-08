@@ -61,9 +61,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # TTLs
-EPISODIC_TTL = 86400 * 90   # 90 days
-SEMANTIC_TTL = 0             # Never expires
-PROCEDURAL_TTL = 0           # Never expires
+EPISODIC_TTL = 86400 * 90  # 90 days
+SEMANTIC_TTL = 0  # Never expires
+PROCEDURAL_TTL = 0  # Never expires
 
 # Max memories per query
 MAX_RECALL = 10
@@ -190,7 +190,11 @@ class AgentMemory:
 
         logger.debug(
             "Memory stored: %s [%s/%s/%s] %s",
-            entry.memory_id[:10], agent, repo, memory_type, content[:50],
+            entry.memory_id[:10],
+            agent,
+            repo,
+            memory_type,
+            content[:50],
         )
 
         return entry
@@ -316,9 +320,7 @@ class AgentMemory:
         for mem in memories:
             age_days = (time.time() - mem.created_at) / 86400
             age_str = f"{age_days:.0f}d ago" if age_days > 1 else "today"
-            lines.append(
-                f"- [{mem.memory_type}] ({age_str}) {mem.content}"
-            )
+            lines.append(f"- [{mem.memory_type}] ({age_str}) {mem.content}")
 
         return "\n".join(lines)
 

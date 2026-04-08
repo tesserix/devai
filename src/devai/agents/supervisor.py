@@ -166,8 +166,7 @@ class SupervisorAgent(BaseAgent):
 
         if review_feedback:
             context_parts.append(
-                "## Review Feedback from Previous Iteration\n"
-                + "\n".join(f"- {fb}" for fb in review_feedback)
+                "## Review Feedback from Previous Iteration\n" + "\n".join(f"- {fb}" for fb in review_feedback)
             )
 
         if inbox_context:
@@ -182,10 +181,7 @@ class SupervisorAgent(BaseAgent):
         user_message = "\n\n".join(context_parts)
 
         if escalations:
-            escalation_text = "\n".join(
-                f"- **{e['from_agent']}**: {e['subject']} — {e['body']}"
-                for e in escalations
-            )
+            escalation_text = "\n".join(f"- **{e['from_agent']}**: {e['subject']} — {e['body']}" for e in escalations)
             user_message += (
                 f"\n\n## Agent Escalations Requiring Your Decision\n{escalation_text}"
                 "\n\nPlease address these escalations in your revised plan."
@@ -259,7 +255,10 @@ class SupervisorAgent(BaseAgent):
         }
 
     async def _create_tracking_issue(
-        self, repo: str, plan: dict[str, Any], raw_plan: str,
+        self,
+        repo: str,
+        plan: dict[str, Any],
+        raw_plan: str,
     ) -> dict[str, Any]:
         """Create a tracking issue on the SCM provider with the execution plan."""
         project_summary = plan.get("project_summary", "DevAI Pipeline Execution")
@@ -321,7 +320,8 @@ class SupervisorAgent(BaseAgent):
             )
             logger.info(
                 "Created tracking issue #%s on %s",
-                issue.get("number", "?"), repo,
+                issue.get("number", "?"),
+                repo,
             )
             return issue
         except Exception as e:
@@ -329,7 +329,10 @@ class SupervisorAgent(BaseAgent):
             return {"number": None, "html_url": ""}
 
     async def _create_project_board(
-        self, repo: str, plan: dict[str, Any], tracking_issue: dict[str, Any],
+        self,
+        repo: str,
+        plan: dict[str, Any],
+        tracking_issue: dict[str, Any],
     ) -> dict[str, Any]:
         """Create a GitHub Project v2 board for this pipeline run."""
         org = repo.split("/")[0] if "/" in repo else self.config.github_org
@@ -337,11 +340,7 @@ class SupervisorAgent(BaseAgent):
         phases = plan.get("delegation_plan", {}).get("phases", [])
 
         # Build project description
-        description = (
-            f"## {project_summary}\n\n"
-            f"Automated ALM pipeline managed by DevAI.\n\n"
-            f"**Phases:** {len(phases)}\n"
-        )
+        description = f"## {project_summary}\n\nAutomated ALM pipeline managed by DevAI.\n\n**Phases:** {len(phases)}\n"
         for phase in phases:
             description += f"- **{phase.get('name', '')}**: {phase.get('objective', '')}\n"
 
@@ -356,13 +355,16 @@ class SupervisorAgent(BaseAgent):
             )
             logger.info(
                 "Created project board '%s' on %s: %s",
-                project.get("title", "?"), org, project.get("url", ""),
+                project.get("title", "?"),
+                org,
+                project.get("url", ""),
             )
 
             # Post project link on the tracking issue
             if tracking_issue.get("number") and project.get("url"):
                 await self.scm.add_comment(
-                    repo, tracking_issue["number"],
+                    repo,
+                    tracking_issue["number"],
                     f"**Project Board Created**\n\n"
                     f"All epics, stories, and tasks will be tracked on the project board:\n"
                     f"{project['url']}",
@@ -374,7 +376,10 @@ class SupervisorAgent(BaseAgent):
             return {"id": None, "url": ""}
 
     async def _add_issue_to_project(
-        self, repo: str, project_id: str, issue_number: int,
+        self,
+        repo: str,
+        project_id: str,
+        issue_number: int,
     ) -> None:
         """Add an issue to the project board."""
         try:
@@ -401,11 +406,31 @@ class SupervisorAgent(BaseAgent):
             "architecture": {"overview": text},
             "delegation_plan": {
                 "phases": [
-                    {"name": "Analysis", "agents": ["document_analyzer", "tech_detector", "requirements_analyst"], "objective": "Understand the codebase and requirements"},
-                    {"name": "Planning", "agents": ["product_director", "engineering_manager"], "objective": "Create epics, stories, and technical plan"},
-                    {"name": "Implementation", "agents": ["senior_developer", "db_engineer"], "objective": "Write code and handle database changes"},
-                    {"name": "Quality", "agents": ["staff_reviewer", "security_expert", "qa_tester"], "objective": "Review, scan, and test"},
-                    {"name": "Deployment", "agents": ["ci_monitor", "infra_provisioner", "release_manager"], "objective": "Build, provision, and deploy"},
+                    {
+                        "name": "Analysis",
+                        "agents": ["document_analyzer", "tech_detector", "requirements_analyst"],
+                        "objective": "Understand the codebase and requirements",
+                    },
+                    {
+                        "name": "Planning",
+                        "agents": ["product_director", "engineering_manager"],
+                        "objective": "Create epics, stories, and technical plan",
+                    },
+                    {
+                        "name": "Implementation",
+                        "agents": ["senior_developer", "db_engineer"],
+                        "objective": "Write code and handle database changes",
+                    },
+                    {
+                        "name": "Quality",
+                        "agents": ["staff_reviewer", "security_expert", "qa_tester"],
+                        "objective": "Review, scan, and test",
+                    },
+                    {
+                        "name": "Deployment",
+                        "agents": ["ci_monitor", "infra_provisioner", "release_manager"],
+                        "objective": "Build, provision, and deploy",
+                    },
                 ]
             },
             "quality_requirements": {},

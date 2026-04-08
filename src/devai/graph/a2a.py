@@ -143,8 +143,5 @@ class A2ABus:
 
         lines = ["## Messages from Other Agents\n"]
         for msg in self._inbox:
-            lines.append(
-                f"**From {msg['from_agent']}** ({msg['message_type']}): "
-                f"{msg['subject']}\n{msg['body']}\n"
-            )
+            lines.append(f"**From {msg['from_agent']}** ({msg['message_type']}): {msg['subject']}\n{msg['body']}\n")
         return "\n".join(lines)

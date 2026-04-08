@@ -103,7 +103,7 @@ class IncidentResponderAgent:
 
             # Check for duplicates via memory
             try:
-                memory = AgentMemory(self.db.pool if hasattr(self.db, 'pool') else self.db)
+                memory = AgentMemory(self.db.pool if hasattr(self.db, "pool") else self.db)
                 past = await memory.recall(
                     agent=self.name,
                     repo=repo,
@@ -222,22 +222,22 @@ class IncidentResponderAgent:
         category = finding.get("category", "unknown")
         detected_by = finding.get("detected_by", "sre_monitor")
 
-        body = f"""## [{severity}] {finding.get('title', '')}
+        body = f"""## [{severity}] {finding.get("title", "")}
 
 **Category:** {category}
 **Detected by:** {detected_by}
-**Affected:** {app.get('namespace', 'unknown')}/{app.get('name', 'unknown') if app else 'unknown'}
+**Affected:** {app.get("namespace", "unknown")}/{app.get("name", "unknown") if app else "unknown"}
 
 ### Evidence
 ```
-{json.dumps(finding.get('evidence', finding), indent=2)[:2000]}
+{json.dumps(finding.get("evidence", finding), indent=2)[:2000]}
 ```
 
 ### Description
-{finding.get('description', 'No description available.')}
+{finding.get("description", "No description available.")}
 
 ### Recommended Fix
-{finding.get('recommendation', 'Investigate the evidence above and apply appropriate fix.')}
+{finding.get("recommendation", "Investigate the evidence above and apply appropriate fix.")}
 
 ---
 *This issue was automatically created by the DevAI SRE monitoring system.*
@@ -247,4 +247,5 @@ class IncidentResponderAgent:
 
 def import_time():
     import time
+
     return time.time()

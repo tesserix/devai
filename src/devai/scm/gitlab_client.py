@@ -69,14 +69,18 @@ class GitLabSCMClient(SCMClient):
         return {"number": data["iid"], "title": data["title"], "body": data.get("description", ""), **data}
 
     async def add_comment(self, repo: str, issue_id: int | str, body: str) -> dict[str, Any]:
-        resp = await self._request("POST", f"/projects/{self._project_id(repo)}/issues/{issue_id}/notes", json={"body": body})
+        resp = await self._request(
+            "POST", f"/projects/{self._project_id(repo)}/issues/{issue_id}/notes", json={"body": body}
+        )
         return resp.json()
 
     async def add_labels(self, repo: str, issue_id: int | str, labels: list[str]) -> None:
         issue = await self.get_issue(repo, issue_id)
         existing = issue.get("labels", [])
         all_labels = list(set(existing + labels))
-        await self._request("PUT", f"/projects/{self._project_id(repo)}/issues/{issue_id}", json={"labels": ",".join(all_labels)})
+        await self._request(
+            "PUT", f"/projects/{self._project_id(repo)}/issues/{issue_id}", json={"labels": ",".join(all_labels)}
+        )
 
     # --- Branches ---
 
@@ -87,7 +91,11 @@ class GitLabSCMClient(SCMClient):
     async def create_branch(self, repo: str, branch_name: str, from_branch: str | None = None) -> str:
         if from_branch is None:
             from_branch = await self.get_default_branch(repo)
-        resp = await self._request("POST", f"/projects/{self._project_id(repo)}/repository/branches", json={"branch": branch_name, "ref": from_branch})
+        resp = await self._request(
+            "POST",
+            f"/projects/{self._project_id(repo)}/repository/branches",
+            json={"branch": branch_name, "ref": from_branch},
+        )
         return resp.json()["commit"]["id"]
 
     # --- Files ---
@@ -95,7 +103,9 @@ class GitLabSCMClient(SCMClient):
     async def get_file_content(self, repo: str, path: str, ref: str | None = None) -> str:
         params: dict[str, str] = {"ref": ref or await self.get_default_branch(repo)}
         encoded_path = quote_plus(path)
-        resp = await self._request("GET", f"/projects/{self._project_id(repo)}/repository/files/{encoded_path}", params=params)
+        resp = await self._request(
+            "GET", f"/projects/{self._project_id(repo)}/repository/files/{encoded_path}", params=params
+        )
         return base64.b64decode(resp.json()["content"]).decode("utf-8")
 
     async def list_files(self, repo: str, path: str = "", ref: str | None = None) -> list[dict[str, Any]]:
@@ -113,7 +123,13 @@ class GitLabSCMClient(SCMClient):
         return [{"path": f["path"], "type": f["type"]} for f in resp.json()]
 
     async def create_or_update_file(
-        self, repo: str, path: str, content: str, message: str, branch: str, sha: str | None = None,
+        self,
+        repo: str,
+        path: str,
+        content: str,
+        message: str,
+        branch: str,
+        sha: str | None = None,
     ) -> dict[str, Any]:
         encoded_path = quote_plus(path)
         encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
@@ -122,22 +138,38 @@ class GitLabSCMClient(SCMClient):
         # Check if file exists → update vs create
         try:
             await self.get_file_content(repo, path, ref=branch)
-            resp = await self._request("PUT", f"/projects/{self._project_id(repo)}/repository/files/{encoded_path}", json=payload)
+            resp = await self._request(
+                "PUT", f"/projects/{self._project_id(repo)}/repository/files/{encoded_path}", json=payload
+            )
         except httpx.HTTPStatusError:
-            resp = await self._request("POST", f"/projects/{self._project_id(repo)}/repository/files/{encoded_path}", json=payload)
+            resp = await self._request(
+                "POST", f"/projects/{self._project_id(repo)}/repository/files/{encoded_path}", json=payload
+            )
 
         return resp.json()
 
     # --- Merge Requests ---
 
     async def create_pull_request(
-        self, repo: str, title: str, body: str, head: str, base: str | None = None,
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str | None = None,
     ) -> dict[str, Any]:
         if base is None:
             base = await self.get_default_branch(repo)
-        resp = await self._request("POST", f"/projects/{self._project_id(repo)}/merge_requests", json={
-            "title": title, "description": body, "source_branch": head, "target_branch": base,
-        })
+        resp = await self._request(
+            "POST",
+            f"/projects/{self._project_id(repo)}/merge_requests",
+            json={
+                "title": title,
+                "description": body,
+                "source_branch": head,
+                "target_branch": base,
+            },
+        )
         data = resp.json()
         return {"number": data["iid"], "html_url": data["web_url"], **data}
 
@@ -151,18 +183,26 @@ class GitLabSCMClient(SCMClient):
         return "\n".join(f"--- a/{c['old_path']}\n+++ b/{c['new_path']}\n{c.get('diff', '')}" for c in changes)
 
     async def create_pr_review(
-        self, repo: str, pr_id: int, body: str, event: str = "COMMENT",
+        self,
+        repo: str,
+        pr_id: int,
+        body: str,
+        event: str = "COMMENT",
         comments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # GitLab uses notes for MR reviews
-        resp = await self._request("POST", f"/projects/{self._project_id(repo)}/merge_requests/{pr_id}/notes", json={"body": body})
+        resp = await self._request(
+            "POST", f"/projects/{self._project_id(repo)}/merge_requests/{pr_id}/notes", json={"body": body}
+        )
         return resp.json()
 
     async def merge_pull_request(self, repo: str, pr_id: int, method: str = "squash") -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if method == "squash":
             payload["squash"] = True
-        resp = await self._request("PUT", f"/projects/{self._project_id(repo)}/merge_requests/{pr_id}/merge", json=payload)
+        resp = await self._request(
+            "PUT", f"/projects/{self._project_id(repo)}/merge_requests/{pr_id}/merge", json=payload
+        )
         return resp.json()
 
     # --- CI/CD ---

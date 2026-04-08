@@ -138,6 +138,7 @@ class NemoClawProvider:
                 for tc in choice.message.tool_calls:
                     func_name = tc.function.name
                     import json
+
                     func_args = json.loads(tc.function.arguments)
 
                     logger.debug("Executing tool: %s(%s)", func_name, func_args)
@@ -151,11 +152,13 @@ class NemoClawProvider:
                         logger.error("Tool %s failed: %s", func_name, e)
                         result = f"Error: {e}"
 
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result,
+                        }
+                    )
 
             raise RuntimeError(f"NemoClaw agent exceeded {iterations} iterations")
 
@@ -164,11 +167,13 @@ class NemoClawProvider:
     @retry_async(max_attempts=2, base_delay=3.0, max_delay=30.0)
     async def _call_api_generate(self, **kwargs: Any) -> Any:
         """Single generation call with retry and circuit breaker."""
+
         async def _call() -> Any:
             return await asyncio.wait_for(
                 self.client.chat.completions.create(**kwargs),
                 timeout=API_CALL_TIMEOUT,
             )
+
         return await _nemoclaw_breaker.call(_call)
 
     @retry_async(max_attempts=2, base_delay=3.0, max_delay=30.0)
@@ -178,6 +183,7 @@ class NemoClawProvider:
         tools: list[dict[str, Any]],
     ) -> Any:
         """Chat completion with tools, retry, and circuit breaker."""
+
         async def _call() -> Any:
             return await asyncio.wait_for(
                 self.client.chat.completions.create(
@@ -189,6 +195,7 @@ class NemoClawProvider:
                 ),
                 timeout=API_CALL_TIMEOUT,
             )
+
         return await _nemoclaw_breaker.call(_call)
 
     def _convert_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -197,22 +204,26 @@ class NemoClawProvider:
         for tool in tools:
             if "input_schema" in tool:
                 # Anthropic format → OpenAI format
-                openai_tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool["name"],
-                        "description": tool.get("description", ""),
-                        "parameters": tool["input_schema"],
-                    },
-                })
+                openai_tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool["name"],
+                            "description": tool.get("description", ""),
+                            "parameters": tool["input_schema"],
+                        },
+                    }
+                )
             elif "function" in tool:
                 # Already OpenAI format
                 openai_tools.append(tool)
             else:
-                openai_tools.append({
-                    "type": "function",
-                    "function": tool,
-                })
+                openai_tools.append(
+                    {
+                        "type": "function",
+                        "function": tool,
+                    }
+                )
         return openai_tools
 
     async def _fallback_generate(

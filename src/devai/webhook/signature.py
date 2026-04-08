@@ -29,5 +29,5 @@ def verify_github_signature(payload: bytes, signature: str | None, secret: str) 
         hashlib.sha256,
     ).hexdigest()
 
-    received = signature[len("sha256="):]
+    received = signature[len("sha256=") :]
     return hmac.compare_digest(expected, received)

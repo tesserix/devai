@@ -59,7 +59,9 @@ def retry_async(
                     if attempt == max_attempts:
                         logger.error(
                             "Retry exhausted for %s after %d attempts: %s",
-                            func.__name__, max_attempts, e,
+                            func.__name__,
+                            max_attempts,
+                            e,
                         )
                         raise
 
@@ -70,7 +72,11 @@ def retry_async(
 
                     logger.warning(
                         "Retry %d/%d for %s after %.1fs: %s",
-                        attempt, max_attempts, func.__name__, delay, e,
+                        attempt,
+                        max_attempts,
+                        func.__name__,
+                        delay,
+                        e,
                     )
                     await asyncio.sleep(delay)
 
@@ -174,10 +180,7 @@ class StateCheckpoint:
         import json
 
         # Don't checkpoint non-serializable items
-        clean_state = {
-            k: v for k, v in state.items()
-            if k != "on_progress" and not callable(v)
-        }
+        clean_state = {k: v for k, v in state.items() if k != "on_progress" and not callable(v)}
 
         key = f"devai:checkpoint:{run_id}:{stage}"
         await self.redis.set(key, json.dumps(clean_state, default=str), ex=86400 * 7)

@@ -86,9 +86,13 @@ class DocumentAnalyzerAgent(BaseAgent):
                 extracted_texts.append(f"[OpenAPI: {source['value']}]\n{result}")
 
             elif source["type"] == "wiki":
-                result = await doc_tools.execute("doc_read_github_wiki", {
-                    "repo": repo, "page": source["value"],
-                })
+                result = await doc_tools.execute(
+                    "doc_read_github_wiki",
+                    {
+                        "repo": repo,
+                        "page": source["value"],
+                    },
+                )
                 extracted_texts.append(f"[Wiki: {source['value']}]\n{result}")
 
         # Always include the raw requirements text
@@ -145,8 +149,7 @@ Be specific and actionable. Don't add requirements not in the source documents."
             a2a.notify(
                 "engineering_manager",
                 "OpenAPI Spec Found",
-                f"Found {len(api_sources)} API spec(s) in requirements. "
-                "Use these for implementation planning.",
+                f"Found {len(api_sources)} API spec(s) in requirements. Use these for implementation planning.",
             )
 
         return {
@@ -162,7 +165,7 @@ Be specific and actionable. Don't add requirements not in the source documents."
         sources: list[dict[str, str]] = []
 
         # PDF files
-        for match in re.finditer(r'(/[^\s]+\.pdf|[A-Za-z]:\\[^\s]+\.pdf)', text, re.IGNORECASE):
+        for match in re.finditer(r"(/[^\s]+\.pdf|[A-Za-z]:\\[^\s]+\.pdf)", text, re.IGNORECASE):
             sources.append({"type": "pdf", "value": match.group()})
 
         # URLs
@@ -171,17 +174,17 @@ Be specific and actionable. Don't add requirements not in the source documents."
             sources.append({"type": "url", "value": url})
 
         # Markdown files
-        for match in re.finditer(r'(/[^\s]+\.md|[A-Za-z]:\\[^\s]+\.md)', text, re.IGNORECASE):
+        for match in re.finditer(r"(/[^\s]+\.md|[A-Za-z]:\\[^\s]+\.md)", text, re.IGNORECASE):
             sources.append({"type": "markdown", "value": match.group()})
 
         # OpenAPI specs
-        for match in re.finditer(r'(/[^\s]+\.(yaml|yml|json))', text, re.IGNORECASE):
+        for match in re.finditer(r"(/[^\s]+\.(yaml|yml|json))", text, re.IGNORECASE):
             path = match.group()
             if any(kw in path.lower() for kw in ["openapi", "swagger", "api-spec"]):
                 sources.append({"type": "openapi", "value": path})
 
         # Wiki page references
-        for match in re.finditer(r'wiki:(\S+)', text, re.IGNORECASE):
+        for match in re.finditer(r"wiki:(\S+)", text, re.IGNORECASE):
             sources.append({"type": "wiki", "value": match.group(1)})
 
         return sources
@@ -192,19 +195,46 @@ Be specific and actionable. Don't add requirements not in the source documents."
         hints: list[str] = []
 
         tech_keywords = {
-            "react": "React", "next.js": "Next.js", "nextjs": "Next.js",
-            "vue": "Vue.js", "angular": "Angular", "svelte": "Svelte",
-            "tailwind": "Tailwind CSS", "typescript": "TypeScript",
-            "python": "Python", "django": "Django", "flask": "Flask", "fastapi": "FastAPI",
-            "go ": "Go", "golang": "Go", "gin": "Gin", "echo": "Echo",
-            "rust": "Rust", "java": "Java", "spring": "Spring Boot",
-            "node.js": "Node.js", "express": "Express", "nestjs": "NestJS",
-            "postgresql": "PostgreSQL", "postgres": "PostgreSQL",
-            "mongodb": "MongoDB", "redis": "Redis", "mysql": "MySQL",
-            "kubernetes": "Kubernetes", "docker": "Docker", "helm": "Helm",
-            "terraform": "Terraform", "aws": "AWS", "gcp": "GCP", "azure": "Azure",
-            "nats": "NATS", "rabbitmq": "RabbitMQ", "kafka": "Kafka",
-            "graphql": "GraphQL", "grpc": "gRPC", "rest api": "REST API",
+            "react": "React",
+            "next.js": "Next.js",
+            "nextjs": "Next.js",
+            "vue": "Vue.js",
+            "angular": "Angular",
+            "svelte": "Svelte",
+            "tailwind": "Tailwind CSS",
+            "typescript": "TypeScript",
+            "python": "Python",
+            "django": "Django",
+            "flask": "Flask",
+            "fastapi": "FastAPI",
+            "go ": "Go",
+            "golang": "Go",
+            "gin": "Gin",
+            "echo": "Echo",
+            "rust": "Rust",
+            "java": "Java",
+            "spring": "Spring Boot",
+            "node.js": "Node.js",
+            "express": "Express",
+            "nestjs": "NestJS",
+            "postgresql": "PostgreSQL",
+            "postgres": "PostgreSQL",
+            "mongodb": "MongoDB",
+            "redis": "Redis",
+            "mysql": "MySQL",
+            "kubernetes": "Kubernetes",
+            "docker": "Docker",
+            "helm": "Helm",
+            "terraform": "Terraform",
+            "aws": "AWS",
+            "gcp": "GCP",
+            "azure": "Azure",
+            "nats": "NATS",
+            "rabbitmq": "RabbitMQ",
+            "kafka": "Kafka",
+            "graphql": "GraphQL",
+            "grpc": "gRPC",
+            "rest api": "REST API",
         }
 
         for keyword, tech in tech_keywords.items():

@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 # QA gets read tools + commit (for test files) + test execution
 QA_TOOLS = [
-    t for t in GITHUB_TOOLS
-    if t["name"] in {
+    t
+    for t in GITHUB_TOOLS
+    if t["name"]
+    in {
         "github_get_file_content",
         "github_list_files",
         "github_get_repo_tree",
@@ -110,7 +112,7 @@ Branch: {branch}
 {issue_refs}
 
 ## Original Requirements
-{state.get('requirements', '')[:2000]}
+{state.get("requirements", "")[:2000]}
 
 {inbox_context}
 

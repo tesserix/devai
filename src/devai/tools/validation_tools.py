@@ -23,8 +23,8 @@ VALIDATION_TOOLS: list[dict[str, Any]] = [
     {
         "name": "validate_compile",
         "description": "Compile/type-check the code. "
-                       "Python: mypy/pyright. Go: go build. TypeScript: tsc --noEmit. "
-                       "Returns compilation errors if any.",
+        "Python: mypy/pyright. Go: go build. TypeScript: tsc --noEmit. "
+        "Returns compilation errors if any.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -38,8 +38,8 @@ VALIDATION_TOOLS: list[dict[str, Any]] = [
     {
         "name": "validate_lint",
         "description": "Run linter on the code. "
-                       "Python: ruff. Go: golangci-lint. TypeScript: eslint. "
-                       "Returns linting errors/warnings.",
+        "Python: ruff. Go: golangci-lint. TypeScript: eslint. "
+        "Returns linting errors/warnings.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -53,8 +53,8 @@ VALIDATION_TOOLS: list[dict[str, Any]] = [
     {
         "name": "validate_unit_tests",
         "description": "Run unit tests. "
-                       "Python: pytest. Go: go test. TypeScript: jest/vitest. "
-                       "Returns test results with pass/fail counts.",
+        "Python: pytest. Go: go test. TypeScript: jest/vitest. "
+        "Returns test results with pass/fail counts.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -67,8 +67,7 @@ VALIDATION_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "validate_format",
-        "description": "Check code formatting. "
-                       "Python: ruff format --check. Go: gofmt. TypeScript: prettier --check.",
+        "description": "Check code formatting. Python: ruff format --check. Go: gofmt. TypeScript: prettier --check.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -168,13 +167,15 @@ class ValidationToolExecutor:
             if lang == "python":
                 out = await self._run(
                     ["python", "-m", "pytest", "-v", "--tb=short", "-q"],
-                    tmpdir, timeout=300,
+                    tmpdir,
+                    timeout=300,
                 )
                 tool = "pytest"
             elif lang == "go":
                 out = await self._run(
                     ["go", "test", "-v", "-count=1", "./..."],
-                    tmpdir, timeout=300,
+                    tmpdir,
+                    timeout=300,
                 )
                 tool = "go test"
             elif lang in ("typescript", "javascript"):
@@ -228,9 +229,16 @@ class ValidationToolExecutor:
 
     async def _clone(self, repo: str, branch: str, tmpdir: str) -> bool:
         proc = await asyncio.create_subprocess_exec(
-            "git", "clone", "--branch", branch, "--depth", "1",
-            f"https://github.com/{repo}.git", tmpdir,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            "git",
+            "clone",
+            "--branch",
+            branch,
+            "--depth",
+            "1",
+            f"https://github.com/{repo}.git",
+            tmpdir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         return proc.returncode == 0
@@ -238,8 +246,10 @@ class ValidationToolExecutor:
     async def _run(self, cmd: list[str], cwd: str, timeout: int = 120) -> str:
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=cwd,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                *cmd,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
                 env={**os.environ},
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)

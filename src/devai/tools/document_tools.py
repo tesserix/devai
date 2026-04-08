@@ -21,7 +21,7 @@ DOCUMENT_TOOLS: list[dict[str, Any]] = [
     {
         "name": "doc_read_pdf",
         "description": "Read and extract text from a PDF document. "
-                       "Supports requirements docs, design documents, and specs.",
+        "Supports requirements docs, design documents, and specs.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -55,7 +55,7 @@ DOCUMENT_TOOLS: list[dict[str, Any]] = [
     {
         "name": "doc_parse_openapi",
         "description": "Parse an OpenAPI/Swagger spec (YAML or JSON) and extract endpoints, "
-                       "request/response schemas, and authentication requirements.",
+        "request/response schemas, and authentication requirements.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -127,7 +127,7 @@ class DocumentToolExecutor:
                 "file": file_path,
                 "total_pages": len(reader.pages),
                 "text": text[:15000],  # Limit to 15K chars
-                "pages": pages[:20],   # First 20 pages
+                "pages": pages[:20],  # First 20 pages
                 "metadata": {
                     "title": reader.metadata.title if reader.metadata else "",
                     "author": reader.metadata.author if reader.metadata else "",
@@ -173,20 +173,24 @@ class DocumentToolExecutor:
         for line in content.split("\n"):
             if line.startswith("#"):
                 if current_content:
-                    sections.append({
-                        "heading": current_heading,
-                        "content": "\n".join(current_content).strip(),
-                    })
+                    sections.append(
+                        {
+                            "heading": current_heading,
+                            "content": "\n".join(current_content).strip(),
+                        }
+                    )
                 current_heading = line.lstrip("#").strip()
                 current_content = []
             else:
                 current_content.append(line)
 
         if current_content:
-            sections.append({
-                "heading": current_heading,
-                "content": "\n".join(current_content).strip(),
-            })
+            sections.append(
+                {
+                    "heading": current_heading,
+                    "content": "\n".join(current_content).strip(),
+                }
+            )
 
         return {
             "file": file_path,
@@ -214,6 +218,7 @@ class DocumentToolExecutor:
                 text = resp.text
                 if "html" in content_type:
                     import re
+
                     text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
                     text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
                     text = re.sub(r"<[^>]+>", " ", text)
@@ -238,6 +243,7 @@ class DocumentToolExecutor:
         spec: dict[str, Any] = {}
         try:
             import yaml
+
             spec = yaml.safe_load(content)
         except (ImportError, Exception):
             try:
@@ -254,15 +260,17 @@ class DocumentToolExecutor:
         for path_str, methods in paths.items():
             for method, details in methods.items():
                 if method in ("get", "post", "put", "patch", "delete"):
-                    endpoints.append({
-                        "method": method.upper(),
-                        "path": path_str,
-                        "summary": details.get("summary", ""),
-                        "tags": details.get("tags", []),
-                        "parameters": len(details.get("parameters", [])),
-                        "request_body": bool(details.get("requestBody")),
-                        "responses": list(details.get("responses", {}).keys()),
-                    })
+                    endpoints.append(
+                        {
+                            "method": method.upper(),
+                            "path": path_str,
+                            "summary": details.get("summary", ""),
+                            "tags": details.get("tags", []),
+                            "parameters": len(details.get("parameters", [])),
+                            "request_body": bool(details.get("requestBody")),
+                            "responses": list(details.get("responses", {}).keys()),
+                        }
+                    )
 
         schemas = list(components.get("schemas", {}).keys())
         security_schemes = list(components.get("securitySchemes", {}).keys())
@@ -297,6 +305,7 @@ class DocumentToolExecutor:
 
             # Detect numbered/bulleted items
             import re
+
             if re.match(r"^(\d+[\.\)]\s|[-*]\s|•\s)", stripped):
                 if current_item:
                     items.append("\n".join(current_item))

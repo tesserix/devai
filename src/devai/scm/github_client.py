@@ -103,19 +103,19 @@ class GitHubSCMClient(SCMClient):
         repos: list[dict[str, Any]] = []
         page = 1
         while True:
-            resp = await self._request(
-                "GET", f"/installation/repositories?per_page={per_page}&page={page}"
-            )
+            resp = await self._request("GET", f"/installation/repositories?per_page={per_page}&page={page}")
             data = resp.json()
             for r in data.get("repositories", []):
-                repos.append({
-                    "full_name": r["full_name"],
-                    "name": r["name"],
-                    "description": r.get("description") or "",
-                    "language": r.get("language") or "",
-                    "private": r.get("private", False),
-                    "default_branch": r.get("default_branch", "main"),
-                })
+                repos.append(
+                    {
+                        "full_name": r["full_name"],
+                        "name": r["name"],
+                        "description": r.get("description") or "",
+                        "language": r.get("language") or "",
+                        "private": r.get("private", False),
+                        "default_branch": r.get("default_branch", "main"),
+                    }
+                )
             if len(data.get("repositories", [])) < per_page:
                 break
             page += 1
@@ -124,7 +124,8 @@ class GitHubSCMClient(SCMClient):
     async def create_repo(self, org: str, name: str, description: str = "", private: bool = True) -> dict[str, Any]:
         """Create a new repository in an organization."""
         resp = await self._request(
-            "POST", f"/orgs/{org}/repos",
+            "POST",
+            f"/orgs/{org}/repos",
             json={"name": name, "description": description, "private": private, "auto_init": True},
         )
         data = resp.json()
@@ -195,7 +196,13 @@ class GitHubSCMClient(SCMClient):
         return resp.json().get("tree", [])
 
     async def create_or_update_file(
-        self, repo: str, path: str, content: str, message: str, branch: str, sha: str | None = None,
+        self,
+        repo: str,
+        path: str,
+        content: str,
+        message: str,
+        branch: str,
+        sha: str | None = None,
     ) -> dict[str, Any]:
         encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
         payload: dict[str, Any] = {"message": message, "content": encoded, "branch": branch}
@@ -207,11 +214,18 @@ class GitHubSCMClient(SCMClient):
     # --- Pull Requests ---
 
     async def create_pull_request(
-        self, repo: str, title: str, body: str, head: str, base: str | None = None,
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str | None = None,
     ) -> dict[str, Any]:
         if base is None:
             base = await self.get_default_branch(repo)
-        resp = await self._request("POST", f"/repos/{repo}/pulls", json={"title": title, "body": body, "head": head, "base": base})
+        resp = await self._request(
+            "POST", f"/repos/{repo}/pulls", json={"title": title, "body": body, "head": head, "base": base}
+        )
         return resp.json()
 
     async def get_pull_request(self, repo: str, pr_id: int) -> dict[str, Any]:
@@ -228,7 +242,11 @@ class GitHubSCMClient(SCMClient):
         return resp.text
 
     async def create_pr_review(
-        self, repo: str, pr_id: int, body: str, event: str = "COMMENT",
+        self,
+        repo: str,
+        pr_id: int,
+        body: str,
+        event: str = "COMMENT",
         comments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"body": body, "event": event}
@@ -304,7 +322,8 @@ class GitHubSCMClient(SCMClient):
     async def set_repo_visibility(self, repo: str, visibility: str) -> dict[str, Any]:
         """Toggle repo between public and private (for CI build limits)."""
         resp = await self._request(
-            "PATCH", f"/repos/{repo}",
+            "PATCH",
+            f"/repos/{repo}",
             json={"visibility": visibility},
         )
         result = resp.json()
@@ -312,13 +331,17 @@ class GitHubSCMClient(SCMClient):
         return {"visibility": result.get("visibility", visibility)}
 
     async def get_all_workflow_runs(
-        self, repo: str, status: str = "in_progress", limit: int = 20,
+        self,
+        repo: str,
+        status: str = "in_progress",
+        limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Get all workflow runs with a given status (queued or in_progress)."""
         runs = []
         for check_status in ("queued", "in_progress"):
             resp = await self._request(
-                "GET", f"/repos/{repo}/actions/runs",
+                "GET",
+                f"/repos/{repo}/actions/runs",
                 params={"status": check_status, "per_page": str(limit)},
             )
             runs.extend(resp.json().get("workflow_runs", []))

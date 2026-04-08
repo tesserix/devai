@@ -20,7 +20,10 @@ TEST_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "repo": {"type": "string", "description": "Repository in org/repo format"},
                 "branch": {"type": "string", "description": "Branch with test files"},
-                "test_file": {"type": "string", "description": "Specific test file to run (optional, runs all if omitted)"},
+                "test_file": {
+                    "type": "string",
+                    "description": "Specific test file to run (optional, runs all if omitted)",
+                },
                 "base_url": {"type": "string", "description": "Base URL for the application under test"},
             },
             "required": ["repo", "branch", "base_url"],
@@ -62,8 +65,14 @@ class TestToolExecutor:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Clone the repo
             clone_proc = await asyncio.create_subprocess_exec(
-                "git", "clone", "--branch", branch, "--depth", "1",
-                f"https://github.com/{repo}.git", tmpdir,
+                "git",
+                "clone",
+                "--branch",
+                branch,
+                "--depth",
+                "1",
+                f"https://github.com/{repo}.git",
+                tmpdir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -73,7 +82,8 @@ class TestToolExecutor:
 
             # Install dependencies
             install_proc = await asyncio.create_subprocess_exec(
-                "npm", "install",
+                "npm",
+                "install",
                 cwd=tmpdir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -82,7 +92,11 @@ class TestToolExecutor:
 
             # Install Playwright browsers
             pw_install = await asyncio.create_subprocess_exec(
-                "npx", "playwright", "install", "--with-deps", "chromium",
+                "npx",
+                "playwright",
+                "install",
+                "--with-deps",
+                "chromium",
                 cwd=tmpdir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -92,7 +106,9 @@ class TestToolExecutor:
             # Run tests
             results_path = Path(tmpdir) / "test-results.json"
             cmd = [
-                "npx", "playwright", "test",
+                "npx",
+                "playwright",
+                "test",
                 "--reporter=json",
                 f"--output={results_path}",
             ]
@@ -144,10 +160,12 @@ class TestToolExecutor:
                                 passed += 1
                             elif status == "failed":
                                 failed += 1
-                                failures.append({
-                                    "test": spec.get("title", "unknown"),
-                                    "error": str(result.get("error", {}).get("message", ""))[:500],
-                                })
+                                failures.append(
+                                    {
+                                        "test": spec.get("title", "unknown"),
+                                        "error": str(result.get("error", {}).get("message", ""))[:500],
+                                    }
+                                )
                             elif status == "skipped":
                                 skipped += 1
                 walk_suites(suite.get("suites", []))

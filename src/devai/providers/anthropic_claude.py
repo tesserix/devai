@@ -83,19 +83,23 @@ class ClaudeProvider:
                             timeout_seconds=60,
                             description=f"tool:{tc.name}",
                         )
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tc.id,
-                            "content": result,
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tc.id,
+                                "content": result,
+                            }
+                        )
                     except Exception as e:
                         logger.error("Tool %s failed: %s", tc.name, e)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tc.id,
-                            "content": f"Error: {e}",
-                            "is_error": True,
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tc.id,
+                                "content": f"Error: {e}",
+                                "is_error": True,
+                            }
+                        )
 
                 messages.append({"role": "user", "content": tool_results})
 
@@ -111,6 +115,7 @@ class ClaudeProvider:
         messages: list[dict[str, Any]],
     ) -> Message:
         """Make a single API call with retry and circuit breaker."""
+
         async def _api_call() -> Message:
             return await asyncio.wait_for(
                 self.client.messages.create(

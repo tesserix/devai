@@ -41,8 +41,17 @@ class DiscoveryAgent:
         all_namespaces = ns_raw.split() if ns_raw else []
 
         # Filter out system namespaces
-        system_ns = {"kube-system", "kube-public", "kube-node-lease", "cert-manager",
-                      "istio-system", "argocd", "monitoring", "nats", "external-secrets"}
+        system_ns = {
+            "kube-system",
+            "kube-public",
+            "kube-node-lease",
+            "cert-manager",
+            "istio-system",
+            "argocd",
+            "monitoring",
+            "nats",
+            "external-secrets",
+        }
         app_namespaces = [ns for ns in all_namespaces if ns not in system_ns]
         infra_namespaces = [ns for ns in all_namespaces if ns in system_ns]
 
@@ -69,22 +78,23 @@ class DiscoveryAgent:
                     for env in c.get("env", []):
                         name = env.get("name", "")
                         value = env.get("value", "")
-                        if any(kw in name.upper() for kw in ["DATABASE", "DB_", "REDIS", "NATS", "KAFKA", "POSTGRES", "MONGO"]):
+                        if any(
+                            kw in name.upper()
+                            for kw in ["DATABASE", "DB_", "REDIS", "NATS", "KAFKA", "POSTGRES", "MONGO"]
+                        ):
                             env_vars[name] = value or "(from secret)"
 
-                apps.append({
-                    "name": meta.get("name", ""),
-                    "namespace": ns,
-                    "kind": item.get("kind", "Deployment"),
-                    "replicas": spec.get("replicas", 0),
-                    "images": [c.get("image", "") for c in containers],
-                    "ports": [
-                        p.get("containerPort")
-                        for c in containers
-                        for p in c.get("ports", [])
-                    ],
-                    "infra_connections": env_vars,
-                })
+                apps.append(
+                    {
+                        "name": meta.get("name", ""),
+                        "namespace": ns,
+                        "kind": item.get("kind", "Deployment"),
+                        "replicas": spec.get("replicas", 0),
+                        "images": [c.get("image", "") for c in containers],
+                        "ports": [p.get("containerPort") for c in containers for p in c.get("ports", [])],
+                        "infra_connections": env_vars,
+                    }
+                )
 
         # 3. Discover services (to map endpoints)
         services: list[dict[str, Any]] = []
@@ -95,13 +105,18 @@ class DiscoveryAgent:
                     for svc in json.loads(svc_raw).get("items", []):
                         svc_meta = svc.get("metadata", {})
                         svc_spec = svc.get("spec", {})
-                        services.append({
-                            "name": svc_meta.get("name", ""),
-                            "namespace": ns,
-                            "type": svc_spec.get("type", "ClusterIP"),
-                            "ports": [{"port": p.get("port"), "target": p.get("targetPort")} for p in svc_spec.get("ports", [])],
-                            "selector": svc_spec.get("selector", {}),
-                        })
+                        services.append(
+                            {
+                                "name": svc_meta.get("name", ""),
+                                "namespace": ns,
+                                "type": svc_spec.get("type", "ClusterIP"),
+                                "ports": [
+                                    {"port": p.get("port"), "target": p.get("targetPort")}
+                                    for p in svc_spec.get("ports", [])
+                                ],
+                                "selector": svc_spec.get("selector", {}),
+                            }
+                        )
                 except json.JSONDecodeError:
                     pass
 
@@ -113,23 +128,28 @@ class DiscoveryAgent:
                 for vs in json.loads(vs_raw).get("items", []):
                     vs_spec = vs.get("spec", {})
                     hosts = vs_spec.get("hosts", [])
-                    virtual_services.append({
-                        "name": vs["metadata"]["name"],
-                        "namespace": vs["metadata"].get("namespace", ""),
-                        "hosts": hosts,
-                        "gateways": vs_spec.get("gateways", []),
-                    })
+                    virtual_services.append(
+                        {
+                            "name": vs["metadata"]["name"],
+                            "namespace": vs["metadata"].get("namespace", ""),
+                            "hosts": hosts,
+                            "gateways": vs_spec.get("gateways", []),
+                        }
+                    )
             except json.JSONDecodeError:
                 pass
 
         # 5. Use Groq to analyze topology and identify dependencies
-        topology_input = json.dumps({
-            "app_namespaces": app_namespaces,
-            "infra_namespaces": infra_namespaces,
-            "apps": apps[:30],
-            "services": services[:30],
-            "virtual_services": virtual_services[:15],
-        }, indent=2)
+        topology_input = json.dumps(
+            {
+                "app_namespaces": app_namespaces,
+                "infra_namespaces": infra_namespaces,
+                "apps": apps[:30],
+                "services": services[:30],
+                "virtual_services": virtual_services[:15],
+            },
+            indent=2,
+        )
 
         topology_analysis = await self.groq.generate(
             prompt=f"""Analyze this Kubernetes cluster topology and map all dependencies:

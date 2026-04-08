@@ -69,8 +69,7 @@ class CIMonitorAgent(BaseAgent):
                 a2a.notify(
                     "senior_developer",
                     "No CI Workflow Found",
-                    f"No GitHub Actions workflow found for branch '{branch}'. "
-                    "Proceeding without CI validation.",
+                    f"No GitHub Actions workflow found for branch '{branch}'. Proceeding without CI validation.",
                 )
                 return {
                     "build_status": "success",
@@ -143,8 +142,7 @@ class CIMonitorAgent(BaseAgent):
                 a2a.notify(
                     "orchestrator",
                     "Repo Made Public for CI",
-                    f"Temporarily set {repo} to public for CI build. "
-                    "Will revert to private after ALL builds complete.",
+                    f"Temporarily set {repo} to public for CI build. Will revert to private after ALL builds complete.",
                 )
             return original
         except Exception as e:
@@ -175,7 +173,9 @@ class CIMonitorAgent(BaseAgent):
                 run_ids = [r.get("id", "?") for r in active_runs]
                 logger.debug(
                     "Waiting for %d active builds on %s: %s",
-                    len(active_runs), repo, run_ids,
+                    len(active_runs),
+                    repo,
+                    run_ids,
                 )
             except Exception as e:
                 logger.warning("Failed to check active builds: %s", e)
@@ -186,7 +186,8 @@ class CIMonitorAgent(BaseAgent):
         # Timeout — make private anyway but warn
         logger.warning(
             "Timed out waiting for builds on %s after %ds — making private anyway",
-            repo, DRAIN_TIMEOUT_SECONDS,
+            repo,
+            DRAIN_TIMEOUT_SECONDS,
         )
         try:
             await self.scm.set_repo_visibility(repo, "private")
@@ -248,15 +249,15 @@ class CIMonitorAgent(BaseAgent):
             for job in jobs:
                 if job.get("conclusion") == "failure":
                     failed_steps = [
-                        step["name"]
-                        for step in job.get("steps", [])
-                        if step.get("conclusion") == "failure"
+                        step["name"] for step in job.get("steps", []) if step.get("conclusion") == "failure"
                     ]
-                    failed.append({
-                        "name": job.get("name", "unknown"),
-                        "failed_steps": ", ".join(failed_steps),
-                        "url": job.get("html_url", ""),
-                    })
+                    failed.append(
+                        {
+                            "name": job.get("name", "unknown"),
+                            "failed_steps": ", ".join(failed_steps),
+                            "url": job.get("html_url", ""),
+                        }
+                    )
             return failed
 
         except Exception as e:
@@ -271,15 +272,12 @@ class CIMonitorAgent(BaseAgent):
         try:
             groq = GroqProvider(self.config)
 
-            job_details = "\n".join(
-                f"- Job: {j['name']}, Failed Steps: {j['failed_steps']}"
-                for j in failed_jobs
-            )
+            job_details = "\n".join(f"- Job: {j['name']}, Failed Steps: {j['failed_steps']}" for j in failed_jobs)
 
             response = await groq.generate(
                 prompt=f"Analyze these CI build failures and suggest fixes:\n\n{job_details}",
                 system="You are a CI/CD expert. Analyze build failures concisely. "
-                       "Identify root causes and suggest specific fixes. Be brief.",
+                "Identify root causes and suggest specific fixes. Be brief.",
                 max_tokens=1024,
             )
             return response

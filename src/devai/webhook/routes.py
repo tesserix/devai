@@ -38,20 +38,22 @@ async def scm_webhook(request: Request) -> dict[str, str]:
     # Verify signature based on provider
     signature = (
         request.headers.get("X-Hub-Signature-256", "")  # GitHub
-        or request.headers.get("X-Gitlab-Token", "")     # GitLab
-        or request.headers.get("X-Webhook-Secret", "")    # ADO
+        or request.headers.get("X-Gitlab-Token", "")  # GitLab
+        or request.headers.get("X-Webhook-Secret", "")  # ADO
     )
 
     if config.github_webhook_secret and not scm.verify_webhook_signature(
-        body, signature, config.github_webhook_secret,
+        body,
+        signature,
+        config.github_webhook_secret,
     ):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     # Determine event type from headers (provider-specific)
     event_type = (
-        request.headers.get("X-GitHub-Event", "")         # GitHub
-        or request.headers.get("X-Gitlab-Event", "")       # GitLab
-        or "ado_webhook"                                    # ADO
+        request.headers.get("X-GitHub-Event", "")  # GitHub
+        or request.headers.get("X-Gitlab-Event", "")  # GitLab
+        or "ado_webhook"  # ADO
     )
 
     payload = await request.json()
@@ -109,16 +111,20 @@ async def _trigger_from_normalized_event(request: Request, event: dict[str, Any]
 
     logger.info(
         "Pipeline triggered from %s issue #%s on %s",
-        event.get("trigger_type", "unknown"), issue_number, repo,
+        event.get("trigger_type", "unknown"),
+        issue_number,
+        repo,
     )
 
     # Post acknowledgement via SCM abstraction
     try:
         from devai.scm import create_scm_client
+
         config = request.app.state.config
         scm = create_scm_client(config)
         await scm.add_comment(
-            repo, issue_number,
+            repo,
+            issue_number,
             "**DevAI Pipeline Triggered**\n\n"
             "The ALM pipeline has started processing this requirement.\n\n"
             "The Supervisor Agent will analyze this request, create a tracking issue "
@@ -129,9 +135,7 @@ async def _trigger_from_normalized_event(request: Request, event: dict[str, Any]
     except Exception as e:
         logger.warning("Failed to post trigger comment: %s", e)
 
-    asyncio.create_task(
-        _run_pipeline(request, repo, requirements, event.get("trigger_type", "scm"), str(issue_number))
-    )
+    asyncio.create_task(_run_pipeline(request, repo, requirements, event.get("trigger_type", "scm"), str(issue_number)))
 
 
 async def _route_event(request: Request, event_type: str, payload: dict[str, Any]) -> None:
@@ -182,14 +186,14 @@ async def _trigger_from_issue(request: Request, payload: dict[str, Any]) -> None
 
     logger.info(
         "Pipeline triggered from issue #%d on %s: %s",
-        issue_number, repo, issue_title,
+        issue_number,
+        repo,
+        issue_title,
     )
 
     await _post_trigger_comment(request, repo, issue_number)
 
-    asyncio.create_task(
-        _run_pipeline(request, repo, requirements, "github_issue", str(issue_number))
-    )
+    asyncio.create_task(_run_pipeline(request, repo, requirements, "github_issue", str(issue_number)))
 
 
 async def _trigger_from_issue_comment(request: Request, payload: dict[str, Any]) -> None:
@@ -207,9 +211,7 @@ async def _trigger_from_issue_comment(request: Request, payload: dict[str, Any])
     logger.info("Pipeline triggered from comment on #%d on %s", issue_number, repo)
 
     await _post_trigger_comment(request, repo, issue_number)
-    asyncio.create_task(
-        _run_pipeline(request, repo, requirements, "github_issue", str(issue_number))
-    )
+    asyncio.create_task(_run_pipeline(request, repo, requirements, "github_issue", str(issue_number)))
 
 
 async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) -> None:
@@ -261,19 +263,19 @@ async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) 
 
         logger.info(
             "Pipeline triggered from project card → issue #%d on %s",
-            issue_number, repo,
+            issue_number,
+            repo,
         )
 
         await _post_trigger_comment(request, repo, issue_number)
-        asyncio.create_task(
-            _run_pipeline(request, repo, requirements, "project_card", str(issue_number))
-        )
+        asyncio.create_task(_run_pipeline(request, repo, requirements, "project_card", str(issue_number)))
 
     except Exception as e:
         logger.error("Failed to process project card event: %s", e)
 
 
 # --- Helpers ---
+
 
 def _build_requirements_from_issue(issue: dict[str, Any]) -> str:
     """Build a comprehensive requirements string from an issue/work item."""
@@ -310,7 +312,8 @@ async def _post_trigger_comment(request: Request, repo: str, issue_number: int) 
         scm = create_scm_client(config)
 
         await scm.add_comment(
-            repo, issue_number,
+            repo,
+            issue_number,
             "**DevAI Pipeline Triggered**\n\n"
             "The ALM pipeline has started processing this requirement.\n\n"
             "Stages: Supervisor → Orchestrator → Document Analysis → "
@@ -397,16 +400,14 @@ async def _run_pipeline(
             status_icon = "white_check_mark" if stage in ("deployed", "done") else "x"
 
             timings = final_state.get("agent_timings", {})
-            timing_lines = "\n".join(
-                f"| {agent} | {dur:.1f}s |"
-                for agent, dur in timings.items()
-            )
+            timing_lines = "\n".join(f"| {agent} | {dur:.1f}s |" for agent, dur in timings.items())
 
             tracking = final_state.get("supervisor_tracking_issue")
             tracking_ref = f"\n**Tracking Issue:** #{tracking}" if tracking else ""
 
             await scm.add_comment(
-                repo, int(trigger_ref),
+                repo,
+                int(trigger_ref),
                 f"## Pipeline Complete\n\n"
                 f":{status_icon}: **Stage:** {stage}\n{tracking_ref}\n\n"
                 f"| Agent | Duration |\n|---|---|\n{timing_lines}\n\n"
@@ -420,10 +421,9 @@ async def _run_pipeline(
         if trigger_ref.isdigit():
             with contextlib.suppress(Exception):
                 await scm.add_comment(
-                    repo, int(trigger_ref),
-                    f"## Pipeline Failed\n\n"
-                    f":x: Error: `{str(e)[:200]}`\n\n"
-                    f"Check the DevAI dashboard for details.",
+                    repo,
+                    int(trigger_ref),
+                    f"## Pipeline Failed\n\n:x: Error: `{str(e)[:200]}`\n\nCheck the DevAI dashboard for details.",
                 )
 
     finally:

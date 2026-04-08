@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 class SREState(TypedDict, total=False):
     """State flowing through the SRE LangGraph."""
+
     scan_id: str
     cluster_id: str
     trigger: str  # cron | manual | alert
@@ -113,6 +114,7 @@ class SREOrchestrator:
             import redis.asyncio as redis_lib
 
             from devai.services.memory import AgentMemory
+
             r = redis_lib.from_url(self.config.redis_url, decode_responses=True)
             memory = AgentMemory(r)
         except Exception:
@@ -122,8 +124,12 @@ class SREOrchestrator:
         result = await agent.run()
 
         elapsed = time.monotonic() - start
-        logger.info("Discovery completed: %d apps in %d namespaces (%.1fs)",
-                     len(result.get("apps", [])), len(result.get("namespaces", [])), elapsed)
+        logger.info(
+            "Discovery completed: %d apps in %d namespaces (%.1fs)",
+            len(result.get("apps", [])),
+            len(result.get("namespaces", [])),
+            elapsed,
+        )
 
         return {
             "namespaces": result.get("namespaces", []),
@@ -138,8 +144,13 @@ class SREOrchestrator:
         """Run all monitoring agents in parallel."""
         namespaces = state.get("namespaces", [])
         if not namespaces:
-            return {"infra_findings": [], "log_findings": [], "perf_findings": [],
-                    "cost_findings": [], "capacity_findings": []}
+            return {
+                "infra_findings": [],
+                "log_findings": [],
+                "perf_findings": [],
+                "cost_findings": [],
+                "capacity_findings": [],
+            }
 
         from devai.sre.agents.capacity_planner import CapacityPlannerAgent
         from devai.sre.agents.cost_analyzer import CostAnalyzerAgent
@@ -295,8 +306,7 @@ class SREOrchestrator:
             "error": None,
         }
 
-        logger.info("SRE scan started: scan_id=%s cluster=%s trigger=%s",
-                     initial_state["scan_id"], cluster_id, trigger)
+        logger.info("SRE scan started: scan_id=%s cluster=%s trigger=%s", initial_state["scan_id"], cluster_id, trigger)
 
         try:
             final_state = await self._graph.ainvoke(initial_state)

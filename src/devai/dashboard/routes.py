@@ -23,6 +23,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 # --- Dashboard Page ---
 
+
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 async def dashboard_page() -> str:
@@ -31,6 +32,7 @@ async def dashboard_page() -> str:
 
 
 # --- Auth (supports Keycloak OIDC or GitHub OAuth) ---
+
 
 @router.get("/auth/login")
 async def auth_login(request: Request) -> RedirectResponse:
@@ -78,16 +80,18 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
         await kc.close()
 
         session_id = secrets.token_urlsafe(48)
-        session_data = json.dumps({
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "auth_provider": "keycloak",
-            "user_login": userinfo.get("preferred_username", userinfo.get("sub", "")),
-            "user_name": userinfo.get("name", ""),
-            "user_email": userinfo.get("email", ""),
-            "avatar_url": "",
-            "roles": userinfo.get("realm_access", {}).get("roles", []),
-        })
+        session_data = json.dumps(
+            {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "auth_provider": "keycloak",
+                "user_login": userinfo.get("preferred_username", userinfo.get("sub", "")),
+                "user_name": userinfo.get("name", ""),
+                "user_email": userinfo.get("email", ""),
+                "avatar_url": "",
+                "roles": userinfo.get("realm_access", {}).get("roles", []),
+            }
+        )
     else:
         oauth = GitHubOAuth(config)
         token_data = await oauth.exchange_code(code)
@@ -99,16 +103,18 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
         await oauth.close()
 
         session_id = secrets.token_urlsafe(48)
-        session_data = json.dumps({
-            "access_token": access_token,
-            "refresh_token": "",
-            "auth_provider": "github",
-            "user_login": user["login"],
-            "user_name": user.get("name", ""),
-            "user_email": user.get("email", ""),
-            "avatar_url": user.get("avatar_url", ""),
-            "roles": [],
-        })
+        session_data = json.dumps(
+            {
+                "access_token": access_token,
+                "refresh_token": "",
+                "auth_provider": "github",
+                "user_login": user["login"],
+                "user_name": user.get("name", ""),
+                "user_email": user.get("email", ""),
+                "avatar_url": user.get("avatar_url", ""),
+                "roles": [],
+            }
+        )
 
     await redis.set(f"devai:session:{session_id}", session_data, ex=86400)
 
@@ -142,6 +148,7 @@ async def _get_session(request: Request) -> dict[str, Any] | None:
 
 
 # --- API Endpoints ---
+
 
 @router.get("/api/me")
 async def get_current_user(request: Request) -> dict[str, Any]:
@@ -178,7 +185,12 @@ async def get_repos(request: Request, org: str) -> list[dict[str, Any]]:
     repos = await oauth.get_org_repos(session["access_token"], org)
     await oauth.close()
     return [
-        {"full_name": r["full_name"], "name": r["name"], "description": r.get("description", ""), "language": r.get("language", "")}
+        {
+            "full_name": r["full_name"],
+            "name": r["name"],
+            "description": r.get("description", ""),
+            "language": r.get("language", ""),
+        }
         for r in repos
     ]
 
@@ -302,6 +314,7 @@ async def list_repos(request: Request) -> list[dict[str, Any]]:
     """List repositories accessible to the GitHub App installation."""
     config = request.app.state.config
     from devai.scm.factory import create_scm_client
+
     scm = create_scm_client(config)
     try:
         repos = await scm.list_installation_repos()
@@ -327,6 +340,7 @@ async def create_repo(request: Request) -> dict[str, Any]:
 
     config = request.app.state.config
     from devai.scm.factory import create_scm_client
+
     scm = create_scm_client(config)
     try:
         repo = await scm.create_repo(org, name, description, private)
@@ -360,6 +374,7 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
 
     if issue_number:
         from devai.core.github_client import GitHubClient
+
         github = GitHubClient(config)
         issue = await github.get_issue(repo, issue_number)
         # Build full requirements from issue (same as webhook)
@@ -378,6 +393,7 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
 
     # Create a run ID immediately for the response
     from ulid import ULID
+
     run_id = str(ULID())
 
     # Run the LangGraph pipeline in the background
@@ -422,13 +438,15 @@ async def get_pipeline_runs(request: Request, repo: str | None = None, limit: in
         run_data = await state.get_run(rid)
         if run_data:
             agents = await state.get_agent_statuses(rid)
-            runs.append({
-                "run_id": rid,
-                "stage": run_data.get("stage"),
-                "repo": run_data.get("repo"),
-                "created_at": run_data.get("created_at"),
-                "agents": agents,
-            })
+            runs.append(
+                {
+                    "run_id": rid,
+                    "stage": run_data.get("stage"),
+                    "repo": run_data.get("repo"),
+                    "created_at": run_data.get("created_at"),
+                    "agents": agents,
+                }
+            )
     return runs
 
 
@@ -445,6 +463,7 @@ async def get_pipeline_run(request: Request, run_id: str) -> dict[str, Any]:
 
 
 # --- Governance (CLAUDE.md) ---
+
 
 @router.get("/api/governance/claude-md")
 async def get_claude_md(request: Request, repo: str) -> dict[str, str]:
@@ -471,6 +490,7 @@ async def save_claude_md(request: Request) -> dict[str, str]:
 
 
 # --- Approval Gates ---
+
 
 @router.get("/api/pipeline/runs/{run_id}/approvals")
 async def get_pending_approvals(request: Request, run_id: str) -> list[dict[str, Any]]:
@@ -523,6 +543,7 @@ async def reject_gate(request: Request, run_id: str, gate: str) -> dict[str, str
 
 
 # --- Pipeline Permissions/Config ---
+
 
 @router.post("/api/pipeline/config")
 async def save_pipeline_config(request: Request) -> dict[str, str]:

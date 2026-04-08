@@ -60,19 +60,26 @@ class Database:
             """INSERT INTO pipeline_runs
                (id, repo_full_name, trigger_type, trigger_ref, requirements, governance_snapshot)
                VALUES ($1, $2, $3, $4, $5, $6)""",
-            run_id, repo, trigger_type, trigger_ref, requirements, governance,
+            run_id,
+            repo,
+            trigger_type,
+            trigger_ref,
+            requirements,
+            governance,
         )
 
     async def update_run_stage(self, run_id: str, stage: str) -> None:
         await self.pool.execute(
             "UPDATE pipeline_runs SET stage = $1, updated_at = NOW() WHERE id = $2",
-            stage, run_id,
+            stage,
+            run_id,
         )
 
     async def complete_run(self, run_id: str, stage: str) -> None:
         await self.pool.execute(
             "UPDATE pipeline_runs SET stage = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2",
-            stage, run_id,
+            stage,
+            run_id,
         )
 
     async def get_run(self, run_id: str) -> dict[str, Any] | None:
@@ -83,11 +90,13 @@ class Database:
         if repo:
             rows = await self.pool.fetch(
                 "SELECT * FROM pipeline_runs WHERE repo_full_name = $1 ORDER BY created_at DESC LIMIT $2",
-                repo, limit,
+                repo,
+                limit,
             )
         else:
             rows = await self.pool.fetch(
-                "SELECT * FROM pipeline_runs ORDER BY created_at DESC LIMIT $1", limit,
+                "SELECT * FROM pipeline_runs ORDER BY created_at DESC LIMIT $1",
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -99,7 +108,10 @@ class Database:
         row = await self.pool.fetchrow(
             """INSERT INTO agent_executions (run_id, agent_name, status, started_at, provider, model)
                VALUES ($1, $2, 'running', NOW(), $3, $4) RETURNING id""",
-            run_id, agent_name, provider, model,
+            run_id,
+            agent_name,
+            provider,
+            model,
         )
         return str(row["id"])
 
@@ -122,13 +134,20 @@ class Database:
                tokens_input = $4, tokens_output = $5, llm_cost_usd = $6,
                error_message = $7
                WHERE id = $8""",
-            status, output_summary, json.dumps(output_data),
-            tokens_input, tokens_output, cost_usd, error, exec_id,
+            status,
+            output_summary,
+            json.dumps(output_data),
+            tokens_input,
+            tokens_output,
+            cost_usd,
+            error,
+            exec_id,
         )
 
     async def get_agent_executions(self, run_id: str) -> list[dict[str, Any]]:
         rows = await self.pool.fetch(
-            "SELECT * FROM agent_executions WHERE run_id = $1 ORDER BY started_at", run_id,
+            "SELECT * FROM agent_executions WHERE run_id = $1 ORDER BY started_at",
+            run_id,
         )
         return [dict(r) for r in rows]
 
@@ -152,13 +171,21 @@ class Database:
             """INSERT INTO a2a_messages
                (id, run_id, from_agent, to_agent, message_type, subject, body, payload, in_reply_to)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
-            msg_id, run_id, from_agent, to_agent, message_type,
-            subject, body, json.dumps(payload or {}), in_reply_to,
+            msg_id,
+            run_id,
+            from_agent,
+            to_agent,
+            message_type,
+            subject,
+            body,
+            json.dumps(payload or {}),
+            in_reply_to,
         )
 
     async def get_a2a_messages(self, run_id: str) -> list[dict[str, Any]]:
         rows = await self.pool.fetch(
-            "SELECT * FROM a2a_messages WHERE run_id = $1 ORDER BY created_at", run_id,
+            "SELECT * FROM a2a_messages WHERE run_id = $1 ORDER BY created_at",
+            run_id,
         )
         return [dict(r) for r in rows]
 
@@ -181,8 +208,14 @@ class Database:
             """INSERT INTO audit_log
                (run_id, agent_name, action, entity_type, entity_ref, details, actor, actor_type)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
-            run_id, agent_name, action, entity_type, entity_ref,
-            json.dumps(details or {}), actor, actor_type,
+            run_id,
+            agent_name,
+            action,
+            entity_type,
+            entity_ref,
+            json.dumps(details or {}),
+            actor,
+            actor_type,
         )
 
     async def get_audit_log(
@@ -194,16 +227,19 @@ class Database:
         if run_id:
             rows = await self.pool.fetch(
                 "SELECT * FROM audit_log WHERE run_id = $1 ORDER BY created_at DESC LIMIT $2",
-                run_id, limit,
+                run_id,
+                limit,
             )
         elif agent_name:
             rows = await self.pool.fetch(
                 "SELECT * FROM audit_log WHERE agent_name = $1 ORDER BY created_at DESC LIMIT $2",
-                agent_name, limit,
+                agent_name,
+                limit,
             )
         else:
             rows = await self.pool.fetch(
-                "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT $1", limit,
+                "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT $1",
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -231,9 +267,15 @@ class Database:
                content = EXCLUDED.content, tags = EXCLUDED.tags,
                metadata = EXCLUDED.metadata, embedding = EXCLUDED.embedding,
                updated_at = NOW()""",
-            memory_id, agent, repo, memory_type, content,
-            tags or [], json.dumps(metadata or {}),
-            embedding, expires_at,
+            memory_id,
+            agent,
+            repo,
+            memory_type,
+            content,
+            tags or [],
+            json.dumps(metadata or {}),
+            embedding,
+            expires_at,
         )
 
     async def recall_memories(
@@ -301,7 +343,9 @@ class Database:
                      AND (repo = $2 OR repo = 'global')
                    ORDER BY embedding <=> $1::vector
                    LIMIT $3""",
-                embedding, repo, limit,
+                embedding,
+                repo,
+                limit,
             )
         else:
             rows = await self.pool.fetch(
@@ -310,7 +354,8 @@ class Database:
                    WHERE is_active = TRUE AND embedding IS NOT NULL
                    ORDER BY embedding <=> $1::vector
                    LIMIT $2""",
-                embedding, limit,
+                embedding,
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -336,8 +381,17 @@ class Database:
             """INSERT INTO security_findings
                (run_id, repo, scanner, severity, issue, pr_number, file_path, line_number, tool, cve_id, cwe_id)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)""",
-            run_id, repo, scanner, severity, issue, pr_number,
-            file_path, line_number, tool, cve_id, cwe_id,
+            run_id,
+            repo,
+            scanner,
+            severity,
+            issue,
+            pr_number,
+            file_path,
+            line_number,
+            tool,
+            cve_id,
+            cwe_id,
         )
 
     # =========================================================================
@@ -361,8 +415,14 @@ class Database:
                (run_id, repo, migration_type, migration_file, migration_hash,
                 is_destructive, tables_created, tables_modified, columns_added)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
-            run_id, repo, migration_type, migration_file, migration_hash,
-            is_destructive, tables_created or [], tables_modified or [],
+            run_id,
+            repo,
+            migration_type,
+            migration_file,
+            migration_hash,
+            is_destructive,
+            tables_created or [],
+            tables_modified or [],
             columns_added or [],
         )
 
@@ -374,7 +434,9 @@ class Database:
         row = await self.pool.fetchrow(
             """INSERT INTO approval_gates (run_id, gate_name, agent_name)
                VALUES ($1, $2, $3) RETURNING id""",
-            run_id, gate_name, agent_name,
+            run_id,
+            gate_name,
+            agent_name,
         )
         return str(row["id"])
 
@@ -382,7 +444,11 @@ class Database:
         await self.pool.execute(
             """UPDATE approval_gates SET status = $1, decided_by = $2, decided_at = NOW(), reason = $3
                WHERE run_id = $4 AND gate_name = $5 AND status = 'pending'""",
-            decision, decided_by, reason, run_id, gate_name,
+            decision,
+            decided_by,
+            reason,
+            run_id,
+            gate_name,
         )
         # Audit the decision
         await self.audit(
@@ -400,7 +466,8 @@ class Database:
 
     async def get_recent_activity(self, limit: int = 20) -> list[dict[str, Any]]:
         rows = await self.pool.fetch(
-            "SELECT * FROM v_recent_activity LIMIT $1", limit,
+            "SELECT * FROM v_recent_activity LIMIT $1",
+            limit,
         )
         return [dict(r) for r in rows]
 
@@ -411,7 +478,8 @@ class Database:
     async def get_security_posture(self, repo: str | None = None) -> list[dict[str, Any]]:
         if repo:
             rows = await self.pool.fetch(
-                "SELECT * FROM v_security_posture WHERE repo = $1", repo,
+                "SELECT * FROM v_security_posture WHERE repo = $1",
+                repo,
             )
         else:
             rows = await self.pool.fetch("SELECT * FROM v_security_posture")

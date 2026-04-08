@@ -68,9 +68,9 @@ class PerfMonitorAgent:
             # Query key metrics
             queries = {
                 "error_rate": 'sum(rate(http_requests_total{status=~"5.."}[5m])) by (namespace, service) / sum(rate(http_requests_total[5m])) by (namespace, service)',
-                "p99_latency": 'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, namespace, service))',
-                "request_rate": 'sum(rate(http_requests_total[5m])) by (namespace, service)',
-                "pod_restarts": 'sum(increase(kube_pod_container_status_restarts_total[1h])) by (namespace, pod)',
+                "p99_latency": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, namespace, service))",
+                "request_rate": "sum(rate(http_requests_total[5m])) by (namespace, service)",
+                "pod_restarts": "sum(increase(kube_pod_container_status_restarts_total[1h])) by (namespace, pod)",
             }
 
             for name, query in queries.items():
@@ -87,9 +87,15 @@ class PerfMonitorAgent:
             pods_raw = await self.k8s._kubectl("get", "pods", "-n", ns, "-o", "jsonpath={.items[*].metadata.name}")
             if pods_raw:
                 for pod_name in pods_raw.split()[:3]:
-                    logs = await self.k8s.execute("k8s_get_pod_logs", {
-                        "namespace": ns, "pod_name": pod_name, "lines": 30, "errors_only": True,
-                    })
+                    logs = await self.k8s.execute(
+                        "k8s_get_pod_logs",
+                        {
+                            "namespace": ns,
+                            "pod_name": pod_name,
+                            "lines": 30,
+                            "errors_only": True,
+                        },
+                    )
                     if logs:
                         perf_data.append(f"## Error Logs: {ns}/{pod_name}\n{logs}")
 

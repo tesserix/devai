@@ -45,7 +45,6 @@ TECH_MARKERS: dict[str, dict[str, Any]] = {
     "Cargo.toml": {"language": "rust", "package_manager": "cargo"},
     "pom.xml": {"language": "java", "package_manager": "maven"},
     "build.gradle": {"language": "java/kotlin", "package_manager": "gradle"},
-
     # Frameworks
     "next.config.ts": {"framework": "next.js"},
     "next.config.js": {"framework": "next.js"},
@@ -56,7 +55,6 @@ TECH_MARKERS: dict[str, dict[str, Any]] = {
     "svelte.config.js": {"framework": "svelte"},
     "manage.py": {"framework": "django"},
     "app.py": {"framework": "flask_or_fastapi"},
-
     # Infrastructure
     "Dockerfile": {"deployment": "container"},
     "docker-compose.yml": {"deployment": "docker-compose"},
@@ -71,12 +69,10 @@ TECH_MARKERS: dict[str, dict[str, Any]] = {
     "fly.toml": {"deployment": "fly.io"},
     "render.yaml": {"deployment": "render"},
     "vercel.json": {"deployment": "vercel"},
-
     # Databases
     "prisma": {"database": "prisma"},
     "migrations": {"database": "sql_migrations"},
     "alembic": {"database": "alembic/sqlalchemy"},
-
     # Config
     ".eslintrc": {"linter": "eslint"},
     "ruff.toml": {"linter": "ruff"},
@@ -216,8 +212,7 @@ Identify the complete tech stack.""",
         a2a.notify(
             "senior_developer",
             "Tech Stack Context",
-            f"Repo uses {lang}/{framework}. Follow existing patterns: "
-            + ", ".join(tech_stack.get("patterns", [])[:5]),
+            f"Repo uses {lang}/{framework}. Follow existing patterns: " + ", ".join(tech_stack.get("patterns", [])[:5]),
             payload=tech_stack,
         )
 

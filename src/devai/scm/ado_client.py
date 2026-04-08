@@ -129,7 +129,9 @@ class AzureDevOpsSCMClient(SCMClient):
         patch_doc = [{"op": "replace", "path": "/fields/System.Tags", "value": "; ".join(all_tags)}]
         url = self._api_url(org, project, f"wit/workitems/{issue_id}")
         await self._http.patch(
-            url, json=patch_doc, params={"api-version": "7.1"},
+            url,
+            json=patch_doc,
+            params={"api-version": "7.1"},
             headers={**self._http.headers, "Content-Type": "application/json-patch+json"},
         )
 
@@ -158,11 +160,17 @@ class AzureDevOpsSCMClient(SCMClient):
 
         # Create the branch
         push_url = self._git_url(org, project, repo_name, "refs")
-        await self._request("POST", push_url, json=[{
-            "name": f"refs/heads/{branch_name}",
-            "oldObjectId": "0000000000000000000000000000000000000000",
-            "newObjectId": sha,
-        }])
+        await self._request(
+            "POST",
+            push_url,
+            json=[
+                {
+                    "name": f"refs/heads/{branch_name}",
+                    "oldObjectId": "0000000000000000000000000000000000000000",
+                    "newObjectId": sha,
+                }
+            ],
+        )
         return sha
 
     # --- Files ---
@@ -197,7 +205,13 @@ class AzureDevOpsSCMClient(SCMClient):
         return [{"path": i["path"], "type": "blob" if not i.get("isFolder") else "tree"} for i in items]
 
     async def create_or_update_file(
-        self, repo: str, path: str, content: str, message: str, branch: str, sha: str | None = None,
+        self,
+        repo: str,
+        path: str,
+        content: str,
+        message: str,
+        branch: str,
+        sha: str | None = None,
     ) -> dict[str, Any]:
         org, project, repo_name = self._parse_repo(repo)
         encoded = base64.b64encode(content.encode()).decode()
@@ -206,14 +220,18 @@ class AzureDevOpsSCMClient(SCMClient):
         change_type = "edit" if sha else "add"
         payload = {
             "refUpdates": [{"name": f"refs/heads/{branch}", "oldObjectId": sha or "0" * 40}],
-            "commits": [{
-                "comment": message,
-                "changes": [{
-                    "changeType": change_type,
-                    "item": {"path": path},
-                    "newContent": {"content": encoded, "contentType": "base64encoded"},
-                }],
-            }],
+            "commits": [
+                {
+                    "comment": message,
+                    "changes": [
+                        {
+                            "changeType": change_type,
+                            "item": {"path": path},
+                            "newContent": {"content": encoded, "contentType": "base64encoded"},
+                        }
+                    ],
+                }
+            ],
         }
         resp = await self._request("POST", push_url, json=payload)
         return resp.json()
@@ -221,16 +239,27 @@ class AzureDevOpsSCMClient(SCMClient):
     # --- Pull Requests ---
 
     async def create_pull_request(
-        self, repo: str, title: str, body: str, head: str, base: str | None = None,
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str | None = None,
     ) -> dict[str, Any]:
         org, project, repo_name = self._parse_repo(repo)
         if base is None:
             base = await self.get_default_branch(repo)
         url = self._git_url(org, project, repo_name, "pullrequests")
-        resp = await self._request("POST", url, json={
-            "title": title, "description": body,
-            "sourceRefName": f"refs/heads/{head}", "targetRefName": f"refs/heads/{base}",
-        })
+        resp = await self._request(
+            "POST",
+            url,
+            json={
+                "title": title,
+                "description": body,
+                "sourceRefName": f"refs/heads/{head}",
+                "targetRefName": f"refs/heads/{base}",
+            },
+        )
         data = resp.json()
         return {"number": data["pullRequestId"], **data}
 
@@ -254,24 +283,36 @@ class AzureDevOpsSCMClient(SCMClient):
         return "\n".join(f"{e.get('changeType', '?')}: {e['item']['path']}" for e in entries)
 
     async def create_pr_review(
-        self, repo: str, pr_id: int, body: str, event: str = "COMMENT",
+        self,
+        repo: str,
+        pr_id: int,
+        body: str,
+        event: str = "COMMENT",
         comments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         org, project, repo_name = self._parse_repo(repo)
         url = self._git_url(org, project, repo_name, f"pullrequests/{pr_id}/threads")
-        resp = await self._request("POST", url, json={
-            "comments": [{"content": body, "commentType": "text"}],
-            "status": "active",
-        })
+        resp = await self._request(
+            "POST",
+            url,
+            json={
+                "comments": [{"content": body, "commentType": "text"}],
+                "status": "active",
+            },
+        )
         return resp.json()
 
     async def merge_pull_request(self, repo: str, pr_id: int, method: str = "squash") -> dict[str, Any]:
         org, project, repo_name = self._parse_repo(repo)
         url = self._git_url(org, project, repo_name, f"pullrequests/{pr_id}")
-        resp = await self._request("PATCH", url, json={
-            "status": "completed",
-            "completionOptions": {"mergeStrategy": "squash" if method == "squash" else "noFastForward"},
-        })
+        resp = await self._request(
+            "PATCH",
+            url,
+            json={
+                "status": "completed",
+                "completionOptions": {"mergeStrategy": "squash" if method == "squash" else "noFastForward"},
+            },
+        )
         return resp.json()
 
     # --- CI/CD (Pipelines) ---

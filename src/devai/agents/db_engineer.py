@@ -34,8 +34,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DB_TOOLS = [
-    t for t in GITHUB_TOOLS
-    if t["name"] in {
+    t
+    for t in GITHUB_TOOLS
+    if t["name"]
+    in {
         "github_get_file_content",
         "github_list_files",
         "github_get_repo_tree",
@@ -183,21 +185,18 @@ Always include rollback/downgrade scripts."""
             a2a.escalate(
                 "engineering_manager",
                 "DB Migration BLOCKED — Destructive Change Detected",
-                f"PR #{pr_number} contains potentially destructive database changes.\n\n"
-                f"{result_text[:500]}",
+                f"PR #{pr_number} contains potentially destructive database changes.\n\n{result_text[:500]}",
             )
             a2a.escalate(
                 "senior_developer",
                 "DB Changes Need Revision",
-                f"The Database Engineer blocked your changes. Please review:\n\n"
-                f"{result_text[:300]}",
+                f"The Database Engineer blocked your changes. Please review:\n\n{result_text[:300]}",
             )
         elif decision == "review_needed":
             a2a.notify(
                 "staff_reviewer",
                 "DB Changes Need Manual Review",
-                f"Schema changes in PR #{pr_number} require careful review:\n\n"
-                f"{result_text[:300]}",
+                f"Schema changes in PR #{pr_number} require careful review:\n\n{result_text[:300]}",
             )
         else:
             a2a.notify(

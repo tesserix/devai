@@ -17,8 +17,10 @@ logger = logging.getLogger(__name__)
 
 # EM gets read-only + comment tools
 EM_TOOLS = [
-    t for t in GITHUB_TOOLS
-    if t["name"] in {
+    t
+    for t in GITHUB_TOOLS
+    if t["name"]
+    in {
         "github_get_issue",
         "github_get_file_content",
         "github_list_files",
@@ -85,8 +87,7 @@ class EngineeringManagerAgent(BaseAgent):
         req_context = ""
         if analyzed_reqs:
             req_context = "\n## Analyzed Requirements\n" + "\n".join(
-                f"- [{r.get('category', 'functional')}] {r.get('title', '')}"
-                for r in analyzed_reqs[:10]
+                f"- [{r.get('category', 'functional')}] {r.get('title', '')}" for r in analyzed_reqs[:10]
             )
 
         # Check for A2A messages (handoffs, gaps, etc.)
@@ -135,7 +136,8 @@ The Staff Reviewer requested changes. Please incorporate this feedback into your
             first_issue = stories[0].get("number")
             if first_issue:
                 await self.github.add_comment(
-                    repo, first_issue,
+                    repo,
+                    first_issue,
                     f"## Technical Implementation Plan\n\n{plan_text}",
                 )
 
@@ -151,8 +153,7 @@ The Staff Reviewer requested changes. Please incorporate this feedback into your
         a2a.notify(
             "qa_tester",
             "Implementation Starting",
-            f"Technical plan approved for {len(stories)} stories. "
-            "Prepare test strategy based on the requirements.",
+            f"Technical plan approved for {len(stories)} stories. Prepare test strategy based on the requirements.",
         )
 
         return {

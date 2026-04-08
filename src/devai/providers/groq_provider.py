@@ -39,7 +39,11 @@ class GroqProvider:
 
             result = subprocess.run(
                 [
-                    "gcloud", "secrets", "versions", "access", "latest",
+                    "gcloud",
+                    "secrets",
+                    "versions",
+                    "access",
+                    "latest",
                     f"--secret={secret_name}",
                     "--project=tesseracthub-480811",
                 ],

@@ -219,13 +219,15 @@ class BaseAgent(ABC):
         if not gates.get(gate, False):
             return
 
-        approval = json.dumps({
-            "run_id": ctx.run_id,
-            "gate": gate,
-            "agent": self.name,
-            "repo": ctx.repo_full_name,
-            "timestamp": time.time(),
-        })
+        approval = json.dumps(
+            {
+                "run_id": ctx.run_id,
+                "gate": gate,
+                "agent": self.name,
+                "repo": ctx.repo_full_name,
+                "timestamp": time.time(),
+            }
+        )
         await self.state.redis.rpush(f"devai:run:{ctx.run_id}:approvals", approval)
         await self.state.set_agent_status(ctx.run_id, self.name, "waiting_approval")
 
@@ -267,8 +269,14 @@ class BaseAgent(ABC):
             output_filter = OutputFilter()
 
             # Filter any text fields that might be posted to SCM
-            for key in ("implementation_summary", "review_summary", "security_summary",
-                        "test_summary", "supervisor_plan_raw", "orchestrator_decision_raw"):
+            for key in (
+                "implementation_summary",
+                "review_summary",
+                "security_summary",
+                "test_summary",
+                "supervisor_plan_raw",
+                "orchestrator_decision_raw",
+            ):
                 if key in result and isinstance(result[key], str):
                     result[key] = output_filter.filter_for_scm(result[key])
         except Exception as e:

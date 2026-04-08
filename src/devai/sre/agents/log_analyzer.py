@@ -68,6 +68,7 @@ class LogAnalyzerAgent:
             pods_data = await self.k8s.execute("k8s_get_pod_status", {"namespace": ns})
 
             import json
+
             try:
                 pods = json.loads(pods_data) if isinstance(pods_data, str) else pods_data
             except json.JSONDecodeError:
@@ -81,18 +82,30 @@ class LogAnalyzerAgent:
                 if raw:
                     pod_names = raw.split()[:5]  # Sample first 5
                     for pn in pod_names:
-                        log_result = await self.k8s.execute("k8s_get_pod_logs", {
-                            "namespace": ns, "pod_name": pn, "lines": 50, "errors_only": True,
-                        })
+                        log_result = await self.k8s.execute(
+                            "k8s_get_pod_logs",
+                            {
+                                "namespace": ns,
+                                "pod_name": pn,
+                                "lines": 50,
+                                "errors_only": True,
+                            },
+                        )
                         if log_result and "logs" in str(log_result):
                             all_logs.append(f"## Pod: {ns}/{pn}\n{log_result}")
             else:
                 for pod_info in pod_list[:10]:
                     pn = pod_info.get("name", "")
                     if pn:
-                        log_result = await self.k8s.execute("k8s_get_pod_logs", {
-                            "namespace": ns, "pod_name": pn, "lines": 100, "errors_only": True,
-                        })
+                        log_result = await self.k8s.execute(
+                            "k8s_get_pod_logs",
+                            {
+                                "namespace": ns,
+                                "pod_name": pn,
+                                "lines": 100,
+                                "errors_only": True,
+                            },
+                        )
                         all_logs.append(f"## Pod: {ns}/{pn}\n{log_result}")
 
         if not all_logs:

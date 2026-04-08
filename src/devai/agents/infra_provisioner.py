@@ -25,8 +25,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 INFRA_TOOLS = [
-    t for t in GITHUB_TOOLS
-    if t["name"] in {
+    t
+    for t in GITHUB_TOOLS
+    if t["name"]
+    in {
         "github_get_file_content",
         "github_list_files",
         "github_get_repo_tree",

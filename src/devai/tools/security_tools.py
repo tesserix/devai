@@ -21,8 +21,8 @@ SECURITY_TOOLS: list[dict[str, Any]] = [
     {
         "name": "security_scan_sast",
         "description": "Run Static Application Security Testing (SAST) on the codebase. "
-                       "Supports Python (bandit+semgrep), Go (gosec), JS/TS (eslint-security). "
-                       "Returns structured vulnerability findings.",
+        "Supports Python (bandit+semgrep), Go (gosec), JS/TS (eslint-security). "
+        "Returns structured vulnerability findings.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -36,7 +36,7 @@ SECURITY_TOOLS: list[dict[str, Any]] = [
     {
         "name": "security_scan_dependencies",
         "description": "Scan dependencies for known CVEs. "
-                       "Supports pip (safety/pip-audit), npm (npm audit), Go (govulncheck).",
+        "Supports pip (safety/pip-audit), npm (npm audit), Go (govulncheck).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -50,7 +50,7 @@ SECURITY_TOOLS: list[dict[str, Any]] = [
     {
         "name": "security_scan_secrets",
         "description": "Scan code for hardcoded secrets, API keys, credentials, and tokens. "
-                       "Uses pattern-based detection for common secret formats.",
+        "Uses pattern-based detection for common secret formats.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -63,7 +63,7 @@ SECURITY_TOOLS: list[dict[str, Any]] = [
     {
         "name": "security_scan_container",
         "description": "Scan Dockerfile and container image for vulnerabilities. "
-                       "Checks base image, exposed ports, running as root, etc.",
+        "Checks base image, exposed ports, running as root, etc.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -77,7 +77,7 @@ SECURITY_TOOLS: list[dict[str, Any]] = [
     {
         "name": "security_check_owasp",
         "description": "Check code against OWASP Top 10 categories. "
-                       "Produces a compliance checklist with pass/fail per category.",
+        "Produces a compliance checklist with pass/fail per category.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -128,70 +128,87 @@ class SecurityToolExecutor:
                 # Bandit
                 bandit_out = await self._run_cmd(
                     ["python", "-m", "bandit", "-r", ".", "-f", "json", "-ll"],
-                    tmpdir, timeout=120,
+                    tmpdir,
+                    timeout=120,
                 )
                 if bandit_out:
                     try:
                         data = json.loads(bandit_out)
                         for r in data.get("results", []):
-                            findings.append({
-                                "tool": "bandit",
-                                "severity": r.get("issue_severity", "MEDIUM"),
-                                "confidence": r.get("issue_confidence", "MEDIUM"),
-                                "file": r.get("filename", ""),
-                                "line": r.get("line_number", 0),
-                                "issue": r.get("issue_text", ""),
-                                "cwe": r.get("issue_cwe", {}).get("id", ""),
-                            })
+                            findings.append(
+                                {
+                                    "tool": "bandit",
+                                    "severity": r.get("issue_severity", "MEDIUM"),
+                                    "confidence": r.get("issue_confidence", "MEDIUM"),
+                                    "file": r.get("filename", ""),
+                                    "line": r.get("line_number", 0),
+                                    "issue": r.get("issue_text", ""),
+                                    "cwe": r.get("issue_cwe", {}).get("id", ""),
+                                }
+                            )
                     except json.JSONDecodeError:
                         findings.append({"tool": "bandit", "raw": bandit_out[:2000]})
 
             elif lang == "go":
                 gosec_out = await self._run_cmd(
                     ["gosec", "-fmt=json", "./..."],
-                    tmpdir, timeout=120,
+                    tmpdir,
+                    timeout=120,
                 )
                 if gosec_out:
                     try:
                         data = json.loads(gosec_out)
                         for issue in data.get("Issues", []):
-                            findings.append({
-                                "tool": "gosec",
-                                "severity": issue.get("severity", "MEDIUM"),
-                                "confidence": issue.get("confidence", "MEDIUM"),
-                                "file": issue.get("file", ""),
-                                "line": issue.get("line", "0"),
-                                "issue": issue.get("details", ""),
-                                "cwe": issue.get("cwe", {}).get("id", ""),
-                            })
+                            findings.append(
+                                {
+                                    "tool": "gosec",
+                                    "severity": issue.get("severity", "MEDIUM"),
+                                    "confidence": issue.get("confidence", "MEDIUM"),
+                                    "file": issue.get("file", ""),
+                                    "line": issue.get("line", "0"),
+                                    "issue": issue.get("details", ""),
+                                    "cwe": issue.get("cwe", {}).get("id", ""),
+                                }
+                            )
                     except json.JSONDecodeError:
                         findings.append({"tool": "gosec", "raw": gosec_out[:2000]})
 
             elif lang in ("javascript", "typescript"):
                 # ESLint security plugin
                 eslint_out = await self._run_cmd(
-                    ["npx", "eslint", "--no-eslintrc",
-                     "--plugin", "security",
-                     "--rule", '{"security/detect-object-injection": "warn", '
-                               '"security/detect-non-literal-regexp": "warn", '
-                               '"security/detect-unsafe-regex": "warn", '
-                               '"security/detect-eval-with-expression": "error"}',
-                     "-f", "json", "."],
-                    tmpdir, timeout=120,
+                    [
+                        "npx",
+                        "eslint",
+                        "--no-eslintrc",
+                        "--plugin",
+                        "security",
+                        "--rule",
+                        '{"security/detect-object-injection": "warn", '
+                        '"security/detect-non-literal-regexp": "warn", '
+                        '"security/detect-unsafe-regex": "warn", '
+                        '"security/detect-eval-with-expression": "error"}',
+                        "-f",
+                        "json",
+                        ".",
+                    ],
+                    tmpdir,
+                    timeout=120,
                 )
                 if eslint_out:
                     try:
                         data = json.loads(eslint_out)
                         for file_result in data:
                             for msg in file_result.get("messages", []):
-                                findings.append({
-                                    "tool": "eslint-security",
-                                    "severity": "HIGH" if msg.get("severity", 1) >= 2 else "MEDIUM",
-                                    "file": file_result.get("filePath", ""),
-                                    "line": msg.get("line", 0),
-                                    "issue": msg.get("message", ""),
-                                    "rule": msg.get("ruleId", ""),
-                                })
+                                findings.append(
+                                    {
+                                        "tool": "eslint-security",
+                                        "severity": "HIGH" if msg.get("severity", 1) >= 2 else "MEDIUM",
+                                        "file": file_result.get("filePath", ""),
+                                        "line": msg.get("line", 0),
+                                        "issue": msg.get("message", ""),
+                                        "rule": msg.get("ruleId", ""),
+                                    }
+                                )
                     except json.JSONDecodeError:
                         pass
 
@@ -217,45 +234,52 @@ class SecurityToolExecutor:
                 # pip-audit
                 audit_out = await self._run_cmd(
                     ["python", "-m", "pip_audit", "--format=json", "--desc"],
-                    tmpdir, timeout=120,
+                    tmpdir,
+                    timeout=120,
                 )
                 if audit_out:
                     try:
                         data = json.loads(audit_out)
                         for dep in data.get("dependencies", []):
                             for vuln in dep.get("vulns", []):
-                                vulns.append({
-                                    "package": dep.get("name", ""),
-                                    "version": dep.get("version", ""),
-                                    "cve": vuln.get("id", ""),
-                                    "description": vuln.get("description", "")[:200],
-                                    "fix_version": vuln.get("fix_versions", ["unknown"])[0],
-                                })
+                                vulns.append(
+                                    {
+                                        "package": dep.get("name", ""),
+                                        "version": dep.get("version", ""),
+                                        "cve": vuln.get("id", ""),
+                                        "description": vuln.get("description", "")[:200],
+                                        "fix_version": vuln.get("fix_versions", ["unknown"])[0],
+                                    }
+                                )
                     except json.JSONDecodeError:
                         pass
 
             elif lang in ("javascript", "typescript"):
                 audit_out = await self._run_cmd(
                     ["npm", "audit", "--json"],
-                    tmpdir, timeout=60,
+                    tmpdir,
+                    timeout=60,
                 )
                 if audit_out:
                     try:
                         data = json.loads(audit_out)
                         for name, adv in data.get("vulnerabilities", {}).items():
-                            vulns.append({
-                                "package": name,
-                                "severity": adv.get("severity", ""),
-                                "via": str(adv.get("via", ""))[:200],
-                                "fix_available": adv.get("fixAvailable", False),
-                            })
+                            vulns.append(
+                                {
+                                    "package": name,
+                                    "severity": adv.get("severity", ""),
+                                    "via": str(adv.get("via", ""))[:200],
+                                    "fix_available": adv.get("fixAvailable", False),
+                                }
+                            )
                     except json.JSONDecodeError:
                         pass
 
             elif lang == "go":
                 vuln_out = await self._run_cmd(
                     ["govulncheck", "-json", "./..."],
-                    tmpdir, timeout=120,
+                    tmpdir,
+                    timeout=120,
                 )
                 if vuln_out:
                     try:
@@ -263,10 +287,12 @@ class SecurityToolExecutor:
                             entry = json.loads(line)
                             if "finding" in entry:
                                 f = entry["finding"]
-                                vulns.append({
-                                    "osv_id": f.get("osv", ""),
-                                    "trace": str(f.get("trace", []))[:200],
-                                })
+                                vulns.append(
+                                    {
+                                        "osv_id": f.get("osv", ""),
+                                        "trace": str(f.get("trace", []))[:200],
+                                    }
+                                )
                     except (json.JSONDecodeError, ValueError):
                         pass
 
@@ -290,7 +316,8 @@ class SecurityToolExecutor:
 
             trufflehog_out = await self._run_cmd(
                 ["trufflehog", "filesystem", "--json", "--no-update", tmpdir],
-                tmpdir, timeout=120,
+                tmpdir,
+                timeout=120,
             )
             if trufflehog_out:
                 for line in trufflehog_out.strip().split("\n"):
@@ -298,13 +325,15 @@ class SecurityToolExecutor:
                         entry = json.loads(line)
                         if entry.get("SourceMetadata"):
                             meta = entry["SourceMetadata"].get("Data", {}).get("Filesystem", {})
-                            secrets.append({
-                                "file": meta.get("file", ""),
-                                "line": meta.get("line", 0),
-                                "detector": entry.get("DetectorName", ""),
-                                "verified": entry.get("Verified", False),
-                                "raw_preview": entry.get("Raw", "")[:30] + "***",
-                            })
+                            secrets.append(
+                                {
+                                    "file": meta.get("file", ""),
+                                    "line": meta.get("line", 0),
+                                    "detector": entry.get("DetectorName", ""),
+                                    "verified": entry.get("Verified", False),
+                                    "raw_preview": entry.get("Raw", "")[:30] + "***",
+                                }
+                            )
                     except json.JSONDecodeError:
                         continue
             else:
@@ -324,25 +353,43 @@ class SecurityToolExecutor:
 
                 for pattern, label in patterns:
                     grep_out = await self._run_cmd(
-                        ["grep", "-rn", "-E", pattern, "--include=*.py", "--include=*.go",
-                         "--include=*.js", "--include=*.ts", "--include=*.yaml",
-                         "--include=*.yml", "--include=*.json", "--include=*.env",
-                         "--include=*.toml", "--include=*.cfg",
-                         "--exclude-dir=.git", "--exclude-dir=node_modules",
-                         "--exclude-dir=vendor", "--exclude-dir=__pycache__", "."],
-                        tmpdir, timeout=30,
+                        [
+                            "grep",
+                            "-rn",
+                            "-E",
+                            pattern,
+                            "--include=*.py",
+                            "--include=*.go",
+                            "--include=*.js",
+                            "--include=*.ts",
+                            "--include=*.yaml",
+                            "--include=*.yml",
+                            "--include=*.json",
+                            "--include=*.env",
+                            "--include=*.toml",
+                            "--include=*.cfg",
+                            "--exclude-dir=.git",
+                            "--exclude-dir=node_modules",
+                            "--exclude-dir=vendor",
+                            "--exclude-dir=__pycache__",
+                            ".",
+                        ],
+                        tmpdir,
+                        timeout=30,
                     )
                     if grep_out:
                         for line in grep_out.strip().split("\n")[:5]:
                             parts = line.split(":", 2)
                             if len(parts) >= 2:
-                                secrets.append({
-                                    "file": parts[0],
-                                    "line": parts[1],
-                                    "detector": label,
-                                    "verified": False,
-                                    "raw_preview": parts[2][:40] + "***" if len(parts) > 2 else "",
-                                })
+                                secrets.append(
+                                    {
+                                        "file": parts[0],
+                                        "line": parts[1],
+                                        "detector": label,
+                                        "verified": False,
+                                        "raw_preview": parts[2][:40] + "***" if len(parts) > 2 else "",
+                                    }
+                                )
 
             return {
                 "scanner": "secrets",
@@ -372,11 +419,21 @@ class SecurityToolExecutor:
                 # Check for latest tag
                 for line in content.split("\n"):
                     stripped = line.strip()
-                    if stripped.startswith("FROM") and (":latest" in stripped or ":" not in stripped.split()[1] if len(stripped.split()) > 1 else True):
-                        findings.append({"severity": "MEDIUM", "issue": "Base image uses :latest tag — pin to specific version", "line": stripped})
+                    if stripped.startswith("FROM") and (
+                        ":latest" in stripped or ":" not in stripped.split()[1] if len(stripped.split()) > 1 else True
+                    ):
+                        findings.append(
+                            {
+                                "severity": "MEDIUM",
+                                "issue": "Base image uses :latest tag — pin to specific version",
+                                "line": stripped,
+                            }
+                        )
 
             if "USER" not in content:
-                findings.append({"severity": "HIGH", "issue": "No USER instruction — container runs as root", "line": ""})
+                findings.append(
+                    {"severity": "HIGH", "issue": "No USER instruction — container runs as root", "line": ""}
+                )
 
             if "HEALTHCHECK" not in content:
                 findings.append({"severity": "LOW", "issue": "No HEALTHCHECK instruction", "line": ""})
@@ -388,21 +445,30 @@ class SecurityToolExecutor:
                 if "chmod 777" in stripped:
                     findings.append({"severity": "HIGH", "issue": "Overly permissive chmod 777", "line": stripped})
                 if stripped.startswith("ADD") and ("http://" in stripped or "https://" in stripped):
-                    findings.append({"severity": "MEDIUM", "issue": "ADD from remote URL — use COPY + curl instead", "line": stripped})
+                    findings.append(
+                        {
+                            "severity": "MEDIUM",
+                            "issue": "ADD from remote URL — use COPY + curl instead",
+                            "line": stripped,
+                        }
+                    )
 
             # Try hadolint if available
             hadolint_out = await self._run_cmd(
                 ["hadolint", "-f", "json", str(dfile)],
-                tmpdir, timeout=30,
+                tmpdir,
+                timeout=30,
             )
             if hadolint_out:
                 try:
                     for item in json.loads(hadolint_out):
-                        findings.append({
-                            "severity": item.get("level", "warning").upper(),
-                            "issue": f"[{item.get('code', '')}] {item.get('message', '')}",
-                            "line": str(item.get("line", "")),
-                        })
+                        findings.append(
+                            {
+                                "severity": item.get("level", "warning").upper(),
+                                "issue": f"[{item.get('code', '')}] {item.get('message', '')}",
+                                "line": str(item.get("line", "")),
+                            }
+                        )
                 except json.JSONDecodeError:
                     pass
 
@@ -419,36 +485,119 @@ class SecurityToolExecutor:
 
         # OWASP Top 10 (2021) checklist
         checks: list[dict[str, Any]] = [
-            {"id": "A01", "name": "Broken Access Control", "patterns": [
-                "role", "admin", "authorize", "permission", "rbac", "acl",
-            ]},
-            {"id": "A02", "name": "Cryptographic Failures", "patterns": [
-                "md5", "sha1", "base64", "encrypt", "decrypt", "hash", "salt",
-            ]},
-            {"id": "A03", "name": "Injection", "patterns": [
-                "sql", "exec", "eval", "system(", "subprocess", "os.popen",
-                "innerHTML", "dangerouslySetInnerHTML", "raw(", "format(",
-            ]},
-            {"id": "A04", "name": "Insecure Design", "patterns": [
-                "todo", "fixme", "hack", "workaround", "temporary",
-            ]},
-            {"id": "A05", "name": "Security Misconfiguration", "patterns": [
-                "debug", "cors", "allow_all", "permit_all", "*.*.*",
-                "0.0.0.0", "disable_ssl", "verify=false", "insecure",
-            ]},
+            {
+                "id": "A01",
+                "name": "Broken Access Control",
+                "patterns": [
+                    "role",
+                    "admin",
+                    "authorize",
+                    "permission",
+                    "rbac",
+                    "acl",
+                ],
+            },
+            {
+                "id": "A02",
+                "name": "Cryptographic Failures",
+                "patterns": [
+                    "md5",
+                    "sha1",
+                    "base64",
+                    "encrypt",
+                    "decrypt",
+                    "hash",
+                    "salt",
+                ],
+            },
+            {
+                "id": "A03",
+                "name": "Injection",
+                "patterns": [
+                    "sql",
+                    "exec",
+                    "eval",
+                    "system(",
+                    "subprocess",
+                    "os.popen",
+                    "innerHTML",
+                    "dangerouslySetInnerHTML",
+                    "raw(",
+                    "format(",
+                ],
+            },
+            {
+                "id": "A04",
+                "name": "Insecure Design",
+                "patterns": [
+                    "todo",
+                    "fixme",
+                    "hack",
+                    "workaround",
+                    "temporary",
+                ],
+            },
+            {
+                "id": "A05",
+                "name": "Security Misconfiguration",
+                "patterns": [
+                    "debug",
+                    "cors",
+                    "allow_all",
+                    "permit_all",
+                    "*.*.*",
+                    "0.0.0.0",
+                    "disable_ssl",
+                    "verify=false",
+                    "insecure",
+                ],
+            },
             {"id": "A06", "name": "Vulnerable Components", "patterns": []},
-            {"id": "A07", "name": "Auth Failures", "patterns": [
-                "password", "token", "jwt", "session", "cookie", "oauth",
-            ]},
-            {"id": "A08", "name": "Software/Data Integrity", "patterns": [
-                "deserializ", "pickle", "yaml.load", "marshal", "unserialize",
-            ]},
-            {"id": "A09", "name": "Logging/Monitoring Failures", "patterns": [
-                "log", "audit", "monitor", "alert", "trace",
-            ]},
-            {"id": "A10", "name": "SSRF", "patterns": [
-                "url", "fetch", "request", "http", "redirect",
-            ]},
+            {
+                "id": "A07",
+                "name": "Auth Failures",
+                "patterns": [
+                    "password",
+                    "token",
+                    "jwt",
+                    "session",
+                    "cookie",
+                    "oauth",
+                ],
+            },
+            {
+                "id": "A08",
+                "name": "Software/Data Integrity",
+                "patterns": [
+                    "deserializ",
+                    "pickle",
+                    "yaml.load",
+                    "marshal",
+                    "unserialize",
+                ],
+            },
+            {
+                "id": "A09",
+                "name": "Logging/Monitoring Failures",
+                "patterns": [
+                    "log",
+                    "audit",
+                    "monitor",
+                    "alert",
+                    "trace",
+                ],
+            },
+            {
+                "id": "A10",
+                "name": "SSRF",
+                "patterns": [
+                    "url",
+                    "fetch",
+                    "request",
+                    "http",
+                    "redirect",
+                ],
+            },
         ]
 
         diff_lower = diff.lower()
@@ -456,12 +605,14 @@ class SecurityToolExecutor:
 
         for check in checks:
             relevant = any(p in diff_lower for p in check["patterns"])
-            results.append({
-                "id": check["id"],
-                "category": check["name"],
-                "relevant_to_diff": relevant,
-                "status": "REVIEW_NEEDED" if relevant else "NOT_APPLICABLE",
-            })
+            results.append(
+                {
+                    "id": check["id"],
+                    "category": check["name"],
+                    "relevant_to_diff": relevant,
+                    "status": "REVIEW_NEEDED" if relevant else "NOT_APPLICABLE",
+                }
+            )
 
         review_needed = [r for r in results if r["status"] == "REVIEW_NEEDED"]
 
@@ -490,7 +641,13 @@ class SecurityToolExecutor:
                     line = line.strip()
                     if line and not line.startswith("#"):
                         parts = line.split("==")
-                        deps.append({"name": parts[0].strip(), "version": parts[1].strip() if len(parts) > 1 else "unknown", "ecosystem": "pypi"})
+                        deps.append(
+                            {
+                                "name": parts[0].strip(),
+                                "version": parts[1].strip() if len(parts) > 1 else "unknown",
+                                "ecosystem": "pypi",
+                            }
+                        )
 
             pyproject = path / "pyproject.toml"
             if pyproject.exists():
@@ -505,7 +662,9 @@ class SecurityToolExecutor:
                         in_deps = False
                     if in_deps and line.strip().startswith('"'):
                         dep = line.strip().strip('",')
-                        deps.append({"name": dep.split(">=")[0].split("==")[0].strip(), "version": ">=*", "ecosystem": "pypi"})
+                        deps.append(
+                            {"name": dep.split(">=")[0].split("==")[0].strip(), "version": ">=*", "ecosystem": "pypi"}
+                        )
 
             # Node.js
             pkg_json = path / "package.json"
@@ -524,7 +683,12 @@ class SecurityToolExecutor:
             if go_mod.exists():
                 for line in go_mod.read_text().split("\n"):
                     line = line.strip()
-                    if line and not line.startswith("module") and not line.startswith("go ") and not line.startswith("//"):
+                    if (
+                        line
+                        and not line.startswith("module")
+                        and not line.startswith("go ")
+                        and not line.startswith("//")
+                    ):
                         if line.startswith("require") or line == "(" or line == ")":
                             continue
                         parts = line.split()
@@ -543,9 +707,16 @@ class SecurityToolExecutor:
 
     async def _clone(self, repo: str, branch: str, tmpdir: str) -> bool:
         proc = await asyncio.create_subprocess_exec(
-            "git", "clone", "--branch", branch, "--depth", "1",
-            f"https://github.com/{repo}.git", tmpdir,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            "git",
+            "clone",
+            "--branch",
+            branch,
+            "--depth",
+            "1",
+            f"https://github.com/{repo}.git",
+            tmpdir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
@@ -554,13 +725,18 @@ class SecurityToolExecutor:
         return True
 
     async def _run_cmd(
-        self, cmd: list[str], cwd: str, timeout: int = 60,
+        self,
+        cmd: list[str],
+        cwd: str,
+        timeout: int = 60,
     ) -> str:
         """Run a command and return stdout, or empty string on failure."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=cwd,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                *cmd,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env={**os.environ},
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)

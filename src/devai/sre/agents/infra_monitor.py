@@ -74,7 +74,7 @@ class InfraMonitorAgent:
 ## Certificates
 {certs}
 
-{''.join(namespace_data)}"""
+{"".join(namespace_data)}"""
 
         analysis = await self.groq.generate(
             prompt=f"Analyze this Kubernetes cluster state and identify issues:\n\n{combined[:8000]}",
@@ -83,6 +83,7 @@ class InfraMonitorAgent:
         )
 
         import json
+
         try:
             return json.loads(analysis)
         except json.JSONDecodeError:

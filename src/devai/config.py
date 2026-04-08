@@ -28,11 +28,11 @@ class Settings(BaseSettings):
     redis_lock_ttl: int = 360  # seconds
 
     # --- SCM Provider (GitHub / GitLab / Azure DevOps) ---
-    scm_provider: str = "github"          # github | gitlab | azure_devops
-    scm_auth_method: str = "github_app"   # github_app | pat | oauth | ado_pat | gitlab_token
-    scm_base_url: str = ""                # Override default API URL (for self-hosted)
-    scm_token: str = ""                   # PAT / OAuth token / GitLab token
-    scm_organization: str = ""            # ADO org name (if using azure_devops)
+    scm_provider: str = "github"  # github | gitlab | azure_devops
+    scm_auth_method: str = "github_app"  # github_app | pat | oauth | ado_pat | gitlab_token
+    scm_base_url: str = ""  # Override default API URL (for self-hosted)
+    scm_token: str = ""  # PAT / OAuth token / GitLab token
+    scm_organization: str = ""  # ADO org name (if using azure_devops)
 
     # --- GitHub (legacy + GitHub App auth) ---
     github_app_id: int = 0

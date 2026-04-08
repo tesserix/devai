@@ -219,14 +219,16 @@ Break these requirements into user stories. Consider the repository context and 
                 body=body,
                 labels=labels,
             )
-            created_stories.append({
-                "title": story.get("title", ""),
-                "description": story.get("description", ""),
-                "priority": story.get("priority", "medium"),
-                "number": issue["number"],
-                "url": issue["html_url"],
-                "acceptance_criteria": ac,
-            })
+            created_stories.append(
+                {
+                    "title": story.get("title", ""),
+                    "description": story.get("description", ""),
+                    "priority": story.get("priority", "medium"),
+                    "number": issue["number"],
+                    "url": issue["html_url"],
+                    "acceptance_criteria": ac,
+                }
+            )
             story_numbers.append(issue["number"])
 
             # Add story to the Supervisor's project board
@@ -238,7 +240,8 @@ Break these requirements into user stories. Consider the repository context and 
         if epic_number and created_stories:
             story_refs = "\n".join(f"- [ ] #{s['number']} — {s['title']}" for s in created_stories)
             await self.github.add_comment(
-                repo, epic_number,
+                repo,
+                epic_number,
                 f"## User Stories\n\n{story_refs}",
             )
 

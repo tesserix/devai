@@ -64,63 +64,109 @@ logger = logging.getLogger(__name__)
 # Maps agent_name → set of allowed SCM operations
 AGENT_PERMISSIONS: dict[str, set[str]] = {
     "supervisor": {
-        "create_issue", "add_comment", "get_issue", "get_repo_info",
-        "create_project", "add_item_to_project", "get_node_id",
+        "create_issue",
+        "add_comment",
+        "get_issue",
+        "get_repo_info",
+        "create_project",
+        "add_item_to_project",
+        "get_node_id",
     },
     "orchestrator": {
-        "add_comment", "get_issue", "get_repo_info",
+        "add_comment",
+        "get_issue",
+        "get_repo_info",
     },
     "document_analyzer": {
-        "get_file_content", "list_files", "get_repo_tree",
+        "get_file_content",
+        "list_files",
+        "get_repo_tree",
     },
     "tech_detector": {
-        "get_file_content", "list_files", "get_repo_tree",
+        "get_file_content",
+        "list_files",
+        "get_repo_tree",
     },
     "requirements_analyst": {
-        "get_issue", "get_file_content", "add_comment",
+        "get_issue",
+        "get_file_content",
+        "add_comment",
     },
     "product_director": {
-        "create_issue", "add_comment", "get_issue",
-        "get_node_id", "add_item_to_project",
+        "create_issue",
+        "add_comment",
+        "get_issue",
+        "get_node_id",
+        "add_item_to_project",
     },
     "engineering_manager": {
-        "get_issue", "get_file_content", "list_files", "get_repo_tree", "add_comment",
+        "get_issue",
+        "get_file_content",
+        "list_files",
+        "get_repo_tree",
+        "add_comment",
     },
     "senior_developer": {
-        "get_file_content", "list_files", "get_repo_tree",
-        "create_branch", "create_or_update_file", "create_pull_request",
+        "get_file_content",
+        "list_files",
+        "get_repo_tree",
+        "create_branch",
+        "create_or_update_file",
+        "create_pull_request",
         "add_comment",
     },
     "db_engineer": {
-        "get_file_content", "list_files", "get_repo_tree", "add_comment",
+        "get_file_content",
+        "list_files",
+        "get_repo_tree",
+        "add_comment",
     },
     "staff_reviewer": {
-        "get_pr_diff", "create_pr_review", "add_comment",
+        "get_pr_diff",
+        "create_pr_review",
+        "add_comment",
     },
     "security_expert": {
-        "get_pr_diff", "get_file_content", "list_files", "add_comment",
+        "get_pr_diff",
+        "get_file_content",
+        "list_files",
+        "add_comment",
     },
     "ci_monitor": {
-        "get_pipeline_runs", "get_pipeline_jobs", "add_comment",
-        "set_repo_visibility", "get_repo_visibility", "get_all_workflow_runs",
+        "get_pipeline_runs",
+        "get_pipeline_jobs",
+        "add_comment",
+        "set_repo_visibility",
+        "get_repo_visibility",
+        "get_all_workflow_runs",
     },
     "qa_tester": {
-        "get_file_content", "add_comment",
+        "get_file_content",
+        "add_comment",
     },
     "infra_provisioner": {
-        "get_file_content", "list_files", "get_repo_tree",
-        "create_branch", "create_or_update_file", "create_pull_request",
+        "get_file_content",
+        "list_files",
+        "get_repo_tree",
+        "create_branch",
+        "create_or_update_file",
+        "create_pull_request",
         "add_comment",
     },
     "release_manager": {
-        "merge_pull_request", "add_comment", "get_pull_request",
+        "merge_pull_request",
+        "add_comment",
+        "get_pull_request",
     },
 }
 
 # Operations that are destructive or high-risk — always logged at WARNING level
 DESTRUCTIVE_OPERATIONS = {
-    "merge_pull_request", "set_repo_visibility", "create_branch",
-    "create_or_update_file", "create_pull_request",
+    "merge_pull_request",
+    "set_repo_visibility",
+    "create_branch",
+    "create_or_update_file",
+    "create_pull_request",
 }
 
 # Repos that agents are NEVER allowed to modify (infra repos)
@@ -175,7 +221,9 @@ class ActionPolicy:
         if operation in DESTRUCTIVE_OPERATIONS:
             logger.warning(
                 "GUARDRAIL: Agent '%s' performing destructive operation '%s' on '%s'",
-                agent_name, operation, repo,
+                agent_name,
+                operation,
+                repo,
             )
 
 
@@ -193,7 +241,10 @@ SECRET_PATTERNS = [
     (re.compile(r"AKIA[A-Z0-9]{16}"), "AWS Access Key"),
     (re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"), "Private Key"),
     (re.compile(r"(?:password|passwd|pwd)\s*[=:]\s*['\"][^'\"]{4,}['\"]", re.IGNORECASE), "Password"),
-    (re.compile(r"(?:api_key|apikey|api-key|token|secret)\s*[=:]\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE), "API Key/Secret"),
+    (
+        re.compile(r"(?:api_key|apikey|api-key|token|secret)\s*[=:]\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE),
+        "API Key/Secret",
+    ),
     (re.compile(r"eyJ[A-Za-z0-9-_]{20,}\.[A-Za-z0-9-_]{20,}"), "JWT Token"),
     (re.compile(r"[0-9a-f]{40}", re.IGNORECASE), "Potential SHA/Token (40 hex chars)"),
 ]
@@ -210,7 +261,7 @@ INJECTION_PATTERNS = [
 
 # Maximum input sizes
 MAX_REQUIREMENTS_LENGTH = 50_000  # 50KB
-MAX_ISSUE_BODY_LENGTH = 65_000   # GitHub's limit
+MAX_ISSUE_BODY_LENGTH = 65_000  # GitHub's limit
 MAX_COMMENT_LENGTH = 65_000
 MAX_PR_BODY_LENGTH = 65_000
 
@@ -229,9 +280,7 @@ class InputSanitizer:
         # Check length
         if len(text) > MAX_REQUIREMENTS_LENGTH:
             text = text[:MAX_REQUIREMENTS_LENGTH]
-            warnings.append(
-                f"Requirements truncated to {MAX_REQUIREMENTS_LENGTH} chars"
-            )
+            warnings.append(f"Requirements truncated to {MAX_REQUIREMENTS_LENGTH} chars")
 
         # Check for secrets
         text, secret_warnings = self._mask_secrets(text)
@@ -251,7 +300,7 @@ class InputSanitizer:
         text, _ = self._mask_secrets(text)
 
         if len(text) > max_length:
-            text = text[:max_length - 50] + "\n\n*[Content truncated]*"
+            text = text[: max_length - 50] + "\n\n*[Content truncated]*"
 
         return text
 
@@ -280,9 +329,7 @@ class InputSanitizer:
                 for match in matches:
                     masked = match[:4] + "***MASKED***" + match[-4:]
                     text = text.replace(match, masked)
-                warnings.append(
-                    f"GUARDRAIL: Detected {len(matches)} potential {name}(s) in input — masked"
-                )
+                warnings.append(f"GUARDRAIL: Detected {len(matches)} potential {name}(s) in input — masked")
         return text, warnings
 
     def _detect_injection(self, text: str) -> list[str]:
@@ -290,9 +337,7 @@ class InputSanitizer:
         warnings: list[str] = []
         for pattern in INJECTION_PATTERNS:
             if pattern.search(text):
-                warnings.append(
-                    f"GUARDRAIL: Potential prompt injection detected: {pattern.pattern[:50]}..."
-                )
+                warnings.append(f"GUARDRAIL: Potential prompt injection detected: {pattern.pattern[:50]}...")
         return warnings
 
 
@@ -318,7 +363,7 @@ class OutputFilter:
 
         # Truncate if too long
         if len(text) > MAX_ISSUE_BODY_LENGTH:
-            text = text[:MAX_ISSUE_BODY_LENGTH - 50] + "\n\n*[Content truncated]*"
+            text = text[: MAX_ISSUE_BODY_LENGTH - 50] + "\n\n*[Content truncated]*"
 
         return text
 
@@ -389,9 +434,7 @@ class AuditLog:
 
         Returns the audit entry ID.
         """
-        entry_id = hashlib.sha256(
-            f"{time.time()}-{agent}-{action}".encode()
-        ).hexdigest()[:16]
+        entry_id = hashlib.sha256(f"{time.time()}-{agent}-{action}".encode()).hexdigest()[:16]
 
         entry = {
             "id": entry_id,
@@ -413,7 +456,10 @@ class AuditLog:
         log_fn = logger.warning if severity != AUDIT_INFO else logger.info
         log_fn(
             "AUDIT [%s] agent=%s action=%s repo=%s details=%s",
-            severity.upper(), agent, action, repo,
+            severity.upper(),
+            agent,
+            action,
+            repo,
             json.dumps(details or {}, default=str)[:200],
         )
 
@@ -470,11 +516,11 @@ class AuditLog:
 
 # Default rate limits (requests per minute)
 DEFAULT_RATE_LIMITS = {
-    "github_api": 80,       # GitHub: 5000/hr ≈ 83/min, leave headroom
-    "anthropic_api": 50,    # Claude: ~60 RPM on most tiers
-    "openai_api": 50,       # OpenAI: varies by tier
-    "groq_api": 25,         # Groq: 30 RPM free tier
-    "cloudflare_api": 20,   # Cloudflare: 1200/5min = 240/min, conservative
+    "github_api": 80,  # GitHub: 5000/hr ≈ 83/min, leave headroom
+    "anthropic_api": 50,  # Claude: ~60 RPM on most tiers
+    "openai_api": 50,  # OpenAI: varies by tier
+    "groq_api": 25,  # Groq: 30 RPM free tier
+    "cloudflare_api": 20,  # Cloudflare: 1200/5min = 240/min, conservative
     "pipeline_trigger": 5,  # Max 5 pipeline triggers per minute (per user)
 }
 
@@ -513,7 +559,9 @@ class RateLimiter:
         if current_count >= limit:
             logger.warning(
                 "GUARDRAIL: Rate limit reached for '%s': %d/%d per minute",
-                resource, current_count, limit,
+                resource,
+                current_count,
+                limit,
             )
             return False
 
@@ -577,10 +625,12 @@ class Guardrails:
             from langsmith import traceable
 
             self.pre_agent_check = traceable(  # type: ignore[assignment]
-                name="guardrails.pre_agent_check", run_type="tool",
+                name="guardrails.pre_agent_check",
+                run_type="tool",
             )(self.pre_agent_check)
             self.pre_scm_check = traceable(  # type: ignore[assignment]
-                name="guardrails.pre_scm_check", run_type="tool",
+                name="guardrails.pre_scm_check",
+                run_type="tool",
             )(self.pre_scm_check)
         except ImportError:
             pass
@@ -654,8 +704,7 @@ class Guardrails:
         allowed = await self.rate_limiter.acquire("github_api")
         if not allowed:
             raise RuntimeError(
-                f"GitHub API rate limit reached. Agent '{agent_name}' "
-                f"must wait before performing '{operation}'."
+                f"GitHub API rate limit reached. Agent '{agent_name}' must wait before performing '{operation}'."
             )
 
         # Audit log

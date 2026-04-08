@@ -305,7 +305,8 @@ class ALMOrchestrator:
     async def _node_supervisor(self, state: ALMState) -> dict[str, Any]:
         """Supervisor plans the architecture and creates the delegation plan."""
         result = await self._run_node(
-            "supervisor", state,
+            "supervisor",
+            state,
             "devai.agents.supervisor.SupervisorAgent",
         )
         result["stage"] = "plan_approved"
@@ -315,7 +316,8 @@ class ALMOrchestrator:
     async def _node_orchestrator_pre(self, state: ALMState) -> dict[str, Any]:
         """Orchestrator validates the plan and prepares for execution."""
         result = await self._run_node(
-            "orchestrator_pre", state,
+            "orchestrator_pre",
+            state,
             "devai.agents.orchestrator.OrchestratorAgent",
         )
         return result
@@ -324,7 +326,8 @@ class ALMOrchestrator:
     async def _node_orchestrator_review(self, state: ALMState) -> dict[str, Any]:
         """Orchestrator evaluates review results and decides next step."""
         result = await self._run_node(
-            "orchestrator_review", state,
+            "orchestrator_review",
+            state,
             "devai.agents.orchestrator.OrchestratorAgent",
         )
         return result
@@ -333,7 +336,8 @@ class ALMOrchestrator:
     async def _node_orchestrator_security(self, state: ALMState) -> dict[str, Any]:
         """Orchestrator evaluates security scan results and decides next step."""
         result = await self._run_node(
-            "orchestrator_security", state,
+            "orchestrator_security",
+            state,
             "devai.agents.orchestrator.OrchestratorAgent",
         )
         return result
@@ -342,7 +346,8 @@ class ALMOrchestrator:
     async def _node_orchestrator_tests(self, state: ALMState) -> dict[str, Any]:
         """Orchestrator evaluates test results and decides next step."""
         result = await self._run_node(
-            "orchestrator_tests", state,
+            "orchestrator_tests",
+            state,
             "devai.agents.orchestrator.OrchestratorAgent",
         )
         return result
@@ -351,7 +356,8 @@ class ALMOrchestrator:
     async def _node_orchestrator_post(self, state: ALMState) -> dict[str, Any]:
         """Orchestrator produces the final pipeline status report."""
         result = await self._run_node(
-            "orchestrator_post", state,
+            "orchestrator_post",
+            state,
             "devai.agents.orchestrator.OrchestratorAgent",
         )
         result["stage"] = state.get("stage", "done")
@@ -362,7 +368,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.ingest_documents", run_type="chain")
     async def _node_ingest_documents(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "ingest_documents", state,
+            "ingest_documents",
+            state,
             "devai.agents.document_analyzer.DocumentAnalyzerAgent",
         )
         result["stage"] = "requirements_analyzed"
@@ -371,7 +378,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.detect_tech_stack", run_type="chain")
     async def _node_detect_tech_stack(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "detect_tech_stack", state,
+            "detect_tech_stack",
+            state,
             "devai.agents.tech_detector.TechDetectorAgent",
         )
         return result
@@ -379,7 +387,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.analyze_requirements", run_type="chain")
     async def _node_analyze_requirements(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "analyze_requirements", state,
+            "analyze_requirements",
+            state,
             "devai.agents.requirements_analyst.RequirementsAnalystAgent",
         )
         result["stage"] = "requirements_analyzed"
@@ -388,7 +397,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.create_epic", run_type="chain")
     async def _node_create_epic(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "create_epic", state,
+            "create_epic",
+            state,
             "devai.agents.product_director.ProductDirectorAgent",
             method="run_epic",
         )
@@ -398,7 +408,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.create_stories", run_type="chain")
     async def _node_create_stories(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "create_stories", state,
+            "create_stories",
+            state,
             "devai.agents.product_director.ProductDirectorAgent",
             method="run_stories",
         )
@@ -408,7 +419,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.create_plan", run_type="chain")
     async def _node_create_plan(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "create_plan", state,
+            "create_plan",
+            state,
             "devai.agents.engineering_manager.EngineeringManagerAgent",
         )
         result["stage"] = "plan_created"
@@ -417,7 +429,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.implement_code", run_type="chain")
     async def _node_implement_code(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "implement_code", state,
+            "implement_code",
+            state,
             "devai.agents.senior_developer.SeniorDeveloperAgent",
         )
         result["stage"] = "code_implemented"
@@ -426,7 +439,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.db_engineering", run_type="chain")
     async def _node_db_engineering(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "db_engineering", state,
+            "db_engineering",
+            state,
             "devai.agents.db_engineer.DBEngineerAgent",
         )
         return result
@@ -434,7 +448,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.review_code", run_type="chain")
     async def _node_review_code(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "review_code", state,
+            "review_code",
+            state,
             "devai.agents.staff_reviewer.StaffReviewerAgent",
         )
         result["stage"] = "code_reviewed"
@@ -443,7 +458,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.security_scan", run_type="chain")
     async def _node_security_scan(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "security_scan", state,
+            "security_scan",
+            state,
             "devai.agents.security_expert.SecurityExpertAgent",
         )
         return result
@@ -451,7 +467,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.monitor_build", run_type="chain")
     async def _node_monitor_build(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "monitor_build", state,
+            "monitor_build",
+            state,
             "devai.agents.ci_monitor.CIMonitorAgent",
         )
         result["stage"] = "build_monitoring"
@@ -460,7 +477,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.run_tests", run_type="chain")
     async def _node_run_tests(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "run_tests", state,
+            "run_tests",
+            state,
             "devai.agents.qa_tester.QATesterAgent",
         )
         result["stage"] = "tests_complete"
@@ -469,7 +487,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.provision_infra", run_type="chain")
     async def _node_provision_infra(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "provision_infra", state,
+            "provision_infra",
+            state,
             "devai.agents.infra_provisioner.InfraProvisionerAgent",
         )
         return result
@@ -477,7 +496,8 @@ class ALMOrchestrator:
     @traceable_if_enabled(name="alm.deploy_release", run_type="chain")
     async def _node_deploy_release(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "deploy_release", state,
+            "deploy_release",
+            state,
             "devai.agents.release_manager.ReleaseManagerAgent",
         )
         result["stage"] = "deployed"
@@ -501,7 +521,11 @@ class ALMOrchestrator:
             return ""
 
     async def _record_success(
-        self, agent_name: str, state: ALMState, node_name: str, elapsed: float,
+        self,
+        agent_name: str,
+        state: ALMState,
+        node_name: str,
+        elapsed: float,
     ) -> None:
         """Record successful execution in memory."""
         try:
@@ -607,9 +631,7 @@ class ALMOrchestrator:
         }
 
         # Load governance (CLAUDE.md)
-        governance = await self.state_manager.redis.get(
-            f"devai:governance:{repo_full_name}:claude_md"
-        )
+        governance = await self.state_manager.redis.get(f"devai:governance:{repo_full_name}:claude_md")
         if governance:
             initial_state["governance"] = governance
 
@@ -627,7 +649,8 @@ class ALMOrchestrator:
 
         logger.info(
             "ALM pipeline started: run_id=%s repo=%s",
-            initial_state["run_id"], repo_full_name,
+            initial_state["run_id"],
+            repo_full_name,
         )
 
         try:
@@ -641,7 +664,8 @@ class ALMOrchestrator:
 
             logger.info(
                 "ALM pipeline completed: run_id=%s stage=%s timings=%s",
-                initial_state["run_id"], final_stage,
+                initial_state["run_id"],
+                final_stage,
                 final_state.get("agent_timings", {}),
             )
 

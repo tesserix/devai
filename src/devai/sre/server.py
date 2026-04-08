@@ -88,6 +88,7 @@ def create_sre_app() -> FastAPI:
     @app.get("/readyz")
     async def ready():
         from devai.sre.tools.k8s_tools import K8sToolExecutor
+
         k8s = K8sToolExecutor()
         cluster = await k8s._kubectl("cluster-info")
         return {
@@ -107,7 +108,8 @@ def create_sre_app() -> FastAPI:
     async def list_scan_runs(limit: int = 20):
         db = app.state.db
         rows = await db.pool.fetch(
-            "SELECT * FROM sre_scan_runs ORDER BY started_at DESC LIMIT $1", limit,
+            "SELECT * FROM sre_scan_runs ORDER BY started_at DESC LIMIT $1",
+            limit,
         )
         return [dict(r) for r in rows]
 
@@ -118,7 +120,8 @@ def create_sre_app() -> FastAPI:
         db = app.state.db
         rows = await db.pool.fetch(
             "SELECT * FROM sre_incidents WHERE status = $1 ORDER BY created_at DESC LIMIT $2",
-            status, limit,
+            status,
+            limit,
         )
         return [dict(r) for r in rows]
 
@@ -130,7 +133,8 @@ def create_sre_app() -> FastAPI:
             raise HTTPException(404, "Incident not found")
         # Get remediations
         remediations = await db.pool.fetch(
-            "SELECT * FROM sre_remediations WHERE incident_id = $1 ORDER BY created_at", incident_id,
+            "SELECT * FROM sre_remediations WHERE incident_id = $1 ORDER BY created_at",
+            incident_id,
         )
         result = dict(row)
         result["remediations"] = [dict(r) for r in remediations]
@@ -144,7 +148,9 @@ def create_sre_app() -> FastAPI:
         if status:
             await db.pool.execute(
                 "UPDATE sre_incidents SET status = $1, resolution_note = $2, updated_at = NOW() WHERE id = $3",
-                status, note, incident_id,
+                status,
+                note,
+                incident_id,
             )
             if status == "resolved":
                 await db.pool.execute(
@@ -177,16 +183,19 @@ def create_sre_app() -> FastAPI:
         if app_id:
             rows = await db.pool.fetch(
                 "SELECT * FROM sre_metrics WHERE app_id = $1 ORDER BY recorded_at DESC LIMIT $2",
-                app_id, limit,
+                app_id,
+                limit,
             )
         elif metric_name:
             rows = await db.pool.fetch(
                 "SELECT * FROM sre_metrics WHERE metric_name = $1 ORDER BY recorded_at DESC LIMIT $2",
-                metric_name, limit,
+                metric_name,
+                limit,
             )
         else:
             rows = await db.pool.fetch(
-                "SELECT * FROM sre_metrics ORDER BY recorded_at DESC LIMIT $1", limit,
+                "SELECT * FROM sre_metrics ORDER BY recorded_at DESC LIMIT $1",
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -205,6 +214,7 @@ def create_sre_app() -> FastAPI:
 
 
 # --- Autonomous Scanner ---
+
 
 async def _autonomous_scanner(db: Any) -> None:
     """Continuously run SRE scans on a schedule."""
