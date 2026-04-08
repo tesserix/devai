@@ -23,8 +23,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // No session — redirect to BFF login
-  const loginUrl = new URL("/bff/login", request.url);
+  // No session — redirect to auth-bff login
+  const loginUrl = new URL("/auth/login", request.url);
   loginUrl.searchParams.set("redirect_uri", request.url);
   return NextResponse.redirect(loginUrl);
 }

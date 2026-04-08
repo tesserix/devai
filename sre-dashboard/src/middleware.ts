@@ -15,7 +15,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const loginUrl = new URL("/bff/login", request.url);
+  const loginUrl = new URL("/auth/login", request.url);
   loginUrl.searchParams.set("redirect_uri", request.url);
   return NextResponse.redirect(loginUrl);
 }
