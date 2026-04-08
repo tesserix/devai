@@ -76,6 +76,12 @@ You also have full access to source code repositories (GitHub, GitLab, Azure Dev
 - Read files, browse directory trees, view PRs and issues
 - Use this to validate changes, explain code, or investigate problems
 
+You can also INJECT additional requirements into a running pipeline:
+- When the user wants to add requirements, clarify something, or give feedback to agents
+- Use the inject_pipeline_requirements tool with the run_id and message
+- The Supervisor agent will pick up the injection and adjust the plan accordingly
+- This is how humans collaborate with the AI development team in real-time
+
 You can answer questions like:
 - "What happened in the last pipeline run?"
 - "Show me all security findings for tesserix/Home-Chef-App"
@@ -86,6 +92,8 @@ You can answer questions like:
 - "Show me the code in src/main.go of tesserix/my-service"
 - "What changed in PR #42?"
 - "Give me a full status report of all projects"
+- "Add a requirement to the current run: the API should also support pagination"
+- "Tell the agents to use PostgreSQL instead of SQLite"
 """
 
 
@@ -506,6 +514,61 @@ class DevAIChatAgent:
             finally:
                 await scm.close()
 
+        @tool
+        async def inject_pipeline_requirements(run_id: str, message: str) -> str:
+            """Inject additional requirements or feedback into a running pipeline.
+
+            Use this when the user wants to:
+            - Add new requirements to an active pipeline run
+            - Clarify or correct something for the agents
+            - Give feedback about the current implementation direction
+            - Request changes to the plan or approach
+
+            The Supervisor agent will pick up the injection and adjust accordingly.
+            """
+            import time as _time
+
+            from ulid import ULID
+
+            # Verify the run exists
+            run_data = await state.get_run(run_id)
+            if not run_data:
+                return f"Run {run_id} not found. Use query_pipeline_runs to find active runs."
+
+            # Store the injection
+            injection = json.dumps(
+                {
+                    "message": message,
+                    "timestamp": _time.time(),
+                    "source": "chat_agent",
+                }
+            )
+            await state.redis.rpush(f"devai:run:{run_id}:injections", injection)
+            await state.redis.expire(f"devai:run:{run_id}:injections", 86400 * 7)
+
+            # Also post as A2A message
+            a2a_msg = json.dumps(
+                {
+                    "id": str(ULID()),
+                    "from_agent": "human",
+                    "to_agent": "supervisor",
+                    "message_type": "request",
+                    "subject": "Additional Requirements from User",
+                    "body": message,
+                    "payload": {"source": "chat_agent", "run_id": run_id},
+                    "timestamp": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    ).isoformat(),
+                }
+            )
+            await state.redis.rpush(f"devai:run:{run_id}:a2a_messages", a2a_msg)
+
+            stage = run_data.get("stage", "unknown")
+            return (
+                f"Requirements injected into run {run_id} (current stage: {stage}). "
+                f"The Supervisor will pick this up at the next story boundary and adjust the plan."
+            )
+
         return [
             query_pipeline_runs,
             query_pipeline_detail,
@@ -522,6 +585,7 @@ class DevAIChatAgent:
             scm_get_repo_tree,
             scm_get_pr,
             scm_get_issue,
+            inject_pipeline_requirements,
         ]
 
     @traceable_if_enabled(name="chat.respond", run_type="chain")

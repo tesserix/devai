@@ -278,7 +278,28 @@ class ALMOrchestrator:
 
     @traceable_if_enabled(name="alm.story_loop_start", run_type="chain")
     async def _node_story_loop_start(self, state: ALMState) -> dict[str, Any]:
-        """Pick the next unprocessed story and load its context into active state."""
+        """Pick the next unprocessed story and load its context into active state.
+
+        Also checks for injected requirements from the dashboard chat —
+        if found, appends them to the requirements so agents see them.
+        """
+        # Check for injected requirements from dashboard/chat
+        run_id = state.get("run_id", "")
+        injected_reqs = await self._check_injections(run_id)
+        extra_state: dict[str, Any] = {}
+        if injected_reqs:
+            current_reqs = state.get("requirements", "")
+            injection_text = "\n\n## Additional Requirements (from user)\n" + "\n".join(
+                f"- {inj}" for inj in injected_reqs
+            )
+            extra_state["requirements"] = current_reqs + injection_text
+            self._report_progress(
+                state,
+                "story_loop_start",
+                "info",
+                f"Picked up {len(injected_reqs)} injected requirement(s) from user",
+            )
+
         story_branches = list(state.get("story_branches", []))
         stories = state.get("stories", [])
         story_plans = state.get("story_plans", [])
@@ -314,7 +335,7 @@ class ALMOrchestrator:
         # Check if story was previously attempted (has branch/PR from prior iteration)
         sb = story_branches[next_index]
 
-        return {
+        result = {
             "active_story_index": next_index,
             "story_branches": story_branches,
             # Reset active context for this story
@@ -339,7 +360,9 @@ class ALMOrchestrator:
             # Set story-specific plan as the technical plan for agents to read
             "technical_plan": story_plan,
             "stage": f"story_{next_index + 1}_implementing",
+            **extra_state,
         }
+        return result
 
     @traceable_if_enabled(name="alm.story_complete", run_type="chain")
     async def _node_story_complete(self, state: ALMState) -> dict[str, Any]:
@@ -714,6 +737,41 @@ class ALMOrchestrator:
         )
         result["stage"] = "deployed"
         return result
+
+    # ------------------------------------------------------------------
+    # Injection Polling (human-in-the-loop requirements)
+    # ------------------------------------------------------------------
+
+    async def _check_injections(self, run_id: str) -> list[str]:
+        """Check Redis for requirements injected by the user via dashboard chat.
+
+        Reads and clears the injection queue so each injection is processed once.
+        """
+        if not run_id:
+            return []
+        try:
+            key = f"devai:run:{run_id}:injections"
+            raw_items = await self.state_manager.redis.lrange(key, 0, -1)
+            if not raw_items:
+                return []
+
+            # Clear the queue
+            await self.state_manager.redis.delete(key)
+
+            messages = []
+            for raw in raw_items:
+                try:
+                    data = json.loads(raw)
+                    messages.append(data.get("message", ""))
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
+            if messages:
+                logger.info("Found %d injected requirement(s) for run %s", len(messages), run_id)
+            return messages
+        except Exception as e:
+            logger.warning("Failed to check injections for run %s: %s", run_id, e)
+            return []
 
     # ------------------------------------------------------------------
     # Memory Integration

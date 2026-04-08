@@ -869,6 +869,57 @@ async def reject_gate(request: Request, run_id: str, gate: str) -> dict[str, str
 # --- Pipeline Permissions/Config ---
 
 
+@router.post("/api/pipeline/runs/{run_id}/inject")
+async def inject_requirements(request: Request, run_id: str) -> dict[str, Any]:
+    """Inject additional requirements into a running pipeline.
+
+    The orchestrator polls Redis for injected requirements at story boundaries.
+    The Supervisor picks them up, re-plans, and the pipeline continues.
+    """
+    body = await request.json()
+    message = body.get("message", "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+
+    redis = request.app.state.state_manager.redis
+
+    # Verify the run exists
+    run_data = await request.app.state.state_manager.get_run(run_id)
+    if not run_data:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Store the injection in Redis — the orchestrator polls this key
+    injection = json.dumps(
+        {
+            "message": message,
+            "timestamp": __import__("time").time(),
+            "source": "dashboard_chat",
+        }
+    )
+    await redis.rpush(f"devai:run:{run_id}:injections", injection)
+    await redis.expire(f"devai:run:{run_id}:injections", 86400 * 7)
+
+    # Also post as an A2A message so it shows up in the dashboard
+    from ulid import ULID
+
+    a2a_msg = json.dumps(
+        {
+            "id": str(ULID()),
+            "from_agent": "human",
+            "to_agent": "supervisor",
+            "message_type": "request",
+            "subject": "Additional Requirements from User",
+            "body": message,
+            "payload": {"source": "dashboard_chat", "run_id": run_id},
+            "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        }
+    )
+    await redis.rpush(f"devai:run:{run_id}:a2a_messages", a2a_msg)
+
+    logger.info("Requirements injected into run %s: %s", run_id, message[:100])
+    return {"status": "injected", "run_id": run_id}
+
+
 @router.post("/api/pipeline/config")
 async def save_pipeline_config(request: Request) -> dict[str, str]:
     """Save pipeline configuration (permissions, model settings, etc.)."""
@@ -898,6 +949,7 @@ async def get_pipeline_config(request: Request, repo: str = "default") -> dict[s
         },
         "claude_model": "claude-sonnet-4-20250514",
         "openai_model": "o3",
+        "groq_model": "llama-3.3-70b-versatile",
         "max_review_iterations": 3,
-        "branch_template": "devai/{run_id}/{description}",
+        "branch_template": "story/{story_number}-{description}",
     }

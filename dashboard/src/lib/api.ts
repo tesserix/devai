@@ -23,6 +23,7 @@ export interface PipelineConfig {
   gates: Record<string, boolean>;
   claude_model: string;
   openai_model: string;
+  groq_model: string;
   max_review_iterations: number;
 }
 

@@ -238,8 +238,8 @@ export default function DashboardPage() {
               {tab === "agents" && <AgentsTab run={selectedRun} />}
               {tab === "a2a" && <A2ATab messages={a2aMessages} />}
               {tab === "events" && <EventsTab events={(selectedRun as any)?.events || []} />}
-              {tab === "chat" && <ChatPanel />}
-              {tab === "config" && <ConfigTab />}
+              {tab === "chat" && <ChatPanel runId={selectedRun?.run_id} repo={selectedRun?.repo} stage={selectedRun?.stage} />}
+              {tab === "config" && <ConfigTab repo={selectedRun?.repo || "default"} />}
             </div>
           </>
         ) : (
@@ -512,7 +512,7 @@ function EventsTab({ events }: { events: Array<{ step: string; status: string; d
   );
 }
 
-function ConfigTab() {
+function ConfigTab({ repo }: { repo: string }) {
   const [config, setConfig] = useState({
     auto_mode: false,
     gates: {
@@ -522,7 +522,75 @@ function ConfigTab() {
       merge: true,
       createPR: false,
     },
+    claude_model: "claude-sonnet-4-20250514",
+    openai_model: "o3",
+    groq_model: "llama-3.3-70b-versatile",
+    max_review_iterations: 3,
   });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // Load config on mount
+  useEffect(() => {
+    api.getConfig(repo).then((data) => {
+      setConfig((prev) => ({
+        ...prev,
+        auto_mode: data.auto_mode ?? prev.auto_mode,
+        claude_model: data.claude_model ?? prev.claude_model,
+        openai_model: data.openai_model ?? prev.openai_model,
+        groq_model: (data as any).groq_model ?? prev.groq_model,
+        max_review_iterations: data.max_review_iterations ?? prev.max_review_iterations,
+        gates: { ...prev.gates, ...(data.gates || {}) },
+      }));
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [repo]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await api.saveConfig({ ...config, repo });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      // Handle error silently
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const gateDescriptions: Record<string, string> = {
+    deployment: "Pause before deploying to production via ArgoCD",
+    testing: "Pause before running E2E tests on story PRs",
+    review: "Pause before submitting code review on PRs",
+    merge: "Pause before merging approved story PRs to main",
+    createPR: "Pause before creating pull requests for stories",
+  };
+
+  const providers = [
+    {
+      dot: "bg-indigo-500",
+      name: "Claude (Anthropic)",
+      key: "claude_model" as const,
+      desc: "EM, Developer, DB, Security, QA, Infra",
+    },
+    {
+      dot: "bg-green-600",
+      name: "OpenAI",
+      key: "openai_model" as const,
+      desc: "Supervisor, Orchestrator, Product Director, Staff Reviewer",
+    },
+    {
+      dot: "bg-orange-500",
+      name: "Groq (Llama)",
+      key: "groq_model" as const,
+      desc: "Doc Analyzer, Tech Detector, Requirements, CI Monitor, Release",
+    },
+  ];
+
+  if (!loaded) return <div className="text-sm text-gray-400">Loading config...</div>;
 
   return (
     <div className="max-w-lg space-y-6">
@@ -534,7 +602,7 @@ function ConfigTab() {
           <label className="flex items-center justify-between">
             <div>
               <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Auto Mode</span>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Skip all approval gates</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Skip all approval gates — pipeline runs fully autonomous</p>
             </div>
             <input
               type="checkbox"
@@ -543,6 +611,22 @@ function ConfigTab() {
               className="w-4 h-4 rounded accent-indigo-600"
             />
           </label>
+          <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+            <label className="flex items-center justify-between">
+              <div>
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Max Review Iterations</span>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">How many review/fix cycles before escalating</p>
+              </div>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={config.max_review_iterations}
+                onChange={(e) => setConfig({ ...config, max_review_iterations: parseInt(e.target.value) || 3 })}
+                className="w-16 px-2 py-1 rounded bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-right text-gray-900 dark:text-gray-100 focus:outline-none focus:border-indigo-400"
+              />
+            </label>
+          </div>
         </div>
       </div>
 
@@ -553,7 +637,10 @@ function ConfigTab() {
         <div className="divide-y divide-gray-100 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
           {Object.entries(config.gates).map(([gate, enabled]) => (
             <label key={gate} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer">
-              <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">{gate.replace(/([A-Z])/g, " $1")}</span>
+              <div>
+                <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">{gate.replace(/([A-Z])/g, " $1")}</span>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{gateDescriptions[gate] || ""}</p>
+              </div>
               <input
                 type="checkbox"
                 checked={enabled}
@@ -575,39 +662,50 @@ function ConfigTab() {
           LLM Providers
         </h3>
         <div className="divide-y divide-gray-100 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
-          {[
-            {
-              dot: "bg-indigo-500",
-              name: "Claude (Anthropic)",
-              model: "claude-sonnet-4",
-              desc: "Supervisor, Orchestrator, EM, Developer, DB, Security, QA, Infra",
-            },
-            {
-              dot: "bg-green-600",
-              name: "OpenAI (Codex)",
-              model: "o3",
-              desc: "Product Director, Staff Reviewer",
-            },
-            {
-              dot: "bg-orange-500",
-              name: "Groq (Llama 3.3)",
-              model: "llama-3.3-70b",
-              desc: "Doc Analyzer, Tech Detector, Requirements, CI Monitor, Release",
-            },
-          ].map((p) => (
+          {providers.map((p) => (
             <div key={p.name} className="px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 shrink-0">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${p.dot}`} />
                   <span className="text-sm text-gray-700 dark:text-gray-300">{p.name}</span>
                 </div>
-                <span className="text-xs font-mono text-gray-400 dark:text-gray-500">{p.model}</span>
+                <input
+                  type="text"
+                  value={(config as any)[p.key] || ""}
+                  onChange={(e) => setConfig({ ...config, [p.key]: e.target.value })}
+                  className="w-52 px-2 py-1 rounded bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-xs font-mono text-right text-gray-900 dark:text-gray-100 focus:outline-none focus:border-indigo-400"
+                />
               </div>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 ml-4">{p.desc}</p>
             </div>
           ))}
         </div>
       </div>
+
+      {/* Save Button */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {saving ? (
+            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" /><path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="opacity-75" /></svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
+          )}
+          {saving ? "Saving..." : "Save Configuration"}
+        </button>
+        {saved && (
+          <span className="text-sm text-green-500 flex items-center gap-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+            Saved
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-gray-400 dark:text-gray-500">
+        Configuration is saved per repository ({repo}). Changes take effect on the next pipeline run.
+      </p>
     </div>
   );
 }

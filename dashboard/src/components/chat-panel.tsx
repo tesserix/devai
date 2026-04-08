@@ -9,12 +9,18 @@ interface Message {
   timestamp: Date;
 }
 
-export function ChatPanel() {
+interface ChatPanelProps {
+  runId?: string;
+  repo?: string;
+  stage?: string;
+}
+
+export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
       content:
-        "Hi! I'm the DevAI assistant. I can query pipeline runs, agent memory, security findings, SRE incidents, source code, and more. What would you like to know?",
+        "Hi! I'm the DevAI assistant. I can query pipeline runs, agent memory, security findings, SRE incidents, source code, and more.\n\nYou can also **inject additional requirements** into a running pipeline — just tell me what to add and I'll send it to the Supervisor agent.",
       timestamp: new Date(),
     },
   ]);
@@ -29,10 +35,15 @@ export function ChatPanel() {
 
   const send = useCallback(async () => {
     if (!input.trim() || loading) return;
-    const userMsg = input.trim();
+    let userMsg = input.trim();
     setInput("");
 
-    setMessages((prev) => [...prev, { role: "user", content: userMsg, timestamp: new Date() }]);
+    // If we have an active run, prepend context so the chat agent knows
+    if (runId) {
+      userMsg = `[Active pipeline: run_id=${runId}, repo=${repo || "unknown"}, stage=${stage || "unknown"}]\n\n${userMsg}`;
+    }
+
+    setMessages((prev) => [...prev, { role: "user", content: input.trim(), timestamp: new Date() }]);
     setLoading(true);
 
     try {
@@ -56,10 +67,26 @@ export function ChatPanel() {
     } finally {
       setLoading(false);
     }
-  }, [input, loading]);
+  }, [input, loading, runId, repo, stage]);
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+      {/* Pipeline context banner */}
+      {runId && (
+        <div className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950 border-b border-indigo-100 dark:border-indigo-900 flex items-center gap-2">
+          <span className={clsx(
+            "w-2 h-2 rounded-full shrink-0",
+            stage === "deployed" ? "bg-green-500" : stage?.includes("fail") ? "bg-red-500" : "bg-indigo-500 animate-pulse"
+          )} />
+          <span className="text-xs text-indigo-700 dark:text-indigo-300 font-medium truncate">
+            {repo} &mdash; {stage?.replace(/_/g, " ")}
+          </span>
+          <span className="text-xs text-indigo-400 dark:text-indigo-500 font-mono ml-auto shrink-0">
+            {runId.slice(0, 10)}
+          </span>
+        </div>
+      )}
+
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg, i) => (
@@ -106,7 +133,7 @@ export function ChatPanel() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
-            placeholder="Ask about pipelines, agents, security, code..."
+            placeholder={runId ? "Ask questions or inject requirements into the pipeline..." : "Ask about pipelines, agents, security, code..."}
             className="flex-1 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-100 dark:focus:ring-indigo-900 transition-colors"
             disabled={loading}
           />
@@ -119,7 +146,7 @@ export function ChatPanel() {
           </button>
         </div>
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5 px-1">
-          15 tools: pipelines, A2A messages, memory, security, SRE, source code, PRs, issues
+          16 tools: pipelines, A2A messages, memory, security, SRE, source code, PRs, issues, inject requirements
         </p>
       </div>
     </div>
