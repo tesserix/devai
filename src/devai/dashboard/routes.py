@@ -297,6 +297,47 @@ async def move_item(request: Request, org: str, project_number: int) -> dict[str
     return {"status": "moved"}
 
 
+@router.get("/api/repos")
+async def list_repos(request: Request) -> list[dict[str, Any]]:
+    """List repositories accessible to the GitHub App installation."""
+    config = request.app.state.config
+    from devai.scm.factory import create_scm_client
+    scm = create_scm_client(config)
+    try:
+        repos = await scm.list_installation_repos()
+        return sorted(repos, key=lambda r: r["full_name"].lower())
+    except Exception as e:
+        logger.warning("Failed to list repos: %s", e)
+        return []
+    finally:
+        await scm.close()
+
+
+@router.post("/api/repos/create")
+async def create_repo(request: Request) -> dict[str, Any]:
+    """Create a new repository via the GitHub App."""
+    body = await request.json()
+    org = body.get("org", "tesserix")
+    name = body.get("name", "").strip()
+    description = body.get("description", "")
+    private = body.get("private", True)
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Repository name is required")
+
+    config = request.app.state.config
+    from devai.scm.factory import create_scm_client
+    scm = create_scm_client(config)
+    try:
+        repo = await scm.create_repo(org, name, description, private)
+        return repo
+    except Exception as e:
+        logger.warning("Failed to create repo: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        await scm.close()
+
+
 @router.post("/api/pipeline/trigger")
 async def trigger_pipeline(request: Request) -> dict[str, Any]:
     """Trigger a DevAI ALM pipeline run from the dashboard (LangGraph)."""

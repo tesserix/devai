@@ -78,4 +78,16 @@ export const api = {
     apiFetch<Array<{ full_name: string; name: string; description: string; language: string }>>(
       `/orgs/${org}/repos`
     ),
+
+  // GitHub App repos (installation-level, no OAuth needed)
+  listRepos: () =>
+    apiFetch<Array<{ full_name: string; name: string; description: string; language: string; private: boolean }>>(
+      "/repos"
+    ),
+
+  createRepo: (org: string, name: string, description?: string, isPrivate?: boolean) =>
+    apiFetch<{ full_name: string; name: string; html_url: string }>("/repos/create", {
+      method: "POST",
+      body: JSON.stringify({ org, name, description, private: isPrivate ?? true }),
+    }),
 };

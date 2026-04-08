@@ -96,6 +96,46 @@ class GitHubSCMClient(SCMClient):
         resp.raise_for_status()
         return resp
 
+    # --- Repositories ---
+
+    async def list_installation_repos(self, per_page: int = 100) -> list[dict[str, Any]]:
+        """List repos accessible to the GitHub App installation."""
+        repos: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            resp = await self._request(
+                "GET", f"/installation/repositories?per_page={per_page}&page={page}"
+            )
+            data = resp.json()
+            for r in data.get("repositories", []):
+                repos.append({
+                    "full_name": r["full_name"],
+                    "name": r["name"],
+                    "description": r.get("description") or "",
+                    "language": r.get("language") or "",
+                    "private": r.get("private", False),
+                    "default_branch": r.get("default_branch", "main"),
+                })
+            if len(data.get("repositories", [])) < per_page:
+                break
+            page += 1
+        return repos
+
+    async def create_repo(self, org: str, name: str, description: str = "", private: bool = True) -> dict[str, Any]:
+        """Create a new repository in an organization."""
+        resp = await self._request(
+            "POST", f"/orgs/{org}/repos",
+            json={"name": name, "description": description, "private": private, "auto_init": True},
+        )
+        data = resp.json()
+        return {
+            "full_name": data["full_name"],
+            "name": data["name"],
+            "description": data.get("description") or "",
+            "html_url": data["html_url"],
+            "default_branch": data.get("default_branch", "main"),
+        }
+
     # --- Issues ---
 
     async def create_issue(self, repo: str, title: str, body: str, labels: list[str] | None = None) -> dict[str, Any]:
