@@ -79,6 +79,27 @@ def create_sre_app() -> FastAPI:
         allow_credentials=True,
     )
 
+    # --- Chat ---
+
+    @app.post("/api/chat/message")
+    async def sre_chat_message(request: Any) -> dict[str, str]:
+        """Send a message to the SRE chat agent."""
+        from fastapi import Request
+
+        req: Request = request
+        body = await req.json()
+        message = body.get("message", "")
+        session_id = body.get("session_id", "default")
+
+        if not message:
+            return {"response": "Please send a message.", "session_id": session_id}
+
+        from devai.sre.chat import SREChatAgent
+
+        agent = SREChatAgent(settings, database=app.state.db)
+        response = await agent.chat(message, session_id)
+        return {"response": response, "session_id": session_id}
+
     # --- Health ---
 
     @app.get("/healthz")

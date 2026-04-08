@@ -5,9 +5,10 @@ import { sre, type Incident, type ScanRun, type ClusterHealth, type AppReliabili
 import { IncidentFeed } from "@/components/incident-feed";
 import { ClusterOverview } from "@/components/cluster-overview";
 import { ScanHistory } from "@/components/scan-history";
+import { SREChatPanel } from "@/components/sre-chat-panel";
 import { clsx } from "clsx";
 
-type Tab = "overview" | "incidents" | "apps" | "scans" | "costs";
+type Tab = "overview" | "incidents" | "apps" | "scans" | "costs" | "chat";
 
 const NAV_ITEMS: { key: Tab; label: string }[] = [
   { key: "overview", label: "Overview" },
@@ -15,6 +16,7 @@ const NAV_ITEMS: { key: Tab; label: string }[] = [
   { key: "apps", label: "Applications" },
   { key: "scans", label: "Scan History" },
   { key: "costs", label: "Cost Analysis" },
+  { key: "chat", label: "Chat" },
 ];
 
 export default function SREDashboard() {
@@ -159,6 +161,7 @@ export default function SREDashboard() {
             {tab === "apps" && "Application Reliability"}
             {tab === "scans" && "Scan History"}
             {tab === "costs" && "Cost Analysis"}
+            {tab === "chat" && "SRE Assistant"}
           </h2>
         </header>
 
@@ -239,6 +242,8 @@ export default function SREDashboard() {
                   <p className="text-sm mt-1">Data refreshes daily</p>
                 </div>
               )}
+
+              {tab === "chat" && <SREChatPanel />}
             </>
           )}
         </div>
