@@ -36,7 +36,7 @@ export function ApprovalBanner({ approvals, onApprove, onReject }: ApprovalBanne
                 <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
                   Approval Required: {a.gate}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
                   {agent?.label || a.agent} is waiting for your decision
                 </p>
               </div>

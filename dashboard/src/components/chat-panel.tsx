@@ -59,7 +59,7 @@ export function ChatPanel() {
   }, [input, loading]);
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 overflow-hidden">
+    <div className="flex flex-col h-full bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg, i) => (
@@ -69,18 +69,18 @@ export function ChatPanel() {
                 "max-w-[80%] rounded-xl px-4 py-3 text-sm",
                 msg.role === "user"
                   ? "bg-indigo-600 text-white rounded-br-sm"
-                  : "bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-bl-sm"
+                  : "bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-600 rounded-bl-sm"
               )}
             >
               {msg.role === "assistant" ? (
                 <div
-                  className="prose dark:prose-invert prose-sm max-w-none prose-pre:bg-gray-100 dark:prose-pre:bg-slate-900 prose-code:text-indigo-700 dark:prose-code:text-indigo-400"
+                  className="prose dark:prose-invert prose-sm max-w-none prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800 prose-code:text-indigo-700 dark:prose-code:text-indigo-400"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                 />
               ) : (
                 <p className="whitespace-pre-wrap">{msg.content}</p>
               )}
-              <p className="text-[9px] mt-1.5 opacity-50">
+              <p className="text-xs mt-1.5 opacity-50">
                 {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </p>
             </div>
@@ -88,7 +88,7 @@ export function ChatPanel() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl rounded-bl-sm px-4 py-3">
+            <div className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl rounded-bl-sm px-4 py-3">
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" />
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.15s]" />
@@ -100,14 +100,14 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-200 dark:border-slate-800 p-3 bg-white dark:bg-slate-900">
+      <div className="border-t border-gray-200 dark:border-gray-700 p-3 bg-white dark:bg-gray-800">
         <div className="flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
             placeholder="Ask about pipelines, agents, security, code..."
-            className="flex-1 px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-100 dark:focus:ring-indigo-900 transition-colors"
+            className="flex-1 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-100 dark:focus:ring-indigo-900 transition-colors"
             disabled={loading}
           />
           <button
@@ -118,7 +118,7 @@ export function ChatPanel() {
             Send
           </button>
         </div>
-        <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1.5 px-1">
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5 px-1">
           15 tools: pipelines, A2A messages, memory, security, SRE, source code, PRs, issues
         </p>
       </div>
@@ -141,9 +141,9 @@ function renderMarkdown(md: string): string {
     .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
     .replace(/^\|(.+)\|$/gm, (_, row) => {
       const cells = row.split("|").map((c: string) => c.trim());
-      return `<tr>${cells.map((c: string) => `<td class="px-2 py-1 border-b border-gray-200 dark:border-slate-700">${c}</td>`).join("")}</tr>`;
+      return `<tr>${cells.map((c: string) => `<td class="px-2 py-1 border-b border-gray-200 dark:border-gray-600">${c}</td>`).join("")}</tr>`;
     })
-    .replace(/((<tr>.*<\/tr>\n?)+)/g, '<table class="w-full text-xs my-2 border border-gray-200 dark:border-slate-700 rounded">$1</table>')
+    .replace(/((<tr>.*<\/tr>\n?)+)/g, '<table class="w-full text-xs my-2 border border-gray-200 dark:border-gray-600 rounded">$1</table>')
     .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     .replace(/((<li.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
     .replace(/\n/g, "<br />");

@@ -11,7 +11,7 @@ interface RunListProps {
 
 const STAGE_DOT: Record<string, string> = {
   triggered: "bg-gray-400",
-  requirements_analyzed: "bg-slate-500",
+  requirements_analyzed: "bg-gray-500",
   epic_created: "bg-indigo-500",
   stories_created: "bg-blue-500",
   plan_created: "bg-indigo-600",
@@ -28,7 +28,7 @@ const STAGE_DOT: Record<string, string> = {
 export function RunList({ runs, selectedRunId, onSelect }: RunListProps) {
   if (runs.length === 0) {
     return (
-      <div className="text-center py-10 text-gray-400 dark:text-slate-500">
+      <div className="text-center py-10 text-gray-400 dark:text-gray-500">
         <p className="text-sm">No pipeline runs yet</p>
         <p className="text-xs mt-1">Trigger a run from the CLI or webhook</p>
       </div>
@@ -52,30 +52,30 @@ export function RunList({ runs, selectedRunId, onSelect }: RunListProps) {
               "w-full text-left p-2.5 rounded-md border transition-all",
               isSelected
                 ? "border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40"
-                : "border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-gray-300 dark:hover:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800/50"
+                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50"
             )}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className={clsx("w-1.5 h-1.5 rounded-full shrink-0", STAGE_DOT[run.stage] || "bg-gray-400")} />
-                <span className="text-[10px] font-mono text-gray-500 dark:text-slate-500">
+                <span className="text-xs font-mono text-gray-500 dark:text-gray-500">
                   {run.run_id.slice(0, 8)}
                 </span>
               </div>
-              <span className="text-[10px] text-gray-400 dark:text-slate-500">
+              <span className="text-xs text-gray-400 dark:text-gray-500">
                 {formatTime(run.created_at)}
               </span>
             </div>
             <div className="mt-1 flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-800 dark:text-slate-200 truncate max-w-[140px]">
+              <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate max-w-[140px]">
                 {run.repo}
               </span>
-              <span className="text-[10px] text-gray-400 dark:text-slate-500 shrink-0 ml-1">
+              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0 ml-1">
                 {completedAgents}/{agentCount || "?"} agents
               </span>
             </div>
             <div className="mt-1.5">
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
                 {run.stage.replace(/_/g, " ")}
               </span>
             </div>

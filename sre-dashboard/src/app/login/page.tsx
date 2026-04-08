@@ -7,7 +7,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
       <div className="w-full max-w-sm">
         {/* Logo + title */}
         <div className="text-center mb-8">
@@ -18,23 +18,23 @@ export default function LoginPage() {
               <line x1="12" y1="17" x2="12" y2="21"/>
             </svg>
           </div>
-          <h1 className="text-2xl font-semibold text-gray-900 dark:text-slate-100 tracking-tight">
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
             DevAI SRE
           </h1>
-          <p className="mt-1.5 text-sm text-gray-500 dark:text-slate-400">
+          <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
             AI-powered Site Reliability Engineering
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-7 shadow-sm">
-          <h2 className="text-sm font-medium text-gray-700 dark:text-slate-300 text-center mb-5">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-7 shadow-sm">
+          <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center mb-5">
             Sign in to continue
           </h2>
 
           <button
             onClick={handleGoogleLogin}
-            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors shadow-sm cursor-pointer"
+            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm cursor-pointer"
           >
             <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
               <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
@@ -45,12 +45,12 @@ export default function LoginPage() {
             Sign in with Google
           </button>
 
-          <p className="mt-5 text-center text-xs text-gray-400 dark:text-slate-500">
+          <p className="mt-5 text-center text-xs text-gray-400 dark:text-gray-500">
             Access restricted to authorized users
           </p>
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-400 dark:text-slate-600">
+        <p className="mt-6 text-center text-xs text-gray-400 dark:text-gray-500">
           Tesserix Platform
         </p>
       </div>

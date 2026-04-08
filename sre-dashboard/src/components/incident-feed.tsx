@@ -29,9 +29,9 @@ const SEVERITY_STYLES: Record<string, { border: string; bg: string; text: string
     dot: "bg-blue-400",
   },
   info: {
-    border: "border-gray-200 dark:border-slate-700",
-    bg: "bg-gray-50 dark:bg-slate-800/50",
-    text: "text-gray-500 dark:text-slate-400",
+    border: "border-gray-200 dark:border-gray-600",
+    bg: "bg-gray-50 dark:bg-gray-700/50",
+    text: "text-gray-500 dark:text-gray-400",
     dot: "bg-gray-400",
   },
 };
@@ -48,7 +48,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function IncidentFeed({ incidents, onSelect }: { incidents: Incident[]; onSelect: (id: string) => void }) {
   if (incidents.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-400 dark:text-slate-500">
+      <div className="text-center py-12 text-gray-400 dark:text-gray-500">
         <p className="text-lg font-medium">All Clear</p>
         <p className="text-sm mt-1">No open incidents</p>
       </div>
@@ -75,15 +75,15 @@ export function IncidentFeed({ incidents, onSelect }: { incidents: Incident[]; o
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <div className={clsx("w-2 h-2 rounded-full flex-shrink-0", sev.dot)} />
-                  <span className={clsx("text-[10px] font-bold uppercase tracking-wider", sev.text)}>
+                  <span className={clsx("text-sm font-bold uppercase tracking-wider", sev.text)}>
                     {inc.severity}
                   </span>
-                  <span className="text-[10px] text-gray-400 dark:text-slate-500">
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
                     {categoryLabel}
                   </span>
                 </div>
-                <p className="text-sm font-medium text-gray-900 dark:text-slate-100 mt-1 truncate">{inc.title}</p>
-                <div className="flex items-center gap-3 mt-1.5 text-[10px] text-gray-400 dark:text-slate-500">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mt-1 truncate">{inc.title}</p>
+                <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-400 dark:text-gray-500">
                   <span>by {inc.detected_by}</span>
                   {inc.scm_issue_number && <span>#{inc.scm_issue_number}</span>}
                   <span>{new Date(inc.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>

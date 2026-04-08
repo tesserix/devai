@@ -28,32 +28,32 @@ export function ClusterOverview({ clusters }: { clusters: ClusterHealth[] }) {
                   "w-3 h-3 rounded-full",
                   hasCritical ? "bg-red-500 animate-pulse" : hasIssues ? "bg-amber-500" : "bg-emerald-500"
                 )} />
-                <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100">{c.cluster_name}</h3>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">{c.cluster_name}</h3>
               </div>
-              <span className="text-xs text-gray-400 dark:text-slate-500">{c.total_apps} apps</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">{c.total_apps} apps</span>
             </div>
 
             <div className="mt-4 grid grid-cols-3 gap-3">
               <div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">{c.open_incidents}</p>
-                <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">Open</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{c.open_incidents}</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Open</p>
               </div>
               <div>
                 <p className={clsx(
                   "text-2xl font-bold",
                   c.critical_incidents > 0
                     ? "text-red-600 dark:text-red-400"
-                    : "text-gray-900 dark:text-slate-100"
+                    : "text-gray-900 dark:text-gray-100"
                 )}>
                   {c.critical_incidents}
                 </p>
-                <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">Critical</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Critical</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                   {c.latest_daily_cost ? `$${c.latest_daily_cost.toFixed(0)}` : "—"}
                 </p>
-                <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">Daily Cost</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Daily Cost</p>
               </div>
             </div>
           </div>

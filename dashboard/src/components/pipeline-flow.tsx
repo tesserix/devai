@@ -35,7 +35,7 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
                     isDone && "bg-green-50 dark:bg-green-950 border-green-500 dark:border-green-600 text-green-700 dark:text-green-400",
                     isActive && "bg-indigo-50 dark:bg-indigo-950 border-indigo-500 text-indigo-700 dark:text-indigo-400 ring-2 ring-indigo-200 dark:ring-indigo-900",
                     isFailed && "bg-red-50 dark:bg-red-950 border-red-500 text-red-700 dark:text-red-400",
-                    !isDone && !isActive && !isFailed && "bg-gray-100 dark:bg-slate-800 border-gray-300 dark:border-slate-700 text-gray-400 dark:text-slate-500",
+                    !isDone && !isActive && !isFailed && "bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500",
                     isCoordinator && isActive && "border-indigo-600 bg-indigo-50 dark:bg-indigo-950 ring-indigo-200 dark:ring-indigo-900",
                     isCoordinator && isDone && "border-green-500 dark:border-green-600",
                   )}
@@ -50,10 +50,10 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
                 </div>
                 <span
                   className={clsx(
-                    "text-[9px] font-medium whitespace-nowrap",
+                    "text-xs font-medium whitespace-nowrap",
                     isDone && "text-green-600 dark:text-green-500",
                     isActive && "text-indigo-600 dark:text-indigo-400",
-                    !isDone && !isActive && "text-gray-400 dark:text-slate-500"
+                    !isDone && !isActive && "text-gray-400 dark:text-gray-500"
                   )}
                 >
                   {stage.label}
@@ -61,17 +61,17 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
                 {agent && (
                   <span
                     className={clsx(
-                      "text-[8px] whitespace-nowrap",
+                      "text-xs whitespace-nowrap",
                       isCoordinator
                         ? "text-indigo-500 dark:text-indigo-400 font-medium"
-                        : "text-gray-400 dark:text-slate-500"
+                        : "text-gray-400 dark:text-gray-500"
                     )}
                   >
                     {isCoordinator ? "Coord" : agent.provider}
                   </span>
                 )}
                 {timing !== undefined && (
-                  <span className="text-[8px] text-gray-400 dark:text-slate-500">
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
                     {timing.toFixed(1)}s
                   </span>
                 )}
@@ -84,7 +84,7 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
                     "w-6 h-px mx-0.5",
                     currentIdx >= 0 && idx < currentIdx
                       ? "bg-green-400 dark:bg-green-600"
-                      : "bg-gray-200 dark:bg-slate-700"
+                      : "bg-gray-200 dark:bg-gray-600"
                   )}
                 />
               )}

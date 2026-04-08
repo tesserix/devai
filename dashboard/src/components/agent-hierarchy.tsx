@@ -24,7 +24,7 @@ function StatusDot({ status }: { status?: string }) {
           ? "bg-red-600"
           : status === "waiting_approval"
             ? "bg-amber-500 animate-pulse"
-            : "bg-gray-300 dark:bg-slate-600";
+            : "bg-gray-300 dark:bg-gray-600";
 
   return <span className={clsx("w-2 h-2 rounded-full inline-block shrink-0", color)} />;
 }
@@ -41,21 +41,21 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
   return (
     <div className="space-y-5">
       {/* Progress Bar */}
-      <div className="p-4 rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+      <div className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
+          <span className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             Pipeline Progress
           </span>
-          <span className="text-xs font-mono text-gray-500 dark:text-slate-400">{progressPct}%</span>
+          <span className="text-xs font-mono text-gray-500 dark:text-gray-400">{progressPct}%</span>
         </div>
-        <div className="w-full h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
+        <div className="w-full h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
           <div
             className="h-full rounded-full bg-indigo-600 transition-all duration-700"
             style={{ width: `${progressPct}%` }}
           />
         </div>
         {orchestratorRouting?.status_summary && (
-          <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-2">{orchestratorRouting.status_summary}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">{orchestratorRouting.status_summary}</p>
         )}
       </div>
 
@@ -68,7 +68,7 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
               ? "border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40"
               : supervisorStatus === "completed"
                 ? "border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
-                : "border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                : "border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
           )}
         >
           <div className="flex items-center gap-3">
@@ -80,15 +80,15 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">{supervisorInfo.label}</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{supervisorInfo.label}</h3>
                 <StatusDot status={supervisorStatus} />
               </div>
-              <p className="text-[11px] text-gray-400 dark:text-slate-500">Plans architecture &amp; delegates tasks</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">Plans architecture &amp; delegates tasks</p>
               <div className="flex items-center gap-2 mt-1.5">
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-100 dark:border-indigo-900">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-100 dark:border-indigo-900">
                   {supervisorInfo.provider}
                 </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
                   COORDINATOR
                 </span>
               </div>
@@ -97,8 +97,8 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
         </div>
 
         {/* Connector */}
-        <div className="w-px h-5 bg-gray-200 dark:bg-slate-700" />
-        <div className="w-2 h-2 rotate-45 border-b border-r border-gray-300 dark:border-slate-600 -mt-1.5" />
+        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700" />
+        <div className="w-2 h-2 rotate-45 border-b border-r border-gray-300 dark:border-gray-500 -mt-1.5" />
       </div>
 
       {/* Orchestrator Node */}
@@ -110,7 +110,7 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
               ? "border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40"
               : orchestratorStatus === "completed"
                 ? "border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
-                : "border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                : "border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
           )}
         >
           <div className="flex items-center gap-3">
@@ -122,19 +122,19 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">{orchestratorInfo.label}</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{orchestratorInfo.label}</h3>
                 <StatusDot status={orchestratorStatus} />
               </div>
-              <p className="text-[11px] text-gray-400 dark:text-slate-500">Manages execution workflow (code &rarr; test &rarr; fix &rarr; deploy)</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">Manages execution workflow (code &rarr; test &rarr; fix &rarr; deploy)</p>
               <div className="flex items-center gap-2 mt-1.5">
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-100 dark:border-indigo-900">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-100 dark:border-indigo-900">
                   {orchestratorInfo.provider}
                 </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
                   COORDINATOR
                 </span>
                 {currentPhase && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900">
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900">
                     Phase: {currentPhase}
                   </span>
                 )}
@@ -144,8 +144,8 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
         </div>
 
         {/* Fan-out connector */}
-        <div className="w-px h-4 bg-gray-200 dark:bg-slate-700 mt-0.5" />
-        <div className="w-full max-w-2xl h-px bg-gray-200 dark:bg-slate-700" />
+        <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mt-0.5" />
+        <div className="w-full max-w-2xl h-px bg-gray-200 dark:bg-gray-700" />
       </div>
 
       {/* Execution Phases */}
@@ -168,17 +168,17 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
                     ? "border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20"
                     : anyFailed
                       ? "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/20"
-                      : "border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+                      : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
               )}
             >
               {/* Phase header */}
               <div className="flex items-center gap-2 mb-2.5">
                 <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: phase.color }} />
-                <h4 className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: phase.color }}>
+                <h4 className="text-sm font-semibold uppercase tracking-wider" style={{ color: phase.color }}>
                   {phase.name}
                 </h4>
-                {allDone && <span className="text-[9px] text-green-600 dark:text-green-500 ml-auto">Done</span>}
-                {anyRunning && <span className="text-[9px] text-blue-600 dark:text-blue-400 ml-auto animate-pulse">Active</span>}
+                {allDone && <span className="text-xs text-green-600 dark:text-green-500 ml-auto">Done</span>}
+                {anyRunning && <span className="text-xs text-blue-600 dark:text-blue-400 ml-auto animate-pulse">Active</span>}
               </div>
 
               {/* Agents in this phase */}
@@ -202,24 +202,24 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
                             ? "bg-green-50 dark:bg-green-950/20"
                             : status === "failed"
                               ? "bg-red-50 dark:bg-red-950/20"
-                              : "bg-gray-50 dark:bg-slate-800/50"
+                              : "bg-gray-50 dark:bg-gray-700/50"
                       )}
                     >
                       <div
-                        className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-semibold shrink-0"
+                        className="w-5 h-5 rounded flex items-center justify-center text-xs font-semibold shrink-0"
                         style={{ backgroundColor: `${info.color}18`, color: info.color }}
                       >
                         {info.label.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <span className="text-[10px] font-medium text-gray-800 dark:text-slate-200 truncate block">
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate block">
                           {info.label}
                         </span>
-                        <span className="text-[8px] text-gray-400 dark:text-slate-500">{info.provider}</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{info.provider}</span>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         {msgCount > 0 && (
-                          <span className="text-[8px] px-1 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                          <span className="text-xs px-1 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
                             {msgCount}
                           </span>
                         )}
