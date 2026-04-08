@@ -104,7 +104,8 @@ def wrap_openai_client(client: Any) -> Any:
         from langsmith.wrappers import wrap_openai
 
         return wrap_openai(client)
-    except ImportError:
+    except (ImportError, AttributeError, Exception):
+        # Groq/other OpenAI-compatible clients may not match the expected interface
         return client
 
 
