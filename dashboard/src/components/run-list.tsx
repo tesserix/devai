@@ -7,6 +7,7 @@ interface RunListProps {
   runs: PipelineRun[];
   selectedRunId?: string;
   onSelect: (runId: string) => void;
+  onRetrigger?: (repo: string) => void;
 }
 
 const STAGE_DOT: Record<string, string> = {
@@ -25,7 +26,7 @@ const STAGE_DOT: Record<string, string> = {
   failed: "bg-red-600",
 };
 
-export function RunList({ runs, selectedRunId, onSelect }: RunListProps) {
+export function RunList({ runs, selectedRunId, onSelect, onRetrigger }: RunListProps) {
   if (runs.length === 0) {
     return (
       <div className="text-center py-10 text-gray-400 dark:text-gray-500">
@@ -43,6 +44,7 @@ export function RunList({ runs, selectedRunId, onSelect }: RunListProps) {
         const completedAgents = Object.values(run.agents || {}).filter(
           (a) => a.status === "completed"
         ).length;
+        const isFailed = run.stage === "failed";
 
         return (
           <button
@@ -74,10 +76,28 @@ export function RunList({ runs, selectedRunId, onSelect }: RunListProps) {
                 {completedAgents}/{agentCount || "?"} agents
               </span>
             </div>
-            <div className="mt-1.5">
-              <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+            <div className="mt-1.5 flex items-center justify-between">
+              <span className={clsx(
+                "text-xs px-1.5 py-0.5 rounded",
+                isFailed
+                  ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+                  : "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
+              )}>
                 {run.stage.replace(/_/g, " ")}
               </span>
+              {isFailed && onRetrigger && (
+                <span
+                  role="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRetrigger(run.repo);
+                  }}
+                  className="text-xs px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800/40 cursor-pointer transition-colors"
+                  title="Retrigger pipeline for this repo"
+                >
+                  Retry
+                </span>
+              )}
             </div>
           </button>
         );

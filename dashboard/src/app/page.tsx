@@ -66,6 +66,12 @@ export default function DashboardPage() {
     await fetchRuns();
   };
 
+  const handleRetrigger = async (repo: string) => {
+    const result = await api.triggerPipeline(repo, "Retry failed pipeline run");
+    setSelectedRunId(result.run_id);
+    await fetchRuns();
+  };
+
   const handleApprove = async (gate: string) => {
     if (!selectedRunId) return;
     await api.approveGate(selectedRunId, gate);
@@ -122,7 +128,7 @@ export default function DashboardPage() {
           {loading ? (
             <div className="text-center py-8 text-gray-400 dark:text-gray-500 text-xs">Loading...</div>
           ) : (
-            <RunList runs={runs} selectedRunId={selectedRunId} onSelect={setSelectedRunId} />
+            <RunList runs={runs} selectedRunId={selectedRunId} onSelect={setSelectedRunId} onRetrigger={handleRetrigger} />
           )}
         </div>
 
