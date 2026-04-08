@@ -12,7 +12,10 @@ from typing import Any
 
 import httpx
 
-from devai.providers.groq_provider import GroqProvider
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 from devai.sre.tools.k8s_tools import K8sToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -53,7 +56,7 @@ class PerfMonitorAgent:
 
     def __init__(self, config: Any) -> None:
         self.config = config
-        self.groq = GroqProvider(config)
+        self.openai = OpenAIProvider(config)
         self.k8s = K8sToolExecutor()
         self._prometheus_url = getattr(config, "prometheus_url", "http://prometheus.monitoring.svc.cluster.local:9090")
 
@@ -101,7 +104,7 @@ class PerfMonitorAgent:
 
         combined = "\n\n".join(perf_data)
 
-        analysis = await self.groq.generate(
+        analysis = await self.openai.generate(
             prompt=f"Analyze these performance metrics and identify issues:\n\n{combined[:10000]}",
             system=SYSTEM_PROMPT,
             response_format={"type": "json_object"},

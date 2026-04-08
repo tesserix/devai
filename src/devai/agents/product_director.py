@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
 from devai.graph.a2a import A2ABus
-from devai.providers.openai_codex import CodexLiteProvider
+
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.state import ALMState
@@ -56,7 +60,7 @@ Guidelines:
 
 
 class ProductDirectorAgent(BaseAgent):
-    """Creates Epics and User Stories using OpenAI Codex Responses API."""
+    """Creates Epics and User Stories using OpenAI Chat Completions API."""
 
     name = "product_director"
     subscribe_subject = "devai.pipeline.trigger"
@@ -68,7 +72,7 @@ class ProductDirectorAgent(BaseAgent):
 
     async def run_epic(self, state: ALMState, a2a: A2ABus | None = None) -> dict[str, Any]:
         """Create a GitHub Epic from analyzed requirements."""
-        codex = CodexLiteProvider(self.config)
+        openai = OpenAIProvider(self.config)
         if a2a is None:
             a2a = A2ABus(self.name, state.get("a2a_messages", []))
 
@@ -100,7 +104,7 @@ class ProductDirectorAgent(BaseAgent):
 
 Create a GitHub Epic that encompasses all these requirements."""
 
-        response = await codex.generate(
+        response = await openai.generate(
             prompt=prompt,
             system=EPIC_SYSTEM_PROMPT,
             response_format={"type": "json_object"},
@@ -153,7 +157,7 @@ Create a GitHub Epic that encompasses all these requirements."""
 
     async def run_stories(self, state: ALMState, a2a: A2ABus | None = None) -> dict[str, Any]:
         """Create user stories from the epic and requirements."""
-        codex = CodexLiteProvider(self.config)
+        openai = OpenAIProvider(self.config)
         if a2a is None:
             a2a = A2ABus(self.name, state.get("a2a_messages", []))
 
@@ -184,7 +188,7 @@ Create a GitHub Epic that encompasses all these requirements."""
 
 Break these requirements into user stories. Consider the repository context and ensure stories are actionable for developers."""
 
-        response = await codex.generate(
+        response = await openai.generate(
             prompt=prompt,
             system=STORIES_SYSTEM_PROMPT,
             response_format={"type": "json_object"},

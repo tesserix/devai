@@ -1,4 +1,4 @@
-"""Staff Developer/Reviewer Agent — reviews code using OpenAI Codex sandbox."""
+"""Staff Developer/Reviewer Agent — reviews code using Claude tool-use loop."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
 from devai.models import CodeReview, ReviewDecision
-from devai.providers.openai_codex import CodexSandboxProvider
+
+# Primary: Anthropic Claude | Fallback: OpenAI
+from devai.providers.anthropic_claude import ClaudeProvider
+from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -18,15 +21,31 @@ logger = logging.getLogger(__name__)
 
 
 class StaffReviewerAgent(BaseAgent):
-    """Reviews code for standards, optimization, and security using Codex sandbox."""
+    """Reviews code for standards, optimization, and security using Claude tool-use loop."""
 
     name = "staff_reviewer"
     subscribe_subject = "devai.pipeline.code_ready"
     publish_subject = ""
 
+    # Reviewer gets read-only tools + PR review tools
+    REVIEWER_TOOLS = [
+        t
+        for t in GITHUB_TOOLS
+        if t["name"]
+        in {
+            "github_get_file_content",
+            "github_list_files",
+            "github_get_repo_tree",
+            "github_get_pr_diff",
+            "github_add_comment",
+            "github_create_pr_review",
+        }
+    ]
+
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
-        """Review the PR code using Codex sandbox."""
-        codex = CodexSandboxProvider(self.config)
+        """Review the PR code using Claude tool-use loop."""
+        claude = ClaudeProvider(self.config)
+        tool_executor = GitHubToolExecutor(self.github)
 
         pr_number = state.get("pr_number")
         branch = state.get("branch_name")
@@ -43,26 +62,10 @@ class StaffReviewerAgent(BaseAgent):
                 "review_summary": "No PR or branch found in pipeline context",
             }
 
-        # Get the PR diff
-        diff = await self.github.get_pr_diff(repo, pr_number)
-
         # Check for messages from other agents
         inbox_context = a2a.format_inbox_context()
 
-        review_prompt = f"""Review this pull request:
-
-PR #{pr_number} on {repo}
-Branch: {branch}
-
-## PR Diff
-```
-{diff[:10000]}
-```
-
-## Requirements
-{state.get("requirements", "")[:2000]}
-
-{inbox_context}
+        review_system = """You are a Staff Software Engineer performing a thorough code review.
 
 Focus on:
 1. Code quality and adherence to project conventions
@@ -71,15 +74,42 @@ Focus on:
 4. Error handling: proper error propagation, no swallowed errors
 5. Testing: are the changes testable? Any obvious missing test cases?
 
-Be thorough but fair. Only request changes for genuine issues, not style preferences."""
+Be thorough but fair. Only request changes for genuine issues, not style preferences.
 
-        result = await codex.run_review(
-            repo_url=f"https://github.com/{repo}.git",
-            branch=branch,
-            review_prompt=review_prompt,
+After reviewing, output your review as JSON:
+{
+    "decision": "approved" or "changes_requested",
+    "summary": "Overall review summary",
+    "comments": ["List of specific comments"],
+    "security_issues": ["Any security issues found"],
+    "performance_issues": ["Any performance issues found"],
+    "style_issues": ["Any style issues found"]
+}"""
+
+        review_prompt = f"""Review this pull request:
+
+PR #{pr_number} on {repo}
+Branch: {branch}
+
+## Requirements
+{state.get("requirements", "")[:2000]}
+
+{inbox_context}
+
+Start by getting the PR diff with github_get_pr_diff, then explore the repo structure and read relevant files to understand the codebase context. Provide a thorough review."""
+
+        governance = state.get("governance", "")
+        if governance:
+            review_system += f"\n\n## Repository Governance (CLAUDE.md)\nYou MUST follow these rules:\n\n{governance}"
+
+        result_text = await claude.run_agent_loop(
+            system_prompt=review_system,
+            user_message=review_prompt,
+            tools=self.REVIEWER_TOOLS,
+            tool_executor=tool_executor.execute,
         )
 
-        review = self._parse_review(result)
+        review = self._parse_review_text(result_text)
 
         # Post the review on the PR
         event = "APPROVE" if review.decision == ReviewDecision.APPROVED else "REQUEST_CHANGES"
@@ -130,15 +160,13 @@ Be thorough but fair. Only request changes for genuine issues, not style prefere
             "review_feedback": feedback,
         }
 
-    def _parse_review(self, codex_result: dict[str, Any]) -> CodeReview:
-        """Parse Codex sandbox output into a structured CodeReview."""
-        output = codex_result.get("output", "")
-
+    def _parse_review_text(self, result_text: str) -> CodeReview:
+        """Parse Claude tool-use loop output into a structured CodeReview."""
         try:
-            start = output.find("{")
-            end = output.rfind("}") + 1
+            start = result_text.find("{")
+            end = result_text.rfind("}") + 1
             if start >= 0 and end > start:
-                data = json.loads(output[start:end])
+                data = json.loads(result_text[start:end])
                 decision = ReviewDecision(data.get("decision", "changes_requested"))
                 return CodeReview(
                     decision=decision,
@@ -151,15 +179,9 @@ Be thorough but fair. Only request changes for genuine issues, not style prefere
         except (json.JSONDecodeError, ValueError):
             pass
 
-        if not codex_result.get("success", False):
-            return CodeReview(
-                decision=ReviewDecision.CHANGES_REQUESTED,
-                summary=f"Review failed: {codex_result.get('error', 'Unknown error')}",
-            )
-
         return CodeReview(
             decision=ReviewDecision.CHANGES_REQUESTED,
-            summary=f"Review completed but output could not be parsed. Raw output:\n{output[:1000]}",
+            summary=f"Review completed but output could not be parsed. Raw output:\n{result_text[:1000]}",
         )
 
     def _format_review_body(self, review: CodeReview) -> str:

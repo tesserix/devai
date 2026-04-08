@@ -30,8 +30,10 @@ dependencies = [
     "PyJWT>=2.10.0",
     # PostgreSQL
     "asyncpg>=0.30.0",
-    # Groq
+    # Groq (fallback)
     "groq>=0.12.0",
+    # Google Gemini
+    "google-generativeai>=0.8.0",
     # LangGraph / LangChain / LangSmith
     "langgraph>=0.2",
     "langchain-core>=0.3",

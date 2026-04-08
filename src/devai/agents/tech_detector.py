@@ -22,7 +22,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.providers.groq_provider import GroqProvider
+
+# Primary: Gemini | Fallback: OpenAI
+from devai.providers.gemini_provider import GeminiProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -151,13 +155,13 @@ class TechDetectorAgent(BaseAgent):
                 except Exception:
                     pass
 
-        # Phase 3: Use Groq for intelligent analysis
-        groq = GroqProvider(self.config)
+        # Phase 3: Use Gemini for intelligent analysis
+        gemini = GeminiProvider(self.config)
 
         tree_summary = "\n".join(file_paths[:200])
         configs = "\n\n".join(f"=== {k} ===\n{v}" for k, v in config_contents.items())
 
-        response = await groq.generate(
+        response = await gemini.generate(
             prompt=f"""Analyze this repository:
 
 ## File Tree (first 200 files)

@@ -8,7 +8,7 @@ The Supervisor is the first agent to receive a user request. It:
 5. Monitors agent outputs via A2A messages and adjusts the plan dynamically
 6. Escalates blockers and resolves conflicts between agents
 
-Uses Claude for maximum reasoning capability on architectural decisions.
+Uses OpenAI for maximum reasoning capability on architectural decisions.
 """
 
 from __future__ import annotations
@@ -18,7 +18,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.providers.anthropic_claude import ClaudeProvider
+
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -138,7 +142,7 @@ class SupervisorAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Analyze the request and create a comprehensive execution plan."""
-        claude = ClaudeProvider(self.config)
+        openai = OpenAIProvider(self.config)
 
         repo = state.get("repo_full_name", "")
         requirements = state.get("requirements", "")
@@ -187,9 +191,9 @@ class SupervisorAgent(BaseAgent):
                 "\n\nPlease address these escalations in your revised plan."
             )
 
-        plan_text = await claude.generate(
-            system_prompt=system,
-            user_message=user_message,
+        plan_text = await openai.generate(
+            prompt=user_message,
+            system=system,
         )
 
         # Parse the plan (extract JSON if present)

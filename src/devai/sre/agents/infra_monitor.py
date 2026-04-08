@@ -9,7 +9,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from devai.providers.groq_provider import GroqProvider
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 from devai.sre.tools.k8s_tools import K8sToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -46,7 +49,7 @@ class InfraMonitorAgent:
 
     def __init__(self, config: Any) -> None:
         self.config = config
-        self.groq = GroqProvider(config)
+        self.openai = OpenAIProvider(config)
         self.k8s = K8sToolExecutor()
 
     async def run(self, namespaces: list[str]) -> dict[str, Any]:
@@ -64,7 +67,7 @@ class InfraMonitorAgent:
 
         certs = await self.k8s.execute("k8s_check_certificates", {})
 
-        # Use Groq for fast analysis
+        # Use OpenAI for fast analysis
         combined = f"""## Cluster Health
 {cluster_health}
 
@@ -76,7 +79,7 @@ class InfraMonitorAgent:
 
 {"".join(namespace_data)}"""
 
-        analysis = await self.groq.generate(
+        analysis = await self.openai.generate(
             prompt=f"Analyze this Kubernetes cluster state and identify issues:\n\n{combined[:8000]}",
             system=SYSTEM_PROMPT,
             response_format={"type": "json_object"},

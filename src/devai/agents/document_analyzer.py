@@ -16,7 +16,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.providers.groq_provider import GroqProvider
+
+# Primary: Gemini | Fallback: OpenAI
+from devai.providers.gemini_provider import GeminiProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 from devai.tools.document_tools import DocumentToolExecutor
 
 if TYPE_CHECKING:
@@ -57,7 +61,7 @@ class DocumentAnalyzerAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Analyze input documents and extract requirements."""
-        groq = GroqProvider(self.config)
+        gemini = GeminiProvider(self.config)
         doc_tools = DocumentToolExecutor()
 
         requirements_text = state.get("requirements", "")
@@ -98,7 +102,7 @@ class DocumentAnalyzerAgent(BaseAgent):
         # Always include the raw requirements text
         extracted_texts.append(f"[Raw Requirements]\n{requirements_text}")
 
-        # Use Groq for fast synthesis
+        # Use Gemini for fast synthesis
         combined = "\n\n---\n\n".join(extracted_texts)
 
         synthesis_prompt = f"""Analyze these documents and extract ALL requirements for building this software:
@@ -117,7 +121,7 @@ Extract and synthesize into a comprehensive requirements document covering:
 Output as structured text that a Requirements Analyst can work with.
 Be specific and actionable. Don't add requirements not in the source documents."""
 
-        synthesized = await groq.generate(
+        synthesized = await gemini.generate(
             prompt=synthesis_prompt,
             system=SYSTEM_PROMPT,
             max_tokens=4096,

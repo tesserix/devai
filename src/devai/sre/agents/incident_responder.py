@@ -14,7 +14,10 @@ import json
 import logging
 from typing import Any
 
-from devai.providers.anthropic_claude import ClaudeProvider
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 from devai.scm import create_scm_client
 from devai.services.memory import AgentMemory
 
@@ -68,7 +71,7 @@ class IncidentResponderAgent:
     def __init__(self, config: Any, db: Any) -> None:
         self.config = config
         self.db = db
-        self.claude = ClaudeProvider(config)
+        self.openai = OpenAIProvider(config)
 
     async def run(
         self,

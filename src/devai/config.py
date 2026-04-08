@@ -65,7 +65,12 @@ class Settings(BaseSettings):
     claude_max_tokens: int = 8192
     claude_max_iterations: int = 25
 
-    # --- Groq ---
+    # --- Google Gemini ---
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+    gcp_secret_gemini_api_key: str = "prod-devai-gemini-api-key"
+
+    # --- Groq (fallback / secondary) ---
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
     gcp_secret_groq_api_key: str = "prod-devai-groq-api-key"

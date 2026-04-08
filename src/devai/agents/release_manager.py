@@ -15,7 +15,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.providers.groq_provider import GroqProvider
+
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -227,12 +231,12 @@ class ReleaseManagerAgent(BaseAgent):
     async def _generate_release_summary(self, state: ALMState) -> str:
         """Generate a release summary using Groq."""
         try:
-            groq = GroqProvider(self.config)
+            openai = OpenAIProvider(self.config)
 
             stories = state.get("stories", [])
             story_list = "\n".join(f"- {s.get('title', 'untitled')}" for s in stories[:10])
 
-            response = await groq.generate(
+            response = await openai.generate(
                 prompt=f"""Generate a brief release summary for these changes:
 
 Requirements: {state.get("requirements", "")[:500]}

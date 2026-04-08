@@ -13,7 +13,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from devai.providers.groq_provider import GroqProvider
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 from devai.sre.tools.k8s_tools import K8sToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -56,7 +59,7 @@ class LogAnalyzerAgent:
 
     def __init__(self, config: Any) -> None:
         self.config = config
-        self.groq = GroqProvider(config)
+        self.openai = OpenAIProvider(config)
         self.k8s = K8sToolExecutor()
 
     async def run(self, namespaces: list[str]) -> dict[str, Any]:
@@ -113,7 +116,7 @@ class LogAnalyzerAgent:
 
         combined = "\n\n".join(all_logs)
 
-        analysis = await self.groq.generate(
+        analysis = await self.openai.generate(
             prompt=f"Analyze these application error logs:\n\n{combined[:10000]}",
             system=SYSTEM_PROMPT,
             response_format={"type": "json_object"},

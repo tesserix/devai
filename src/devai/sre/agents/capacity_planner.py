@@ -13,7 +13,10 @@ import json
 import logging
 from typing import Any
 
-from devai.providers.groq_provider import GroqProvider
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 from devai.sre.tools.k8s_tools import K8sToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -62,7 +65,7 @@ class CapacityPlannerAgent:
 
     def __init__(self, config: Any) -> None:
         self.config = config
-        self.groq = GroqProvider(config)
+        self.openai = OpenAIProvider(config)
         self.k8s = K8sToolExecutor()
 
     async def run(self, namespaces: list[str]) -> dict[str, Any]:
@@ -83,7 +86,7 @@ class CapacityPlannerAgent:
         if pvcs:
             combined += f"\n\n## PVCs\n{pvcs[:3000]}"
 
-        analysis = await self.groq.generate(
+        analysis = await self.openai.generate(
             prompt=f"Analyze capacity and forecast resource needs:\n\n{combined[:10000]}",
             system=SYSTEM_PROMPT,
             response_format={"type": "json_object"},

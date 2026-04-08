@@ -9,7 +9,7 @@ It:
 5. Handles failure recovery, retries, and iteration loops
 6. Tracks progress and reports status back to the Supervisor
 
-Uses Claude for intelligent routing decisions that go beyond simple conditionals.
+Uses OpenAI for intelligent routing decisions that go beyond simple conditionals.
 """
 
 from __future__ import annotations
@@ -19,7 +19,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.providers.anthropic_claude import ClaudeProvider
+
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -113,7 +117,7 @@ class OrchestratorAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Evaluate current pipeline state and make a routing decision."""
-        claude = ClaudeProvider(self.config)
+        openai = OpenAIProvider(self.config)
 
         # Gather execution context
         stage = state.get("stage", "triggered")
@@ -168,9 +172,9 @@ class OrchestratorAgent(BaseAgent):
         user_message = "\n".join(context_parts)
         user_message += "\n\nBased on the current state, what should happen next? Provide your routing decision."
 
-        decision_text = await claude.generate(
-            system_prompt=SYSTEM_PROMPT,
-            user_message=user_message,
+        decision_text = await openai.generate(
+            prompt=user_message,
+            system=SYSTEM_PROMPT,
         )
 
         # Parse the decision

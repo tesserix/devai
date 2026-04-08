@@ -6,7 +6,7 @@ Handles the tesserix private repo build limit:
 3. Makes repo private again only after ALL builds finish
 4. Never leaves repos public if builds are still running
 
-Uses Groq for fast log analysis of build failures.
+Uses OpenAI for fast log analysis of build failures.
 """
 
 from __future__ import annotations
@@ -16,7 +16,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.providers.groq_provider import GroqProvider
+
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -270,11 +274,11 @@ class CIMonitorAgent(BaseAgent):
             return "No failed jobs found"
 
         try:
-            groq = GroqProvider(self.config)
+            openai = OpenAIProvider(self.config)
 
             job_details = "\n".join(f"- Job: {j['name']}, Failed Steps: {j['failed_steps']}" for j in failed_jobs)
 
-            response = await groq.generate(
+            response = await openai.generate(
                 prompt=f"Analyze these CI build failures and suggest fixes:\n\n{job_details}",
                 system="You are a CI/CD expert. Analyze build failures concisely. "
                 "Identify root causes and suggest specific fixes. Be brief.",

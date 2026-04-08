@@ -1,6 +1,6 @@
 """Requirements Analyst Agent — refines raw requirements into structured, actionable specs.
 
-Uses Groq (Llama 3.3 70B) for fast analysis. Identifies gaps, ambiguities,
+Uses OpenAI for fast analysis. Identifies gaps, ambiguities,
 and asks clarifying questions before passing to the Product Director.
 """
 
@@ -11,7 +11,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.core.base_agent import BaseAgent
-from devai.providers.groq_provider import GroqProvider
+
+# Primary: OpenAI | Fallback: Claude
+from devai.providers.openai_provider import OpenAIProvider
+
+# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -58,7 +62,7 @@ Be thorough but practical. Flag genuine gaps, don't invent problems."""
 
 
 class RequirementsAnalystAgent(BaseAgent):
-    """Analyzes and refines raw requirements using Groq for fast inference."""
+    """Analyzes and refines raw requirements using OpenAI for fast inference."""
 
     name = "requirements_analyst"
     subscribe_subject = "devai.pipeline.trigger"
@@ -66,7 +70,7 @@ class RequirementsAnalystAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Analyze and refine requirements."""
-        groq = GroqProvider(self.config)
+        openai = OpenAIProvider(self.config)
 
         requirements = state.get("requirements", "")
         repo = state.get("repo_full_name", "")
@@ -79,7 +83,7 @@ Raw Requirements:
 Analyze these requirements thoroughly. Break them down into structured, actionable items.
 Consider the repository context and identify any gaps or risks."""
 
-        response = await groq.generate(
+        response = await openai.generate(
             prompt=prompt,
             system=SYSTEM_PROMPT,
             response_format={"type": "json_object"},
