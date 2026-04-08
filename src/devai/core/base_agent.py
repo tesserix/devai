@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
     from devai.config import Settings
     from devai.core.event_bus import EventBus
-    from devai.core.github_client import GitHubClient
     from devai.core.state import StateManager
+    from devai.scm.base import SCMClient
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +55,14 @@ class BaseAgent(ABC):
 
     def __init__(
         self,
-        github: GitHubClient,
+        scm: SCMClient,
         state_manager: StateManager,
         config: Settings,
         event_bus: EventBus | None = None,
     ) -> None:
-        self.github = github
+        self.scm = scm
+        # Backward-compatible alias (agents may still reference self.github)
+        self.github = scm
         self.state = state_manager
         self.config = config
         self.event_bus = event_bus
@@ -72,8 +74,11 @@ class BaseAgent(ABC):
         """Execute the agent as a LangGraph node.
 
         Reads from ALMState, performs work, returns partial state updates.
-        Includes A2A messaging support and LangSmith tracing.
+        Includes guardrails, A2A messaging, and LangSmith tracing.
         """
+        # Run pre-execution guardrail checks
+        await self._guardrail_pre_check(state)
+
         # Create A2A bus scoped to this agent
         a2a = A2ABus(self.name, state.get("a2a_messages", []))
 
@@ -92,6 +97,9 @@ class BaseAgent(ABC):
                 pass
 
         result = await _run_fn(state, a2a)
+
+        # Run post-execution guardrail checks on output
+        result = self._guardrail_post_check(result)
 
         # Merge A2A messages: start with existing, add agent's outbox,
         # and include any messages the agent may have added to the result directly
@@ -191,7 +199,7 @@ class BaseAgent(ABC):
             await self.state.release_lock(run_id, self.name, self.worker_id)
             await msg.ack()
 
-    async def _check_approval_gate(self, ctx: Any) -> None:
+    async def _check_approval_gate(self, ctx: Any) -> None:  # noqa: C901
         """Check if this agent requires user approval before proceeding."""
         gate = AGENT_GATE_MAP.get(self.name)
         if not gate:
@@ -235,3 +243,35 @@ class BaseAgent(ABC):
             await asyncio.sleep(5)
 
         raise RuntimeError(f"Gate '{gate}' timed out on run {ctx.run_id}")
+
+    # --- Guardrail Integration ---
+
+    async def _guardrail_pre_check(self, state: ALMState) -> None:
+        """Run guardrail checks before agent execution."""
+        try:
+            from devai.services.guardrails import Guardrails
+
+            guardrails = Guardrails(self.config, self.state.redis)
+            warnings = await guardrails.pre_agent_check(self.name, dict(state))
+            for w in warnings:
+                logger.warning("Guardrail: %s", w)
+        except Exception as e:
+            # Guardrails should never block execution due to their own errors
+            logger.debug("Guardrail pre-check skipped: %s", e)
+
+    def _guardrail_post_check(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Filter agent output through guardrails."""
+        try:
+            from devai.services.guardrails import OutputFilter
+
+            output_filter = OutputFilter()
+
+            # Filter any text fields that might be posted to SCM
+            for key in ("implementation_summary", "review_summary", "security_summary",
+                        "test_summary", "supervisor_plan_raw", "orchestrator_decision_raw"):
+                if key in result and isinstance(result[key], str):
+                    result[key] = output_filter.filter_for_scm(result[key])
+        except Exception as e:
+            logger.debug("Guardrail post-check skipped: %s", e)
+
+        return result

@@ -112,4 +112,34 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
         )
         return [e.to_dict() for e in entries]
 
+    # --- Audit Trail API ---
+
+    @app.get("/dashboard/api/audit/{run_id}")
+    async def get_audit_trail(run_id: str, limit: int = 100) -> list:
+        """Get the guardrail audit trail for a pipeline run."""
+        from devai.services.guardrails import AuditLog
+
+        audit = AuditLog(state.redis)
+        return await audit.get_audit_trail(run_id, limit)
+
+    @app.get("/dashboard/api/audit/{run_id}/security")
+    async def get_security_events(run_id: str) -> list:
+        """Get security-relevant audit events for a pipeline run."""
+        from devai.services.guardrails import AuditLog
+
+        audit = AuditLog(state.redis)
+        trail = await audit.get_audit_trail(run_id, 500)
+        return [e for e in trail if e.get("severity") == "critical" or "security" in e.get("action", "")]
+
+    @app.get("/dashboard/api/ratelimits")
+    async def get_rate_limits() -> dict:
+        """Get current rate limit status for all resources."""
+        from devai.services.guardrails import DEFAULT_RATE_LIMITS, RateLimiter
+
+        limiter = RateLimiter(state.redis)
+        statuses = {}
+        for resource in DEFAULT_RATE_LIMITS:
+            statuses[resource] = await limiter.check(resource)
+        return statuses
+
     return app

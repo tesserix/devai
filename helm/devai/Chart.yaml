@@ -1,6 +1,0 @@
-apiVersion: v2
-name: devai
-description: AI-powered development lifecycle automation platform
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

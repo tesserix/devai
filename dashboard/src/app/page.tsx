@@ -5,13 +5,14 @@ import { api, type PipelineRun } from "@/lib/api";
 import { AGENT_INFO } from "@/lib/constants";
 import { PipelineFlow } from "@/components/pipeline-flow";
 import { AgentCard } from "@/components/agent-card";
+import { AgentHierarchy } from "@/components/agent-hierarchy";
 import { A2AFeed } from "@/components/a2a-feed";
 import { RunList } from "@/components/run-list";
 import { TriggerDialog } from "@/components/trigger-dialog";
 import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
 
-type Tab = "overview" | "agents" | "a2a" | "chat" | "config";
+type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "chat" | "config";
 
 export default function DashboardPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
@@ -79,8 +80,10 @@ export default function DashboardPage() {
     setApprovals((prev) => prev.filter((a) => a.gate !== gate));
   };
 
-  // Mock A2A messages from run context (in production, served from API)
-  const a2aMessages = (selectedRun as any)?.context?.a2a_messages || [];
+  // Extract context data from run
+  const runContext = (selectedRun as any)?.context ?? {};
+  const a2aMessages = runContext.a2a_messages || [];
+  const orchestratorRouting = runContext.orchestrator_routing;
 
   return (
     <div className="flex h-screen">
@@ -89,12 +92,12 @@ export default function DashboardPage() {
         {/* Header */}
         <div className="p-4 border-b border-[var(--border-primary)]">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold">
               D
             </div>
             <div>
               <h1 className="text-sm font-bold text-[var(--text-primary)]">DevAI</h1>
-              <p className="text-[10px] text-[var(--text-muted)]">ALM Pipeline Dashboard</p>
+              <p className="text-[10px] text-[var(--text-muted)]">Multi-Agent ALM Platform</p>
             </div>
           </div>
         </div>
@@ -103,7 +106,7 @@ export default function DashboardPage() {
         <div className="p-3">
           <button
             onClick={() => setTriggerOpen(true)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-500 hover:to-indigo-500 transition-all shadow-sm"
           >
             <span>+</span>
             New Pipeline Run
@@ -119,11 +122,19 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Footer */}
+        {/* User + Logout */}
         <div className="p-3 border-t border-[var(--border-primary)]">
-          <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            LangGraph + LangSmith
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              Supervisor + Orchestrator
+            </div>
+            <a
+              href="/bff/logout"
+              className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors"
+            >
+              Logout
+            </a>
           </div>
         </div>
       </aside>
@@ -144,6 +155,11 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {orchestratorRouting?.progress_pct !== undefined && (
+                    <span className="text-[10px] px-2 py-1 rounded-full bg-indigo-500/15 text-indigo-400 font-mono">
+                      {orchestratorRouting.progress_pct}%
+                    </span>
+                  )}
                   <span className="text-xs px-2.5 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)] font-medium">
                     {selectedRun.stage.replace(/_/g, " ")}
                   </span>
@@ -175,6 +191,7 @@ export default function DashboardPage() {
               <div className="flex gap-1">
                 {([
                   { key: "overview", label: "Overview" },
+                  { key: "hierarchy", label: "Agent Hierarchy" },
                   { key: "agents", label: "Agents" },
                   { key: "a2a", label: "A2A Messages" },
                   { key: "chat", label: "Chat" },
@@ -185,7 +202,7 @@ export default function DashboardPage() {
                     onClick={() => setTab(t.key)}
                     className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                       tab === t.key
-                        ? "border-blue-500 text-blue-400"
+                        ? "border-violet-500 text-violet-400"
                         : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     }`}
                   >
@@ -198,7 +215,14 @@ export default function DashboardPage() {
             {/* Tab Content */}
             <div className="flex-1 overflow-y-auto p-6">
               {tab === "overview" && (
-                <OverviewTab run={selectedRun} a2aMessages={a2aMessages} />
+                <OverviewTab run={selectedRun} a2aMessages={a2aMessages} orchestratorRouting={orchestratorRouting} />
+              )}
+              {tab === "hierarchy" && (
+                <AgentHierarchy
+                  agentStatuses={selectedRun.agents || {}}
+                  a2aMessages={a2aMessages}
+                  orchestratorRouting={orchestratorRouting}
+                />
               )}
               {tab === "agents" && <AgentsTab run={selectedRun} />}
               {tab === "a2a" && <A2ATab messages={a2aMessages} />}
@@ -209,17 +233,17 @@ export default function DashboardPage() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-600/20 border border-blue-500/30 flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">🤖</span>
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 to-indigo-600/20 border border-violet-500/30 flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl">🧠</span>
               </div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">DevAI Dashboard</h2>
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">DevAI Multi-Agent Platform</h2>
               <p className="text-sm text-[var(--text-muted)] mt-1 max-w-sm">
+                Supervisor &rarr; Orchestrator &rarr; Specialist Agents.
                 AI-powered Application Lifecycle Management.
-                Select a run or trigger a new pipeline.
               </p>
               <button
                 onClick={() => setTriggerOpen(true)}
-                className="mt-4 px-4 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                className="mt-4 px-4 py-2 text-xs font-medium rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-500 hover:to-indigo-500 transition-all"
               >
                 Start New Pipeline
               </button>
@@ -240,19 +264,53 @@ export default function DashboardPage() {
 
 // --- Tab Components ---
 
-function OverviewTab({ run, a2aMessages }: { run: PipelineRun; a2aMessages: any[] }) {
+function OverviewTab({
+  run,
+  a2aMessages,
+  orchestratorRouting,
+}: {
+  run: PipelineRun;
+  a2aMessages: any[];
+  orchestratorRouting?: any;
+}) {
   const agents = run.agents || {};
-  const agentKeys = Object.keys(AGENT_INFO);
+  const coordinators = Object.entries(AGENT_INFO).filter(([, info]) => info.role === "coordinator");
+  const specialists = Object.entries(AGENT_INFO).filter(([, info]) => info.role === "specialist");
 
   return (
     <div className="space-y-6">
-      {/* Agent Grid */}
+      {/* Coordinator Agents */}
       <div>
         <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
-          Agent Status
+          Coordination Layer
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {coordinators.map(([key]) => {
+            const agentStatus = agents[key];
+            const msgCount = a2aMessages.filter(
+              (m: any) => m.from_agent === key || m.to_agent === key
+            ).length;
+
+            return (
+              <AgentCard
+                key={key}
+                agentKey={key}
+                status={agentStatus?.status}
+                error={agentStatus?.error}
+                messageCount={msgCount}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Specialist Agents */}
+      <div>
+        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+          Specialist Agents
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {agentKeys.map((key) => {
+          {specialists.map(([key]) => {
             const agentStatus = agents[key];
             const msgCount = a2aMessages.filter(
               (m: any) => m.from_agent === key || m.to_agent === key
@@ -286,44 +344,65 @@ function OverviewTab({ run, a2aMessages }: { run: PipelineRun; a2aMessages: any[
 
 function AgentsTab({ run }: { run: PipelineRun }) {
   const agents = run.agents || {};
+  const coordinators = Object.entries(AGENT_INFO).filter(([, info]) => info.role === "coordinator");
+  const specialists = Object.entries(AGENT_INFO).filter(([, info]) => info.role === "specialist");
+
+  const renderAgentDetail = ([key, info]: [string, typeof AGENT_INFO[string]]) => {
+    const agentStatus = agents[key];
+    return (
+      <div
+        key={key}
+        className="p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">{info.icon}</span>
+          <div>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">{info.label}</h4>
+            <p className="text-xs text-[var(--text-muted)]">
+              Provider: {info.provider} | Role: {info.role}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+            style={{
+              backgroundColor: `${info.color}15`,
+              color: info.color,
+            }}
+          >
+            {agentStatus?.status || "idle"}
+          </span>
+          {info.role === "coordinator" && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 font-medium">
+              COORDINATOR
+            </span>
+          )}
+          {agentStatus?.error && (
+            <span className="text-[10px] text-red-400 truncate">{agentStatus.error}</span>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="space-y-4">
-      <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-        All Agents ({Object.keys(AGENT_INFO).length})
-      </h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {Object.entries(AGENT_INFO).map(([key, info]) => {
-          const agentStatus = agents[key];
-          return (
-            <div
-              key={key}
-              className="p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]"
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{info.icon}</span>
-                <div>
-                  <h4 className="text-sm font-semibold text-[var(--text-primary)]">{info.label}</h4>
-                  <p className="text-xs text-[var(--text-muted)]">Provider: {info.provider}</p>
-                </div>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <span
-                  className="text-[10px] px-2 py-0.5 rounded-full font-medium"
-                  style={{
-                    backgroundColor: `${info.color}15`,
-                    color: info.color,
-                  }}
-                >
-                  {agentStatus?.status || "idle"}
-                </span>
-                {agentStatus?.error && (
-                  <span className="text-[10px] text-red-400 truncate">{agentStatus.error}</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-3">
+          Coordinators ({coordinators.length})
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {coordinators.map(renderAgentDetail)}
+        </div>
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+          Specialists ({specialists.length})
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {specialists.map(renderAgentDetail)}
+        </div>
       </div>
     </div>
   );
@@ -370,7 +449,7 @@ function ConfigTab() {
               type="checkbox"
               checked={config.auto_mode}
               onChange={(e) => setConfig({ ...config, auto_mode: e.target.checked })}
-              className="w-4 h-4 rounded accent-blue-500"
+              className="w-4 h-4 rounded accent-violet-500"
             />
           </label>
         </div>
@@ -393,7 +472,7 @@ function ConfigTab() {
                     gates: { ...config.gates, [gate]: e.target.checked },
                   })
                 }
-                className="w-4 h-4 rounded accent-blue-500"
+                className="w-4 h-4 rounded accent-violet-500"
               />
             </label>
           ))}
@@ -406,16 +485,34 @@ function ConfigTab() {
         </h3>
         <div className="space-y-3 p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-[var(--text-secondary)]">Claude (Anthropic)</span>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-500" />
+              <span className="text-[var(--text-secondary)]">Claude (Anthropic)</span>
+            </div>
             <span className="text-[var(--text-muted)] font-mono text-xs">claude-sonnet-4</span>
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-[var(--text-secondary)]">OpenAI (Codex)</span>
-            <span className="text-[var(--text-muted)] font-mono text-xs">o3</span>
+          <div className="text-[10px] text-[var(--text-muted)] ml-4 -mt-1">
+            Supervisor, Orchestrator, EM, Developer, DB, Security, QA, Infra
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-[var(--text-secondary)]">Groq (Llama 3.3)</span>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="text-[var(--text-secondary)]">OpenAI (Codex)</span>
+            </div>
+            <span className="text-[var(--text-muted)] font-mono text-xs">o3</span>
+          </div>
+          <div className="text-[10px] text-[var(--text-muted)] ml-4 -mt-1">
+            Product Director, Staff Reviewer
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-500" />
+              <span className="text-[var(--text-secondary)]">Groq (Llama 3.3)</span>
+            </div>
             <span className="text-[var(--text-muted)] font-mono text-xs">llama-3.3-70b</span>
+          </div>
+          <div className="text-[10px] text-[var(--text-muted)] ml-4 -mt-1">
+            Doc Analyzer, Tech Detector, Requirements, CI Monitor, Release
           </div>
         </div>
       </div>

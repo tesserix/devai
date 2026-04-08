@@ -117,9 +117,17 @@ export default function SREDashboard() {
           >
             Trigger Manual Scan
           </button>
-          <div className="flex items-center gap-2 mt-2 text-[10px] text-[var(--text-muted)]">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            Auto-scanning every 5m
+          <div className="flex items-center justify-between mt-2">
+            <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Auto-scanning every 5m
+            </div>
+            <a
+              href="/bff/logout"
+              className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors"
+            >
+              Logout
+            </a>
           </div>
         </div>
       </aside>

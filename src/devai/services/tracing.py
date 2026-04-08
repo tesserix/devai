@@ -79,10 +79,17 @@ def wrap_anthropic_client(client: Any) -> Any:
         return client
 
     try:
+        # Try the dedicated Anthropic wrapper first (langsmith >= 0.1.x)
+        from langsmith.wrappers import wrap_anthropic
+
+        return wrap_anthropic(client)
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        # Fallback to OpenAI-compatible wrapper
         from langsmith.wrappers import wrap_openai
 
-        # LangSmith's wrap_openai also works with Anthropic's client
-        # via the OpenAI-compatible interface
         return wrap_openai(client)
     except (ImportError, Exception):
         return client

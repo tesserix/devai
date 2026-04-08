@@ -94,6 +94,22 @@ class Settings(BaseSettings):
     langchain_project: str = "devai"  # Project name in LangSmith UI
     langchain_endpoint: str = "https://api.smith.langchain.com"
 
+    # --- GKE / Kubernetes ---
+    gke_cluster: str = "tesseract-prod-in-gke"
+    gke_region: str = "asia-south1"
+    gke_project: str = "tesseracthub-480811"
+    gke_use_in_cluster: bool = True  # Use in-cluster auth when running in GKE
+
+    # --- ArgoCD ---
+    argocd_namespace: str = "argocd"
+    argocd_sync_timeout: int = 300  # seconds to wait for ArgoCD sync
+    argocd_health_timeout: int = 120  # seconds to wait for healthy status
+
+    # --- Cloudflare ---
+    cloudflare_api_token: str = ""
+    cloudflare_account_id: str = ""
+    cloudflare_zone_id: str = ""  # Primary zone for DNS/tunnel management
+
     # --- Observability ---
     otel_endpoint: str = ""
     metrics_enabled: bool = True

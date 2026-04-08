@@ -132,6 +132,11 @@ Create a GitHub Epic that encompasses all these requirements."""
             "url": issue["html_url"],
         }
 
+        # Add epic to the Supervisor's project board
+        project_id = state.get("supervisor_project_id")
+        if project_id:
+            await self._add_to_project(repo, project_id, issue["number"])
+
         # Notify Engineering Manager
         a2a.notify(
             "engineering_manager",
@@ -224,6 +229,11 @@ Break these requirements into user stories. Consider the repository context and 
             })
             story_numbers.append(issue["number"])
 
+            # Add story to the Supervisor's project board
+            project_id = state.get("supervisor_project_id")
+            if project_id:
+                await self._add_to_project(repo, project_id, issue["number"])
+
         # Update epic body with story references
         if epic_number and created_stories:
             story_refs = "\n".join(f"- [ ] #{s['number']} — {s['title']}" for s in created_stories)
@@ -246,3 +256,13 @@ Break these requirements into user stories. Consider the repository context and 
             "story_issue_numbers": story_numbers,
             # a2a messages are merged by BaseAgent.run() automatically
         }
+
+    async def _add_to_project(self, repo: str, project_id: str, issue_number: int) -> None:
+        """Add an issue to the Supervisor's project board."""
+        try:
+            node_id = await self.scm.get_node_id(repo, issue_number)
+            if node_id:
+                await self.scm.add_item_to_project(project_id, node_id)
+                logger.debug("Added issue #%d to project board", issue_number)
+        except Exception as e:
+            logger.warning("Failed to add issue #%d to project: %s", issue_number, e)

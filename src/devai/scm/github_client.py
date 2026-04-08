@@ -259,5 +259,137 @@ class GitHubSCMClient(SCMClient):
 
         return None
 
+    # --- Repo Visibility ---
+
+    async def set_repo_visibility(self, repo: str, visibility: str) -> dict[str, Any]:
+        """Toggle repo between public and private (for CI build limits)."""
+        resp = await self._request(
+            "PATCH", f"/repos/{repo}",
+            json={"visibility": visibility},
+        )
+        result = resp.json()
+        logger.info("Set %s visibility to %s", repo, visibility)
+        return {"visibility": result.get("visibility", visibility)}
+
+    async def get_all_workflow_runs(
+        self, repo: str, status: str = "in_progress", limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Get all workflow runs with a given status (queued or in_progress)."""
+        runs = []
+        for check_status in ("queued", "in_progress"):
+            resp = await self._request(
+                "GET", f"/repos/{repo}/actions/runs",
+                params={"status": check_status, "per_page": str(limit)},
+            )
+            runs.extend(resp.json().get("workflow_runs", []))
+        return runs
+
+    # --- Projects v2 (GraphQL) ---
+
+    async def _graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute a GitHub GraphQL query."""
+        token = await self._get_token()
+        resp = await self._http.post(
+            "https://api.github.com/graphql",
+            headers={"Authorization": f"bearer {token}"},
+            json={"query": query, "variables": variables or {}},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if "errors" in data:
+            raise RuntimeError(f"GraphQL error: {data['errors']}")
+        return data.get("data", {})
+
+    async def create_project(
+        self,
+        org: str,
+        title: str,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Create a GitHub Projects v2 board on the org."""
+        # First get the org node ID
+        org_data = await self._graphql(
+            "query($login: String!) { organization(login: $login) { id } }",
+            {"login": org},
+        )
+        owner_id = org_data.get("organization", {}).get("id")
+        if not owner_id:
+            raise RuntimeError(f"Organization '{org}' not found or not accessible")
+
+        # Create the project
+        result = await self._graphql(
+            """
+            mutation($ownerId: ID!, $title: String!) {
+                createProjectV2(input: {ownerId: $ownerId, title: $title}) {
+                    projectV2 {
+                        id
+                        number
+                        url
+                        title
+                    }
+                }
+            }
+            """,
+            {"ownerId": owner_id, "title": title},
+        )
+
+        project = result.get("createProjectV2", {}).get("projectV2", {})
+
+        # Update description if provided (separate mutation)
+        if description and project.get("id"):
+            await self._graphql(
+                """
+                mutation($projectId: ID!, $readme: String!) {
+                    updateProjectV2(input: {projectId: $projectId, readme: $readme}) {
+                        projectV2 { id }
+                    }
+                }
+                """,
+                {"projectId": project["id"], "readme": description},
+            )
+
+        return {
+            "id": project.get("id", ""),
+            "number": project.get("number"),
+            "url": project.get("url", ""),
+            "title": project.get("title", title),
+        }
+
+    async def add_item_to_project(
+        self,
+        project_id: str,
+        content_id: str,
+    ) -> dict[str, Any]:
+        """Add an issue or PR to a GitHub Projects v2 board."""
+        result = await self._graphql(
+            """
+            mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                    item {
+                        id
+                    }
+                }
+            }
+            """,
+            {"projectId": project_id, "contentId": content_id},
+        )
+        item = result.get("addProjectV2ItemById", {}).get("item", {})
+        return {"item_id": item.get("id", "")}
+
+    async def get_node_id(self, repo: str, issue_number: int) -> str:
+        """Get the GraphQL node ID for an issue."""
+        owner, name = repo.split("/", 1)
+        result = await self._graphql(
+            """
+            query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                    issue(number: $number) { id }
+                }
+            }
+            """,
+            {"owner": owner, "name": name, "number": issue_number},
+        )
+        return result.get("repository", {}).get("issue", {}).get("id", "")
+
     async def close(self) -> None:
         await self._http.aclose()

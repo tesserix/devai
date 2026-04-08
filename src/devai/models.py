@@ -46,6 +46,8 @@ class ReviewDecision(StrEnum):
 
 
 class AgentRole(StrEnum):
+    SUPERVISOR = "supervisor"
+    ORCHESTRATOR = "orchestrator"
     REQUIREMENTS_ANALYST = "requirements_analyst"
     PRODUCT_DIRECTOR = "product_director"
     ENGINEERING_MANAGER = "engineering_manager"

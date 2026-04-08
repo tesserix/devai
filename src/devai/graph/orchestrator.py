@@ -1,38 +1,48 @@
 """LangGraph ALM Pipeline Orchestrator.
 
-Full Application Lifecycle Management pipeline:
+Full Application Lifecycle Management pipeline with Supervisor/Orchestrator hierarchy:
 
-    trigger
-      ↓
-    ingest_documents ─── (extracts requirements from PDFs, URLs, specs)
-      ↓
+    User Request
+      |
+    supervisor ──────── (plans architecture, creates delegation plan)
+      |
+    orchestrator_pre ── (validates plan, sets up execution workflow)
+      |
+    ingest_documents ── (extracts requirements from PDFs, URLs, specs)
+      |
     detect_tech_stack ── (auto-detects language, framework, deployment target)
-      ↓
+      |
     analyze_requirements
-      ↓
+      |
     create_epic
-      ↓
+      |
     create_stories
-      ↓
+      |
     create_plan
-      ↓
+      |
     implement_code
-      ↓
-    review_code ──────→ (changes_requested) ──→ implement_code (loop)
-      ↓ (approved)
-    security_scan ────→ (block) ──→ implement_code (fix loop)
-      ↓ (pass)
+      |
+    db_engineering
+      |
+    review_code ──────→ orchestrator_review → (changes_requested) → implement_code
+      | (approved)
+    security_scan ────→ orchestrator_security → (block) → implement_code
+      | (pass)
     monitor_build
-      ↓
-    run_tests ────────→ (failed) ──→ implement_code (fix loop)
-      ↓ (passed)
-    provision_infra ── (generate Helm charts or VM deploy scripts)
-      ↓
+      |
+    run_tests ────────→ orchestrator_tests → (failed) → implement_code
+      | (passed)
+    provision_infra
+      |
     deploy_release
-      ↓
+      |
+    orchestrator_post ── (final status report)
+      |
     END
 
 Features:
+- Supervisor Agent plans architecture before execution begins
+- Orchestrator Agent makes dynamic routing decisions at quality gates
 - State checkpointing at each stage boundary
 - Agent memory injection for cross-run learning
 - A2A message persistence to Redis
@@ -56,8 +66,8 @@ from devai.services.tracing import traceable_if_enabled
 
 if TYPE_CHECKING:
     from devai.config import Settings
-    from devai.core.github_client import GitHubClient
     from devai.core.state import StateManager
+    from devai.scm.base import SCMClient
 
 logger = logging.getLogger(__name__)
 
@@ -67,25 +77,34 @@ NODE_TIMEOUT = 900  # 15 minutes per agent
 
 
 class ALMOrchestrator:
-    """LangGraph-based ALM pipeline orchestrator with full lifecycle management."""
+    """LangGraph-based ALM pipeline orchestrator with Supervisor/Orchestrator hierarchy."""
 
     def __init__(
         self,
-        github: GitHubClient,
+        scm: SCMClient,
         state_manager: StateManager,
         config: Settings,
     ) -> None:
-        self.github = github
+        self.scm = scm
         self.state_manager = state_manager
         self.config = config
         self._checkpoint = StateCheckpoint(state_manager.redis)
         self._graph = self._build_graph()
 
     def _build_graph(self) -> Any:
-        """Build and compile the full ALM StateGraph."""
+        """Build and compile the full ALM StateGraph with Supervisor/Orchestrator."""
         graph = StateGraph(ALMState)
 
         # --- Register all nodes ---
+        # Supervisor & Orchestrator (coordination layer)
+        graph.add_node("supervisor", self._node_supervisor)
+        graph.add_node("orchestrator_pre", self._node_orchestrator_pre)
+        graph.add_node("orchestrator_review", self._node_orchestrator_review)
+        graph.add_node("orchestrator_security", self._node_orchestrator_security)
+        graph.add_node("orchestrator_tests", self._node_orchestrator_tests)
+        graph.add_node("orchestrator_post", self._node_orchestrator_post)
+
+        # Specialist agents (execution layer)
         graph.add_node("ingest_documents", self._node_ingest_documents)
         graph.add_node("detect_tech_stack", self._node_detect_tech_stack)
         graph.add_node("analyze_requirements", self._node_analyze_requirements)
@@ -102,9 +121,17 @@ class ALMOrchestrator:
         graph.add_node("deploy_release", self._node_deploy_release)
 
         # --- Define edges ---
-        graph.set_entry_point("ingest_documents")
 
-        # Linear flow: docs → tech → requirements → epic → stories → plan → code
+        # Entry: Supervisor plans first
+        graph.set_entry_point("supervisor")
+
+        # Supervisor -> Orchestrator validates and starts execution
+        graph.add_edge("supervisor", "orchestrator_pre")
+
+        # Orchestrator kicks off the analysis phase
+        graph.add_edge("orchestrator_pre", "ingest_documents")
+
+        # Linear flow: docs -> tech -> requirements -> epic -> stories -> plan -> code
         graph.add_edge("ingest_documents", "detect_tech_stack")
         graph.add_edge("detect_tech_stack", "analyze_requirements")
         graph.add_edge("analyze_requirements", "create_epic")
@@ -114,52 +141,65 @@ class ALMOrchestrator:
         graph.add_edge("implement_code", "db_engineering")
         graph.add_edge("db_engineering", "review_code")
 
-        # Conditional: review decision
+        # After review: Orchestrator makes the routing decision
+        graph.add_edge("review_code", "orchestrator_review")
         graph.add_conditional_edges(
-            "review_code",
+            "orchestrator_review",
             self._route_after_review,
             {
                 "approved": "security_scan",
                 "changes_requested": "implement_code",
-                "max_iterations": END,
+                "max_iterations": "orchestrator_post",
             },
         )
 
-        # Conditional: security gate
+        # After security: Orchestrator makes the routing decision
+        graph.add_edge("security_scan", "orchestrator_security")
         graph.add_conditional_edges(
-            "security_scan",
+            "orchestrator_security",
             self._route_after_security,
             {
                 "pass": "monitor_build",
                 "pass_with_warnings": "monitor_build",
                 "block": "implement_code",
-                "max_blocks": END,
+                "max_blocks": "orchestrator_post",
             },
         )
 
         graph.add_edge("monitor_build", "run_tests")
 
-        # Conditional: test results
+        # After tests: Orchestrator makes the routing decision
+        graph.add_edge("run_tests", "orchestrator_tests")
         graph.add_conditional_edges(
-            "run_tests",
+            "orchestrator_tests",
             self._route_after_tests,
             {
                 "passed": "provision_infra",
                 "failed": "implement_code",
-                "max_failures": END,
+                "max_failures": "orchestrator_post",
             },
         )
 
         graph.add_edge("provision_infra", "deploy_release")
-        graph.add_edge("deploy_release", END)
+
+        # After deploy: Orchestrator produces final report
+        graph.add_edge("deploy_release", "orchestrator_post")
+        graph.add_edge("orchestrator_post", END)
 
         return graph.compile()
 
-    # --- Routing Functions ---
+    # --- Routing Functions (Orchestrator-powered) ---
 
     def _route_after_review(self, state: ALMState) -> str:
+        """Orchestrator-informed routing after code review."""
         decision = state.get("review_decision", "changes_requested")
         iteration = state.get("review_iteration", 0)
+
+        # Check orchestrator's recommendation
+        routing = state.get("orchestrator_routing", {})
+        if routing.get("decision") == "escalate":
+            logger.warning("Orchestrator escalated at review stage")
+            return "max_iterations"
 
         if decision == "approved":
             return "approved"
@@ -169,8 +209,13 @@ class ALMOrchestrator:
         return "changes_requested"
 
     def _route_after_security(self, state: ALMState) -> str:
+        """Orchestrator-informed routing after security scan."""
         decision = state.get("security_decision", "pass")
         iteration = state.get("review_iteration", 0)
+
+        routing = state.get("orchestrator_routing", {})
+        if routing.get("decision") == "escalate":
+            return "max_blocks"
 
         if decision in ("pass", "pass_with_warnings"):
             return decision
@@ -179,8 +224,13 @@ class ALMOrchestrator:
         return "block"
 
     def _route_after_tests(self, state: ALMState) -> str:
+        """Orchestrator-informed routing after test execution."""
         test_failed = state.get("test_failed", 0)
         iteration = state.get("review_iteration", 0)
+
+        routing = state.get("orchestrator_routing", {})
+        if routing.get("decision") == "escalate":
+            return "max_failures"
 
         if test_failed == 0:
             return "passed"
@@ -210,7 +260,7 @@ class ALMOrchestrator:
         module_path, class_name = agent_cls_path.rsplit(".", 1)
         module = importlib.import_module(module_path)
         agent_cls = getattr(module, class_name)
-        agent = agent_cls(self.github, self.state_manager, self.config)
+        agent = agent_cls(self.scm, self.state_manager, self.config)
 
         # Inject memory context
         await self._get_memory_context(agent.name, state)
@@ -249,7 +299,65 @@ class ALMOrchestrator:
 
         return result
 
-    # --- Node Functions ---
+    # --- Supervisor & Orchestrator Nodes ---
+
+    @traceable_if_enabled(name="alm.supervisor", run_type="chain")
+    async def _node_supervisor(self, state: ALMState) -> dict[str, Any]:
+        """Supervisor plans the architecture and creates the delegation plan."""
+        result = await self._run_node(
+            "supervisor", state,
+            "devai.agents.supervisor.SupervisorAgent",
+        )
+        result["stage"] = "plan_approved"
+        return result
+
+    @traceable_if_enabled(name="alm.orchestrator_pre", run_type="chain")
+    async def _node_orchestrator_pre(self, state: ALMState) -> dict[str, Any]:
+        """Orchestrator validates the plan and prepares for execution."""
+        result = await self._run_node(
+            "orchestrator_pre", state,
+            "devai.agents.orchestrator.OrchestratorAgent",
+        )
+        return result
+
+    @traceable_if_enabled(name="alm.orchestrator_review", run_type="chain")
+    async def _node_orchestrator_review(self, state: ALMState) -> dict[str, Any]:
+        """Orchestrator evaluates review results and decides next step."""
+        result = await self._run_node(
+            "orchestrator_review", state,
+            "devai.agents.orchestrator.OrchestratorAgent",
+        )
+        return result
+
+    @traceable_if_enabled(name="alm.orchestrator_security", run_type="chain")
+    async def _node_orchestrator_security(self, state: ALMState) -> dict[str, Any]:
+        """Orchestrator evaluates security scan results and decides next step."""
+        result = await self._run_node(
+            "orchestrator_security", state,
+            "devai.agents.orchestrator.OrchestratorAgent",
+        )
+        return result
+
+    @traceable_if_enabled(name="alm.orchestrator_tests", run_type="chain")
+    async def _node_orchestrator_tests(self, state: ALMState) -> dict[str, Any]:
+        """Orchestrator evaluates test results and decides next step."""
+        result = await self._run_node(
+            "orchestrator_tests", state,
+            "devai.agents.orchestrator.OrchestratorAgent",
+        )
+        return result
+
+    @traceable_if_enabled(name="alm.orchestrator_post", run_type="chain")
+    async def _node_orchestrator_post(self, state: ALMState) -> dict[str, Any]:
+        """Orchestrator produces the final pipeline status report."""
+        result = await self._run_node(
+            "orchestrator_post", state,
+            "devai.agents.orchestrator.OrchestratorAgent",
+        )
+        result["stage"] = state.get("stage", "done")
+        return result
+
+    # --- Specialist Agent Nodes ---
 
     @traceable_if_enabled(name="alm.ingest_documents", run_type="chain")
     async def _node_ingest_documents(self, state: ALMState) -> dict[str, Any]:

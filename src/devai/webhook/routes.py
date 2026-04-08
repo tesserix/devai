@@ -63,7 +63,6 @@ async def scm_webhook(request: Request) -> dict[str, str]:
     if normalized:
         # Check if the event should trigger the pipeline
         labels = normalized.get("labels", [])
-        normalized.get("action", "")
         command = normalized.get("command", "")
 
         should_trigger = (
@@ -97,12 +96,23 @@ async def _trigger_from_normalized_event(request: Request, event: dict[str, Any]
         f"## Description\n\n{body_text}"
     )
 
+    # Guardrail: sanitize requirements before feeding to agents
+    try:
+        from devai.services.guardrails import InputSanitizer
+
+        sanitizer = InputSanitizer()
+        requirements, warnings = sanitizer.sanitize_requirements(requirements)
+        for w in warnings:
+            logger.warning("Webhook guardrail: %s", w)
+    except Exception:
+        pass
+
     logger.info(
         "Pipeline triggered from %s issue #%s on %s",
         event.get("trigger_type", "unknown"), issue_number, repo,
     )
 
-    # Post acknowledgement
+    # Post acknowledgement via SCM abstraction
     try:
         from devai.scm import create_scm_client
         config = request.app.state.config
@@ -111,6 +121,8 @@ async def _trigger_from_normalized_event(request: Request, event: dict[str, Any]
             repo, issue_number,
             "**DevAI Pipeline Triggered**\n\n"
             "The ALM pipeline has started processing this requirement.\n\n"
+            "The Supervisor Agent will analyze this request, create a tracking issue "
+            "with the architecture plan, and coordinate specialist agents.\n\n"
             "Progress updates will be posted as each stage completes.",
         )
         await scm.close()
@@ -160,23 +172,12 @@ async def _route_event(request: Request, event_type: str, payload: dict[str, Any
 
 
 async def _trigger_from_issue(request: Request, payload: dict[str, Any]) -> None:
-    """Trigger the ALM pipeline from a GitHub issue.
-
-    The issue body IS the requirement document. It can contain:
-    - Plain text requirements
-    - Links to PDFs, wikis, or OpenAPI specs
-    - Markdown-formatted requirements
-    - References to other issues
-
-    The Document Analyzer agent will parse all of this.
-    """
+    """Trigger the ALM pipeline from a GitHub issue."""
     issue = payload["issue"]
     repo = payload["repository"]["full_name"]
     issue_number = issue["number"]
     issue_title = issue.get("title", "")
-    issue.get("body", "") or ""
 
-    # Build the full requirements text from the issue
     requirements = _build_requirements_from_issue(issue)
 
     logger.info(
@@ -184,10 +185,8 @@ async def _trigger_from_issue(request: Request, payload: dict[str, Any]) -> None
         issue_number, repo, issue_title,
     )
 
-    # Acknowledge on the issue immediately
     await _post_trigger_comment(request, repo, issue_number)
 
-    # Run the LangGraph pipeline in the background
     asyncio.create_task(
         _run_pipeline(request, repo, requirements, "github_issue", str(issue_number))
     )
@@ -200,8 +199,6 @@ async def _trigger_from_issue_comment(request: Request, payload: dict[str, Any])
     issue_number = issue["number"]
     comment_body = payload.get("comment", {}).get("body", "")
 
-    # Extract optional override requirements from the command
-    # Format: /devai run [optional requirements override]
     parts = comment_body.split(maxsplit=2)
     override_reqs = parts[2] if len(parts) > 2 else ""
 
@@ -216,21 +213,13 @@ async def _trigger_from_issue_comment(request: Request, payload: dict[str, Any])
 
 
 async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) -> None:
-    """Trigger pipeline when a project card is moved to the ready column.
-
-    GitHub Projects v2 sends a projects_v2_item event. We need to:
-    1. Check if the item was moved to the configured "Ready" column
-    2. Resolve the linked issue content
-    3. Trigger the pipeline with the issue as requirements
-    """
+    """Trigger pipeline when a project card is moved to the ready column."""
     config = request.app.state.config
     changes = payload.get("changes", {})
 
-    # Check if the field that changed is a status field
     field_value = changes.get("field_value", {})
     new_value = field_value.get("to", {})
 
-    # Only trigger if moved to the ready column
     if isinstance(new_value, dict):
         column_name = new_value.get("name", "")
     elif isinstance(new_value, str):
@@ -242,7 +231,6 @@ async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) 
         logger.debug("Project card moved to '%s' — not the ready column", column_name)
         return
 
-    # Get the linked content (issue/PR)
     item = payload.get("projects_v2_item", {})
     content_type = item.get("content_type", "")
     content_node_id = item.get("content_node_id", "")
@@ -251,28 +239,23 @@ async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) 
         logger.debug("Project card is not an issue, skipping")
         return
 
-    # Resolve the issue via GitHub API
-    payload.get("organization", {}).get("login", config.github_org)
-
     try:
-        from devai.core.github_client import GitHubClient
+        from devai.scm import create_scm_client
 
-        github = GitHubClient(config)
+        scm = create_scm_client(config)
 
-        # Use GraphQL to resolve the node ID to an issue
-        issue_data = await _resolve_project_item_issue(github, content_node_id)
+        issue_data = await _resolve_project_item_issue(scm, content_node_id)
 
         if not issue_data:
             logger.warning("Could not resolve project item %s to an issue", content_node_id)
-            await github.close()
+            await scm.close()
             return
 
         repo = issue_data["repo"]
         issue_number = issue_data["number"]
 
-        # Fetch full issue
-        issue = await github.get_issue(repo, issue_number)
-        await github.close()
+        issue = await scm.get_issue(repo, issue_number)
+        await scm.close()
 
         requirements = _build_requirements_from_issue(issue)
 
@@ -293,14 +276,7 @@ async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) 
 # --- Helpers ---
 
 def _build_requirements_from_issue(issue: dict[str, Any]) -> str:
-    """Build a comprehensive requirements string from a GitHub issue.
-
-    Extracts:
-    - Issue title and body (the main requirement)
-    - Labels (for categorization)
-    - Linked issues (if referenced)
-    - Milestone context
-    """
+    """Build a comprehensive requirements string from an issue/work item."""
     number = issue.get("number", "?")
     title = issue.get("title", "")
     body = issue.get("body", "") or ""
@@ -326,35 +302,34 @@ def _build_requirements_from_issue(issue: dict[str, Any]) -> str:
 
 
 async def _post_trigger_comment(request: Request, repo: str, issue_number: int) -> None:
-    """Post a comment on the issue confirming the pipeline was triggered."""
+    """Post a comment confirming pipeline was triggered via SCM abstraction."""
     try:
-        from devai.core.github_client import GitHubClient
+        from devai.scm import create_scm_client
 
         config = request.app.state.config
-        github = GitHubClient(config)
+        scm = create_scm_client(config)
 
-        await github.add_comment(
+        await scm.add_comment(
             repo, issue_number,
             "**DevAI Pipeline Triggered**\n\n"
             "The ALM pipeline has started processing this requirement.\n\n"
-            "Stages: Document Analysis → Tech Detection → Requirements → "
-            "Epic → Stories → Plan → Code → Review → Security → Build → "
-            "Test → Deploy\n\n"
-            "Progress updates will be posted here as each stage completes.",
+            "Stages: Supervisor → Orchestrator → Document Analysis → "
+            "Tech Detection → Requirements → Epic → Stories → Plan → "
+            "Code → Review → Security → Build → Test → Deploy\n\n"
+            "Progress updates will be posted on the tracking issue.",
         )
-        await github.close()
+        await scm.close()
     except Exception as e:
         logger.warning("Failed to post trigger comment: %s", e)
 
 
 async def _resolve_project_item_issue(
-    github: Any,
+    scm: Any,
     node_id: str,
 ) -> dict[str, Any] | None:
     """Resolve a GitHub Projects v2 content_node_id to an issue.
 
-    Uses the GitHub GraphQL API to look up the node and extract
-    the repository and issue number.
+    Uses the GitHub GraphQL API. Only works with GitHub SCM client.
     """
     query = """
     query($id: ID!) {
@@ -370,7 +345,8 @@ async def _resolve_project_item_issue(
     }
     """
     try:
-        resp = await github._request(
+        # This uses the GitHub-specific _request method
+        resp = await scm._request(
             "POST",
             "https://api.github.com/graphql",
             json={"query": query, "variables": {"id": node_id}},
@@ -426,10 +402,13 @@ async def _run_pipeline(
                 for agent, dur in timings.items()
             )
 
+            tracking = final_state.get("supervisor_tracking_issue")
+            tracking_ref = f"\n**Tracking Issue:** #{tracking}" if tracking else ""
+
             await scm.add_comment(
                 repo, int(trigger_ref),
                 f"## Pipeline Complete\n\n"
-                f":{status_icon}: **Stage:** {stage}\n\n"
+                f":{status_icon}: **Stage:** {stage}\n{tracking_ref}\n\n"
                 f"| Agent | Duration |\n|---|---|\n{timing_lines}\n\n"
                 f"**Run ID:** `{final_state.get('run_id', 'unknown')}`",
             )

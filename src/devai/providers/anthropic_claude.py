@@ -36,7 +36,9 @@ class ClaudeProvider:
     """Anthropic Claude Messages API with tool-use agentic loop."""
 
     def __init__(self, config: Settings) -> None:
-        self.client = AsyncAnthropic(api_key=config.anthropic_api_key)
+        from devai.services.tracing import wrap_anthropic_client
+
+        self.client = wrap_anthropic_client(AsyncAnthropic(api_key=config.anthropic_api_key))
         self.model = config.claude_model
         self.max_tokens = config.claude_max_tokens
         self.max_iterations = config.claude_max_iterations

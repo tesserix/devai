@@ -95,6 +95,16 @@ class ALMState(TypedDict, total=False):
     deploy_argocd_app: str
     health_check_passed: bool
 
+    # --- Supervisor & Orchestrator ---
+    supervisor_plan: dict[str, Any]  # Structured plan from Supervisor Agent
+    supervisor_plan_raw: str  # Raw LLM output from Supervisor
+    supervisor_tracking_issue: int | None  # SCM tracking issue number
+    supervisor_project_id: str | None  # GitHub Project v2 node ID
+    supervisor_project_url: str | None  # Project board URL
+    orchestrator_routing: dict[str, Any]  # Current routing decision from Orchestrator
+    orchestrator_decision_raw: str  # Raw LLM output from Orchestrator
+    detected_tech_stack: str  # Tech stack detected by TechDetector
+
     # --- A2A Communication ---
     a2a_messages: list[A2AMessageDict]
 

@@ -177,6 +177,74 @@ class SCMClient(ABC):
         """
         ...
 
+    # --- Repo Visibility (for CI build limits on private repos) ---
+
+    async def set_repo_visibility(self, repo: str, visibility: str) -> dict[str, Any]:
+        """Set repository visibility ('public' or 'private').
+
+        Used for the public→build→private cycle when the org has limited
+        Actions minutes for private repos.
+
+        Default implementation is a no-op — override in provider.
+        """
+        return {"visibility": visibility}
+
+    async def get_repo_visibility(self, repo: str) -> str:
+        """Get current repository visibility.
+
+        Returns 'public' or 'private'.
+        """
+        info = await self.get_repo_info(repo)
+        return info.get("visibility", "private")
+
+    async def get_all_workflow_runs(
+        self, repo: str, status: str = "in_progress", limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Get all workflow runs with a given status.
+
+        Used to check if ALL builds have completed before toggling visibility.
+        Default returns empty — override in provider.
+        """
+        return []
+
+    # --- Projects / Boards ---
+
+    async def create_project(
+        self,
+        org: str,
+        title: str,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Create a project board (GitHub Projects v2, GitLab Board, ADO Board).
+
+        Returns: dict with at least 'id' and 'url' keys.
+        Default implementation returns empty — override in provider.
+        """
+        return {"id": None, "url": ""}
+
+    async def add_item_to_project(
+        self,
+        project_id: str,
+        content_id: str,
+    ) -> dict[str, Any]:
+        """Add an issue or PR to a project board.
+
+        Args:
+            project_id: The project node ID.
+            content_id: The issue/PR node ID.
+
+        Returns: dict with at least 'item_id' key.
+        """
+        return {"item_id": None}
+
+    async def get_node_id(self, repo: str, issue_number: int) -> str:
+        """Get the GraphQL node ID for an issue.
+
+        Required for adding issues to GitHub Projects v2.
+        Default returns empty string — override in provider.
+        """
+        return ""
+
     # --- Lifecycle ---
 
     @abstractmethod

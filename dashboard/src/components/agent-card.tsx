@@ -15,22 +15,44 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
   const info = AGENT_INFO[agentKey];
   if (!info) return null;
 
+  const isCoordinator = info.role === "coordinator";
+
   return (
     <div
       className={clsx(
         "rounded-lg border p-4 transition-all",
+        isCoordinator && "border-l-4",
         status === "completed" && "border-green-500/30 bg-green-500/5",
-        status === "running" && "border-blue-500/30 bg-blue-500/5 animate-pulse",
+        status === "running" && "border-blue-500/30 bg-blue-500/5",
         status === "failed" && "border-red-500/30 bg-red-500/5",
         status === "waiting_approval" && "border-amber-500/30 bg-amber-500/5",
-        !status && "border-[var(--border-primary)] bg-[var(--bg-secondary)]"
+        !status && "border-[var(--border-primary)] bg-[var(--bg-secondary)]",
+        isCoordinator && !status && "border-l-violet-500/50",
+        isCoordinator && status === "completed" && "border-l-violet-400",
+        isCoordinator && status === "running" && "border-l-violet-500",
+        status === "running" && "animate-pulse"
       )}
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-2.5">
-          <span className="text-xl">{info.icon}</span>
+          <div
+            className={clsx(
+              "flex items-center justify-center text-xl",
+              isCoordinator ? "w-10 h-10 rounded-xl" : "w-9 h-9 rounded-lg",
+            )}
+            style={{ backgroundColor: `${info.color}15` }}
+          >
+            {info.icon}
+          </div>
           <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">{info.label}</h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)]">{info.label}</h3>
+              {isCoordinator && (
+                <span className="text-[8px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-400 font-bold uppercase">
+                  Coord
+                </span>
+              )}
+            </div>
             <p className="text-xs text-[var(--text-muted)]">{info.provider}</p>
           </div>
         </div>
@@ -46,7 +68,10 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
           <span>{timing.toFixed(1)}s</span>
         )}
         {messageCount !== undefined && messageCount > 0 && (
-          <span>{messageCount} msg{messageCount > 1 ? "s" : ""}</span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50" />
+            {messageCount} msg{messageCount > 1 ? "s" : ""}
+          </span>
         )}
       </div>
     </div>

@@ -23,7 +23,9 @@ class CodexLiteProvider:
     """
 
     def __init__(self, config: Settings) -> None:
-        self.client = AsyncOpenAI(api_key=config.openai_api_key)
+        from devai.services.tracing import wrap_openai_client
+
+        self.client = wrap_openai_client(AsyncOpenAI(api_key=config.openai_api_key))
         self.model = config.openai_model
 
     async def generate(
