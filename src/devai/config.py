@@ -57,7 +57,7 @@ class Settings(BaseSettings):
 
     # --- OpenAI / Codex ---
     openai_api_key: str = ""
-    openai_model: str = "o3"
+    openai_model: str = "gpt-4.1"
 
     # --- Anthropic / Claude ---
     anthropic_api_key: str = ""
@@ -67,7 +67,7 @@ class Settings(BaseSettings):
 
     # --- Google Gemini ---
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash-preview-04-17"
     gcp_secret_gemini_api_key: str = "prod-devai-gemini-api-key"
 
     # --- Groq (fallback / secondary) ---

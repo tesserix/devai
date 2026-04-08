@@ -39,12 +39,16 @@ class OpenAIProvider:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        # o3/o4 models use max_completion_tokens instead of max_tokens
+        token_param = "max_completion_tokens" if self.model.startswith(("o1", "o3", "o4")) else "max_tokens"
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
+            token_param: max_tokens,
         }
+        # o-series models don't support temperature
+        if not self.model.startswith(("o1", "o3", "o4")):
+            kwargs["temperature"] = temperature
         if response_format:
             kwargs["response_format"] = response_format
 
