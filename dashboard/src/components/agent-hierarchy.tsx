@@ -35,7 +35,15 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
   const supervisorStatus = agentStatuses["supervisor"]?.status;
   const orchestratorStatus = agentStatuses["orchestrator"]?.status;
 
-  const progressPct = orchestratorRouting?.progress_pct ?? 0;
+  // Compute progress from agent statuses (more reliable than orchestrator routing)
+  const totalAgents = Object.keys(agentStatuses).length || 1;
+  const completedAgents = Object.values(agentStatuses).filter(
+    (a) => a.status === "completed"
+  ).length;
+  const runningAgents = Object.values(agentStatuses).filter(
+    (a) => a.status === "running" || a.status === "in_progress"
+  ).length;
+  const progressPct = orchestratorRouting?.progress_pct ?? Math.round(((completedAgents + runningAgents * 0.5) / Math.max(totalAgents, 14)) * 100);
   const currentPhase = orchestratorRouting?.current_phase ?? "";
 
   return (
@@ -64,8 +72,8 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
         <div
           className={clsx(
             "relative w-full max-w-md p-4 rounded-xl border-2 transition-all",
-            supervisorStatus === "running"
-              ? "border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40"
+            supervisorStatus === "running" || supervisorStatus === "in_progress"
+              ? "border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 animate-pulse"
               : supervisorStatus === "completed"
                 ? "border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
                 : "border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
@@ -106,7 +114,7 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
         <div
           className={clsx(
             "relative w-full max-w-md p-4 rounded-xl border-2 transition-all",
-            orchestratorStatus === "running"
+            orchestratorStatus === "running" || orchestratorStatus === "in_progress"
               ? "border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40"
               : orchestratorStatus === "completed"
                 ? "border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
@@ -153,7 +161,7 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
         {EXECUTION_PHASES.map((phase) => {
           const phaseAgents = phase.agents;
           const allDone = phaseAgents.every((a) => agentStatuses[a]?.status === "completed");
-          const anyRunning = phaseAgents.some((a) => agentStatuses[a]?.status === "running");
+          const anyRunning = phaseAgents.some((a) => agentStatuses[a]?.status === "running" || agentStatuses[a]?.status === "in_progress");
           const anyFailed = phaseAgents.some((a) => agentStatuses[a]?.status === "failed");
           const isActive = currentPhase === phase.name;
 
@@ -162,7 +170,7 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
               key={phase.name}
               className={clsx(
                 "rounded-xl border p-3 transition-all",
-                isActive
+                isActive || anyRunning
                   ? "border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30"
                   : allDone
                     ? "border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20"
@@ -196,8 +204,8 @@ export function AgentHierarchy({ agentStatuses, a2aMessages, orchestratorRouting
                       key={agentKey}
                       className={clsx(
                         "flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors",
-                        status === "running"
-                          ? "bg-blue-50 dark:bg-blue-950/30"
+                        status === "running" || status === "in_progress"
+                          ? "bg-indigo-50 dark:bg-indigo-950/30 animate-pulse"
                           : status === "completed"
                             ? "bg-green-50 dark:bg-green-950/20"
                             : status === "failed"
