@@ -139,7 +139,21 @@ class GitHubSCMClient(SCMClient):
 
     # --- Issues ---
 
+    async def ensure_labels(self, repo: str, labels: list[str]) -> None:
+        """Create labels on a repo if they don't already exist."""
+        import contextlib
+
+        for label in labels:
+            with contextlib.suppress(Exception):
+                await self._request(
+                    "POST",
+                    f"/repos/{repo}/labels",
+                    json={"name": label, "color": "6366f1"},
+                )
+
     async def create_issue(self, repo: str, title: str, body: str, labels: list[str] | None = None) -> dict[str, Any]:
+        if labels:
+            await self.ensure_labels(repo, labels)
         payload: dict[str, Any] = {"title": title, "body": body}
         if labels:
             payload["labels"] = labels
