@@ -363,6 +363,66 @@ class GitHubSCMClient(SCMClient):
             raise RuntimeError(f"GraphQL error: {data['errors']}")
         return data.get("data", {})
 
+    async def list_org_projects(self, org: str) -> list[dict[str, Any]]:
+        """List open GitHub Projects v2 for an organization."""
+        result = await self._graphql(
+            """
+            query($org: String!) {
+                organization(login: $org) {
+                    projectsV2(first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                        nodes {
+                            id
+                            title
+                            number
+                            shortDescription
+                            url
+                            closed
+                        }
+                    }
+                }
+            }
+            """,
+            {"org": org},
+        )
+        projects = result.get("organization", {}).get("projectsV2", {}).get("nodes", [])
+        return [
+            {
+                "id": p["id"],
+                "title": p["title"],
+                "number": p["number"],
+                "description": p.get("shortDescription", ""),
+                "url": p.get("url", ""),
+            }
+            for p in projects
+            if not p.get("closed")
+        ]
+
+    async def link_repo_to_project(self, project_id: str, repo: str) -> None:
+        """Link a repository to a GitHub Project v2."""
+        owner, name = repo.split("/", 1)
+        repo_data = await self._graphql(
+            """
+            query($owner: String!, $name: String!) {
+                repository(owner: $owner, name: $name) { id }
+            }
+            """,
+            {"owner": owner, "name": name},
+        )
+        repo_id = repo_data.get("repository", {}).get("id")
+        if not repo_id:
+            raise RuntimeError(f"Repository '{repo}' not found")
+
+        await self._graphql(
+            """
+            mutation($projectId: ID!, $repositoryId: ID!) {
+                linkProjectV2ToRepository(
+                    input: {projectId: $projectId, repositoryId: $repositoryId}
+                ) { clientMutationId }
+            }
+            """,
+            {"projectId": project_id, "repositoryId": repo_id},
+        )
+
     async def create_project(
         self,
         org: str,

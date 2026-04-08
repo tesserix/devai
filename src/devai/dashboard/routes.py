@@ -360,6 +360,312 @@ async def create_repo(request: Request) -> dict[str, Any]:
         await scm.close()
 
 
+@router.get("/api/projects")
+async def list_projects(request: Request) -> list[dict[str, Any]]:
+    """List GitHub Projects v2 for the configured org."""
+    session = await _get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    config = request.app.state.config
+    org = getattr(config, "github_org", "tesserix")
+    from devai.scm.factory import create_scm_client
+
+    scm = create_scm_client(config)
+    try:
+        projects = await scm.list_org_projects(org)
+        return projects
+    except Exception as e:
+        logger.warning("Failed to list projects: %s", e)
+        return []
+    finally:
+        await scm.close()
+
+
+@router.post("/api/projects/create")
+async def create_project_endpoint(request: Request) -> dict[str, Any]:
+    """Create a GitHub Project v2 and optionally link it to a repo."""
+    session = await _get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    title = body.get("title", "").strip()
+    description = body.get("description", "")
+    repo = body.get("repo", "")
+
+    if not title:
+        raise HTTPException(status_code=400, detail="Project title is required")
+
+    config = request.app.state.config
+    org = getattr(config, "github_org", "tesserix")
+    from devai.scm.factory import create_scm_client
+
+    scm = create_scm_client(config)
+    try:
+        project = await scm.create_project(org, title, description)
+        if repo:
+            await scm.link_repo_to_project(project["id"], repo)
+        return project
+    except Exception as e:
+        logger.warning("Failed to create project: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    finally:
+        await scm.close()
+
+
+@router.post("/api/repos/scaffold")
+async def scaffold_repo(request: Request) -> dict[str, Any]:
+    """Scaffold a repository with CI workflows, CLAUDE.md, and project structure."""
+    session = await _get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    repo = body.get("repo", "").strip()
+    project_title = body.get("project_title", "")
+    tech_stack = body.get("tech_stack", "")
+
+    if not repo:
+        raise HTTPException(status_code=400, detail="Repository name is required")
+
+    config = request.app.state.config
+    from devai.scm.factory import create_scm_client
+
+    scm = create_scm_client(config)
+    created_files: list[str] = []
+    try:
+        default_branch = await scm.get_default_branch(repo)
+
+        # Check existing files to avoid overwriting
+        try:
+            existing = await scm.list_files(repo, ref=default_branch)
+            existing_names = {f.get("name", "") for f in existing}
+        except Exception:
+            existing_names = set()
+
+        # 1. Create CLAUDE.md with project guardrails
+        if "CLAUDE.md" not in existing_names:
+            claude_md = _generate_claude_md(repo, tech_stack)
+            await scm.create_or_update_file(
+                repo,
+                "CLAUDE.md",
+                claude_md,
+                "chore: add CLAUDE.md with project guardrails",
+                default_branch,
+            )
+            created_files.append("CLAUDE.md")
+
+        # 2. Create .github/workflows/ci.yml
+        try:
+            await scm.list_files(repo, ".github/workflows", ref=default_branch)
+        except Exception:
+            ci_workflow = _generate_ci_workflow(repo)
+            await scm.create_or_update_file(
+                repo,
+                ".github/workflows/ci.yml",
+                ci_workflow,
+                "ci: add template CI workflow",
+                default_branch,
+            )
+            created_files.append(".github/workflows/ci.yml")
+
+            pr_template = _generate_pr_template()
+            await scm.create_or_update_file(
+                repo,
+                ".github/pull_request_template.md",
+                pr_template,
+                "chore: add pull request template",
+                default_branch,
+            )
+            created_files.append(".github/pull_request_template.md")
+
+        # 3. Link to project if provided
+        project_info = None
+        if project_title:
+            org = repo.split("/")[0]
+            project_info = await scm.create_project(org, project_title)
+            await scm.link_repo_to_project(project_info["id"], repo)
+
+        return {
+            "status": "scaffolded",
+            "repo": repo,
+            "files_created": created_files,
+            "project": project_info,
+        }
+    except Exception as e:
+        logger.warning("Failed to scaffold repo %s: %s", repo, e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    finally:
+        await scm.close()
+
+
+def _generate_claude_md(repo: str, tech_stack: str = "") -> str:
+    """Generate a CLAUDE.md with project-specific guardrails."""
+    repo_name = repo.split("/")[-1]
+    stack_section = ""
+    if tech_stack:
+        stack_section = f"""
+## Tech Stack
+
+{tech_stack}
+"""
+
+    return f"""# Claude Reference Guide — {repo_name}
+
+## Project
+
+- **Repository:** `{repo}`
+- **GitHub Org:** `tesserix`
+{stack_section}
+## Critical Rules
+
+### 1. Git Identity
+
+Always configure before any commit:
+```bash
+git config user.name "sam123ben"
+git config user.email "samyak.rout@gmail.com"
+```
+
+### 2. No AI References
+
+NEVER include Claude, Copilot, Anthropic, AI tool, or Co-Authored-By mentions in:
+- Commit messages, PR titles or descriptions
+- Code comments or changelog entries
+
+### 3. CI Build Procedure
+
+The `tesserix` GitHub org has limited Actions minutes for private repos.
+Every CI build requires a public-to-build-to-private cycle:
+```bash
+gh repo edit {repo} --visibility public --accept-visibility-change-consequences
+git push origin main
+# Wait for CI to complete
+gh run list --repo {repo} --limit 3
+# Once all green:
+gh repo edit {repo} --visibility private --accept-visibility-change-consequences
+```
+
+### 4. No Manual kubectl apply
+
+All K8s changes go through ArgoCD via the `tesserix-k8s` repo.
+
+### 5. SQL Schemas
+
+All database schemas live in `tesserix-k8s/charts/apps/db-schema-bootstrap/schemas/`.
+Application repos contain only ORM models — never raw .sql files.
+
+## Development
+
+```bash
+# Install dependencies
+# (add project-specific install commands here)
+
+# Run locally
+# (add project-specific run commands here)
+
+# Lint
+# (add project-specific lint commands here)
+
+# Test
+# (add project-specific test commands here)
+```
+
+## GCP & Infrastructure
+
+- **GCP Project:** `tesseracthub-480811`
+- **GCP Region:** `asia-south1`
+- **GKE Cluster:** `tesseract-prod-in-gke`
+"""
+
+
+def _generate_ci_workflow(repo: str) -> str:
+    """Generate a template CI workflow."""
+    repo_name = repo.split("/")[-1]
+    return f"""name: CI Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{{{ github.repository }}}}/{repo_name}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint
+        run: echo "Add linting steps here"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: echo "Add test steps here"
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{{{ env.REGISTRY }}}}
+          username: ${{{{ github.actor }}}}
+          password: ${{{{ secrets.GITHUB_TOKEN }}}}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{{{ env.REGISTRY }}}}/${{{{ env.IMAGE_NAME }}}}:latest
+"""
+
+
+def _generate_pr_template() -> str:
+    """Generate a pull request template."""
+    return """## Summary
+
+<!-- Brief description of changes -->
+
+## Changes
+
+-
+
+## Test Plan
+
+- [ ] Unit tests pass
+- [ ] Manual testing completed
+
+## Checklist
+
+- [ ] Code follows project conventions
+- [ ] No secrets or credentials committed
+- [ ] CI passes
+"""
+
+
 @router.post("/api/pipeline/trigger")
 async def trigger_pipeline(request: Request) -> dict[str, Any]:
     """Trigger a DevAI ALM pipeline run from the dashboard (LangGraph)."""

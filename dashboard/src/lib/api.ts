@@ -90,4 +90,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ org, name, description, private: isPrivate ?? true }),
     }),
+
+  // GitHub Projects v2
+  listProjects: () =>
+    apiFetch<Array<{ id: string; title: string; number: number; description: string; url: string }>>(
+      "/projects"
+    ),
+
+  createProject: (title: string, description?: string, repo?: string) =>
+    apiFetch<{ id: string; number: number; url: string; title: string }>("/projects/create", {
+      method: "POST",
+      body: JSON.stringify({ title, description, repo }),
+    }),
+
+  // Repo scaffolding
+  scaffoldRepo: (repo: string, projectTitle?: string, techStack?: string) =>
+    apiFetch<{ status: string; repo: string; files_created: string[]; project: unknown }>(
+      "/repos/scaffold",
+      {
+        method: "POST",
+        body: JSON.stringify({ repo, project_title: projectTitle, tech_stack: techStack }),
+      }
+    ),
 };
