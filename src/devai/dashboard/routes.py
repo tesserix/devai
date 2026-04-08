@@ -312,6 +312,10 @@ async def move_item(request: Request, org: str, project_number: int) -> dict[str
 @router.get("/api/repos")
 async def list_repos(request: Request) -> list[dict[str, Any]]:
     """List repositories accessible to the GitHub App installation."""
+    session = await _get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     config = request.app.state.config
     from devai.scm.factory import create_scm_client
 
@@ -329,6 +333,10 @@ async def list_repos(request: Request) -> list[dict[str, Any]]:
 @router.post("/api/repos/create")
 async def create_repo(request: Request) -> dict[str, Any]:
     """Create a new repository via the GitHub App."""
+    session = await _get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     body = await request.json()
     org = body.get("org", "tesserix")
     name = body.get("name", "").strip()
