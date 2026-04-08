@@ -85,6 +85,9 @@ export const api = {
       "/repos"
     ),
 
+  checkRepoName: (name: string, org = "tesserix") =>
+    apiFetch<{ available: boolean; reason: string }>(`/repos/check?name=${encodeURIComponent(name)}&org=${encodeURIComponent(org)}`),
+
   createRepo: (org: string, name: string, description?: string, isPrivate?: boolean) =>
     apiFetch<{ full_name: string; name: string; html_url: string }>("/repos/create", {
       method: "POST",

@@ -329,6 +329,25 @@ async def list_repos(request: Request) -> list[dict[str, Any]]:
         await scm.close()
 
 
+@router.get("/api/repos/check")
+async def check_repo_name(request: Request, name: str, org: str = "tesserix") -> dict[str, Any]:
+    """Check if a repository name already exists in the org."""
+    if not name.strip():
+        return {"available": False, "reason": "Name is required"}
+
+    config = request.app.state.config
+    from devai.scm.factory import create_scm_client
+
+    scm = create_scm_client(config)
+    try:
+        await scm.get_repo_info(f"{org}/{name.strip()}")
+        return {"available": False, "reason": "Repository already exists"}
+    except Exception:
+        return {"available": True, "reason": ""}
+    finally:
+        await scm.close()
+
+
 @router.post("/api/repos/create")
 async def create_repo(request: Request) -> dict[str, Any]:
     """Create a new repository via the GitHub App."""
@@ -341,13 +360,24 @@ async def create_repo(request: Request) -> dict[str, Any]:
     if not name:
         raise HTTPException(status_code=400, detail="Repository name is required")
 
+    # Check if repo already exists
     config = request.app.state.config
     from devai.scm.factory import create_scm_client
 
     scm = create_scm_client(config)
     try:
+        try:
+            await scm.get_repo_info(f"{org}/{name}")
+            raise HTTPException(status_code=409, detail=f"Repository '{org}/{name}' already exists")
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # Repo doesn't exist — proceed to create
+
         repo = await scm.create_repo(org, name, description, private)
         return repo
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("Failed to create repo: %s", e)
         raise HTTPException(status_code=400, detail=str(e)) from e

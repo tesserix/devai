@@ -44,6 +44,8 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   const [newRepoName, setNewRepoName] = useState("");
   const [newRepoDesc, setNewRepoDesc] = useState("");
   const [creating, setCreating] = useState(false);
+  const [repoNameStatus, setRepoNameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
+  const checkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Create project form
   const [showCreateProject, setShowCreateProject] = useState(false);
@@ -86,6 +88,24 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
     if (open && repos.length === 0) fetchRepos();
     if (open && projects.length === 0) fetchProjects();
   }, [open, repos.length, projects.length, fetchRepos, fetchProjects]);
+
+  // Debounced repo name availability check
+  const checkRepoName = useCallback((name: string) => {
+    if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
+    if (!name.trim()) {
+      setRepoNameStatus("idle");
+      return;
+    }
+    setRepoNameStatus("checking");
+    checkTimerRef.current = setTimeout(async () => {
+      try {
+        const result = await api.checkRepoName(name.trim());
+        setRepoNameStatus(result.available ? "available" : "taken");
+      } catch {
+        setRepoNameStatus("idle");
+      }
+    }, 500);
+  }, []);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -320,13 +340,33 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                   Name (tesserix/...)
                 </label>
-                <input
-                  type="text"
-                  placeholder="my-new-project"
-                  value={newRepoName}
-                  onChange={(e) => setNewRepoName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="my-new-project"
+                    value={newRepoName}
+                    onChange={(e) => {
+                      setNewRepoName(e.target.value);
+                      checkRepoName(e.target.value);
+                    }}
+                    className={`w-full px-3 py-2 rounded-lg bg-white dark:bg-gray-700 border text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none transition-colors ${
+                      repoNameStatus === "taken"
+                        ? "border-red-400 focus:border-red-500"
+                        : repoNameStatus === "available"
+                          ? "border-green-400 focus:border-green-500"
+                          : "border-gray-200 dark:border-gray-600 focus:border-indigo-500"
+                    }`}
+                  />
+                  {repoNameStatus === "checking" && (
+                    <span className="absolute right-3 top-2.5 text-xs text-gray-400">checking...</span>
+                  )}
+                  {repoNameStatus === "available" && (
+                    <span className="absolute right-3 top-2.5 text-xs text-green-500">available</span>
+                  )}
+                  {repoNameStatus === "taken" && (
+                    <span className="absolute right-3 top-2.5 text-xs text-red-500">already exists</span>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
@@ -342,7 +382,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
               </div>
               <button
                 onClick={handleCreateRepo}
-                disabled={creating || !newRepoName.trim()}
+                disabled={creating || !newRepoName.trim() || repoNameStatus === "taken" || repoNameStatus === "checking"}
                 className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {creating ? "Creating..." : "Create"}
