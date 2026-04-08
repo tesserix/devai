@@ -14,7 +14,7 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
 
   return (
     <div className="w-full overflow-x-auto">
-      <div className="flex items-center gap-1 min-w-[1000px] px-2 py-4">
+      <div className="flex items-center gap-0.5 min-w-[1000px] px-2 py-4">
         {stages.map((stage, idx) => {
           const isActive = stage.key === currentStage;
           const isDone = currentIdx >= 0 && idx < currentIdx;
@@ -27,27 +27,33 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
           return (
             <div key={stage.key} className="flex items-center">
               {/* Node */}
-              <div className="flex flex-col items-center gap-1.5">
+              <div className="flex flex-col items-center gap-1">
                 <div
                   className={clsx(
-                    "flex items-center justify-center text-sm font-medium border-2 transition-all",
-                    isCoordinator ? "w-10 h-10 rounded-xl" : "w-9 h-9 rounded-full",
-                    isDone && "bg-green-500/20 border-green-500 text-green-400",
-                    isActive && "bg-blue-500/20 border-blue-500 text-blue-400 ring-2 ring-blue-500/30",
-                    isFailed && "bg-red-500/20 border-red-500 text-red-400",
-                    !isDone && !isActive && !isFailed && "bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-muted)]",
-                    isCoordinator && isActive && "border-violet-500 bg-violet-500/20 text-violet-400 ring-violet-500/30",
-                    isCoordinator && isDone && "border-violet-400/50 bg-violet-500/10 text-violet-400"
+                    "flex items-center justify-center text-xs font-semibold border-2 transition-all",
+                    isCoordinator ? "w-9 h-9 rounded-xl" : "w-8 h-8 rounded-full",
+                    isDone && "bg-green-50 dark:bg-green-950 border-green-500 dark:border-green-600 text-green-700 dark:text-green-400",
+                    isActive && "bg-indigo-50 dark:bg-indigo-950 border-indigo-500 text-indigo-700 dark:text-indigo-400 ring-2 ring-indigo-200 dark:ring-indigo-900",
+                    isFailed && "bg-red-50 dark:bg-red-950 border-red-500 text-red-700 dark:text-red-400",
+                    !isDone && !isActive && !isFailed && "bg-gray-100 dark:bg-slate-800 border-gray-300 dark:border-slate-700 text-gray-400 dark:text-slate-500",
+                    isCoordinator && isActive && "border-indigo-600 bg-indigo-50 dark:bg-indigo-950 ring-indigo-200 dark:ring-indigo-900",
+                    isCoordinator && isDone && "border-green-500 dark:border-green-600",
                   )}
                 >
-                  {isDone ? "✓" : isActive ? (agent?.icon || "●") : idx + 1}
+                  {isDone ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  ) : (
+                    <span>{idx + 1}</span>
+                  )}
                 </div>
                 <span
                   className={clsx(
-                    "text-[10px] font-medium whitespace-nowrap",
-                    isDone && "text-green-400",
-                    isActive && (isCoordinator ? "text-violet-400" : "text-blue-400"),
-                    !isDone && !isActive && "text-[var(--text-muted)]"
+                    "text-[9px] font-medium whitespace-nowrap",
+                    isDone && "text-green-600 dark:text-green-500",
+                    isActive && "text-indigo-600 dark:text-indigo-400",
+                    !isDone && !isActive && "text-gray-400 dark:text-slate-500"
                   )}
                 >
                   {stage.label}
@@ -55,15 +61,17 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
                 {agent && (
                   <span
                     className={clsx(
-                      "text-[9px] whitespace-nowrap",
-                      isCoordinator ? "text-violet-400/70 font-medium" : "text-[var(--text-muted)]"
+                      "text-[8px] whitespace-nowrap",
+                      isCoordinator
+                        ? "text-indigo-500 dark:text-indigo-400 font-medium"
+                        : "text-gray-400 dark:text-slate-500"
                     )}
                   >
-                    {isCoordinator ? "Coordinator" : agent.provider}
+                    {isCoordinator ? "Coord" : agent.provider}
                   </span>
                 )}
                 {timing !== undefined && (
-                  <span className="text-[9px] text-[var(--text-secondary)]">
+                  <span className="text-[8px] text-gray-400 dark:text-slate-500">
                     {timing.toFixed(1)}s
                   </span>
                 )}
@@ -73,8 +81,10 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
               {idx < stages.length - 1 && (
                 <div
                   className={clsx(
-                    "w-8 h-0.5 mx-0.5",
-                    currentIdx >= 0 && idx < currentIdx ? "bg-green-500/50" : "bg-[var(--border-primary)]"
+                    "w-6 h-px mx-0.5",
+                    currentIdx >= 0 && idx < currentIdx
+                      ? "bg-green-400 dark:bg-green-600"
+                      : "bg-gray-200 dark:bg-slate-700"
                   )}
                 />
               )}

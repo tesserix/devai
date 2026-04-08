@@ -23,7 +23,6 @@ export default function DashboardPage() {
   const [triggerOpen, setTriggerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Fetch runs on mount and periodically
   const fetchRuns = useCallback(async () => {
     try {
       const data = await api.listRuns();
@@ -44,7 +43,6 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchRuns]);
 
-  // Fetch selected run details
   useEffect(() => {
     if (!selectedRunId) return;
     const fetchDetail = async () => {
@@ -80,58 +78,64 @@ export default function DashboardPage() {
     setApprovals((prev) => prev.filter((a) => a.gate !== gate));
   };
 
-  // Extract context data from run
   const runContext = (selectedRun as any)?.context ?? {};
   const a2aMessages = runContext.a2a_messages || [];
   const orchestratorRouting = runContext.orchestrator_routing;
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-gray-50 dark:bg-slate-950">
       {/* Sidebar */}
-      <aside className="w-72 border-r border-[var(--border-primary)] bg-[var(--bg-secondary)] flex flex-col">
+      <aside className="w-68 shrink-0 border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col" style={{ width: "272px" }}>
         {/* Header */}
-        <div className="p-4 border-b border-[var(--border-primary)]">
+        <div className="px-4 py-3.5 border-b border-gray-200 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold">
+            <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
               D
             </div>
             <div>
-              <h1 className="text-sm font-bold text-[var(--text-primary)]">DevAI</h1>
-              <p className="text-[10px] text-[var(--text-muted)]">Multi-Agent ALM Platform</p>
+              <h1 className="text-sm font-semibold text-gray-900 dark:text-slate-100">DevAI</h1>
+              <p className="text-[10px] text-gray-400 dark:text-slate-500">Multi-Agent ALM Platform</p>
             </div>
           </div>
         </div>
 
         {/* New Run Button */}
-        <div className="p-3">
+        <div className="px-3 pt-3 pb-2">
           <button
             onClick={() => setTriggerOpen(true)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-500 hover:to-indigo-500 transition-all shadow-sm"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
           >
-            <span>+</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
             New Pipeline Run
           </button>
+        </div>
+
+        {/* Runs label */}
+        <div className="px-4 pt-2 pb-1">
+          <span className="text-[10px] font-medium text-gray-400 dark:text-slate-500 uppercase tracking-wider">Recent Runs</span>
         </div>
 
         {/* Run List */}
         <div className="flex-1 overflow-y-auto px-3 pb-3">
           {loading ? (
-            <div className="text-center py-8 text-[var(--text-muted)] text-xs">Loading...</div>
+            <div className="text-center py-8 text-gray-400 dark:text-slate-500 text-xs">Loading...</div>
           ) : (
             <RunList runs={runs} selectedRunId={selectedRunId} onSelect={setSelectedRunId} />
           )}
         </div>
 
-        {/* User + Logout */}
-        <div className="p-3 border-t border-[var(--border-primary)]">
+        {/* Footer */}
+        <div className="px-4 py-3 border-t border-gray-200 dark:border-slate-800">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-slate-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-600" />
               Supervisor + Orchestrator
             </div>
             <a
               href="/bff/logout"
-              className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors"
+              className="text-[10px] text-gray-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
             >
               Logout
             </a>
@@ -144,23 +148,23 @@ export default function DashboardPage() {
         {selectedRun ? (
           <>
             {/* Top Bar */}
-            <header className="border-b border-[var(--border-primary)] bg-[var(--bg-secondary)] px-6 py-3">
+            <header className="border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-3 shrink-0">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  <h2 className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                     {selectedRun.repo}
                   </h2>
-                  <p className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
+                  <p className="text-[10px] font-mono text-gray-400 dark:text-slate-500 mt-0.5">
                     {selectedRun.run_id}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {orchestratorRouting?.progress_pct !== undefined && (
-                    <span className="text-[10px] px-2 py-1 rounded-full bg-indigo-500/15 text-indigo-400 font-mono">
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 font-mono border border-indigo-100 dark:border-indigo-900">
                       {orchestratorRouting.progress_pct}%
                     </span>
                   )}
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)] font-medium">
+                  <span className="text-xs px-2.5 py-1 rounded-md bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 font-medium border border-gray-200 dark:border-slate-700">
                     {selectedRun.stage.replace(/_/g, " ")}
                   </span>
                 </div>
@@ -168,7 +172,7 @@ export default function DashboardPage() {
             </header>
 
             {/* Pipeline Flow */}
-            <div className="border-b border-[var(--border-primary)] bg-[var(--bg-secondary)] px-6">
+            <div className="border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 shrink-0">
               <PipelineFlow
                 currentStage={selectedRun.stage}
                 agentTimings={(selectedRun as any)?.context?.agent_timings}
@@ -177,7 +181,7 @@ export default function DashboardPage() {
 
             {/* Approval Banners */}
             {approvals.length > 0 && (
-              <div className="px-6 pt-4">
+              <div className="px-6 pt-4 shrink-0">
                 <ApprovalBanner
                   approvals={approvals}
                   onApprove={handleApprove}
@@ -187,8 +191,8 @@ export default function DashboardPage() {
             )}
 
             {/* Tabs */}
-            <div className="border-b border-[var(--border-primary)] px-6">
-              <div className="flex gap-1">
+            <div className="border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 shrink-0">
+              <div className="flex gap-0 -mb-px">
                 {([
                   { key: "overview", label: "Overview" },
                   { key: "hierarchy", label: "Agent Hierarchy" },
@@ -200,10 +204,10 @@ export default function DashboardPage() {
                   <button
                     key={t.key}
                     onClick={() => setTab(t.key)}
-                    className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                    className={`px-3.5 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                       tab === t.key
-                        ? "border-violet-500 text-violet-400"
-                        : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                        ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400"
+                        : "border-transparent text-gray-500 dark:text-slate-500 hover:text-gray-700 dark:hover:text-slate-300"
                     }`}
                   >
                     {t.label}
@@ -213,7 +217,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Tab Content */}
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-slate-950">
               {tab === "overview" && (
                 <OverviewTab run={selectedRun} a2aMessages={a2aMessages} orchestratorRouting={orchestratorRouting} />
               )}
@@ -231,19 +235,21 @@ export default function DashboardPage() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-slate-950">
             <div className="text-center">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 to-indigo-600/20 border border-violet-500/30 flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">🧠</span>
+              <div className="w-14 h-14 rounded-xl bg-indigo-50 dark:bg-indigo-950 border border-indigo-100 dark:border-indigo-900 flex items-center justify-center mx-auto mb-4">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600 dark:text-indigo-400">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
               </div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">DevAI Multi-Agent Platform</h2>
-              <p className="text-sm text-[var(--text-muted)] mt-1 max-w-sm">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-slate-100">DevAI Multi-Agent Platform</h2>
+              <p className="text-sm text-gray-500 dark:text-slate-400 mt-1 max-w-sm">
                 Supervisor &rarr; Orchestrator &rarr; Specialist Agents.
                 AI-powered Application Lifecycle Management.
               </p>
               <button
                 onClick={() => setTriggerOpen(true)}
-                className="mt-4 px-4 py-2 text-xs font-medium rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-500 hover:to-indigo-500 transition-all"
+                className="mt-5 px-4 py-2 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
               >
                 Start New Pipeline
               </button>
@@ -252,7 +258,6 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* Trigger Dialog */}
       <TriggerDialog
         open={triggerOpen}
         onClose={() => setTriggerOpen(false)}
@@ -279,9 +284,8 @@ function OverviewTab({
 
   return (
     <div className="space-y-6">
-      {/* Coordinator Agents */}
       <div>
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
           Coordination Layer
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -290,7 +294,6 @@ function OverviewTab({
             const msgCount = a2aMessages.filter(
               (m: any) => m.from_agent === key || m.to_agent === key
             ).length;
-
             return (
               <AgentCard
                 key={key}
@@ -304,9 +307,8 @@ function OverviewTab({
         </div>
       </div>
 
-      {/* Specialist Agents */}
       <div>
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
           Specialist Agents
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -315,7 +317,6 @@ function OverviewTab({
             const msgCount = a2aMessages.filter(
               (m: any) => m.from_agent === key || m.to_agent === key
             ).length;
-
             return (
               <AgentCard
                 key={key}
@@ -329,10 +330,9 @@ function OverviewTab({
         </div>
       </div>
 
-      {/* Recent A2A Activity */}
       {a2aMessages.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+          <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
             Recent Agent Communication
           </h3>
           <A2AFeed messages={a2aMessages.slice(-5)} />
@@ -352,34 +352,31 @@ function AgentsTab({ run }: { run: PipelineRun }) {
     return (
       <div
         key={key}
-        className="p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]"
+        className="p-4 rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900"
       >
         <div className="flex items-center gap-3">
-          <span className="text-2xl">{info.icon}</span>
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-base font-semibold shrink-0"
+            style={{ backgroundColor: `${info.color}18`, color: info.color }}
+          >
+            {info.label.charAt(0)}
+          </div>
           <div>
-            <h4 className="text-sm font-semibold text-[var(--text-primary)]">{info.label}</h4>
-            <p className="text-xs text-[var(--text-muted)]">
-              Provider: {info.provider} | Role: {info.role}
+            <h4 className="text-sm font-medium text-gray-900 dark:text-slate-100">{info.label}</h4>
+            <p className="text-xs text-gray-400 dark:text-slate-500">
+              {info.provider} &middot; {info.role}
             </p>
           </div>
         </div>
         <div className="mt-3 flex items-center gap-2">
-          <span
-            className="text-[10px] px-2 py-0.5 rounded-full font-medium"
-            style={{
-              backgroundColor: `${info.color}15`,
-              color: info.color,
-            }}
-          >
-            {agentStatus?.status || "idle"}
-          </span>
+          <StatusBadgeInline status={agentStatus?.status} color={info.color} />
           {info.role === "coordinator" && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 font-medium">
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-100 dark:border-indigo-900">
               COORDINATOR
             </span>
           )}
           {agentStatus?.error && (
-            <span className="text-[10px] text-red-400 truncate">{agentStatus.error}</span>
+            <span className="text-[10px] text-red-600 dark:text-red-400 truncate">{agentStatus.error}</span>
           )}
         </div>
       </div>
@@ -389,7 +386,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-3">
           Coordinators ({coordinators.length})
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -397,7 +394,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
         </div>
       </div>
       <div>
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
           Specialists ({specialists.length})
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -408,11 +405,35 @@ function AgentsTab({ run }: { run: PipelineRun }) {
   );
 }
 
+function StatusBadgeInline({ status, color }: { status?: string; color: string }) {
+  if (!status) return <span className="text-[10px] px-2 py-0.5 rounded-md bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400">Idle</span>;
+
+  const styles: Record<string, string> = {
+    completed: "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-100 dark:border-green-900",
+    running: "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-900",
+    failed: "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900",
+    waiting_approval: "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900",
+  };
+
+  const labels: Record<string, string> = {
+    completed: "Done",
+    running: "Running",
+    failed: "Failed",
+    waiting_approval: "Awaiting",
+  };
+
+  return (
+    <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${styles[status] || styles.running}`}>
+      {labels[status] || status}
+    </span>
+  );
+}
+
 function A2ATab({ messages }: { messages: any[] }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
           Agent-to-Agent Messages ({messages.length})
         </h3>
       </div>
@@ -436,33 +457,33 @@ function ConfigTab() {
   return (
     <div className="max-w-lg space-y-6">
       <div>
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
           Pipeline Configuration
         </h3>
-        <div className="space-y-4 p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]">
+        <div className="space-y-3 p-4 rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900">
           <label className="flex items-center justify-between">
             <div>
-              <span className="text-sm text-[var(--text-primary)]">Auto Mode</span>
-              <p className="text-[10px] text-[var(--text-muted)]">Skip all approval gates</p>
+              <span className="text-sm font-medium text-gray-800 dark:text-slate-200">Auto Mode</span>
+              <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">Skip all approval gates</p>
             </div>
             <input
               type="checkbox"
               checked={config.auto_mode}
               onChange={(e) => setConfig({ ...config, auto_mode: e.target.checked })}
-              className="w-4 h-4 rounded accent-violet-500"
+              className="w-4 h-4 rounded accent-indigo-600"
             />
           </label>
         </div>
       </div>
 
       <div>
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
           Approval Gates
         </h3>
-        <div className="space-y-2 p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]">
+        <div className="divide-y divide-gray-100 dark:divide-slate-800 rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
           {Object.entries(config.gates).map(([gate, enabled]) => (
-            <label key={gate} className="flex items-center justify-between py-1">
-              <span className="text-sm text-[var(--text-primary)] capitalize">{gate.replace(/([A-Z])/g, " $1")}</span>
+            <label key={gate} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer">
+              <span className="text-sm text-gray-700 dark:text-slate-300 capitalize">{gate.replace(/([A-Z])/g, " $1")}</span>
               <input
                 type="checkbox"
                 checked={enabled}
@@ -472,7 +493,7 @@ function ConfigTab() {
                     gates: { ...config.gates, [gate]: e.target.checked },
                   })
                 }
-                className="w-4 h-4 rounded accent-violet-500"
+                className="w-4 h-4 rounded accent-indigo-600"
               />
             </label>
           ))}
@@ -480,40 +501,41 @@ function ConfigTab() {
       </div>
 
       <div>
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
           LLM Providers
         </h3>
-        <div className="space-y-3 p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]">
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-violet-500" />
-              <span className="text-[var(--text-secondary)]">Claude (Anthropic)</span>
+        <div className="divide-y divide-gray-100 dark:divide-slate-800 rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          {[
+            {
+              dot: "bg-indigo-500",
+              name: "Claude (Anthropic)",
+              model: "claude-sonnet-4",
+              desc: "Supervisor, Orchestrator, EM, Developer, DB, Security, QA, Infra",
+            },
+            {
+              dot: "bg-green-600",
+              name: "OpenAI (Codex)",
+              model: "o3",
+              desc: "Product Director, Staff Reviewer",
+            },
+            {
+              dot: "bg-orange-500",
+              name: "Groq (Llama 3.3)",
+              model: "llama-3.3-70b",
+              desc: "Doc Analyzer, Tech Detector, Requirements, CI Monitor, Release",
+            },
+          ].map((p) => (
+            <div key={p.name} className="px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${p.dot}`} />
+                  <span className="text-sm text-gray-700 dark:text-slate-300">{p.name}</span>
+                </div>
+                <span className="text-xs font-mono text-gray-400 dark:text-slate-500">{p.model}</span>
+              </div>
+              <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1 ml-4">{p.desc}</p>
             </div>
-            <span className="text-[var(--text-muted)] font-mono text-xs">claude-sonnet-4</span>
-          </div>
-          <div className="text-[10px] text-[var(--text-muted)] ml-4 -mt-1">
-            Supervisor, Orchestrator, EM, Developer, DB, Security, QA, Infra
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="text-[var(--text-secondary)]">OpenAI (Codex)</span>
-            </div>
-            <span className="text-[var(--text-muted)] font-mono text-xs">o3</span>
-          </div>
-          <div className="text-[10px] text-[var(--text-muted)] ml-4 -mt-1">
-            Product Director, Staff Reviewer
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-cyan-500" />
-              <span className="text-[var(--text-secondary)]">Groq (Llama 3.3)</span>
-            </div>
-            <span className="text-[var(--text-muted)] font-mono text-xs">llama-3.3-70b</span>
-          </div>
-          <div className="text-[10px] text-[var(--text-muted)] ml-4 -mt-1">
-            Doc Analyzer, Tech Detector, Requirements, CI Monitor, Release
-          </div>
+          ))}
         </div>
       </div>
     </div>

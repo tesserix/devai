@@ -29,16 +29,29 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-xl w-full max-w-lg p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">New Pipeline Run</h2>
-        <p className="text-xs text-[var(--text-muted)] mt-1">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl w-full max-w-lg p-6 shadow-xl">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-slate-100">New Pipeline Run</h2>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 dark:text-slate-500 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 dark:text-slate-500 mb-5">
           Trigger the full ALM pipeline with LangGraph orchestration
         </p>
 
-        <div className="mt-5 space-y-4">
+        <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+            <label className="block text-xs font-medium text-gray-600 dark:text-slate-400 mb-1.5">
               Repository
             </label>
             <input
@@ -46,12 +59,12 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
               placeholder="tesserix/my-repo"
               value={repo}
               onChange={(e) => setRepo(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20"
+              className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 transition-colors"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+            <label className="block text-xs font-medium text-gray-600 dark:text-slate-400 mb-1.5">
               Requirements
             </label>
             <textarea
@@ -59,22 +72,22 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
               placeholder="Describe the feature or requirements..."
               value={requirements}
               onChange={(e) => setRequirements(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 resize-none"
+              className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 resize-none transition-colors"
             />
           </div>
         </div>
 
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+            className="px-4 py-2 text-xs font-medium rounded-lg text-gray-600 dark:text-slate-400 border border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={loading || !repo || !requirements}
-            className="px-4 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? "Starting..." : "Start Pipeline"}
           </button>

@@ -22,14 +22,14 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
       className={clsx(
         "rounded-lg border p-4 transition-all",
         isCoordinator && "border-l-4",
-        status === "completed" && "border-green-500/30 bg-green-500/5",
-        status === "running" && "border-blue-500/30 bg-blue-500/5",
-        status === "failed" && "border-red-500/30 bg-red-500/5",
-        status === "waiting_approval" && "border-amber-500/30 bg-amber-500/5",
-        !status && "border-[var(--border-primary)] bg-[var(--bg-secondary)]",
-        isCoordinator && !status && "border-l-violet-500/50",
-        isCoordinator && status === "completed" && "border-l-violet-400",
-        isCoordinator && status === "running" && "border-l-violet-500",
+        status === "completed" && "border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30",
+        status === "running" && "border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30",
+        status === "failed" && "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30",
+        status === "waiting_approval" && "border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30",
+        !status && "border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900",
+        isCoordinator && !status && "border-l-indigo-400 dark:border-l-indigo-500",
+        isCoordinator && status === "completed" && "border-l-green-500",
+        isCoordinator && status === "running" && "border-l-indigo-500",
         status === "running" && "animate-pulse"
       )}
     >
@@ -37,39 +37,39 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
         <div className="flex items-center gap-2.5">
           <div
             className={clsx(
-              "flex items-center justify-center text-xl",
+              "flex items-center justify-center text-sm font-semibold shrink-0",
               isCoordinator ? "w-10 h-10 rounded-xl" : "w-9 h-9 rounded-lg",
             )}
-            style={{ backgroundColor: `${info.color}15` }}
+            style={{ backgroundColor: `${info.color}18`, color: info.color }}
           >
-            {info.icon}
+            {info.label.charAt(0)}
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">{info.label}</h3>
+              <h3 className="text-sm font-medium text-gray-900 dark:text-slate-100">{info.label}</h3>
               {isCoordinator && (
-                <span className="text-[8px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-400 font-bold uppercase">
+                <span className="text-[8px] px-1 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-semibold uppercase border border-indigo-100 dark:border-indigo-900">
                   Coord
                 </span>
               )}
             </div>
-            <p className="text-xs text-[var(--text-muted)]">{info.provider}</p>
+            <p className="text-xs text-gray-400 dark:text-slate-500">{info.provider}</p>
           </div>
         </div>
         <StatusBadge status={status} />
       </div>
 
       {error && (
-        <p className="mt-2 text-xs text-red-400 truncate">{error}</p>
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400 truncate">{error}</p>
       )}
 
-      <div className="mt-3 flex items-center gap-3 text-xs text-[var(--text-muted)]">
+      <div className="mt-3 flex items-center gap-3 text-xs text-gray-400 dark:text-slate-500">
         {timing !== undefined && (
           <span>{timing.toFixed(1)}s</span>
         )}
         {messageCount !== undefined && messageCount > 0 && (
           <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50" />
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 dark:bg-indigo-500" />
             {messageCount} msg{messageCount > 1 ? "s" : ""}
           </span>
         )}
@@ -79,24 +79,30 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
 }
 
 function StatusBadge({ status }: { status?: string }) {
-  if (!status) return <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-muted)]">Idle</span>;
+  if (!status) {
+    return (
+      <span className="text-[10px] px-2 py-0.5 rounded-md bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400">
+        Idle
+      </span>
+    );
+  }
 
   const styles: Record<string, string> = {
-    completed: "bg-green-500/15 text-green-400",
-    running: "bg-blue-500/15 text-blue-400",
-    failed: "bg-red-500/15 text-red-400",
-    waiting_approval: "bg-amber-500/15 text-amber-400",
+    completed: "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900",
+    running: "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900",
+    failed: "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-900",
+    waiting_approval: "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900",
   };
 
   const labels: Record<string, string> = {
     completed: "Done",
     running: "Running",
     failed: "Failed",
-    waiting_approval: "Approval",
+    waiting_approval: "Awaiting",
   };
 
   return (
-    <span className={clsx("text-[10px] px-2 py-0.5 rounded-full font-medium", styles[status] || styles.running)}>
+    <span className={clsx("text-[10px] px-2 py-0.5 rounded-md font-medium", styles[status] || styles.running)}>
       {labels[status] || status}
     </span>
   );

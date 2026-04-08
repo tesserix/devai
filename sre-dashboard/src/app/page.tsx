@@ -9,6 +9,14 @@ import { clsx } from "clsx";
 
 type Tab = "overview" | "incidents" | "apps" | "scans" | "costs";
 
+const NAV_ITEMS: { key: Tab; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "incidents", label: "Incidents" },
+  { key: "apps", label: "Applications" },
+  { key: "scans", label: "Scan History" },
+  { key: "costs", label: "Cost Analysis" },
+];
+
 export default function SREDashboard() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [clusters, setClusters] = useState<ClusterHealth[]>([]);
@@ -47,17 +55,21 @@ export default function SREDashboard() {
   const openCount = incidents.length;
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-gray-50 dark:bg-slate-950">
       {/* Sidebar */}
-      <aside className="w-64 border-r border-[var(--border-primary)] bg-[var(--bg-secondary)] flex flex-col">
-        <div className="p-4 border-b border-[var(--border-primary)]">
+      <aside className="w-64 border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col">
+        <div className="p-4 border-b border-gray-200 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-600 flex items-center justify-center text-white text-sm font-bold">
-              S
+            <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
             </div>
             <div>
-              <h1 className="text-sm font-bold text-[var(--text-primary)]">DevAI SRE</h1>
-              <p className="text-[10px] text-[var(--text-muted)]">Cluster Monitoring</p>
+              <h1 className="text-sm font-bold text-gray-900 dark:text-slate-100">DevAI SRE</h1>
+              <p className="text-[10px] text-gray-400 dark:text-slate-500">Cluster Monitoring</p>
             </div>
           </div>
         </div>
@@ -65,44 +77,49 @@ export default function SREDashboard() {
         {/* Status Banner */}
         <div className={clsx(
           "mx-3 mt-3 p-3 rounded-lg border text-center",
-          criticalCount > 0 ? "border-red-500/30 bg-red-500/10" :
-          openCount > 0 ? "border-amber-500/30 bg-amber-500/10" :
-          "border-green-500/20 bg-green-500/5"
+          criticalCount > 0
+            ? "border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10"
+            : openCount > 0
+            ? "border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10"
+            : "border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5"
         )}>
           <p className={clsx(
             "text-2xl font-bold",
-            criticalCount > 0 ? "text-red-400" : openCount > 0 ? "text-amber-400" : "text-green-400"
+            criticalCount > 0
+              ? "text-red-600 dark:text-red-400"
+              : openCount > 0
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-emerald-600 dark:text-emerald-400"
           )}>
             {criticalCount > 0 ? criticalCount : openCount > 0 ? openCount : "0"}
           </p>
-          <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+          <p className="text-[10px] text-gray-500 dark:text-slate-400 mt-0.5">
             {criticalCount > 0 ? "Critical Incidents" : openCount > 0 ? "Open Incidents" : "All Clear"}
           </p>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-1">
-          {([
-            { key: "overview", label: "Overview", icon: "📊" },
-            { key: "incidents", label: "Incidents", icon: "🔥", badge: openCount },
-            { key: "apps", label: "Applications", icon: "📦", badge: apps.length },
-            { key: "scans", label: "Scan History", icon: "🔄" },
-            { key: "costs", label: "Cost Analysis", icon: "💰" },
-          ] as const).map((item) => (
+        <nav className="flex-1 p-3 space-y-0.5">
+          {NAV_ITEMS.map((item) => (
             <button
               key={item.key}
               onClick={() => setTab(item.key)}
               className={clsx(
                 "w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-colors",
                 tab === item.key
-                  ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50"
+                  ? "bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-slate-100"
+                  : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800/50"
               )}
             >
-              <span>{item.icon} {item.label}</span>
-              {"badge" in item && item.badge! > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
-                  {item.badge}
+              <span>{item.label}</span>
+              {item.key === "incidents" && openCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-slate-300">
+                  {openCount}
+                </span>
+              )}
+              {item.key === "apps" && apps.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-slate-300">
+                  {apps.length}
                 </span>
               )}
             </button>
@@ -110,21 +127,21 @@ export default function SREDashboard() {
         </nav>
 
         {/* Trigger Scan */}
-        <div className="p-3 border-t border-[var(--border-primary)]">
+        <div className="p-3 border-t border-gray-200 dark:border-slate-800">
           <button
             onClick={() => sre.triggerScan().then(fetchAll)}
-            className="w-full px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
+            className="w-full px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
           >
             Trigger Manual Scan
           </button>
           <div className="flex items-center justify-between mt-2">
-            <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-slate-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Auto-scanning every 5m
             </div>
             <a
               href="/bff/logout"
-              className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors"
+              className="text-[10px] text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
             >
               Logout
             </a>
@@ -135,8 +152,8 @@ export default function SREDashboard() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
         {/* Header */}
-        <header className="border-b border-[var(--border-primary)] bg-[var(--bg-secondary)] px-6 py-4">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+        <header className="border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
             {tab === "overview" && "Cluster Overview"}
             {tab === "incidents" && "Incidents"}
             {tab === "apps" && "Application Reliability"}
@@ -147,7 +164,7 @@ export default function SREDashboard() {
 
         <div className="p-6">
           {loading ? (
-            <div className="text-center py-16 text-[var(--text-muted)]">Loading...</div>
+            <div className="text-center py-16 text-gray-400 dark:text-slate-500">Loading...</div>
           ) : (
             <>
               {tab === "overview" && (
@@ -156,13 +173,13 @@ export default function SREDashboard() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div>
-                      <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+                      <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
                         Recent Incidents
                       </h3>
                       <IncidentFeed incidents={incidents.slice(0, 5)} onSelect={setSelectedIncident} />
                     </div>
                     <div>
-                      <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
+                      <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-3">
                         Recent Scans
                       </h3>
                       <ScanHistory runs={scans.slice(0, 8)} />
@@ -180,30 +197,33 @@ export default function SREDashboard() {
                   {apps.map((app) => (
                     <div
                       key={app.app_id}
-                      className="flex items-center justify-between p-4 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]"
+                      className="flex items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900"
                     >
                       <div>
-                        <h4 className="text-sm font-semibold text-[var(--text-primary)]">{app.name}</h4>
-                        <p className="text-xs text-[var(--text-muted)]">{app.namespace} — {app.repo}</p>
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-slate-100">{app.name}</h4>
+                        <p className="text-xs text-gray-400 dark:text-slate-500">{app.namespace} — {app.repo}</p>
                       </div>
                       <div className="flex items-center gap-6 text-xs">
                         <div className="text-center">
-                          <p className={clsx("text-lg font-bold",
-                            app.severe_incidents_30d > 0 ? "text-red-400" : "text-[var(--text-primary)]"
+                          <p className={clsx(
+                            "text-lg font-bold",
+                            app.severe_incidents_30d > 0
+                              ? "text-red-600 dark:text-red-400"
+                              : "text-gray-900 dark:text-slate-100"
                           )}>{app.total_incidents_30d}</p>
-                          <p className="text-[10px] text-[var(--text-muted)]">Incidents/30d</p>
+                          <p className="text-[10px] text-gray-400 dark:text-slate-500">Incidents/30d</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-lg font-bold text-[var(--text-primary)]">
+                          <p className="text-lg font-bold text-gray-900 dark:text-slate-100">
                             {app.health_pct_7d !== null ? `${app.health_pct_7d?.toFixed(0)}%` : "—"}
                           </p>
-                          <p className="text-[10px] text-[var(--text-muted)]">Health/7d</p>
+                          <p className="text-[10px] text-gray-400 dark:text-slate-500">Health/7d</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-lg font-bold text-[var(--text-primary)]">
+                          <p className="text-lg font-bold text-gray-900 dark:text-slate-100">
                             {app.avg_mttr_seconds ? `${(app.avg_mttr_seconds / 60).toFixed(0)}m` : "—"}
                           </p>
-                          <p className="text-[10px] text-[var(--text-muted)]">MTTR</p>
+                          <p className="text-[10px] text-gray-400 dark:text-slate-500">MTTR</p>
                         </div>
                       </div>
                     </div>
@@ -214,7 +234,7 @@ export default function SREDashboard() {
               {tab === "scans" && <ScanHistory runs={scans} />}
 
               {tab === "costs" && (
-                <div className="text-center py-16 text-[var(--text-muted)]">
+                <div className="text-center py-16 text-gray-400 dark:text-slate-500">
                   <p className="text-lg">Cost analysis loading from GCP billing...</p>
                   <p className="text-sm mt-1">Data refreshes daily</p>
                 </div>
