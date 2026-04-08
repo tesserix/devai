@@ -83,6 +83,18 @@ jobs:
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
           cache-to: type=registry,ref=${{ steps.cache.outputs.ref }},mode=max
 
+      - name: Get GKE credentials
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_REGION }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Restart deployment
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
+        run: kubectl rollout restart deployment/devai-dashboard -n devai
+
       - name: Trivy scan
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@master
