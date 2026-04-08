@@ -333,7 +333,7 @@ async def create_repo(request: Request) -> dict[str, Any]:
         return repo
     except Exception as e:
         logger.warning("Failed to create repo: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
         await scm.close()
 
