@@ -684,10 +684,6 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     """Trigger a DevAI ALM pipeline run from the dashboard (LangGraph)."""
     import asyncio
 
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
     repo = body["repo"]
     requirements = body.get("requirements", "")
@@ -803,16 +799,13 @@ async def get_claude_md(request: Request, repo: str) -> dict[str, str]:
 @router.post("/api/governance/claude-md")
 async def save_claude_md(request: Request) -> dict[str, str]:
     """Save CLAUDE.md governance content for a repo."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
     repo = body["repo"]
     content = body["content"]
 
     redis = request.app.state.state_manager.redis
     await redis.set(f"devai:governance:{repo}:claude_md", content)
-    logger.info("CLAUDE.md governance updated for %s by %s", repo, session["user_login"])
+    logger.info("CLAUDE.md governance updated for %s", repo)
     return {"status": "saved", "repo": repo}
 
 
@@ -830,10 +823,6 @@ async def get_pending_approvals(request: Request, run_id: str) -> list[dict[str,
 @router.post("/api/pipeline/runs/{run_id}/approvals/{gate}/approve")
 async def approve_gate(request: Request, run_id: str, gate: str) -> dict[str, str]:
     """Approve a pending gate, allowing the pipeline to continue."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     redis = request.app.state.state_manager.redis
     # Signal the waiting agent to proceed
     await redis.set(f"devai:run:{run_id}:gate:{gate}", "approved", ex=3600)
@@ -845,17 +834,13 @@ async def approve_gate(request: Request, run_id: str, gate: str) -> dict[str, st
             await redis.lrem(f"devai:run:{run_id}:approvals", 1, item)
             break
 
-    logger.info("Gate %s approved for run %s by %s", gate, run_id, session["user_login"])
+    logger.info("Gate %s approved for run %s", gate, run_id)
     return {"status": "approved", "gate": gate}
 
 
 @router.post("/api/pipeline/runs/{run_id}/approvals/{gate}/reject")
 async def reject_gate(request: Request, run_id: str, gate: str) -> dict[str, str]:
     """Reject a pending gate, stopping the pipeline."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     redis = request.app.state.state_manager.redis
     await redis.set(f"devai:run:{run_id}:gate:{gate}", "rejected", ex=3600)
     approvals = await redis.lrange(f"devai:run:{run_id}:approvals", 0, -1)
@@ -865,7 +850,7 @@ async def reject_gate(request: Request, run_id: str, gate: str) -> dict[str, str
             await redis.lrem(f"devai:run:{run_id}:approvals", 1, item)
             break
 
-    logger.info("Gate %s rejected for run %s by %s", gate, run_id, session["user_login"])
+    logger.info("Gate %s rejected for run %s", gate, run_id)
     return {"status": "rejected", "gate": gate}
 
 
@@ -875,9 +860,6 @@ async def reject_gate(request: Request, run_id: str, gate: str) -> dict[str, str
 @router.post("/api/pipeline/config")
 async def save_pipeline_config(request: Request) -> dict[str, str]:
     """Save pipeline configuration (permissions, model settings, etc.)."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
     repo = body.get("repo", "default")
 
