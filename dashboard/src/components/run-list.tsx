@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { clsx } from "clsx";
 import type { PipelineRun } from "@/lib/api";
 
@@ -7,7 +8,7 @@ interface RunListProps {
   runs: PipelineRun[];
   selectedRunId?: string;
   onSelect: (runId: string) => void;
-  onRetrigger?: (repo: string) => void;
+  onRetrigger?: (repo: string) => Promise<void> | void;
 }
 
 const STAGE_DOT: Record<string, string> = {
@@ -27,6 +28,8 @@ const STAGE_DOT: Record<string, string> = {
 };
 
 export function RunList({ runs, selectedRunId, onSelect, onRetrigger }: RunListProps) {
+  const [retriggeringId, setRetriggeringId] = useState<string | null>(null);
+
   if (runs.length === 0) {
     return (
       <div className="text-center py-10 text-gray-400 dark:text-gray-500">
@@ -88,14 +91,36 @@ export function RunList({ runs, selectedRunId, onSelect, onRetrigger }: RunListP
               {isFailed && onRetrigger && (
                 <span
                   role="button"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    onRetrigger(run.repo);
+                    if (retriggeringId === run.run_id) return;
+                    setRetriggeringId(run.run_id);
+                    try {
+                      await onRetrigger(run.repo);
+                    } finally {
+                      setRetriggeringId(null);
+                    }
                   }}
-                  className="text-xs px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800/40 cursor-pointer transition-colors"
+                  className={clsx(
+                    "text-xs px-2 py-0.5 rounded transition-colors",
+                    retriggeringId === run.run_id
+                      ? "bg-indigo-200 dark:bg-indigo-800/50 text-indigo-400 dark:text-indigo-500 cursor-not-allowed"
+                      : "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800/40 cursor-pointer"
+                  )}
                   title="Retrigger pipeline for this repo"
+                  aria-disabled={retriggeringId === run.run_id}
                 >
-                  Retry
+                  {retriggeringId === run.run_id ? (
+                    <span className="flex items-center gap-1">
+                      <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Retrying…
+                    </span>
+                  ) : (
+                    "Retry"
+                  )}
                 </span>
               )}
             </div>

@@ -16,6 +16,7 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
   if (!info) return null;
 
   const isCoordinator = info.role === "coordinator";
+  const isRunning = status === "running" || status === "in_progress";
 
   return (
     <div
@@ -23,14 +24,13 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
         "rounded-lg border p-4 transition-all",
         isCoordinator && "border-l-4",
         status === "completed" && "border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30",
-        status === "running" && "border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30",
+        isRunning && "border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/30 shadow-[0_0_0_1px_rgba(99,102,241,0.3)] animate-pulse",
         status === "failed" && "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30",
         status === "waiting_approval" && "border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30",
         !status && "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800",
         isCoordinator && !status && "border-l-indigo-400 dark:border-l-indigo-500",
         isCoordinator && status === "completed" && "border-l-green-500",
-        isCoordinator && status === "running" && "border-l-indigo-500",
-        status === "running" && "animate-pulse"
+        isCoordinator && isRunning && "border-l-indigo-500",
       )}
     >
       <div className="flex items-start justify-between">
@@ -87,9 +87,12 @@ function StatusBadge({ status }: { status?: string }) {
     );
   }
 
+  const isRunning = status === "running" || status === "in_progress";
+
   const styles: Record<string, string> = {
     completed: "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900",
-    running: "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900",
+    running: "bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900",
+    in_progress: "bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900",
     failed: "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-900",
     waiting_approval: "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900",
   };
@@ -97,12 +100,19 @@ function StatusBadge({ status }: { status?: string }) {
   const labels: Record<string, string> = {
     completed: "Done",
     running: "Running",
+    in_progress: "Running",
     failed: "Failed",
     waiting_approval: "Awaiting",
   };
 
   return (
-    <span className={clsx("text-xs px-2 py-0.5 rounded-md font-medium", styles[status] || styles.running)}>
+    <span className={clsx("text-xs px-2 py-0.5 rounded-md font-medium flex items-center gap-1.5", styles[status] || styles.running)}>
+      {isRunning && (
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500" />
+        </span>
+      )}
       {labels[status] || status}
     </span>
   );

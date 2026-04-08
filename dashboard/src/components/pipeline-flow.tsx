@@ -67,7 +67,7 @@ export function PipelineFlow({ currentStage, agentTimings = {} }: PipelineFlowPr
                         : "text-gray-400 dark:text-gray-500"
                     )}
                   >
-                    {isCoordinator ? "Coord" : agent.provider}
+                    {stage.key === "triggered" ? "Coord" : agent.provider}
                   </span>
                 )}
                 {timing !== undefined && (
