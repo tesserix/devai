@@ -154,7 +154,7 @@ jobs:
 
       - name: Restart deployment
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
-        run: kubectl rollout restart deployment/devai -n devai
+        run: kubectl rollout restart deployment/devai-api -n devai
 
       - name: Trivy vulnerability scan
         if: github.event_name != 'pull_request'
