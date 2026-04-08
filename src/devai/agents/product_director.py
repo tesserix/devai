@@ -115,8 +115,12 @@ Create a GitHub Epic that encompasses all these requirements."""
         except json.JSONDecodeError:
             epic_data = {"title": "Feature Epic", "description": requirements[:500], "labels": ["epic"]}
 
+        # Ensure title is valid (AI sometimes returns empty/None)
+        if not epic_data.get("title", "").strip():
+            epic_data["title"] = f"Epic: {requirements[:80]}" if requirements else "Feature Epic"
+
         # Create the Epic as a GitHub issue
-        labels = epic_data.get("labels", []) + ["epic", "devai:epic"]
+        labels = [lbl for lbl in epic_data.get("labels", []) if isinstance(lbl, str)] + ["epic", "devai:epic"]
         body = f"{epic_data.get('description', '')}\n\n## Milestones\n"
         for m in epic_data.get("milestones", []):
             body += f"\n- [ ] {m}"
@@ -215,11 +219,15 @@ Break these requirements into user stories. Consider the repository context and 
             if epic_number:
                 body += f"\n\n**Epic:** #{epic_number}"
 
-            labels = story.get("labels", []) + ["devai:user-story", f"priority:{story.get('priority', 'medium')}"]
+            labels = [lbl for lbl in story.get("labels", []) if isinstance(lbl, str)] + [
+                "devai:user-story",
+                f"priority:{story.get('priority', 'medium')}",
+            ]
+            story_title = (story.get("title") or "").strip() or "User Story"
 
             issue = await self.github.create_issue(
                 repo=repo,
-                title=story.get("title", "User Story"),
+                title=story_title,
                 body=body,
                 labels=labels,
             )

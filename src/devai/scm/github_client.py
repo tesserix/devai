@@ -152,9 +152,12 @@ class GitHubSCMClient(SCMClient):
                 )
 
     async def create_issue(self, repo: str, title: str, body: str, labels: list[str] | None = None) -> dict[str, Any]:
+        # GitHub requires a non-empty title
+        safe_title = (title or "").strip() or "Untitled Issue"
+        safe_body = (body or "").strip() or ""
         if labels:
             await self.ensure_labels(repo, labels)
-        payload: dict[str, Any] = {"title": title, "body": body}
+        payload: dict[str, Any] = {"title": safe_title, "body": safe_body}
         if labels:
             payload["labels"] = labels
         resp = await self._request("POST", f"/repos/{repo}/issues", json=payload)
