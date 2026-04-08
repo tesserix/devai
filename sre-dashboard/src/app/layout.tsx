@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "DevAI SRE — Cluster Monitoring",
   description: "AI-powered Site Reliability Engineering",
+  icons: { icon: "/favicon.svg" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

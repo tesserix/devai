@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "DevAI — ALM Pipeline Dashboard",
   description: "AI-powered Application Lifecycle Management",
+  icons: { icon: "/favicon.svg" },
 };
 
 export default function RootLayout({
