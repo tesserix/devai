@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/bff/", "/auth/", "/api/", "/_next/", "/favicon.ico"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/bff/",
+  "/auth/",
+  "/api/",
+  "/_next/",
+  "/favicon.ico",
+];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -15,9 +22,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const loginUrl = new URL("/auth/login", request.url);
-  loginUrl.searchParams.set("redirect_uri", request.url);
-  return NextResponse.redirect(loginUrl);
+  return NextResponse.redirect(new URL("/login", request.url));
 }
 
 export const config = {
