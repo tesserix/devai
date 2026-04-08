@@ -311,11 +311,10 @@ async def move_item(request: Request, org: str, project_number: int) -> dict[str
 
 @router.get("/api/repos")
 async def list_repos(request: Request) -> list[dict[str, Any]]:
-    """List repositories accessible to the GitHub App installation."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    """List repositories accessible to the GitHub App installation.
 
+    Auth: Dashboard is behind Keycloak; this uses the App token, not user OAuth.
+    """
     config = request.app.state.config
     from devai.scm.factory import create_scm_client
 
@@ -333,10 +332,6 @@ async def list_repos(request: Request) -> list[dict[str, Any]]:
 @router.post("/api/repos/create")
 async def create_repo(request: Request) -> dict[str, Any]:
     """Create a new repository via the GitHub App."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
     org = body.get("org", "tesserix")
     name = body.get("name", "").strip()
@@ -363,10 +358,6 @@ async def create_repo(request: Request) -> dict[str, Any]:
 @router.get("/api/projects")
 async def list_projects(request: Request) -> list[dict[str, Any]]:
     """List GitHub Projects v2 for the configured org."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     config = request.app.state.config
     org = getattr(config, "github_org", "tesserix")
     from devai.scm.factory import create_scm_client
@@ -385,10 +376,6 @@ async def list_projects(request: Request) -> list[dict[str, Any]]:
 @router.post("/api/projects/create")
 async def create_project_endpoint(request: Request) -> dict[str, Any]:
     """Create a GitHub Project v2 and optionally link it to a repo."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
     title = body.get("title", "").strip()
     description = body.get("description", "")
@@ -417,10 +404,6 @@ async def create_project_endpoint(request: Request) -> dict[str, Any]:
 @router.post("/api/repos/scaffold")
 async def scaffold_repo(request: Request) -> dict[str, Any]:
     """Scaffold a repository with CI workflows, CLAUDE.md, and project structure."""
-    session = await _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
     repo = body.get("repo", "").strip()
     project_title = body.get("project_title", "")
