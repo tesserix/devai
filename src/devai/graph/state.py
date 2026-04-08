@@ -23,6 +23,30 @@ class A2AMessageDict(TypedDict, total=False):
     timestamp: str
 
 
+class StoryBranchDict(TypedDict, total=False):
+    """Per-story branch, PR, and quality gate tracking.
+
+    Each story gets its own feature branch and PR. The orchestrator
+    manages the lifecycle of each story through implement → review →
+    security → test, storing results here.
+    """
+
+    story_index: int  # Index into ALMState["stories"]
+    story_number: int  # GitHub issue number
+    story_title: str
+    branch_name: str | None
+    pr_number: int | None
+    status: str  # "pending" | "implementing" | "in_review" | "approved" | "merged" | "failed"
+    review_decision: str  # "approved" | "changes_requested"
+    review_iteration: int
+    review_feedback: list[str]
+    security_decision: str  # "pass" | "pass_with_warnings" | "block"
+    test_failed: int
+    test_summary: str
+    implementation_summary: str
+    story_plan: str  # Per-story technical plan from EM
+
+
 class ALMState(TypedDict, total=False):
     """Full ALM pipeline state flowing through the LangGraph."""
 
@@ -45,19 +69,24 @@ class ALMState(TypedDict, total=False):
     story_issue_numbers: list[int]
     epic_issue_number: int | None
 
+    # --- Story-Level Tracking (collaborative parallel model) ---
+    story_branches: list[StoryBranchDict]  # Per-story branch/PR/status
+    active_story_index: int  # Index of story currently being processed
+    story_plans: list[str]  # Per-story technical plans from EM
+
     # --- Technical Planning ---
     technical_plan: str
     affected_files: list[str]
     subtasks: list[str]
     plan_complexity: str
 
-    # --- Implementation ---
+    # --- Implementation (active story context — set by story_loop) ---
     branch_name: str | None
     pr_number: int | None
     implementation_summary: str
     committed_files: list[str]
 
-    # --- Code Review ---
+    # --- Code Review (active story context) ---
     review_decision: str  # "approved" | "changes_requested"
     review_summary: str
     review_comments: list[dict[str, str]]

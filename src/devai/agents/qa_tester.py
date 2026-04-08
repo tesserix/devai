@@ -98,8 +98,15 @@ class QATesterAgent(BaseAgent):
                 "test_summary": "No PR or branch found in pipeline context",
             }
 
+        # Get active story context
+        active_idx = state.get("active_story_index", 0)
         stories = state.get("stories", [])
-        issue_refs = "\n".join(f"- #{s.get('number', '?')}: {s.get('title', '')}" for s in stories)
+        active_story = stories[active_idx] if active_idx < len(stories) else {}
+        story_number = active_story.get("number", "?")
+        story_title = active_story.get("title", "")
+        acceptance_criteria = active_story.get("acceptance_criteria", [])
+
+        ac_text = "\n".join(f"- {c}" for c in acceptance_criteria) if acceptance_criteria else "(none)"
 
         # Check for A2A messages
         inbox_context = a2a.format_inbox_context()
@@ -108,15 +115,19 @@ class QATesterAgent(BaseAgent):
 PR: #{pr_number}
 Branch: {branch}
 
-## User Stories
-{issue_refs}
+## Story Under Test
+Story #{story_number}: {story_title}
+Description: {active_story.get('description', '')[:500]}
+
+### Acceptance Criteria to Verify
+{ac_text}
 
 ## Original Requirements
-{state.get("requirements", "")[:2000]}
+{state.get("requirements", "")[:1500]}
 
 {inbox_context}
 
-Write comprehensive E2E tests for the changes in this PR. Then run them and report the results.
+Write E2E tests that verify the acceptance criteria for Story #{story_number}. Then run them and report results.
 
 Start by reading the PR diff to understand what was changed, explore existing tests for patterns, then write and commit test files, and finally run them."""
 
@@ -137,21 +148,21 @@ Start by reading the PR diff to understand what was changed, explore existing te
             await self.github.add_comment(
                 repo=repo,
                 issue_number=pr_number,
-                body=f"## QA Test Results\n\n{result_text}",
+                body=f"## QA Test Results — Story #{story_number}\n\n{result_text}",
             )
 
-        # Notify Release Manager about test completion
-        a2a.handoff(
-            "release_manager",
-            "Tests Complete",
-            f"E2E tests completed for PR #{pr_number}.\n\n{result_text[:300]}...",
+        # Notify about test completion for this story
+        a2a.notify(
+            "orchestrator",
+            f"Story #{story_number} Tests Complete",
+            f"E2E tests completed for PR #{pr_number} (Story #{story_number}).\n\n{result_text[:300]}...",
         )
 
         # Notify CI Monitor
         a2a.notify(
             "ci_monitor",
-            "Test Suite Committed",
-            f"Test files committed to branch '{branch}'. Monitor for CI.",
+            f"Story #{story_number} Test Suite Committed",
+            f"Test files committed to branch '{branch}' for Story #{story_number}.",
         )
 
         return {

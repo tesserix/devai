@@ -43,7 +43,7 @@ class StaffReviewerAgent(BaseAgent):
     ]
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
-        """Review the PR code using Claude tool-use loop."""
+        """Review the PR code for the active story using Claude tool-use loop."""
         claude = ClaudeProvider(self.config)
         tool_executor = GitHubToolExecutor(self.github)
 
@@ -62,17 +62,32 @@ class StaffReviewerAgent(BaseAgent):
                 "review_summary": "No PR or branch found in pipeline context",
             }
 
+        # Get active story context
+        active_idx = state.get("active_story_index", 0)
+        stories = state.get("stories", [])
+        active_story = stories[active_idx] if active_idx < len(stories) else {}
+        story_number = active_story.get("number", "?")
+        story_title = active_story.get("title", "")
+        acceptance_criteria = active_story.get("acceptance_criteria", [])
+
+        ac_text = "\n".join(f"- {c}" for c in acceptance_criteria) if acceptance_criteria else "(none)"
+
         # Check for messages from other agents
         inbox_context = a2a.format_inbox_context()
 
         review_system = """You are a Staff Software Engineer performing a thorough code review.
 
+You are reviewing a PR for a SINGLE user story. The story was implemented on its own feature branch.
+Ensure the implementation matches the story's acceptance criteria and doesn't include unrelated changes.
+
 Focus on:
 1. Code quality and adherence to project conventions
-2. Performance: unnecessary allocations, N+1 queries, blocking calls
-3. Security: injection, auth bypass, secrets in code, OWASP Top 10
-4. Error handling: proper error propagation, no swallowed errors
-5. Testing: are the changes testable? Any obvious missing test cases?
+2. Story completeness: does the PR satisfy ALL acceptance criteria?
+3. Scope: does the PR contain ONLY changes for this story (no scope creep)?
+4. Performance: unnecessary allocations, N+1 queries, blocking calls
+5. Security: injection, auth bypass, secrets in code, OWASP Top 10
+6. Error handling: proper error propagation, no swallowed errors
+7. Testing: are the changes testable? Any obvious missing test cases?
 
 Be thorough but fair. Only request changes for genuine issues, not style preferences.
 
@@ -86,17 +101,24 @@ After reviewing, output your review as JSON:
     "style_issues": ["Any style issues found"]
 }"""
 
-        review_prompt = f"""Review this pull request:
+        review_prompt = f"""Review this pull request for Story #{story_number}: {story_title}
 
 PR #{pr_number} on {repo}
 Branch: {branch}
 
+## Story Details
+Title: {story_title}
+Description: {active_story.get('description', '')[:500]}
+
+### Acceptance Criteria
+{ac_text}
+
 ## Requirements
-{state.get("requirements", "")[:2000]}
+{state.get("requirements", "")[:1500]}
 
 {inbox_context}
 
-Start by getting the PR diff with github_get_pr_diff, then explore the repo structure and read relevant files to understand the codebase context. Provide a thorough review."""
+Start by getting the PR diff with github_get_pr_diff, then explore the repo structure and read relevant files to understand the codebase context. Verify the implementation satisfies the acceptance criteria."""
 
         governance = state.get("governance", "")
         if governance:
@@ -121,23 +143,23 @@ Start by getting the PR diff with github_get_pr_diff, then explore the repo stru
             event=event,
         )
 
-        # A2A communication based on review decision
+        # A2A communication based on review decision — include story context
         if review.decision == ReviewDecision.APPROVED:
             a2a.handoff(
-                "ci_monitor",
-                "Code Approved — Monitor Build",
-                f"PR #{pr_number} approved. Monitor the CI build.",
+                "security_expert",
+                f"Story #{story_number} Approved — Security Scan Next",
+                f"PR #{pr_number} for Story #{story_number} approved. Proceed with security scan.",
             )
             a2a.notify(
                 "qa_tester",
-                "Code Approved",
-                f"PR #{pr_number} approved by review. Prepare for E2E testing.",
+                f"Story #{story_number} Approved",
+                f"PR #{pr_number} for Story #{story_number} approved by review. Prepare for testing.",
             )
         else:
             a2a.escalate(
                 "senior_developer",
-                "Changes Requested",
-                f"Review of PR #{pr_number} requested changes:\n\n{review.summary}",
+                f"Story #{story_number} — Changes Requested",
+                f"Review of PR #{pr_number} (Story #{story_number}) requested changes:\n\n{review.summary}",
                 payload={
                     "security_issues": review.security_issues,
                     "performance_issues": review.performance_issues,

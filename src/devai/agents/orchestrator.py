@@ -31,52 +31,42 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the Orchestrator Agent — the execution coordinator for an AI-powered software development pipeline.
+SYSTEM_PROMPT = """You are the Orchestrator Agent — the execution coordinator for a collaborative AI-powered software development pipeline.
 
 Your role is to manage the real-time execution of the development workflow, making intelligent routing decisions at each checkpoint.
 
+## Collaborative Parallel Model
+
+This pipeline processes stories INDIVIDUALLY on separate feature branches:
+- Each story goes through: implement → review → security → test
+- After all stories pass quality gates, the Release Manager merges all PRs
+- You coordinate the per-story quality gates and track overall progress
+
 ## Your Responsibilities
 
-1. **Workflow Management**: Execute the pipeline phases in order:
-   - Analysis Phase: Document analysis -> Tech detection -> Requirements
-   - Planning Phase: Epic creation -> Story creation -> Technical plan
-   - Implementation Phase: Code implementation -> DB engineering
-   - Quality Phase: Code review -> Security scan -> Build -> Tests
-   - Deployment Phase: Infrastructure provisioning -> Release
-
-2. **Dynamic Routing**: At each checkpoint, decide the next action:
-   - After code review: approve -> continue, or request changes -> loop back
-   - After security scan: pass -> continue, block -> fix and re-scan
-   - After tests: pass -> deploy, fail -> fix and re-test
+1. **Story-Level Routing**: At each quality gate for the active story, decide:
+   - After code review: approve → security scan, or request changes → re-implement
+   - After security scan: pass → test, block → re-implement
+   - After tests: pass → mark story done, fail → re-implement
    - After any failure: retry, escalate to supervisor, or abort
 
-3. **Progress Tracking**: Monitor execution and report:
-   - Current phase and step
+2. **Progress Tracking**: Monitor execution and report:
+   - Which story is currently being processed (and which are done)
+   - Current quality gate for the active story
    - Agent performance (timing, quality)
    - Blockers and risks
-   - Iteration count for loops
+   - Iteration count for feedback loops
 
-4. **Conflict Resolution**: When agents produce conflicting outputs:
+3. **Conflict Resolution**: When agents produce conflicting outputs:
    - Analyze the conflict
    - Decide which approach to follow
    - Provide clear guidance for resolution
-
-## Operational Constraints
-
-1. **Private Repo Build Limits**: The CI Monitor agent handles the public→build→private cycle
-   automatically. When reviewing CI results, be aware that:
-   - The repo visibility may have been toggled during the build
-   - ALL queued builds must complete before the repo goes private again
-   - If CI fails and needs a re-run, the repo stays public until the fix build completes
-   - Never skip the visibility restore step — escalate if it fails
-
-2. **ArgoCD Deployments**: All K8s deployments go through ArgoCD, not kubectl.
-   The Release Manager handles this, but if deployment fails, escalate rather than retry blindly.
 
 ## Decision Context
 
 You will receive the current pipeline state including:
 - The Supervisor's plan and guidance
+- Active story index and story branch statuses
 - Results from completed agents
 - A2A messages between agents
 - Review feedback, security findings, test results
@@ -89,6 +79,7 @@ Return your routing decision as JSON:
 {
   "current_phase": "Name of the current phase",
   "current_step": "Name of the current step",
+  "active_story": "Story #<number> — <title>",
   "decision": "continue|loop_back|escalate|abort",
   "next_agent": "agent_name to execute next (if continue)",
   "loop_target": "agent_name to loop back to (if loop_back)",
@@ -128,17 +119,39 @@ class OrchestratorAgent(BaseAgent):
         supervisor_plan = state.get("supervisor_plan", {})
         agent_timings = state.get("agent_timings", {})
 
+        # Story-level context
+        active_idx = state.get("active_story_index", 0)
+        stories = state.get("stories", [])
+        story_branches = state.get("story_branches", [])
+        active_story = stories[active_idx] if active_idx < len(stories) else {}
+        story_number = active_story.get("number", "?")
+        story_title = active_story.get("title", "")
+
+        # Story progress summary
+        story_status_lines = []
+        for sb in story_branches:
+            status = sb.get("status", "pending")
+            s_num = sb.get("story_number", "?")
+            s_title = sb.get("story_title", "")[:30]
+            icon = {"pending": "⏳", "implementing": "🔧", "approved": "✅", "merged": "🚀", "failed": "❌"}.get(
+                status, "❓"
+            )
+            story_status_lines.append(f"  {icon} Story #{s_num}: {s_title} — {status}")
+        story_progress = "\n".join(story_status_lines) if story_status_lines else "  (no stories)"
+
         # Build A2A context
         inbox_context = a2a.format_inbox_context()
 
         context_parts = [
             "## Current Pipeline State",
             f"- Stage: {stage}",
+            f"- Active Story: #{story_number} — {story_title}",
             f"- Review Decision: {review_decision or 'N/A'}",
             f"- Security Decision: {security_decision or 'N/A'}",
             f"- Test Failures: {test_failed}",
             f"- Review Iteration: {review_iteration}",
             f"- Completed Agents: {', '.join(agent_timings.keys()) or 'None'}",
+            f"\n## Story Progress\n{story_progress}",
         ]
 
         if supervisor_plan:
@@ -180,10 +193,14 @@ class OrchestratorAgent(BaseAgent):
         # Parse the decision
         routing = self._extract_decision(decision_text, state)
 
-        # Calculate progress percentage based on completed stages
-        total_stages = 14
-        completed = len(agent_timings)
-        routing["progress_pct"] = min(int((completed / total_stages) * 100), 100)
+        # Calculate progress: planning (30%) + stories (50%) + deploy (20%)
+        total_stories = max(len(story_branches), 1)
+        done_stories = sum(1 for sb in story_branches if sb.get("status") in ("approved", "merged", "failed"))
+        planning_done = 1 if stage not in ("triggered", "plan_approved") else 0
+        deploy_done = 1 if stage in ("deployed", "done") else 0
+
+        progress = int(planning_done * 30 + (done_stories / total_stories) * 50 + deploy_done * 20)
+        routing["progress_pct"] = min(progress, 100)
 
         # Post progress update to the SCM tracking issue
         await self._post_progress_update(state, routing)

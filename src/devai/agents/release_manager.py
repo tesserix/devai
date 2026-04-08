@@ -1,12 +1,10 @@
 """Release Manager Agent — handles deployment orchestration via ArgoCD.
 
+In the collaborative parallel model, the Release Manager has two roles:
+1. run_merge_stories(): Merge all approved story PRs to main sequentially
+2. run() (deploy): Monitor ArgoCD deployment after merge
+
 For Tesserix repos, deployment goes through ArgoCD (GitOps).
-This agent:
-1. Merges the approved PR (squash merge)
-2. Monitors ArgoCD Application sync status via kubectl
-3. Waits for pod health checks to pass
-4. Supports rollback if deployment fails
-5. Reports deployment status on the PR and tracking issue
 """
 
 from __future__ import annotations
@@ -18,8 +16,6 @@ from devai.core.base_agent import BaseAgent
 
 # Primary: OpenAI | Fallback: Claude
 from devai.providers.openai_provider import OpenAIProvider
-
-# Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
 if TYPE_CHECKING:
     from devai.graph.a2a import A2ABus
@@ -35,107 +31,183 @@ class ReleaseManagerAgent(BaseAgent):
     subscribe_subject = "devai.pipeline.tests_complete"
     publish_subject = ""
 
-    async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
-        """Merge PR and monitor ArgoCD deployment."""
-        repo = state.get("repo_full_name", "")
-        pr_number = state.get("pr_number")
-        branch = state.get("branch_name", "")
+    # ------------------------------------------------------------------
+    # Story Merge Phase — merge all approved story PRs
+    # ------------------------------------------------------------------
 
-        if not pr_number:
+    async def run_merge_stories(self, state: ALMState, a2a: A2ABus | None = None) -> dict[str, Any]:
+        """Merge all approved story PRs to main, sequentially to handle conflicts."""
+        from devai.graph.a2a import A2ABus as A2ABusClass
+
+        if a2a is None:
+            a2a = A2ABusClass(self.name, state.get("a2a_messages", []))
+
+        repo = state.get("repo_full_name", "")
+        story_branches = state.get("story_branches", [])
+
+        approved_stories = [sb for sb in story_branches if sb.get("status") == "approved"]
+        failed_stories = [sb for sb in story_branches if sb.get("status") == "failed"]
+
+        if not approved_stories:
             a2a.escalate(
-                "engineering_manager",
-                "No PR to Deploy",
-                "Release Manager cannot proceed — no PR number in pipeline state.",
+                "supervisor",
+                "No Approved Stories to Merge",
+                f"Out of {len(story_branches)} stories, none were approved. "
+                f"{len(failed_stories)} failed.",
             )
             return {
                 "deploy_status": "failed",
-                "error": "No PR number found",
+                "error": "No approved stories to merge",
+                "a2a_messages": state.get("a2a_messages", []) + a2a.collect_outbox(),
             }
 
-        # Check all tests passed
-        test_failed = state.get("test_failed", 0)
-        if test_failed > 0:
-            a2a.notify(
-                "qa_tester",
-                "Deploy Blocked",
-                f"Cannot deploy — {test_failed} test(s) still failing.",
-            )
+        # Notify everyone about merge phase
+        a2a.broadcast(
+            "Merging Story PRs",
+            f"Merging {len(approved_stories)} approved story PRs to main.\n"
+            + "\n".join(
+                f"- PR #{sb.get('pr_number', '?')} — Story #{sb.get('story_number', '?')}: {sb.get('story_title', '')}"
+                for sb in approved_stories
+            ),
+        )
+
+        merged_prs: list[dict[str, Any]] = []
+        merge_errors: list[str] = []
+
+        for sb in approved_stories:
+            pr_number = sb.get("pr_number")
+            story_number = sb.get("story_number", "?")
+
+            if not pr_number:
+                merge_errors.append(f"Story #{story_number}: no PR number")
+                continue
+
+            merge_result = await self._merge_pr(repo, pr_number)
+
+            if merge_result.get("merged", False):
+                merged_prs.append(
+                    {
+                        "pr_number": pr_number,
+                        "story_number": story_number,
+                        "sha": merge_result.get("sha", ""),
+                    }
+                )
+                a2a.notify(
+                    "orchestrator",
+                    f"Story #{story_number} Merged",
+                    f"PR #{pr_number} (Story #{story_number}) merged to main. "
+                    f"SHA: {merge_result.get('sha', '')[:8]}",
+                )
+            else:
+                error = merge_result.get("message", "Merge failed")
+                merge_errors.append(f"Story #{story_number} PR #{pr_number}: {error}")
+                a2a.escalate(
+                    "senior_developer",
+                    f"Story #{story_number} Merge Failed",
+                    f"Could not merge PR #{pr_number}: {error}\n"
+                    "This may be a merge conflict. The developer should resolve it.",
+                )
+
+        # Update story_branches with merge status
+        updated_branches = list(story_branches)
+        for i, sb in enumerate(updated_branches):
+            if sb.get("status") == "approved":
+                pr_num = sb.get("pr_number")
+                if any(m["pr_number"] == pr_num for m in merged_prs):
+                    updated_branches[i] = {**sb, "status": "merged"}
+
+        # Summary
+        merged = len(merged_prs)
+        errors = len(merge_errors)
+
+        summary = (
+            f"Merge complete: {merged}/{len(approved_stories)} PRs merged. "
+            f"{errors} errors. {len(failed_stories)} stories had failed quality gates."
+        )
+
+        if merge_errors:
+            summary += "\n\nMerge errors:\n" + "\n".join(f"- {e}" for e in merge_errors)
+
+        a2a.broadcast("Merge Phase Complete", summary)
+
+        last_sha = merged_prs[-1]["sha"][:8] if merged_prs else ""
+
+        return {
+            "story_branches": updated_branches,
+            "deploy_version": last_sha,
+            "deploy_status": "merging_complete" if merged > 0 else "failed",
+            "error": "\n".join(merge_errors) if merge_errors else None,
+            "a2a_messages": state.get("a2a_messages", []) + a2a.collect_outbox(),
+        }
+
+    # ------------------------------------------------------------------
+    # Deploy Phase — ArgoCD deployment after merge
+    # ------------------------------------------------------------------
+
+    async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
+        """Monitor ArgoCD deployment after all story PRs are merged."""
+        repo = state.get("repo_full_name", "")
+
+        # Check merge status
+        deploy_status = state.get("deploy_status", "")
+        if deploy_status == "failed":
             return {
                 "deploy_status": "failed",
-                "error": f"{test_failed} tests failing",
+                "error": state.get("error", "Merge phase failed"),
             }
 
         # Notify everyone deployment is starting
+        story_branches = state.get("story_branches", [])
+        merged_count = sum(1 for sb in story_branches if sb.get("status") == "merged")
         a2a.broadcast(
             "Deployment Starting",
-            f"Merging PR #{pr_number} and deploying branch '{branch}' to production.",
+            f"Deploying {merged_count} merged stories to production via ArgoCD.",
         )
 
-        # Step 1: Merge the PR
-        merge_result = await self._merge_pr(repo, pr_number)
-        if not merge_result.get("merged", False):
-            error = merge_result.get("message", "Merge failed")
-            a2a.escalate(
-                "senior_developer",
-                "PR Merge Failed",
-                f"Could not merge PR #{pr_number}: {error}",
-            )
-            return {
-                "deploy_status": "failed",
-                "error": f"Merge failed: {error}",
-            }
-
-        merge_sha = merge_result.get("sha", "")
-
-        # Step 2: Wait for ArgoCD sync and health
+        # Wait for ArgoCD sync and health
         argocd_app = self._derive_argocd_app_name(repo)
         deploy_result = await self._wait_for_argocd_deployment(argocd_app, a2a)
-        deploy_status = deploy_result.get("result", "unknown")
+        argocd_status = deploy_result.get("result", "unknown")
 
-        # Step 3: Rollback if deployment failed
-        if deploy_status in ("degraded", "failed"):
+        # Rollback if deployment failed
+        if argocd_status in ("degraded", "failed"):
             a2a.escalate(
                 "supervisor",
                 "Deployment Failed — Rolling Back",
-                f"ArgoCD app '{argocd_app}' is {deploy_status}. "
+                f"ArgoCD app '{argocd_app}' is {argocd_status}. "
                 f"Health: {deploy_result.get('health_status', 'unknown')}. "
                 "Initiating rollback to previous version.",
             )
             rollback_result = await self._rollback(argocd_app)
             deploy_result["rollback"] = rollback_result
 
-        # Step 4: Generate release summary
+        # Generate release summary
         release_summary = await self._generate_release_summary(state)
 
-        # Step 5: Post deployment comment on PR and tracking issue
-        is_healthy = deploy_status == "healthy"
-        await self._post_deployment_comment(
-            repo,
-            pr_number,
-            deploy_status,
-            merge_sha,
-            release_summary,
-            deploy_result,
-        )
-        await self._update_tracking_issue(state, deploy_status, merge_sha, deploy_result)
+        # Post deployment comment on the tracking issue
+        await self._update_tracking_issue(state, argocd_status, state.get("deploy_version", ""), deploy_result)
 
         # Notify completion
+        is_healthy = argocd_status == "healthy"
         a2a.broadcast(
             f"Deployment {'Successful' if is_healthy else 'Failed'}",
-            f"PR #{pr_number} deployed to production.\n"
+            f"Deployed to production via ArgoCD.\n"
             f"ArgoCD app: {argocd_app}\n"
-            f"Commit: {merge_sha[:8]}\n"
-            f"Status: {deploy_status}\n"
-            f"Sync took: {deploy_result.get('elapsed', '?')}s\n\n{release_summary}",
+            f"Status: {argocd_status}\n"
+            f"Stories merged: {merged_count}\n\n{release_summary}",
         )
 
         return {
             "deploy_status": "success" if is_healthy else "failed",
-            "deploy_version": merge_sha[:8],
+            "deploy_version": state.get("deploy_version", ""),
             "deploy_environment": "production",
             "deploy_argocd_app": argocd_app,
             "health_check_passed": is_healthy,
         }
+
+    # ------------------------------------------------------------------
+    # Helper Methods
+    # ------------------------------------------------------------------
 
     async def _merge_pr(self, repo: str, pr_number: int) -> dict[str, Any]:
         """Merge the PR using squash merge via SCM client."""
@@ -156,7 +228,6 @@ class ReleaseManagerAgent(BaseAgent):
 
             argocd = ArgocdClient(self.config)
 
-            # First, check if the app exists
             try:
                 status = await argocd.get_app_status(app_name)
                 logger.info(
@@ -166,7 +237,6 @@ class ReleaseManagerAgent(BaseAgent):
                     status["health_status"],
                 )
             except Exception:
-                # App might not exist yet (first deployment)
                 logger.warning(
                     "ArgoCD app '%s' not found — it may need to be created via tesserix-k8s",
                     app_name,
@@ -179,7 +249,6 @@ class ReleaseManagerAgent(BaseAgent):
                 )
                 return {"result": "not_found", "name": app_name}
 
-            # Wait for sync completion
             a2a.notify(
                 "orchestrator",
                 "Waiting for ArgoCD Sync",
@@ -222,29 +291,29 @@ class ReleaseManagerAgent(BaseAgent):
             return {"error": str(e)}
 
     def _derive_argocd_app_name(self, repo: str) -> str:
-        """Derive the ArgoCD Application name from the repo name.
-
-        Convention: tesserix/my-service → my-service
-        """
+        """Derive the ArgoCD Application name from the repo name."""
         return repo.split("/")[-1] if "/" in repo else repo
 
     async def _generate_release_summary(self, state: ALMState) -> str:
-        """Generate a release summary using Groq."""
+        """Generate a release summary covering all merged stories."""
         try:
             openai = OpenAIProvider(self.config)
 
-            stories = state.get("stories", [])
-            story_list = "\n".join(f"- {s.get('title', 'untitled')}" for s in stories[:10])
+            story_branches = state.get("story_branches", [])
+            merged = [sb for sb in story_branches if sb.get("status") == "merged"]
+            story_list = "\n".join(
+                f"- Story #{sb.get('story_number', '?')}: {sb.get('story_title', '')}" for sb in merged
+            )
 
             response = await openai.generate(
                 prompt=f"""Generate a brief release summary for these changes:
 
 Requirements: {state.get("requirements", "")[:500]}
 
-User Stories:
+Merged Stories:
 {story_list}
 
-Test Results: {state.get("test_passed", 0)} passed, {state.get("test_failed", 0)} failed
+Total stories: {len(merged)} merged, {len(story_branches)} total
 
 Write a concise 2-3 sentence release note suitable for a changelog.""",
                 system="You are a technical writer. Write concise, professional release notes.",
@@ -254,41 +323,6 @@ Write a concise 2-3 sentence release note suitable for a changelog.""",
 
         except Exception:
             return "Release deployed successfully."
-
-    async def _post_deployment_comment(
-        self,
-        repo: str,
-        pr_number: int,
-        status: str,
-        sha: str,
-        summary: str,
-        argocd_result: dict[str, Any],
-    ) -> None:
-        """Post deployment status as a PR comment."""
-        icon = "white_check_mark" if status == "healthy" else "warning" if status == "timeout" else "x"
-        body = (
-            f"## Deployment Status\n\n"
-            f":{icon}: **{status.upper()}**\n\n"
-            f"**Commit:** `{sha[:8]}`\n"
-            f"**Environment:** production\n"
-            f"**ArgoCD App:** `{argocd_result.get('name', 'unknown')}`\n"
-            f"**Sync:** {argocd_result.get('sync_status', 'N/A')}\n"
-            f"**Health:** {argocd_result.get('health_status', 'N/A')}\n"
-            f"**Duration:** {argocd_result.get('elapsed', '?')}s\n\n"
-            f"### Release Notes\n{summary}"
-        )
-
-        if argocd_result.get("rollback"):
-            rollback = argocd_result["rollback"]
-            body += (
-                f"\n\n### Rollback\n"
-                f":arrows_counterclockwise: Rolled back to revision `{rollback.get('target_revision', '?')}`"
-            )
-
-        try:
-            await self.scm.add_comment(repo, pr_number, body)
-        except Exception as e:
-            logger.error("Failed to post deployment comment: %s", e)
 
     async def _update_tracking_issue(
         self,
@@ -303,16 +337,26 @@ Write a concise 2-3 sentence release note suitable for a changelog.""",
         if not repo or not tracking:
             return
 
+        story_branches = state.get("story_branches", [])
+        merged = [sb for sb in story_branches if sb.get("status") == "merged"]
+        failed = [sb for sb in story_branches if sb.get("status") == "failed"]
+
         icon = "white_check_mark" if status == "healthy" else "x"
+        stories_table = "\n".join(
+            f"| #{sb.get('story_number', '?')} | {sb.get('story_title', '')[:40]} | "
+            f"PR #{sb.get('pr_number', '?')} | {sb.get('status', '?')} |"
+            for sb in story_branches
+        )
+
         body = (
             f"### Deployment Complete\n\n"
             f":{icon}: **{status.upper()}**\n\n"
-            f"| Field | Value |\n|---|---|\n"
-            f"| Commit | `{sha[:8]}` |\n"
-            f"| ArgoCD App | `{argocd_result.get('name', 'unknown')}` |\n"
-            f"| Sync Status | {argocd_result.get('sync_status', 'N/A')} |\n"
-            f"| Health Status | {argocd_result.get('health_status', 'N/A')} |\n"
-            f"| Duration | {argocd_result.get('elapsed', '?')}s |\n"
+            f"**Stories Merged:** {len(merged)}\n"
+            f"**Stories Failed:** {len(failed)}\n"
+            f"**ArgoCD App:** `{argocd_result.get('name', 'unknown')}`\n"
+            f"**Sync Status:** {argocd_result.get('sync_status', 'N/A')}\n"
+            f"**Health Status:** {argocd_result.get('health_status', 'N/A')}\n\n"
+            f"| Story | Title | PR | Status |\n|---|---|---|---|\n{stories_table}\n"
         )
 
         try:

@@ -1,6 +1,6 @@
-"""LangGraph ALM Pipeline Orchestrator.
+"""LangGraph ALM Pipeline Orchestrator — Collaborative Parallel Model.
 
-Full Application Lifecycle Management pipeline with Supervisor/Orchestrator hierarchy:
+Full Application Lifecycle Management pipeline with story-level parallelism:
 
     User Request
       |
@@ -18,20 +18,30 @@ Full Application Lifecycle Management pipeline with Supervisor/Orchestrator hier
       |
     create_stories
       |
-    create_plan
+    create_plan ─────── (EM creates per-story technical plans)
       |
-    implement_code
+    ┌─ story_loop_start ── (picks next unprocessed story, loads context)
+    │    |
+    │  implement_story ── (Sr Dev creates feature branch, implements story)
+    │    |
+    │  db_engineering_story
+    │    |
+    │  review_story ────→ orchestrator_review → changes → implement_story
+    │    | (approved)
+    │  security_scan_story → orchestrator_security → block → implement_story
+    │    | (pass)
+    │  test_story ──────→ orchestrator_tests → failed → implement_story
+    │    | (passed)
+    │  story_complete ──→ (marks story approved, saves to story_branches)
+    │    |
+    └── story_loop_check → more stories? → story_loop_start
+          |
+          all done
+          |
+    merge_stories ────── (Release Manager merges all story PRs to main)
       |
-    db_engineering
-      |
-    review_code ──────→ orchestrator_review → (changes_requested) → implement_code
-      | (approved)
-    security_scan ────→ orchestrator_security → (block) → implement_code
-      | (pass)
     monitor_build
       |
-    run_tests ────────→ orchestrator_tests → (failed) → implement_code
-      | (passed)
     provision_infra
       |
     deploy_release
@@ -41,13 +51,12 @@ Full Application Lifecycle Management pipeline with Supervisor/Orchestrator hier
     END
 
 Features:
-- Supervisor Agent plans architecture before execution begins
-- Orchestrator Agent makes dynamic routing decisions at quality gates
+- Each story gets its own feature branch and PR
+- Story-level quality gates (review, security, tests)
+- Agents collaborate via A2A throughout the pipeline
 - State checkpointing at each stage boundary
 - Agent memory injection for cross-run learning
-- A2A message persistence to Redis
 - Per-node timeout protection (15 min)
-- LangSmith tracing on every node
 """
 
 from __future__ import annotations
@@ -60,7 +69,7 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, StateGraph
 
-from devai.graph.state import ALMState
+from devai.graph.state import ALMState, StoryBranchDict
 from devai.services.resilience import StateCheckpoint, with_timeout
 from devai.services.tracing import traceable_if_enabled
 
@@ -77,7 +86,7 @@ NODE_TIMEOUT = 900  # 15 minutes per agent
 
 
 class ALMOrchestrator:
-    """LangGraph-based ALM pipeline orchestrator with Supervisor/Orchestrator hierarchy."""
+    """LangGraph-based ALM pipeline orchestrator with collaborative story-level execution."""
 
     def __init__(
         self,
@@ -92,11 +101,10 @@ class ALMOrchestrator:
         self._graph = self._build_graph()
 
     def _build_graph(self) -> Any:
-        """Build and compile the full ALM StateGraph with Supervisor/Orchestrator."""
+        """Build the ALM StateGraph with story-level parallel execution."""
         graph = StateGraph(ALMState)
 
-        # --- Register all nodes ---
-        # Supervisor & Orchestrator (coordination layer)
+        # --- Coordination layer ---
         graph.add_node("supervisor", self._node_supervisor)
         graph.add_node("orchestrator_pre", self._node_orchestrator_pre)
         graph.add_node("orchestrator_review", self._node_orchestrator_review)
@@ -104,19 +112,26 @@ class ALMOrchestrator:
         graph.add_node("orchestrator_tests", self._node_orchestrator_tests)
         graph.add_node("orchestrator_post", self._node_orchestrator_post)
 
-        # Specialist agents (execution layer)
+        # --- Planning phase (linear) ---
         graph.add_node("ingest_documents", self._node_ingest_documents)
         graph.add_node("detect_tech_stack", self._node_detect_tech_stack)
         graph.add_node("analyze_requirements", self._node_analyze_requirements)
         graph.add_node("create_epic", self._node_create_epic)
         graph.add_node("create_stories", self._node_create_stories)
         graph.add_node("create_plan", self._node_create_plan)
-        graph.add_node("implement_code", self._node_implement_code)
-        graph.add_node("db_engineering", self._node_db_engineering)
-        graph.add_node("review_code", self._node_review_code)
-        graph.add_node("security_scan", self._node_security_scan)
+
+        # --- Story loop nodes ---
+        graph.add_node("story_loop_start", self._node_story_loop_start)
+        graph.add_node("implement_story", self._node_implement_story)
+        graph.add_node("db_engineering_story", self._node_db_engineering_story)
+        graph.add_node("review_story", self._node_review_story)
+        graph.add_node("security_scan_story", self._node_security_scan_story)
+        graph.add_node("test_story", self._node_test_story)
+        graph.add_node("story_complete", self._node_story_complete)
+
+        # --- Deployment phase ---
+        graph.add_node("merge_stories", self._node_merge_stories)
         graph.add_node("monitor_build", self._node_monitor_build)
-        graph.add_node("run_tests", self._node_run_tests)
         graph.add_node("provision_infra", self._node_provision_infra)
         graph.add_node("deploy_release", self._node_deploy_release)
 
@@ -125,77 +140,88 @@ class ALMOrchestrator:
         # Entry: Supervisor plans first
         graph.set_entry_point("supervisor")
 
-        # Supervisor -> Orchestrator validates and starts execution
+        # Planning phase (linear)
         graph.add_edge("supervisor", "orchestrator_pre")
-
-        # Orchestrator kicks off the analysis phase
         graph.add_edge("orchestrator_pre", "ingest_documents")
-
-        # Linear flow: docs -> tech -> requirements -> epic -> stories -> plan -> code
         graph.add_edge("ingest_documents", "detect_tech_stack")
         graph.add_edge("detect_tech_stack", "analyze_requirements")
         graph.add_edge("analyze_requirements", "create_epic")
         graph.add_edge("create_epic", "create_stories")
         graph.add_edge("create_stories", "create_plan")
-        graph.add_edge("create_plan", "implement_code")
-        graph.add_edge("implement_code", "db_engineering")
-        graph.add_edge("db_engineering", "review_code")
 
-        # After review: Orchestrator makes the routing decision
-        graph.add_edge("review_code", "orchestrator_review")
+        # After planning → start story loop
+        graph.add_edge("create_plan", "story_loop_start")
+
+        # Story implementation cycle
+        graph.add_edge("story_loop_start", "implement_story")
+        graph.add_edge("implement_story", "db_engineering_story")
+        graph.add_edge("db_engineering_story", "review_story")
+
+        # Review gate: orchestrator decides
+        graph.add_edge("review_story", "orchestrator_review")
         graph.add_conditional_edges(
             "orchestrator_review",
             self._route_after_review,
             {
-                "approved": "security_scan",
-                "changes_requested": "implement_code",
-                "max_iterations": "orchestrator_post",
+                "approved": "security_scan_story",
+                "changes_requested": "implement_story",
+                "max_iterations": "story_complete",
             },
         )
 
-        # After security: Orchestrator makes the routing decision
-        graph.add_edge("security_scan", "orchestrator_security")
+        # Security gate: orchestrator decides
+        graph.add_edge("security_scan_story", "orchestrator_security")
         graph.add_conditional_edges(
             "orchestrator_security",
             self._route_after_security,
             {
-                "pass": "monitor_build",
-                "pass_with_warnings": "monitor_build",
-                "block": "implement_code",
-                "max_blocks": "orchestrator_post",
+                "pass": "test_story",
+                "pass_with_warnings": "test_story",
+                "block": "implement_story",
+                "max_blocks": "story_complete",
             },
         )
 
-        graph.add_edge("monitor_build", "run_tests")
-
-        # After tests: Orchestrator makes the routing decision
-        graph.add_edge("run_tests", "orchestrator_tests")
+        # Test gate: orchestrator decides
+        graph.add_edge("test_story", "orchestrator_tests")
         graph.add_conditional_edges(
             "orchestrator_tests",
             self._route_after_tests,
             {
-                "passed": "provision_infra",
-                "failed": "implement_code",
-                "max_failures": "orchestrator_post",
+                "passed": "story_complete",
+                "failed": "implement_story",
+                "max_failures": "story_complete",
             },
         )
 
-        graph.add_edge("provision_infra", "deploy_release")
+        # After story complete: check if more stories remain
+        graph.add_conditional_edges(
+            "story_complete",
+            self._route_story_loop,
+            {
+                "next_story": "story_loop_start",
+                "all_done": "merge_stories",
+            },
+        )
 
-        # After deploy: Orchestrator produces final report
+        # Deployment phase (after all stories done)
+        graph.add_edge("merge_stories", "monitor_build")
+        graph.add_edge("monitor_build", "provision_infra")
+        graph.add_edge("provision_infra", "deploy_release")
         graph.add_edge("deploy_release", "orchestrator_post")
         graph.add_edge("orchestrator_post", END)
 
         return graph.compile()
 
-    # --- Routing Functions (Orchestrator-powered) ---
+    # ------------------------------------------------------------------
+    # Routing Functions
+    # ------------------------------------------------------------------
 
     def _route_after_review(self, state: ALMState) -> str:
-        """Orchestrator-informed routing after code review."""
+        """Route after code review for the active story."""
         decision = state.get("review_decision", "changes_requested")
         iteration = state.get("review_iteration", 0)
 
-        # Check orchestrator's recommendation
         routing = state.get("orchestrator_routing", {})
         if routing.get("decision") == "escalate":
             logger.warning("Orchestrator escalated at review stage")
@@ -204,12 +230,12 @@ class ALMOrchestrator:
         if decision == "approved":
             return "approved"
         if iteration >= MAX_REVIEW_ITERATIONS:
-            logger.warning("Max review iterations (%d) reached", MAX_REVIEW_ITERATIONS)
+            logger.warning("Max review iterations (%d) reached for story", MAX_REVIEW_ITERATIONS)
             return "max_iterations"
         return "changes_requested"
 
     def _route_after_security(self, state: ALMState) -> str:
-        """Orchestrator-informed routing after security scan."""
+        """Route after security scan for the active story."""
         decision = state.get("security_decision", "pass")
         iteration = state.get("review_iteration", 0)
 
@@ -224,7 +250,7 @@ class ALMOrchestrator:
         return "block"
 
     def _route_after_tests(self, state: ALMState) -> str:
-        """Orchestrator-informed routing after test execution."""
+        """Route after test execution for the active story."""
         test_failed = state.get("test_failed", 0)
         iteration = state.get("review_iteration", 0)
 
@@ -238,7 +264,135 @@ class ALMOrchestrator:
             return "max_failures"
         return "failed"
 
-    # --- Node Wrapper ---
+    def _route_story_loop(self, state: ALMState) -> str:
+        """Check if more stories need processing, or all are done."""
+        story_branches = state.get("story_branches", [])
+        for sb in story_branches:
+            if sb.get("status") == "pending":
+                return "next_story"
+        return "all_done"
+
+    # ------------------------------------------------------------------
+    # Story Loop Management Nodes
+    # ------------------------------------------------------------------
+
+    @traceable_if_enabled(name="alm.story_loop_start", run_type="chain")
+    async def _node_story_loop_start(self, state: ALMState) -> dict[str, Any]:
+        """Pick the next unprocessed story and load its context into active state."""
+        story_branches = list(state.get("story_branches", []))
+        stories = state.get("stories", [])
+        story_plans = state.get("story_plans", [])
+
+        # Find the next pending story
+        next_index = None
+        for sb in story_branches:
+            if sb.get("status") == "pending":
+                next_index = sb["story_index"]
+                break
+
+        if next_index is None:
+            # All stories done — shouldn't reach here, but handle gracefully
+            return {"stage": "all_stories_complete"}
+
+        # Mark story as implementing
+        story_branches[next_index] = {**story_branches[next_index], "status": "implementing"}
+
+        story = stories[next_index] if next_index < len(stories) else {}
+        story_plan = story_plans[next_index] if next_index < len(story_plans) else ""
+
+        story_num = story.get("number", "?")
+        story_title = story.get("title", "Unknown")
+
+        self._report_progress(
+            state,
+            "story_loop_start",
+            "running",
+            f"Starting story {next_index + 1}/{len(story_branches)}: #{story_num} — {story_title}",
+        )
+
+        # Load story context into active flat fields
+        # Check if story was previously attempted (has branch/PR from prior iteration)
+        sb = story_branches[next_index]
+
+        return {
+            "active_story_index": next_index,
+            "story_branches": story_branches,
+            # Reset active context for this story
+            "branch_name": sb.get("branch_name"),
+            "pr_number": sb.get("pr_number"),
+            "review_decision": "",
+            "review_summary": "",
+            "review_comments": [],
+            "review_feedback": sb.get("review_feedback", []),
+            "review_iteration": sb.get("review_iteration", 0),
+            "security_decision": "",
+            "security_summary": "",
+            "security_findings": [],
+            "security_issues": [],
+            "performance_issues": [],
+            "test_failed": 0,
+            "test_summary": "",
+            "test_failures": [],
+            "implementation_summary": "",
+            "db_decision": "",
+            "db_summary": "",
+            # Set story-specific plan as the technical plan for agents to read
+            "technical_plan": story_plan,
+            "stage": f"story_{next_index + 1}_implementing",
+        }
+
+    @traceable_if_enabled(name="alm.story_complete", run_type="chain")
+    async def _node_story_complete(self, state: ALMState) -> dict[str, Any]:
+        """Save current story results back to story_branches and mark done."""
+        idx = state.get("active_story_index", 0)
+        story_branches = list(state.get("story_branches", []))
+
+        if idx >= len(story_branches):
+            return {}
+
+        # Determine final status for this story
+        review_decision = state.get("review_decision", "")
+        security_decision = state.get("security_decision", "pass")
+        test_failed = state.get("test_failed", 0)
+
+        if review_decision == "approved" and security_decision in ("pass", "pass_with_warnings") and test_failed == 0:
+            final_status = "approved"
+        else:
+            final_status = "failed"
+
+        # Save all results back to this story's branch record
+        story_branches[idx] = {
+            **story_branches[idx],
+            "status": final_status,
+            "branch_name": state.get("branch_name"),
+            "pr_number": state.get("pr_number"),
+            "review_decision": review_decision,
+            "review_iteration": state.get("review_iteration", 0),
+            "review_feedback": state.get("review_feedback", []),
+            "security_decision": security_decision,
+            "test_failed": test_failed,
+            "test_summary": state.get("test_summary", ""),
+            "implementation_summary": state.get("implementation_summary", ""),
+        }
+
+        story = state.get("stories", [])[idx] if idx < len(state.get("stories", [])) else {}
+        story_num = story.get("number", "?")
+
+        self._report_progress(
+            state,
+            "story_complete",
+            "completed",
+            f"Story #{story_num} completed with status: {final_status}",
+        )
+
+        return {
+            "story_branches": story_branches,
+            "stage": f"story_{idx + 1}_{final_status}",
+        }
+
+    # ------------------------------------------------------------------
+    # Node Wrapper
+    # ------------------------------------------------------------------
 
     async def _run_node(
         self,
@@ -301,11 +455,12 @@ class ALMOrchestrator:
 
         return result
 
-    # --- Supervisor & Orchestrator Nodes ---
+    # ------------------------------------------------------------------
+    # Supervisor & Orchestrator Nodes
+    # ------------------------------------------------------------------
 
     @traceable_if_enabled(name="alm.supervisor", run_type="chain")
     async def _node_supervisor(self, state: ALMState) -> dict[str, Any]:
-        """Supervisor plans the architecture and creates the delegation plan."""
         result = await self._run_node(
             "supervisor",
             state,
@@ -316,7 +471,6 @@ class ALMOrchestrator:
 
     @traceable_if_enabled(name="alm.orchestrator_pre", run_type="chain")
     async def _node_orchestrator_pre(self, state: ALMState) -> dict[str, Any]:
-        """Orchestrator validates the plan and prepares for execution."""
         result = await self._run_node(
             "orchestrator_pre",
             state,
@@ -326,7 +480,6 @@ class ALMOrchestrator:
 
     @traceable_if_enabled(name="alm.orchestrator_review", run_type="chain")
     async def _node_orchestrator_review(self, state: ALMState) -> dict[str, Any]:
-        """Orchestrator evaluates review results and decides next step."""
         result = await self._run_node(
             "orchestrator_review",
             state,
@@ -336,7 +489,6 @@ class ALMOrchestrator:
 
     @traceable_if_enabled(name="alm.orchestrator_security", run_type="chain")
     async def _node_orchestrator_security(self, state: ALMState) -> dict[str, Any]:
-        """Orchestrator evaluates security scan results and decides next step."""
         result = await self._run_node(
             "orchestrator_security",
             state,
@@ -346,7 +498,6 @@ class ALMOrchestrator:
 
     @traceable_if_enabled(name="alm.orchestrator_tests", run_type="chain")
     async def _node_orchestrator_tests(self, state: ALMState) -> dict[str, Any]:
-        """Orchestrator evaluates test results and decides next step."""
         result = await self._run_node(
             "orchestrator_tests",
             state,
@@ -356,7 +507,6 @@ class ALMOrchestrator:
 
     @traceable_if_enabled(name="alm.orchestrator_post", run_type="chain")
     async def _node_orchestrator_post(self, state: ALMState) -> dict[str, Any]:
-        """Orchestrator produces the final pipeline status report."""
         result = await self._run_node(
             "orchestrator_post",
             state,
@@ -365,7 +515,9 @@ class ALMOrchestrator:
         result["stage"] = state.get("stage", "done")
         return result
 
-    # --- Specialist Agent Nodes ---
+    # ------------------------------------------------------------------
+    # Planning Phase Nodes (linear — same as before)
+    # ------------------------------------------------------------------
 
     @traceable_if_enabled(name="alm.ingest_documents", run_type="chain")
     async def _node_ingest_documents(self, state: ALMState) -> dict[str, Any]:
@@ -416,54 +568,122 @@ class ALMOrchestrator:
             method="run_stories",
         )
         result["stage"] = "stories_created"
+
+        # Initialize story_branches from newly created stories
+        stories = result.get("stories", state.get("stories", []))
+        story_branches: list[StoryBranchDict] = []
+        for i, story in enumerate(stories):
+            story_branches.append(
+                StoryBranchDict(
+                    story_index=i,
+                    story_number=story.get("number", 0),
+                    story_title=story.get("title", ""),
+                    branch_name=None,
+                    pr_number=None,
+                    status="pending",
+                    review_decision="",
+                    review_iteration=0,
+                    review_feedback=[],
+                    security_decision="",
+                    test_failed=0,
+                    test_summary="",
+                    implementation_summary="",
+                    story_plan="",
+                )
+            )
+        result["story_branches"] = story_branches
+        result["active_story_index"] = 0
+
         return result
 
     @traceable_if_enabled(name="alm.create_plan", run_type="chain")
     async def _node_create_plan(self, state: ALMState) -> dict[str, Any]:
+        """EM creates per-story technical plans."""
         result = await self._run_node(
             "create_plan",
             state,
             "devai.agents.engineering_manager.EngineeringManagerAgent",
         )
         result["stage"] = "plan_created"
+
+        # Store per-story plans in story_branches
+        story_plans = result.get("story_plans", [])
+        if story_plans:
+            story_branches = list(state.get("story_branches", []))
+            for i, plan in enumerate(story_plans):
+                if i < len(story_branches):
+                    story_branches[i] = {**story_branches[i], "story_plan": plan}
+            result["story_branches"] = story_branches
+
         return result
 
-    @traceable_if_enabled(name="alm.implement_code", run_type="chain")
-    async def _node_implement_code(self, state: ALMState) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Story-Level Execution Nodes
+    # ------------------------------------------------------------------
+
+    @traceable_if_enabled(name="alm.implement_story", run_type="chain")
+    async def _node_implement_story(self, state: ALMState) -> dict[str, Any]:
+        """Implement the active story on its own feature branch."""
         result = await self._run_node(
-            "implement_code",
+            "implement_story",
             state,
             "devai.agents.senior_developer.SeniorDeveloperAgent",
         )
         result["stage"] = "code_implemented"
         return result
 
-    @traceable_if_enabled(name="alm.db_engineering", run_type="chain")
-    async def _node_db_engineering(self, state: ALMState) -> dict[str, Any]:
+    @traceable_if_enabled(name="alm.db_engineering_story", run_type="chain")
+    async def _node_db_engineering_story(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "db_engineering",
+            "db_engineering_story",
             state,
             "devai.agents.db_engineer.DBEngineerAgent",
         )
         return result
 
-    @traceable_if_enabled(name="alm.review_code", run_type="chain")
-    async def _node_review_code(self, state: ALMState) -> dict[str, Any]:
+    @traceable_if_enabled(name="alm.review_story", run_type="chain")
+    async def _node_review_story(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "review_code",
+            "review_story",
             state,
             "devai.agents.staff_reviewer.StaffReviewerAgent",
         )
         result["stage"] = "code_reviewed"
         return result
 
-    @traceable_if_enabled(name="alm.security_scan", run_type="chain")
-    async def _node_security_scan(self, state: ALMState) -> dict[str, Any]:
+    @traceable_if_enabled(name="alm.security_scan_story", run_type="chain")
+    async def _node_security_scan_story(self, state: ALMState) -> dict[str, Any]:
         result = await self._run_node(
-            "security_scan",
+            "security_scan_story",
             state,
             "devai.agents.security_expert.SecurityExpertAgent",
         )
+        return result
+
+    @traceable_if_enabled(name="alm.test_story", run_type="chain")
+    async def _node_test_story(self, state: ALMState) -> dict[str, Any]:
+        result = await self._run_node(
+            "test_story",
+            state,
+            "devai.agents.qa_tester.QATesterAgent",
+        )
+        result["stage"] = "tests_complete"
+        return result
+
+    # ------------------------------------------------------------------
+    # Deployment Phase Nodes
+    # ------------------------------------------------------------------
+
+    @traceable_if_enabled(name="alm.merge_stories", run_type="chain")
+    async def _node_merge_stories(self, state: ALMState) -> dict[str, Any]:
+        """Release Manager merges all approved story PRs to main."""
+        result = await self._run_node(
+            "merge_stories",
+            state,
+            "devai.agents.release_manager.ReleaseManagerAgent",
+            method="run_merge_stories",
+        )
+        result["stage"] = "stories_merged"
         return result
 
     @traceable_if_enabled(name="alm.monitor_build", run_type="chain")
@@ -474,16 +694,6 @@ class ALMOrchestrator:
             "devai.agents.ci_monitor.CIMonitorAgent",
         )
         result["stage"] = "build_monitoring"
-        return result
-
-    @traceable_if_enabled(name="alm.run_tests", run_type="chain")
-    async def _node_run_tests(self, state: ALMState) -> dict[str, Any]:
-        result = await self._run_node(
-            "run_tests",
-            state,
-            "devai.agents.qa_tester.QATesterAgent",
-        )
-        result["stage"] = "tests_complete"
         return result
 
     @traceable_if_enabled(name="alm.provision_infra", run_type="chain")
@@ -505,10 +715,11 @@ class ALMOrchestrator:
         result["stage"] = "deployed"
         return result
 
-    # --- Memory Integration ---
+    # ------------------------------------------------------------------
+    # Memory Integration
+    # ------------------------------------------------------------------
 
     async def _get_memory_context(self, agent_name: str, state: ALMState) -> str:
-        """Load relevant memories for the agent."""
         try:
             from devai.services.memory import AgentMemory
 
@@ -529,7 +740,6 @@ class ALMOrchestrator:
         node_name: str,
         elapsed: float,
     ) -> None:
-        """Record successful execution in memory."""
         try:
             from devai.services.memory import AgentMemory
 
@@ -546,7 +756,6 @@ class ALMOrchestrator:
             pass
 
     async def _record_failure(self, agent_name: str, state: ALMState, error: str) -> None:
-        """Record failure in memory for future learning."""
         try:
             from devai.services.memory import AgentMemory
 
@@ -562,10 +771,11 @@ class ALMOrchestrator:
         except Exception:
             pass
 
-    # --- A2A Persistence ---
+    # ------------------------------------------------------------------
+    # A2A Persistence
+    # ------------------------------------------------------------------
 
     async def _persist_a2a(self, run_id: str, messages: list) -> None:
-        """Persist A2A messages to Redis."""
         try:
             pipe = self.state_manager.redis.pipeline()
             for msg in messages:
@@ -575,15 +785,23 @@ class ALMOrchestrator:
         except Exception as e:
             logger.warning("Failed to persist A2A messages: %s", e)
 
-    # --- Progress Reporting ---
+    # ------------------------------------------------------------------
+    # Progress Reporting
+    # ------------------------------------------------------------------
 
     def _report_progress(self, state: ALMState, step: str, status: str, detail: str) -> None:
+        # Include story context in progress reports
+        idx = state.get("active_story_index")
+        story_branches = state.get("story_branches", [])
+        if idx is not None and idx < len(story_branches):
+            sb = story_branches[idx]
+            detail = f"[Story #{sb.get('story_number', '?')}] {detail}"
+
         callback = state.get("on_progress")
         if callback and callable(callback):
             with contextlib.suppress(Exception):
                 callback(step, status, detail)
         logger.info("Pipeline [%s] %s: %s — %s", state.get("run_id", "?"), step, status, detail)
-        # Persist event to Redis for dashboard visibility
         run_id = state.get("run_id", "")
         if run_id:
             import asyncio
@@ -591,7 +809,6 @@ class ALMOrchestrator:
             asyncio.ensure_future(self._persist_event(run_id, step, status, detail))
 
     async def _persist_event(self, run_id: str, step: str, status: str, detail: str) -> None:
-        """Persist a pipeline event to Redis for real-time dashboard display."""
         try:
             event = json.dumps(
                 {
@@ -605,13 +822,14 @@ class ALMOrchestrator:
             pipe = self.state_manager.redis.pipeline()
             pipe.rpush(f"devai:run:{run_id}:events", event)
             pipe.expire(f"devai:run:{run_id}:events", 86400 * 7)
-            # Keep last 200 events
             pipe.ltrim(f"devai:run:{run_id}:events", -200, -1)
             await pipe.execute()
         except Exception:
-            pass  # Best-effort event logging
+            pass
 
-    # --- Public API ---
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     @traceable_if_enabled(name="alm_pipeline.run", run_type="chain")
     async def run(
@@ -623,7 +841,7 @@ class ALMOrchestrator:
         on_progress: Any = None,
         resume_from: str | None = None,
     ) -> ALMState:
-        """Run the full ALM pipeline.
+        """Run the full ALM pipeline with story-level parallel execution.
 
         Args:
             repo_full_name: GitHub repo (org/repo).
@@ -657,6 +875,9 @@ class ALMOrchestrator:
             "agent_timings": {},
             "error": None,
             "on_progress": on_progress,
+            "story_branches": [],
+            "active_story_index": 0,
+            "story_plans": [],
         }
 
         # Load governance (CLAUDE.md)

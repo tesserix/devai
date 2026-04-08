@@ -156,16 +156,24 @@ class SecurityExpertAgent(BaseAgent):
                 "security_findings": [],
             }
 
+        # Get active story context
+        active_idx = state.get("active_story_index", 0)
+        stories = state.get("stories", [])
+        active_story = stories[active_idx] if active_idx < len(stories) else {}
+        story_number = active_story.get("number", "?")
+        story_title = active_story.get("title", "")
+
         # Check for messages from other agents
         inbox_context = a2a.format_inbox_context()
 
         user_message = f"""Repository: {repo}
 PR: #{pr_number}
 Branch: {branch}
+Story: #{story_number} — {story_title}
 
 {inbox_context}
 
-Run a comprehensive security scan of this PR. Follow the process:
+Run a comprehensive security scan of this PR (Story #{story_number}). Follow the process:
 1. Get the PR diff to understand changes
 2. Explore the repo tree to detect the primary language
 3. Run SAST, dependency scan, secret detection, container scan, and OWASP check
@@ -191,46 +199,40 @@ Be thorough. This is the last security gate before production."""
         # Parse decision from result
         decision = self._parse_decision(result_text)
 
-        # A2A communication based on decision
+        # A2A communication based on decision — include story context
         if decision == "block":
             a2a.escalate(
                 "senior_developer",
-                "SECURITY BLOCK — Critical Vulnerabilities Found",
-                f"Security scan of PR #{pr_number} found critical issues. "
+                f"SECURITY BLOCK — Story #{story_number}",
+                f"Security scan of PR #{pr_number} (Story #{story_number}) found critical issues. "
                 f"Pipeline is blocked until these are fixed.\n\n{result_text[:500]}",
             )
             a2a.notify(
                 "engineering_manager",
-                "Security Gate BLOCKED",
-                f"PR #{pr_number} blocked by security scan. Critical issues must be resolved.",
+                f"Security Gate BLOCKED — Story #{story_number}",
+                f"PR #{pr_number} (Story #{story_number}) blocked by security scan.",
             )
-            # Notify staff reviewer too
             a2a.notify(
                 "staff_reviewer",
-                "Security Issues in Reviewed PR",
-                f"Security scan found issues in PR #{pr_number} that passed code review.",
+                f"Security Issues — Story #{story_number}",
+                f"Security scan found issues in PR #{pr_number} (Story #{story_number}).",
             )
         elif decision == "pass_with_warnings":
             a2a.notify(
-                "ci_monitor",
-                "Security Cleared (with warnings)",
-                f"PR #{pr_number} passed security scan with advisory warnings.",
-            )
-            a2a.notify(
-                "release_manager",
-                "Security Advisory",
-                f"PR #{pr_number} has non-critical security warnings. Review before deployment.",
+                "qa_tester",
+                f"Story #{story_number} Security Cleared (with warnings)",
+                f"PR #{pr_number} (Story #{story_number}) passed security with advisory warnings.",
             )
         else:
             a2a.handoff(
-                "ci_monitor",
-                "Security Cleared",
-                f"PR #{pr_number} passed all security scans. Proceed to build monitoring.",
+                "qa_tester",
+                f"Story #{story_number} Security Cleared",
+                f"PR #{pr_number} (Story #{story_number}) passed all security scans. Proceed to testing.",
             )
             a2a.broadcast(
-                "Security Scan Passed",
-                f"PR #{pr_number} cleared security gate with no findings.",
-                exclude=["ci_monitor"],
+                f"Story #{story_number} Security Scan Passed",
+                f"PR #{pr_number} (Story #{story_number}) cleared security gate.",
+                exclude=["qa_tester"],
             )
 
         return {
