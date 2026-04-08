@@ -12,7 +12,7 @@ import { TriggerDialog } from "@/components/trigger-dialog";
 import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
 
-type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "chat" | "config";
+type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "events" | "chat" | "config";
 
 export default function DashboardPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
@@ -204,6 +204,7 @@ export default function DashboardPage() {
                   { key: "hierarchy", label: "Agent Hierarchy" },
                   { key: "agents", label: "Agents" },
                   { key: "a2a", label: "A2A Messages" },
+                  { key: "events", label: "Events" },
                   { key: "chat", label: "Chat" },
                   { key: "config", label: "Config" },
                 ] as const).map((t) => (
@@ -236,6 +237,7 @@ export default function DashboardPage() {
               )}
               {tab === "agents" && <AgentsTab run={selectedRun} />}
               {tab === "a2a" && <A2ATab messages={a2aMessages} />}
+              {tab === "events" && <EventsTab events={(selectedRun as any)?.events || []} />}
               {tab === "chat" && <ChatPanel />}
               {tab === "config" && <ConfigTab />}
             </div>
@@ -444,6 +446,68 @@ function A2ATab({ messages }: { messages: any[] }) {
         </h3>
       </div>
       <A2AFeed messages={messages} />
+    </div>
+  );
+}
+
+function EventsTab({ events }: { events: Array<{ step: string; status: string; detail: string; timestamp: number }> }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+          Pipeline Events ({events.length})
+        </h3>
+      </div>
+      {events.length === 0 ? (
+        <div className="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+          No events recorded yet
+        </div>
+      ) : (
+        <div className="space-y-1 max-h-[600px] overflow-y-auto">
+          {[...events].reverse().map((evt, i) => {
+            const isError = evt.status === "failed";
+            const isRunning = evt.status === "running";
+            return (
+              <div
+                key={i}
+                className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
+                  isError
+                    ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900"
+                    : isRunning
+                      ? "bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-900"
+                      : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                }`}
+              >
+                <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
+                  isError ? "bg-red-500" : isRunning ? "bg-indigo-500 animate-pulse" : "bg-green-500"
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                      {evt.step.replace(/_/g, " ")}
+                    </span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
+                      isError
+                        ? "bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400"
+                        : isRunning
+                          ? "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400"
+                          : "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400"
+                    }`}>
+                      {evt.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">
+                    {evt.detail}
+                  </p>
+                </div>
+                <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0 whitespace-nowrap">
+                  {new Date(evt.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

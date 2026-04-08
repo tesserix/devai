@@ -272,9 +272,11 @@ class ALMOrchestrator:
             result = await with_timeout(coro, NODE_TIMEOUT, f"agent:{node_name}")
         except TimeoutError:
             logger.error("Agent %s timed out after %ds", node_name, NODE_TIMEOUT)
+            self._report_progress(state, node_name, "failed", f"Timed out after {NODE_TIMEOUT}s")
             result = {"error": f"Agent {node_name} timed out after {NODE_TIMEOUT}s"}
         except Exception as e:
             logger.exception("Agent %s failed: %s", node_name, e)
+            self._report_progress(state, node_name, "failed", str(e)[:200])
             # Learn from the failure
             await self._record_failure(agent.name, state, str(e))
             raise
@@ -581,6 +583,33 @@ class ALMOrchestrator:
             with contextlib.suppress(Exception):
                 callback(step, status, detail)
         logger.info("Pipeline [%s] %s: %s — %s", state.get("run_id", "?"), step, status, detail)
+        # Persist event to Redis for dashboard visibility
+        run_id = state.get("run_id", "")
+        if run_id:
+            import asyncio
+
+            asyncio.ensure_future(self._persist_event(run_id, step, status, detail))
+
+    async def _persist_event(self, run_id: str, step: str, status: str, detail: str) -> None:
+        """Persist a pipeline event to Redis for real-time dashboard display."""
+        try:
+            event = json.dumps(
+                {
+                    "step": step,
+                    "status": status,
+                    "detail": detail,
+                    "timestamp": time.time(),
+                },
+                default=str,
+            )
+            pipe = self.state_manager.redis.pipeline()
+            pipe.rpush(f"devai:run:{run_id}:events", event)
+            pipe.expire(f"devai:run:{run_id}:events", 86400 * 7)
+            # Keep last 200 events
+            pipe.ltrim(f"devai:run:{run_id}:events", -200, -1)
+            await pipe.execute()
+        except Exception:
+            pass  # Best-effort event logging
 
     # --- Public API ---
 

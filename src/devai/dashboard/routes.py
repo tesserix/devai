@@ -775,13 +775,25 @@ async def get_pipeline_runs(request: Request, repo: str | None = None, limit: in
 
 @router.get("/api/pipeline/runs/{run_id}")
 async def get_pipeline_run(request: Request, run_id: str) -> dict[str, Any]:
-    """Get detailed status of a pipeline run."""
+    """Get detailed status of a pipeline run including A2A messages and events."""
     state = request.app.state.state_manager
     run_data = await state.get_run(run_id)
     if not run_data:
         raise HTTPException(status_code=404, detail="Run not found")
     agents = await state.get_agent_statuses(run_id)
     run_data["agents"] = agents
+
+    # Include A2A messages
+    redis = state.redis
+    a2a_raw = await redis.lrange(f"devai:run:{run_id}:a2a_messages", 0, -1)
+    run_data["context"] = {
+        "a2a_messages": [json.loads(m) for m in a2a_raw],
+    }
+
+    # Include events log
+    events_raw = await redis.lrange(f"devai:run:{run_id}:events", 0, -1)
+    run_data["events"] = [json.loads(e) for e in events_raw]
+
     return run_data
 
 
