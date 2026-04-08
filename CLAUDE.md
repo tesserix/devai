@@ -311,6 +311,45 @@ helm/devai/
 
 ArgoCD apps should be created in `tesserix-k8s/argocd/prod/apps/devai/`.
 
+### Authentication (Keycloak + Auth-BFF)
+
+DevAI uses Keycloak for authentication with a shared auth-bff (Backend-for-Frontend) service.
+
+**Realms** (on internal Keycloak at `keycloak.identity-internal.svc.cluster.local:8080`):
+- `devai` — ALM dashboard auth, exposed at `identity-devai.tesserix.app`
+- `devai-sre` — SRE dashboard auth, exposed at `identity-sre.tesserix.app`
+
+**Allowed users** (only these can log in via Google SSO):
+- `samyak.rout@gmail.com`
+- `mahesh.sangawar@gmail.com`
+
+**Auth-BFF image:** `ghcr.io/tesseract-nexus/global-services/auth-bff` (shared across projects)
+**Auth-BFF routes:** `/auth/login`, `/auth/callback`, `/auth/logout` (NOT `/bff/*`)
+**Session cookie:** `devai_session` (HttpOnly, Secure, SameSite=lax)
+
+**Login flow:** Dashboard → middleware checks `devai_session` cookie → if missing, redirect to `/auth/login` → auth-bff redirects to Keycloak → Google SSO → callback → session cookie set → redirect back
+
+### Istio Routing & Auth Policy (IMPORTANT)
+
+When adding new public-facing hostnames to the cluster, **three things** must be configured:
+
+1. **VirtualService** — routes the hostname to the backend service
+   - For identity hostnames: add to `istio-config/values-prod.yaml` → `internalIdentityAliases`
+   - For app hostnames: add to `devai-istio/virtualservice.yaml`
+
+2. **AuthorizationPolicy (frontendApps)** — allows traffic through the ingress gateway
+   - File: `tesserix-k8s/argocd/prod/infrastructure/istio-auth-policies.yaml`
+   - Add the hostname to the `frontendApps` list under the appropriate entry
+   - **This is the source of truth** — inline values in this ArgoCD Application YAML override `values-prod.yaml`
+   - Without this, the mesh-wide `deny-all-default` policy in `istio-system` blocks traffic with "RBAC: access denied"
+
+3. **Gateway restart** — after updating AuthorizationPolicies, the envoy proxy may need a restart:
+   ```bash
+   kubectl rollout restart deployment/istio-ingressgateway -n istio-ingress
+   ```
+
+**Common pitfall:** Adding a VirtualService without updating `istio-auth-policies.yaml` results in "RBAC: access denied" (HTTP 403). The `allow-frontend-apps-public` AuthorizationPolicy in `istio-ingress` namespace acts as a hostname whitelist.
+
 ---
 
 ## Development
