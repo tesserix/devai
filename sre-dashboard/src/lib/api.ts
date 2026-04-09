@@ -57,6 +57,23 @@ export interface AppReliability {
   health_pct_7d?: number;
 }
 
+export interface CostRecommendation {
+  title?: string;
+  recommendation?: string;
+  savings_usd?: number;
+}
+
+export interface CostReport {
+  id: number;
+  cluster_id: string;
+  report_date: string;
+  provider: string;
+  total_cost_usd: number;
+  monthly_forecast?: number;
+  breakdown?: { potential_savings_usd?: number };
+  recommendations?: { items?: CostRecommendation[]; potential_savings_usd?: number };
+}
+
 export const sre = {
   triggerScan: (clusterId = "default") =>
     apiFetch<{ status: string }>("/scan/trigger", { method: "POST", body: JSON.stringify({ cluster_id: clusterId }) }),
@@ -78,5 +95,5 @@ export const sre = {
   metrics: (appId?: string, limit = 100) =>
     apiFetch<any[]>(`/metrics?${appId ? `app_id=${appId}&` : ""}limit=${limit}`),
 
-  costs: (days = 30) => apiFetch<any[]>(`/costs?days=${days}`),
+  costs: (days = 30) => apiFetch<CostReport[]>(`/costs?days=${days}`),
 };

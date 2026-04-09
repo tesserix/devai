@@ -278,7 +278,29 @@ def create_sre_app() -> FastAPI:
             "SELECT * FROM sre_cost_reports WHERE report_date > CURRENT_DATE - $1 ORDER BY report_date DESC",
             days,
         )
-        return [dict(r) for r in rows]
+
+        def _parse_jsonb(value: Any) -> Any:
+            if value is None or isinstance(value, (dict, list)):
+                return value
+            try:
+                return json.loads(value)
+            except (TypeError, json.JSONDecodeError):
+                return value
+
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            row = dict(r)
+            row["breakdown"] = _parse_jsonb(row.get("breakdown"))
+            row["recommendations"] = _parse_jsonb(row.get("recommendations"))
+            # Cast Decimal/Date to JSON-serializable types
+            if row.get("total_cost_usd") is not None:
+                row["total_cost_usd"] = float(row["total_cost_usd"])
+            if row.get("monthly_forecast") is not None:
+                row["monthly_forecast"] = float(row["monthly_forecast"])
+            if row.get("report_date") is not None:
+                row["report_date"] = str(row["report_date"])
+            out.append(row)
+        return out
 
     return app
 

@@ -140,7 +140,7 @@ export default function DashboardPage() {
               Supervisor + Orchestrator
             </div>
             <a
-              href="/bff/logout"
+              href="/auth/logout"
               className="text-xs text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
             >
               Logout

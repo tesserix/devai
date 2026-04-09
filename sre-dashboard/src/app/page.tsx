@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { sre, type Incident, type ScanRun, type ClusterHealth, type AppReliability } from "@/lib/api";
+import {
+  sre,
+  type Incident,
+  type ScanRun,
+  type ClusterHealth,
+  type AppReliability,
+  type CostReport,
+} from "@/lib/api";
 import { IncidentFeed } from "@/components/incident-feed";
 import { ClusterOverview } from "@/components/cluster-overview";
 import { ScanHistory } from "@/components/scan-history";
@@ -24,22 +31,25 @@ export default function SREDashboard() {
   const [clusters, setClusters] = useState<ClusterHealth[]>([]);
   const [apps, setApps] = useState<AppReliability[]>([]);
   const [scans, setScans] = useState<ScanRun[]>([]);
+  const [costs, setCosts] = useState<CostReport[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
   const [selectedIncident, setSelectedIncident] = useState<string>();
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [inc, cl, ap, sc] = await Promise.all([
+      const [inc, cl, ap, sc, co] = await Promise.all([
         sre.listIncidents("open").catch(() => []),
         sre.clusterHealth().catch(() => []),
         sre.listApps().catch(() => []),
         sre.listScanRuns().catch(() => []),
+        sre.costs().catch(() => []),
       ]);
       setIncidents(inc);
       setClusters(cl);
       setApps(ap);
       setScans(sc);
+      setCosts(co);
     } catch {
       // API not available
     } finally {
@@ -142,7 +152,7 @@ export default function SREDashboard() {
               Manual scan only
             </div>
             <a
-              href="/bff/logout"
+              href="/auth/logout"
               className="text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
             >
               Logout
@@ -237,10 +247,80 @@ export default function SREDashboard() {
               {tab === "scans" && <ScanHistory runs={scans} />}
 
               {tab === "costs" && (
-                <div className="text-center py-16 text-gray-400 dark:text-gray-500">
-                  <p className="text-lg">Cost analysis loading from GCP billing...</p>
-                  <p className="text-sm mt-1">Data refreshes daily</p>
-                </div>
+                costs.length === 0 ? (
+                  <div className="text-center py-16 text-gray-400 dark:text-gray-500">
+                    <p className="text-lg">No cost data yet</p>
+                    <p className="text-sm mt-1">Trigger a manual scan to populate cost analysis</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {costs.map((c) => {
+                      const items = c.recommendations?.items ?? [];
+                      const savings = c.recommendations?.potential_savings_usd ?? 0;
+                      return (
+                        <div
+                          key={c.id}
+                          className="p-5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                {c.cluster_id}
+                              </h3>
+                              <p className="text-xs text-gray-400 dark:text-gray-500">
+                                {c.report_date} · {c.provider.toUpperCase()}
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-3 gap-6 text-right">
+                              <div>
+                                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                                  ${c.total_cost_usd.toFixed(2)}
+                                </p>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Daily</p>
+                              </div>
+                              <div>
+                                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                                  {c.monthly_forecast ? `$${c.monthly_forecast.toFixed(0)}` : "—"}
+                                </p>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Monthly</p>
+                              </div>
+                              <div>
+                                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                                  ${savings.toFixed(0)}
+                                </p>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Savings</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {items.length > 0 && (
+                            <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+                              {items.map((rec, i) => (
+                                <div key={i} className="flex items-start justify-between text-xs">
+                                  <div className="flex-1 pr-4">
+                                    <p className="font-medium text-gray-700 dark:text-gray-200">
+                                      {rec.title}
+                                    </p>
+                                    {rec.recommendation && (
+                                      <p className="text-gray-500 dark:text-gray-400 mt-0.5">
+                                        {rec.recommendation}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {rec.savings_usd ? (
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-mono">
+                                      ${Number(rec.savings_usd).toFixed(0)}/mo
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
               )}
 
               {tab === "chat" && <SREChatPanel />}

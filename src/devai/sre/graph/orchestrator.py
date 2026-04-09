@@ -123,21 +123,74 @@ class SREOrchestrator:
         agent = DiscoveryAgent(self.config, memory=memory)
         result = await agent.run()
 
+        # Assign stable IDs and persist the discovered apps so the dashboard
+        # views (v_sre_app_reliability, v_sre_cluster_health) have data to
+        # render. Without this the discover output lives only in scan state
+        # and the Overview / Applications pages stay empty.
+        cluster_id = state.get("cluster_id", "default")
+        apps = result.get("apps", [])
+        for app in apps:
+            app["id"] = f"{cluster_id}:{app.get('namespace', '')}:{app.get('name', '')}"
+            app["cluster_id"] = cluster_id
+
+        await self._persist_apps(cluster_id, apps)
+
         elapsed = time.monotonic() - start
         logger.info(
             "Discovery completed: %d apps in %d namespaces (%.1fs)",
-            len(result.get("apps", [])),
+            len(apps),
             len(result.get("namespaces", [])),
             elapsed,
         )
 
         return {
             "namespaces": result.get("namespaces", []),
-            "apps": result.get("apps", []),
+            "apps": apps,
             "services": result.get("services", []),
             "topology": result.get("topology", {}),
             "agent_timings": {"discovery": elapsed},
         }
+
+    async def _persist_apps(self, cluster_id: str, apps: list[dict[str, Any]]) -> None:
+        """Upsert discovered apps into sre_apps so dashboard views see them."""
+        if not self.db or not apps:
+            return
+
+        try:
+            # Ensure the cluster row exists (FK requirement). The trigger
+            # endpoint already creates it for manual scans, but cron scans
+            # come through here without that guarantee.
+            await self.db.pool.execute(
+                """INSERT INTO sre_clusters (id, name, provider, region)
+                   VALUES ($1, $2, 'gke', $3)
+                   ON CONFLICT (id) DO NOTHING""",
+                cluster_id,
+                cluster_id,
+                "asia-south1",
+            )
+
+            await self.db.pool.executemany(
+                """INSERT INTO sre_apps (id, cluster_id, namespace, name, kind, is_active)
+                   VALUES ($1, $2, $3, $4, $5, TRUE)
+                   ON CONFLICT (id) DO UPDATE
+                   SET namespace = EXCLUDED.namespace,
+                       name = EXCLUDED.name,
+                       kind = EXCLUDED.kind,
+                       is_active = TRUE""",
+                [
+                    (
+                        app["id"],
+                        cluster_id,
+                        app.get("namespace", ""),
+                        app.get("name", ""),
+                        app.get("kind", "Deployment"),
+                    )
+                    for app in apps
+                ],
+            )
+            logger.info("Persisted %d apps to sre_apps for cluster=%s", len(apps), cluster_id)
+        except Exception as e:
+            logger.error("Failed to persist discovered apps: %s", e)
 
     @traceable_if_enabled(name="sre.monitor_parallel", run_type="chain")
     async def _node_monitor_parallel(self, state: SREState) -> dict[str, Any]:
@@ -184,6 +237,13 @@ class SREOrchestrator:
                 return []
             return result.get(key, []) if isinstance(result, dict) else []
 
+        # Persist the cost analyzer report so the Cost Analysis dashboard
+        # tab has data to render. The agent returns total monthly estimate +
+        # potential savings + per-finding recommendations.
+        cost_result = results[3] if not isinstance(results[3], Exception) else None
+        if isinstance(cost_result, dict):
+            await self._persist_cost_report(state.get("cluster_id", "default"), cost_result)
+
         timings = {**state.get("agent_timings", {}), "parallel_monitoring": elapsed}
 
         return {
@@ -194,6 +254,61 @@ class SREOrchestrator:
             "capacity_findings": safe_findings(results[4]),
             "agent_timings": timings,
         }
+
+    async def _persist_cost_report(self, cluster_id: str, cost_data: dict[str, Any]) -> None:
+        """Upsert today's cost report so the Cost Analysis tab has data."""
+        if not self.db:
+            return
+
+        try:
+            import json as _json
+
+            monthly = float(cost_data.get("total_monthly_estimate_usd") or 0)
+            savings = float(cost_data.get("potential_savings_usd") or 0)
+            findings = cost_data.get("findings", []) or []
+
+            # Daily cost = monthly / 30 (best-effort estimate from the LLM
+            # analysis). The Overview page shows latest_daily_cost.
+            daily = round(monthly / 30, 2) if monthly else 0.0
+
+            recommendations = {
+                "items": [
+                    {
+                        "title": f.get("title", ""),
+                        "savings_usd": f.get("estimated_savings_usd", 0),
+                        "recommendation": f.get("recommendation", ""),
+                    }
+                    for f in findings
+                    if isinstance(f, dict)
+                ],
+                "potential_savings_usd": savings,
+            }
+
+            await self.db.pool.execute(
+                """INSERT INTO sre_cost_reports
+                   (cluster_id, report_date, provider, total_cost_usd,
+                    breakdown, recommendations, monthly_forecast)
+                   VALUES ($1, CURRENT_DATE, 'gcp', $2, $3, $4, $5)
+                   ON CONFLICT (cluster_id, report_date, provider) DO UPDATE
+                   SET total_cost_usd = EXCLUDED.total_cost_usd,
+                       breakdown = EXCLUDED.breakdown,
+                       recommendations = EXCLUDED.recommendations,
+                       monthly_forecast = EXCLUDED.monthly_forecast""",
+                cluster_id,
+                daily,
+                _json.dumps({"potential_savings_usd": savings}),
+                _json.dumps(recommendations),
+                monthly or None,
+            )
+            logger.info(
+                "Persisted cost report: cluster=%s daily=$%.2f monthly=$%.2f findings=%d",
+                cluster_id,
+                daily,
+                monthly,
+                len(findings),
+            )
+        except Exception as e:
+            logger.error("Failed to persist cost report: %s", e)
 
     @traceable_if_enabled(name="sre.correlate", run_type="chain")
     async def _node_correlate(self, state: SREState) -> dict[str, Any]:
@@ -226,7 +341,113 @@ class SREOrchestrator:
 
         logger.info("Correlated %d findings from %d raw", len(unique_findings), len(all_findings))
 
+        # Write a per-app health snapshot for this scan so the
+        # v_sre_app_reliability.health_pct_7d column has data to compute.
+        await self._persist_health_snapshots(
+            cluster_id=state.get("cluster_id", "default"),
+            apps=state.get("apps", []),
+            findings=unique_findings,
+        )
+
         return {"all_findings": unique_findings}
+
+    async def _persist_health_snapshots(
+        self,
+        cluster_id: str,
+        apps: list[dict[str, Any]],
+        findings: list[dict[str, Any]],
+    ) -> None:
+        """Write one sre_health_checks row per app for this scan.
+
+        Each app gets a healthy/degraded/unhealthy classification based on
+        the worst-severity finding that touches it. Apps with no findings
+        are marked healthy. The 7-day rolling ratio of healthy vs total
+        rows feeds ``v_sre_app_reliability.health_pct_7d``.
+        """
+        if not self.db or not apps:
+            return
+
+        import json as _json
+
+        severity_rank = {"critical": 3, "high": 3, "medium": 2, "low": 1, "info": 0}
+        app_severity: dict[str, int] = {}
+        app_reasons: dict[str, str] = {}
+
+        for finding in findings:
+            matched = self._match_finding_to_app(finding, apps)
+            if not matched:
+                continue
+            rank = severity_rank.get(finding.get("severity", "info"), 0)
+            app_id = matched["id"]
+            if rank > app_severity.get(app_id, -1):
+                app_severity[app_id] = rank
+                app_reasons[app_id] = finding.get("title", "") or finding.get("severity", "")
+
+        rows: list[tuple] = []
+        for app in apps:
+            rank = app_severity.get(app["id"], 0)
+            if rank >= 3:
+                status = "unhealthy"
+            elif rank == 2:
+                status = "degraded"
+            else:
+                status = "healthy"
+
+            details = {"reason": app_reasons[app["id"]]} if app["id"] in app_reasons else {}
+            rows.append(
+                (
+                    cluster_id,
+                    app["id"],
+                    "scan_snapshot",
+                    status,
+                    _json.dumps(details),
+                )
+            )
+
+        try:
+            await self.db.pool.executemany(
+                """INSERT INTO sre_health_checks
+                   (cluster_id, app_id, check_type, status, details)
+                   VALUES ($1, $2, $3, $4, $5)""",
+                rows,
+            )
+            healthy = sum(1 for r in rows if r[3] == "healthy")
+            logger.info(
+                "Persisted %d health snapshots (%d healthy / %d issues) cluster=%s",
+                len(rows),
+                healthy,
+                len(rows) - healthy,
+                cluster_id,
+            )
+        except Exception as e:
+            logger.error("Failed to persist health snapshots: %s", e)
+
+    @staticmethod
+    def _match_finding_to_app(
+        finding: dict[str, Any], apps: list[dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        """Best-effort match a finding back to a discovered app.
+
+        Mirrors IncidentResponderAgent._find_app but without the
+        all-else-fail fallback to apps[0] — for health snapshots we want
+        unmatched findings to leave every app healthy rather than blaming
+        a random app.
+        """
+        target = (finding.get("app") or finding.get("pod") or "").lower()
+        namespace = finding.get("namespace", "")
+
+        if target:
+            for app in apps:
+                name = (app.get("name") or "").lower()
+                if name and (name in target or target in name):
+                    return app
+
+        if namespace:
+            for app in apps:
+                if app.get("namespace") == namespace:
+                    return app
+
+        return None
 
     @traceable_if_enabled(name="sre.respond", run_type="chain")
     async def _node_respond(self, state: SREState) -> dict[str, Any]:
