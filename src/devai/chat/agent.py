@@ -647,9 +647,17 @@ class DevAIChatAgent:
         final = history[-1]
         response_text = final.content if isinstance(final, AIMessage) else str(final)
 
-        # Trim conversation to last 30 messages to prevent context overflow
+        # Trim conversation history — keep system message + recent messages,
+        # but never split tool_use/tool_result pairs (Claude requires them adjacent)
         if len(history) > 32:
-            self._conversations[session_id] = [history[0]] + history[-30:]
+            system = history[0]
+            recent = history[-30:]
+            # Walk forward to find a safe cut point (not inside a tool exchange)
+            from langchain_core.messages import ToolMessage
+
+            while recent and isinstance(recent[0], ToolMessage):
+                recent = recent[1:]
+            self._conversations[session_id] = [system] + recent
 
         return response_text
 
@@ -704,9 +712,15 @@ class DevAIChatAgent:
                     except Exception as e:
                         history.append(ToolMessage(content=f"Error: {e}", tool_call_id=tc["id"]))
 
-        # Trim
+        # Trim — avoid splitting tool_use/tool_result pairs
         if len(history) > 32:
-            self._conversations[session_id] = [history[0]] + history[-30:]
+            from langchain_core.messages import ToolMessage
+
+            system = history[0]
+            recent = history[-30:]
+            while recent and isinstance(recent[0], ToolMessage):
+                recent = recent[1:]
+            self._conversations[session_id] = [system] + recent
 
     def clear_session(self, session_id: str = "default") -> None:
         """Clear conversation history for a session."""

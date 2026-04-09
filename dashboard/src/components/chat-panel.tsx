@@ -27,7 +27,7 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sessionId = useRef(`chat-${Date.now()}`);
+  const sessionId = useRef(runId ? `pipeline-${runId}` : `chat-${Date.now()}`);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -47,7 +47,7 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
     setLoading(true);
 
     try {
-      const res = await fetch("/chat/api/message", {
+      const res = await fetch("/api/chat/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
