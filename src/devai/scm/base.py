@@ -134,17 +134,31 @@ class SCMClient(ABC):
         fingerprint: str | None = None,
         similarity_threshold: float = 0.6,
     ) -> dict[str, Any] | None:
-        """Look for an open issue that's a likely duplicate of this one.
+        """Look for an existing issue that's a likely duplicate of this one.
+
+        Searches BOTH open and recently-closed issues. The closed-issue
+        search catches the common case where a previous run finished a
+        story and closed its issue, then a re-run tries to recreate the
+        same story-issue from scratch.
 
         Match wins on either:
           1. Body contains the exact ``<!-- devai-fingerprint: X -->`` marker
+             (strongest signal — survives LLM title rewrites)
           2. Title token Jaccard similarity >= ``similarity_threshold`` AND
              at least one label overlaps
 
         The label overlap requirement prevents collisions between unrelated
         DevAI work items that happen to share generic words.
         """
-        candidates = await self.list_issues(repo, state="open", labels=labels, limit=100)
+        # Pull both open and recently-closed candidates so we can dedup
+        # against issues that an earlier successful run already finished.
+        open_candidates = await self.list_issues(
+            repo, state="open", labels=labels, limit=100
+        )
+        closed_candidates = await self.list_issues(
+            repo, state="closed", labels=labels, limit=50
+        )
+        candidates = list(open_candidates) + list(closed_candidates)
         if not candidates:
             return None
 
@@ -156,7 +170,10 @@ class SCMClient(ABC):
                 if marker in body:
                     return issue
 
-        # Fallback: title similarity
+        # Fallback: title similarity (open issues only — we don't want to
+        # silently re-use a closed issue based on fuzzy title alone, that
+        # could cause cross-feature collisions. The fingerprint check
+        # above already handles the legitimate "same intent" case.)
         target_tokens = _normalize_title_tokens(title)
         if not target_tokens:
             return None
@@ -165,7 +182,7 @@ class SCMClient(ABC):
         best_issue: dict[str, Any] | None = None
         best_score = 0.0
 
-        for issue in candidates:
+        for issue in open_candidates:
             cand_tokens = _normalize_title_tokens(issue.get("title", ""))
             if not cand_tokens:
                 continue
