@@ -239,6 +239,31 @@ class GitHubSCMClient(SCMClient):
         resp = await self._request("GET", f"/repos/{repo}/issues/{issue_id}")
         return resp.json()
 
+    async def list_issues(
+        self,
+        repo: str,
+        state: str = "open",
+        labels: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List issues on a GitHub repo.
+
+        Filters out pull requests (GitHub returns PRs as issues from this
+        endpoint). Used by the cross-run dedup logic in the SCMClient base.
+        """
+        params: dict[str, str] = {"state": state, "per_page": str(min(limit, 100))}
+        if labels:
+            params["labels"] = ",".join(labels)
+        try:
+            resp = await self._request("GET", f"/repos/{repo}/issues", params=params)
+            data = resp.json()
+        except Exception as e:
+            logger.warning("Failed to list issues on %s: %s", repo, e)
+            return []
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if "pull_request" not in item]
+
     async def add_comment(self, repo: str, issue_id: int | str, body: str) -> dict[str, Any]:
         resp = await self._request("POST", f"/repos/{repo}/issues/{issue_id}/comments", json={"body": body})
         return resp.json()

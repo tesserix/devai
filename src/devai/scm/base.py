@@ -20,9 +20,52 @@ Connection flow:
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import re
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Marker embedded in issue bodies so future agent runs can recognize their
+# own prior work and avoid creating duplicates. Kept as an HTML comment so
+# it doesn't render in the GitHub UI.
+DEDUPE_MARKER = "devai-fingerprint"
+
+_TITLE_STOPWORDS = {
+    "the", "a", "an", "of", "for", "to", "in", "on", "and", "or", "with",
+    "by", "is", "be", "as", "at", "from", "this", "that", "into", "via",
+    "across", "over", "under", "about", "after", "before", "between",
+    "request", "task", "issue", "operational", "operation", "operations",
+    "devai",
+}
+
+
+def _normalize_title_tokens(text: str) -> set[str]:
+    """Normalize a title into a token set for Jaccard similarity.
+
+    Lowercases, strips punctuation, drops common stopwords + DevAI-specific
+    boilerplate so titles like '[DevAI] Operational task — re-run...' and
+    '[DevAI] Operations request: Re-run...' collapse to the same token set.
+    """
+    if not text:
+        return set()
+    cleaned = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
+    return {t for t in cleaned.split() if len(t) > 2 and t not in _TITLE_STOPWORDS}
+
+
+def fingerprint_for(title: str, body: str = "", extra: str = "") -> str:
+    """Compute a stable 12-char fingerprint for a proposed issue.
+
+    Hashes a normalized version of (title + first 200 body chars + extra).
+    Two re-runs of the same agent on the same intent produce identical
+    fingerprints, which is the strongest dedup signal.
+    """
+    seed = " ".join((title or "", (body or "")[:200], extra or "")).strip().lower()
+    seed = re.sub(r"\s+", " ", seed)
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12]
 
 
 class SCMProvider(StrEnum):
@@ -67,6 +110,147 @@ class SCMClient(ABC):
     async def get_issue(self, repo: str, issue_id: int | str) -> dict[str, Any]:
         """Get an issue/work item by number or ID."""
         ...
+
+    async def list_issues(
+        self,
+        repo: str,
+        state: str = "open",
+        labels: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List issues. Default returns []. Providers should override.
+
+        Used by ``find_duplicate_issue`` / ``create_issue_idempotent`` for
+        cross-run deduplication so the same agent re-running the same intent
+        doesn't spam the repo with copies of the same issue.
+        """
+        return []
+
+    async def find_duplicate_issue(
+        self,
+        repo: str,
+        title: str,
+        labels: list[str] | None = None,
+        fingerprint: str | None = None,
+        similarity_threshold: float = 0.6,
+    ) -> dict[str, Any] | None:
+        """Look for an open issue that's a likely duplicate of this one.
+
+        Match wins on either:
+          1. Body contains the exact ``<!-- devai-fingerprint: X -->`` marker
+          2. Title token Jaccard similarity >= ``similarity_threshold`` AND
+             at least one label overlaps
+
+        The label overlap requirement prevents collisions between unrelated
+        DevAI work items that happen to share generic words.
+        """
+        candidates = await self.list_issues(repo, state="open", labels=labels, limit=100)
+        if not candidates:
+            return None
+
+        # Strongest signal: explicit fingerprint marker in the body
+        if fingerprint:
+            marker = f"<!-- {DEDUPE_MARKER}: {fingerprint} -->"
+            for issue in candidates:
+                body = issue.get("body") or ""
+                if marker in body:
+                    return issue
+
+        # Fallback: title similarity
+        target_tokens = _normalize_title_tokens(title)
+        if not target_tokens:
+            return None
+
+        target_labels = set(labels or [])
+        best_issue: dict[str, Any] | None = None
+        best_score = 0.0
+
+        for issue in candidates:
+            cand_tokens = _normalize_title_tokens(issue.get("title", ""))
+            if not cand_tokens:
+                continue
+            jaccard = len(target_tokens & cand_tokens) / len(target_tokens | cand_tokens)
+            if jaccard < similarity_threshold:
+                continue
+
+            # Require at least one label overlap if we asked for any labels
+            if target_labels:
+                cand_labels = {
+                    lbl.get("name") if isinstance(lbl, dict) else lbl
+                    for lbl in (issue.get("labels") or [])
+                }
+                if not (target_labels & cand_labels):
+                    continue
+
+            if jaccard > best_score:
+                best_score = jaccard
+                best_issue = issue
+
+        return best_issue
+
+    async def create_issue_idempotent(
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+        dedupe_labels: list[str] | None = None,
+        fingerprint: str | None = None,
+    ) -> dict[str, Any]:
+        """Create an issue, but skip if a duplicate already exists.
+
+        Args:
+            repo: target repository
+            title, body, labels: same as ``create_issue``
+            dedupe_labels: labels used to scope the duplicate search.
+                Defaults to ``labels``. Pass a smaller subset (e.g. just
+                ``["devai:user-story"]``) when you want loose matching.
+            fingerprint: optional pre-computed fingerprint. If omitted, one
+                is auto-derived from title + first 200 chars of body.
+
+        Behavior:
+            - If a duplicate is found → posts an attribution comment on the
+              existing issue and returns it.
+            - Otherwise → creates a new issue with a hidden fingerprint
+              marker embedded in the body so future runs match.
+        """
+        if not fingerprint:
+            fingerprint = fingerprint_for(title, body)
+
+        search_labels = dedupe_labels if dedupe_labels is not None else labels
+
+        try:
+            existing = await self.find_duplicate_issue(
+                repo=repo,
+                title=title,
+                labels=search_labels,
+                fingerprint=fingerprint,
+            )
+        except Exception as e:
+            logger.warning("Dedup search failed on %s, will create normally: %s", repo, e)
+            existing = None
+
+        if existing:
+            issue_number = existing.get("number")
+            logger.info(
+                "Dedup hit on %s: re-using #%s instead of creating duplicate %r",
+                repo, issue_number, title[:60],
+            )
+            try:
+                await self.add_comment(
+                    repo,
+                    issue_number,
+                    "_DevAI agent attempted to create another issue with the same intent. "
+                    "Re-using this existing issue instead._\n\n"
+                    f"_Proposed title:_ `{title}`",
+                )
+            except Exception as e:
+                logger.debug("Could not add dedup comment to #%s: %s", issue_number, e)
+            return existing
+
+        marker = f"\n\n<!-- {DEDUPE_MARKER}: {fingerprint} -->"
+        body_with_marker = (body or "").rstrip() + marker
+        return await self.create_issue(repo, title, body_with_marker, labels)
 
     @abstractmethod
     async def add_comment(self, repo: str, issue_id: int | str, body: str) -> dict[str, Any]:

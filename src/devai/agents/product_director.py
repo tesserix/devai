@@ -125,11 +125,14 @@ Create a GitHub Epic that encompasses all these requirements."""
         for m in epic_data.get("milestones", []):
             body += f"\n- [ ] {m}"
 
-        issue = await self.github.create_issue(
+        # Idempotent: scope dedup search to "devai:epic" so we re-use any
+        # existing epic for the same intent instead of spamming new ones.
+        issue = await self.github.create_issue_idempotent(
             repo=repo,
             title=epic_data.get("title", "Feature Epic"),
             body=body,
             labels=labels,
+            dedupe_labels=["devai:epic"],
         )
 
         epic_result = {
@@ -238,11 +241,12 @@ Break these requirements into user stories. Consider the repository context and 
             ]
             story_title = (story.get("title") or "").strip() or "User Story"
 
-            issue = await self.github.create_issue(
+            issue = await self.github.create_issue_idempotent(
                 repo=repo,
                 title=story_title,
                 body=body,
                 labels=labels,
+                dedupe_labels=["devai:user-story"],
             )
             created_stories.append(
                 {

@@ -329,11 +329,12 @@ class SupervisorAgent(BaseAgent):
         body = "\n".join(body_parts)
 
         try:
-            issue = await self.scm.create_issue(
+            issue = await self.scm.create_issue_idempotent(
                 repo=repo,
                 title=f"[DevAI] {project_summary[:80]}",
                 body=body,
                 labels=["devai:tracking", "devai:supervisor-plan"],
+                dedupe_labels=["devai:supervisor-plan"],
             )
             logger.info(
                 "Created tracking issue #%s on %s",
