@@ -147,6 +147,7 @@ Commit the infrastructure code to the appropriate repository."""
             user_message=user_message,
             tools=INFRA_TOOLS,
             tool_executor=tool_executor.execute,
+            max_iterations=self.config.claude_max_iterations_ops,
         )
 
         # Notify Release Manager about the infra setup

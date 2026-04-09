@@ -175,6 +175,7 @@ Always include rollback/downgrade scripts."""
             user_message=user_message,
             tools=DB_TOOLS,
             tool_executor=tool_executor.execute,
+            max_iterations=self.config.claude_max_iterations_implementation,
         )
 
         # Parse decision

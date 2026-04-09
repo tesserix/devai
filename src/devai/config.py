@@ -63,7 +63,19 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-sonnet-4-20250514"
     claude_max_tokens: int = 8192
-    claude_max_iterations: int = 25
+    # Default ceiling for any agent loop. Heavy code-generation roles
+    # (Senior Developer, DB Engineer, Infra Provisioner, QA Tester) pass an
+    # explicit higher value via the per-role overrides below. The loop now
+    # degrades gracefully when the ceiling is reached — it asks the model
+    # to wrap up rather than raising — so this is a soft target, not a
+    # hard kill switch.
+    claude_max_iterations: int = 50
+    # Per-role caps. These are passed explicitly by each agent's call site
+    # so a config tweak doesn't require touching every agent file.
+    claude_max_iterations_implementation: int = 120  # senior_developer, db_engineer
+    claude_max_iterations_review: int = 80  # staff_reviewer, security_expert
+    claude_max_iterations_ops: int = 100  # infra_provisioner, qa_tester
+    claude_max_iterations_planning: int = 60  # engineering_manager
 
     # --- Google Gemini ---
     gemini_api_key: str = ""
@@ -80,7 +92,7 @@ class Settings(BaseSettings):
     nemoclaw_endpoint: str = ""  # e.g. http://nemoclaw-inference.devai.svc.cluster.local:8000/v1
     nemoclaw_model: str = "nvidia/nemotron-3-super-120b-a12b"
     nemoclaw_max_tokens: int = 8192
-    nemoclaw_max_iterations: int = 25
+    nemoclaw_max_iterations: int = 50
     nemoclaw_fallback_to_groq: bool = True  # Fall back to Groq if GPU unavailable
 
     # --- Server ---

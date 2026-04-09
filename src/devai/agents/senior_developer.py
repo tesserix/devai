@@ -214,6 +214,7 @@ Use the existing branch `{branch_name}` — push fixes to it, do NOT create a ne
             user_message=user_message,
             tools=SR_DEV_TOOLS,
             tool_executor=tool_executor,
+            max_iterations=self.config.claude_max_iterations_implementation,
         )
 
         # Notify reviewer that code is ready for this story

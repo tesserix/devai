@@ -106,6 +106,10 @@ class NemoClawProvider:
         """Run a tool-calling agentic loop on the local GPU model.
 
         Uses OpenAI-compatible function calling (supported by vLLM and NIM).
+        Mirrors the Claude provider's graceful wrap-up: when the iteration
+        ceiling is hit, the loop refuses further tool calls and asks the
+        model to summarize, returning whatever text it produces instead of
+        raising — so a runaway agent doesn't fail the whole pipeline.
         """
 
         async def _run() -> str:
@@ -117,6 +121,7 @@ class NemoClawProvider:
 
             # Convert Anthropic-style tools to OpenAI function format
             openai_tools = self._convert_tools(tools)
+            last_text = ""
 
             for i in range(iterations):
                 try:
@@ -129,10 +134,48 @@ class NemoClawProvider:
                 choice = response.choices[0]
                 messages.append(choice.message.model_dump())
 
+                if choice.message.content:
+                    last_text = choice.message.content
+
                 # No tool calls — agent is done
                 if not choice.message.tool_calls:
                     logger.info("NemoClaw agent completed in %d iterations", i + 1)
-                    return choice.message.content or ""
+                    return choice.message.content or last_text
+
+                # Last allowed iteration — refuse new tool calls and ask
+                # the model to wrap up with what it has.
+                if i == iterations - 1:
+                    logger.warning(
+                        "NemoClaw agent reached iteration cap (%d) — requesting wrap-up",
+                        iterations,
+                    )
+                    for tc in choice.message.tool_calls:
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    "ITERATION LIMIT REACHED. Do NOT call any more tools. "
+                                    "Summarize what you have accomplished, list remaining "
+                                    "work as TODOs in your final message, and stop."
+                                ),
+                            }
+                        )
+
+                    try:
+                        final = await self._call_api_chat(messages, openai_tools)
+                        final_text = final.choices[0].message.content or ""
+                    except Exception as e:
+                        logger.warning("NemoClaw wrap-up call failed: %s", e)
+                        final_text = ""
+
+                    if final_text.strip():
+                        return final_text
+                    if last_text:
+                        return last_text
+                    raise RuntimeError(
+                        f"NemoClaw agent exceeded {iterations} iterations and produced no text"
+                    )
 
                 # Execute tool calls
                 for tc in choice.message.tool_calls:
@@ -160,7 +203,7 @@ class NemoClawProvider:
                         }
                     )
 
-            raise RuntimeError(f"NemoClaw agent exceeded {iterations} iterations")
+            return last_text
 
         return await with_timeout(_run(), AGENT_TIMEOUT, "nemoclaw_agent_loop")
 

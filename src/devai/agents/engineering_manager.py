@@ -156,6 +156,7 @@ The Staff Reviewer requested changes. Incorporate this feedback into revised pla
             user_message=user_message,
             tools=EM_TOOLS,
             tool_executor=tool_executor.execute,
+            max_iterations=self.config.claude_max_iterations_planning,
         )
 
         # Parse per-story plans from the output

@@ -54,28 +54,82 @@ class ClaudeProvider:
     ) -> str:
         """Run a Claude agent loop with tool use until completion.
 
-        Includes timeout protection and retry logic for API calls.
+        Includes timeout protection and retry logic for API calls. When the
+        iteration ceiling is reached the loop degrades gracefully:
+
+        1. Sends a final wrap-up turn telling the model to stop calling
+           tools and produce its best final answer with what it has so far.
+        2. Returns whatever text the model produces (even if partial).
+        3. Only raises if there is literally no text to return.
+
+        This prevents one runaway agent from failing the whole pipeline
+        run, which is the right default for a development AI.
         """
 
         async def _run() -> str:
             iterations = max_iterations or self.max_iterations
             messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+            last_text = ""
 
             for i in range(iterations):
                 response = await self._call_api(system_prompt, tools, messages)
-
                 assistant_content = response.content
                 messages.append({"role": "assistant", "content": assistant_content})
+
+                # Capture any text the model produced this turn so we always
+                # have something to return at the end, even on a forced stop.
+                turn_text = "\n".join(
+                    block.text for block in assistant_content if isinstance(block, TextBlock)
+                )
+                if turn_text.strip():
+                    last_text = turn_text
 
                 tool_calls = [block for block in assistant_content if isinstance(block, ToolUseBlock)]
 
                 if not tool_calls:
-                    text_parts = [block.text for block in assistant_content if isinstance(block, TextBlock)]
-                    final_text = "\n".join(text_parts)
                     logger.info("Claude agent completed in %d iterations", i + 1)
-                    return final_text
+                    return turn_text or last_text
 
-                tool_results: list[dict[str, Any]] = []
+                # On the very last allowed iteration, refuse to execute any
+                # more tool calls and give the model one final turn with a
+                # stop instruction. This converts a hard cap into a soft
+                # one without losing any reasoning the model has done.
+                if i == iterations - 1:
+                    logger.warning(
+                        "Claude agent reached iteration cap (%d) — requesting wrap-up",
+                        iterations,
+                    )
+                    tool_results = [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": (
+                                "ITERATION LIMIT REACHED. Do NOT call any more tools. "
+                                "Summarize what you have already accomplished, list any "
+                                "remaining work as TODOs in your final message, and stop."
+                            ),
+                            "is_error": True,
+                        }
+                        for tc in tool_calls
+                    ]
+                    messages.append({"role": "user", "content": tool_results})
+
+                    final = await self._call_api(system_prompt, tools, messages)
+                    final_text = "\n".join(
+                        block.text for block in final.content if isinstance(block, TextBlock)
+                    )
+                    if final_text.strip():
+                        logger.warning(
+                            "Claude agent wrapped up after iteration cap; returning partial result"
+                        )
+                        return final_text
+                    if last_text:
+                        return last_text
+                    raise RuntimeError(
+                        f"Claude agent exceeded {iterations} iterations and produced no text"
+                    )
+
+                tool_results = []
                 for tc in tool_calls:
                     logger.debug("Executing tool: %s(%s)", tc.name, tc.input)
                     try:
@@ -107,7 +161,8 @@ class ClaudeProvider:
 
                 messages.append({"role": "user", "content": tool_results})
 
-            raise RuntimeError(f"Claude agent exceeded {iterations} iterations without completing")
+            # Defensive — the wrap-up branch above always returns or raises.
+            return last_text
 
         return await with_timeout(_run(), AGENT_TIMEOUT, "claude_agent_loop")
 

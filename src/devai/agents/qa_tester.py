@@ -153,6 +153,7 @@ Start by reading the PR diff to understand what was changed, explore existing te
             user_message=user_message,
             tools=QA_TOOLS,
             tool_executor=tool_executor,
+            max_iterations=self.config.claude_max_iterations_ops,
         )
 
         # Post results as a PR comment

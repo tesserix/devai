@@ -132,6 +132,7 @@ Start by getting the PR diff with github_get_pr_diff, then explore the repo stru
             user_message=review_prompt,
             tools=self.REVIEWER_TOOLS,
             tool_executor=tool_executor.execute,
+            max_iterations=self.config.claude_max_iterations_review,
         )
 
         review = self._parse_review_text(result_text)
