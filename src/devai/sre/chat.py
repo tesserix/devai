@@ -15,7 +15,9 @@ import logging
 from typing import TYPE_CHECKING
 
 from devai.providers.openai_provider import OpenAIProvider
+from devai.sre.tools.gcp_tools import GCPToolExecutor
 from devai.sre.tools.k8s_tools import K8sToolExecutor
+from devai.sre.tools.prometheus_tools import PrometheusToolExecutor
 
 if TYPE_CHECKING:
     from devai.config import Settings
@@ -23,36 +25,36 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the DevAI SRE Assistant — an expert Site Reliability Engineer with full access to a production Kubernetes cluster (GKE).
+SYSTEM_PROMPT = """You are the DevAI SRE Assistant — an expert Site Reliability Engineer with full access to:
 
-You can:
-1. **Query cluster state** — pods, deployments, services, resource usage, events, logs
-2. **Query incidents** — open/resolved incidents from the SRE monitoring system
-3. **Query metrics** — CPU, memory, latency, error rates, costs
-4. **Trigger scans** — run targeted SRE analysis on specific namespaces
-5. **Investigate issues** — read pod logs, check events, analyze resource usage
-6. **Recommend fixes** — provide actionable remediation steps based on real data
+1. **Kubernetes cluster** (GKE `tesseract-prod-in-gke` in `asia-south1`) — pods, deployments, services, resource usage, events, logs, HPA, certificates
+2. **Google Cloud Platform** — Cloud Monitoring metrics, Cloud Logging, Cloud SQL instances, Storage buckets, Compute instances, quotas, Recommender insights
+3. **Prometheus** — PromQL queries, alerts, scrape target health
+4. **SRE database** — incidents, health checks, cost reports, scan history
 
 When answering:
-- Always fetch real data using tools — never guess cluster state
+- Always fetch real data using tools — never guess cluster or cloud state
 - Format responses with markdown tables, bullet points, code blocks
 - For kubectl commands, show the exact command the user could run
 - For incidents, include severity, category, MTTR, and fix recommendations
-- For performance issues, include metrics with thresholds and trends
-- Be specific — cite pod names, namespace, container names, timestamps
+- For performance issues, include Prometheus metrics with thresholds and trends
+- For GCP resources, include project, region, and cost context
+- Be specific — cite pod names, namespaces, instance names, timestamps
 
-You are connected to the GKE cluster `tesseract-prod-in-gke` in `asia-south1`.
+You are connected to GCP project `tesseracthub-480811` and GKE cluster `tesseract-prod-in-gke`.
 """
 
 
 class SREChatAgent:
-    """Conversational SRE assistant with kubectl and database access."""
+    """Conversational SRE assistant with kubectl, GCP, Prometheus, and database access."""
 
     def __init__(self, config: Settings, database: Database | None = None) -> None:
         self.config = config
         self.db = database
         self.llm = OpenAIProvider(config)
         self.k8s = K8sToolExecutor()
+        self.gcp = GCPToolExecutor()
+        self.prom = PrometheusToolExecutor()
         self._conversations: dict[str, list[dict[str, str]]] = {}
 
     async def chat(self, message: str, session_id: str = "default") -> str:
@@ -190,6 +192,69 @@ Respond to the user's message using the live cluster data above. Be specific and
             for ns in namespaces_to_check or ["default"]:
                 deps = await self.k8s.execute("k8s_get_deployments", {"namespace": ns})
                 context_parts.append(f"### Deployments: {ns}\n{deps}")
+
+        # GCP resources
+        if any(kw in msg_lower for kw in ["bucket", "storage", "gcs"]):
+            data = await self.gcp.execute("gcp_get_storage_buckets", {})
+            context_parts.append(f"### Cloud Storage\n{data}")
+
+        if any(kw in msg_lower for kw in ["sql", "database", "postgres", "cloudsql", "db instance"]):
+            data = await self.gcp.execute("gcp_get_sql_instances", {})
+            context_parts.append(f"### Cloud SQL\n{data}")
+
+        if any(kw in msg_lower for kw in ["vm", "instance", "compute", "machine"]):
+            data = await self.gcp.execute("gcp_get_compute_instances", {})
+            context_parts.append(f"### Compute Instances\n{data}")
+
+        if any(kw in msg_lower for kw in ["quota", "limit", "capacity"]):
+            data = await self.gcp.execute("gcp_get_quotas", {})
+            context_parts.append(f"### Quotas\n{data}")
+
+        if any(kw in msg_lower for kw in ["recommend", "advisor", "optimization", "optimiz", "suggestion"]):
+            data = await self.gcp.execute("gcp_get_recommendations", {})
+            context_parts.append(f"### GCP Recommendations\n{data}")
+
+        if any(kw in msg_lower for kw in ["gcp", "project", "cloud", "service"]):
+            data = await self.gcp.execute("gcp_get_project_info", {})
+            context_parts.append(f"### GCP Project\n{data}")
+
+        if any(kw in msg_lower for kw in ["monitor", "metric", "cloud monitor"]):
+            data = await self.gcp.execute(
+                "gcp_get_monitoring_metrics",
+                {"metric_type": "kubernetes.io/node/cpu/allocatable_utilization", "minutes": 30},
+            )
+            context_parts.append(f"### GCP Monitoring — Node CPU\n{data}")
+
+        if any(kw in msg_lower for kw in ["cloud log", "gcp log", "stackdriver"]):
+            data = await self.gcp.execute(
+                "gcp_get_logs",
+                {"filter_str": "severity>=ERROR", "minutes": 60, "max_entries": 20},
+            )
+            context_parts.append(f"### GCP Error Logs\n{data}")
+
+        # Prometheus
+        if any(kw in msg_lower for kw in ["prometheus", "promql", "prom", "alert", "scrape", "target"]):
+            if "alert" in msg_lower:
+                data = await self.prom.execute("prom_get_alerts", {})
+                context_parts.append(f"### Prometheus Alerts\n{data}")
+            elif "target" in msg_lower or "scrape" in msg_lower:
+                data = await self.prom.execute("prom_get_targets", {})
+                context_parts.append(f"### Prometheus Targets\n{data}")
+            else:
+                data = await self.prom.execute(
+                    "prom_query",
+                    {"query": "up"},
+                )
+                context_parts.append(f"### Prometheus Status\n{data}")
+
+        if any(kw in msg_lower for kw in ["latency", "error rate", "throughput", "request rate", "p99", "p95"]):
+            queries = {
+                "error_rate": 'sum(rate(http_requests_total{status=~"5.."}[5m])) by (namespace)',
+                "request_rate": "sum(rate(http_requests_total[5m])) by (namespace)",
+            }
+            for label, query in queries.items():
+                data = await self.prom.execute("prom_query", {"query": query})
+                context_parts.append(f"### Prometheus: {label}\n{data}")
 
         # If nothing specific matched, get a general overview
         if not context_parts:
