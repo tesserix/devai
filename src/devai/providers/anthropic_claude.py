@@ -14,7 +14,13 @@ from typing import TYPE_CHECKING, Any
 from anthropic import AsyncAnthropic
 from anthropic.types import Message, TextBlock, ToolUseBlock
 
-from devai.services.resilience import CircuitBreaker, retry_async, with_timeout
+from devai.services.resilience import (
+    CircuitBreaker,
+    estimate_token_count,
+    get_claude_rate_limiter,
+    retry_async,
+    with_timeout,
+)
 
 if TYPE_CHECKING:
     from devai.config import Settings
@@ -165,7 +171,21 @@ class ClaudeProvider:
         tools: list[dict[str, Any]],
         messages: list[dict[str, Any]],
     ) -> Message:
-        """Make a single API call with retry and circuit breaker."""
+        """Make a single API call with proactive rate limiting + retry.
+
+        The rate limiter is the first line of defense — it sleeps before
+        the call to make sure we don't blow the per-minute budget. The
+        retry decorator is the second line, catching any 429 that slips
+        through (e.g. concurrent calls from a different process) and
+        waiting the API-suggested retry-after.
+        """
+        # Conservative pre-call estimate: system prompt + tools schema +
+        # all in-flight messages. We over-estimate slightly so the
+        # limiter errs toward sleeping rather than firing through.
+        estimated_input_tokens = (
+            estimate_token_count(system_prompt) + estimate_token_count(tools) + estimate_token_count(messages)
+        )
+        await get_claude_rate_limiter().acquire(estimated_input_tokens)
 
         async def _api_call() -> Message:
             return await asyncio.wait_for(
@@ -188,6 +208,10 @@ class ClaudeProvider:
         user_message: str,
     ) -> str:
         """Simple one-shot generation without tools."""
+        # Same proactive throttle as the agent-loop path.
+        estimated_input_tokens = estimate_token_count(system_prompt) + estimate_token_count(user_message)
+        await get_claude_rate_limiter().acquire(estimated_input_tokens)
+
         response = await asyncio.wait_for(
             self.client.messages.create(
                 model=self.model,
