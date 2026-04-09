@@ -25,7 +25,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from devai.config import settings
@@ -82,12 +82,9 @@ def create_sre_app() -> FastAPI:
     # --- Chat ---
 
     @app.post("/api/chat/message")
-    async def sre_chat_message(request: Any) -> dict[str, str]:
+    async def sre_chat_message(request: Request) -> dict[str, str]:
         """Send a message to the SRE chat agent."""
-        from fastapi import Request
-
-        req: Request = request
-        body = await req.json()
+        body = await request.json()
         message = body.get("message", "")
         session_id = body.get("session_id", "default")
 

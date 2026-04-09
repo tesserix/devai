@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("/api/message")
-async def chat_message(request: Any) -> dict[str, str]:
+async def chat_message(request: Request) -> dict[str, str]:
     """Send a message to the chat agent and get a response."""
     body = await request.json()
     message = body.get("message", "")
@@ -43,7 +42,7 @@ async def chat_message(request: Any) -> dict[str, str]:
 
 
 @router.post("/api/message/stream")
-async def chat_stream(request: Any) -> StreamingResponse:
+async def chat_stream(request: Request) -> StreamingResponse:
     """Stream a chat response token by token via SSE."""
     body = await request.json()
     message = body.get("message", "")
