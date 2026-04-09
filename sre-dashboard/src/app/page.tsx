@@ -181,6 +181,12 @@ export default function SREDashboard() {
           ) : (
             <>
               {tab === "overview" && (
+                clusters.length === 0 ? (
+                  <EmptyState
+                    title="Waiting for first scan"
+                    body="The SRE service is up but no scan has populated cluster health yet. Click 'Trigger Manual Scan' in the sidebar."
+                  />
+                ) : (
                 <div className="space-y-8">
                   <ClusterOverview clusters={clusters} />
 
@@ -199,13 +205,27 @@ export default function SREDashboard() {
                     </div>
                   </div>
                 </div>
+                )
               )}
 
               {tab === "incidents" && (
-                <IncidentFeed incidents={incidents} onSelect={setSelectedIncident} />
+                incidents.length === 0 ? (
+                  <EmptyState
+                    title="No open incidents"
+                    body="The SRE pipeline hasn't detected any actionable issues. Trigger a manual scan to refresh."
+                  />
+                ) : (
+                  <IncidentFeed incidents={incidents} onSelect={setSelectedIncident} />
+                )
               )}
 
               {tab === "apps" && (
+                apps.length === 0 ? (
+                  <EmptyState
+                    title="No applications discovered yet"
+                    body="The Discovery Agent hasn't run yet, or the cluster has no namespaces. Trigger a manual scan from the sidebar."
+                  />
+                ) : (
                 <div className="space-y-2">
                   {apps.map((app) => (
                     <div
@@ -242,9 +262,19 @@ export default function SREDashboard() {
                     </div>
                   ))}
                 </div>
+                )
               )}
 
-              {tab === "scans" && <ScanHistory runs={scans} />}
+              {tab === "scans" && (
+                scans.length === 0 ? (
+                  <EmptyState
+                    title="No scans recorded yet"
+                    body="Trigger your first manual scan to populate the SRE database."
+                  />
+                ) : (
+                  <ScanHistory runs={scans} />
+                )
+              )}
 
               {tab === "costs" && (
                 costs.length === 0 ? (
@@ -328,6 +358,15 @@ export default function SREDashboard() {
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="text-center py-16">
+      <p className="text-base font-semibold text-gray-700 dark:text-gray-200">{title}</p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1.5 max-w-md mx-auto">{body}</p>
     </div>
   );
 }
