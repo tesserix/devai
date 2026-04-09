@@ -17,8 +17,6 @@ Endpoints:
   GET  /api/costs            — cost reports
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging

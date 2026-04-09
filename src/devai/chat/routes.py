@@ -1,7 +1,5 @@
 """Chat API routes — WebSocket and REST endpoints for the DevAI chatbot."""
 
-from __future__ import annotations
-
 import json
 import logging
 
