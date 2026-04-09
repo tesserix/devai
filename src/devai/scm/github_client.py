@@ -62,6 +62,12 @@ class GitHubSCMClient(SCMClient):
             timeout=30.0,
             headers={"Accept": "application/vnd.github+json"},
         )
+        # Per-repo label cache so we don't keep POSTing labels that
+        # already exist (every issue creation in a run was triggering
+        # 422 already_exists for every shared label, flooding the logs).
+        # Populated lazily on first call to ensure_labels(). Stores the
+        # set of label names known to exist on each repo.
+        self._known_labels: dict[str, set[str]] = {}
 
     # --- Auth ---
 
@@ -188,26 +194,84 @@ class GitHubSCMClient(SCMClient):
 
     # --- Issues ---
 
+    async def _prime_label_cache(self, repo: str) -> None:
+        """Pull every existing label on the repo (paginated) into the cache.
+
+        Done once per repo per process. Subsequent ensure_labels() calls
+        only POST when the label is genuinely missing — no more 422
+        already_exists spam in the pod logs.
+        """
+        known: set[str] = set()
+        page = 1
+        try:
+            while True:
+                resp = await self._request(
+                    "GET",
+                    f"/repos/{repo}/labels",
+                    params={"per_page": "100", "page": str(page)},
+                )
+                items = resp.json()
+                if not isinstance(items, list) or not items:
+                    break
+                for item in items:
+                    name = item.get("name") if isinstance(item, dict) else None
+                    if name:
+                        known.add(name)
+                if len(items) < 100:
+                    break
+                page += 1
+                if page > 10:  # safety cap (1000 labels is plenty)
+                    break
+        except Exception as e:
+            logger.debug("Could not prime label cache for %s: %s", repo, e)
+
+        self._known_labels[repo] = known
+        logger.info("Label cache primed for %s — %d existing labels", repo, len(known))
+
     async def ensure_labels(self, repo: str, labels: list[str] | None) -> list[str]:
-        """Create labels on a repo if they don't already exist."""
+        """Create labels on a repo if they don't already exist.
+
+        Uses an in-process cache of labels-known-to-exist so we don't
+        re-POST labels that already exist on every single issue create
+        (which used to flood the logs with 422 already_exists warnings).
+        """
         usable_labels: list[str] = []
-        for label in self._normalize_labels(labels):
+        normalized = self._normalize_labels(labels)
+        if not normalized:
+            return usable_labels
+
+        # Lazy-prime the cache on first use for this repo
+        if repo not in self._known_labels:
+            await self._prime_label_cache(repo)
+
+        cache = self._known_labels.setdefault(repo, set())
+
+        for label in normalized:
+            if label in cache:
+                # Already known to exist — skip the POST entirely
+                usable_labels.append(label)
+                continue
+
             try:
                 await self._request(
                     "POST",
                     f"/repos/{repo}/labels",
                     json={"name": label, "color": "6366f1"},
                 )
+                cache.add(label)
+                usable_labels.append(label)
             except httpx.HTTPStatusError as exc:
                 response = exc.response
                 detail = self._error_detail(response) if response is not None else str(exc)
                 if response is not None and response.status_code == 422 and "already_exists" in detail:
+                    # Race: someone else created it between cache prime
+                    # and our POST. Add to cache and continue silently.
+                    cache.add(label)
                     usable_labels.append(label)
                     continue
                 logger.warning("Skipping invalid GitHub label %r on %s: %s", label, repo, detail)
                 continue
 
-            usable_labels.append(label)
         return usable_labels
 
     async def create_issue(self, repo: str, title: str, body: str, labels: list[str] | None = None) -> dict[str, Any]:

@@ -32,6 +32,9 @@ class GitHubClient:
             timeout=30.0,
             headers={"Accept": "application/vnd.github+json"},
         )
+        # Per-repo label cache (lazy-primed) to skip POSTing labels that
+        # already exist. Mirrors GitHubSCMClient._known_labels.
+        self._known_labels: dict[str, set[str]] = {}
 
     # --- Authentication ---
 
@@ -124,26 +127,74 @@ class GitHubClient:
             normalized.append(label)
         return normalized
 
+    async def _prime_label_cache(self, repo: str) -> None:
+        """Pull every existing label on the repo into the in-process cache."""
+        known: set[str] = set()
+        page = 1
+        try:
+            while True:
+                resp = await self._request(
+                    "GET",
+                    f"/repos/{repo}/labels",
+                    params={"per_page": "100", "page": str(page)},
+                )
+                items = resp.json()
+                if not isinstance(items, list) or not items:
+                    break
+                for item in items:
+                    name = item.get("name") if isinstance(item, dict) else None
+                    if name:
+                        known.add(name)
+                if len(items) < 100:
+                    break
+                page += 1
+                if page > 10:
+                    break
+        except Exception as e:
+            logger.debug("Could not prime label cache for %s: %s", repo, e)
+
+        self._known_labels[repo] = known
+        logger.info("Label cache primed for %s — %d existing labels", repo, len(known))
+
     async def ensure_labels(self, repo: str, labels: list[str] | None) -> list[str]:
-        """Ensure labels exist and return the subset safe to include on issue creation."""
+        """Ensure labels exist and return the subset safe to include on issue creation.
+
+        Uses an in-process cache so we don't re-POST labels that already
+        exist on every issue create — was flooding the logs with 422
+        already_exists warnings.
+        """
         usable_labels: list[str] = []
-        for label in self._normalize_labels(labels):
+        normalized = self._normalize_labels(labels)
+        if not normalized:
+            return usable_labels
+
+        if repo not in self._known_labels:
+            await self._prime_label_cache(repo)
+        cache = self._known_labels.setdefault(repo, set())
+
+        for label in normalized:
+            if label in cache:
+                usable_labels.append(label)
+                continue
+
             try:
                 await self._request(
                     "POST",
                     f"/repos/{repo}/labels",
                     json={"name": label, "color": "6366f1"},
                 )
+                cache.add(label)
+                usable_labels.append(label)
             except httpx.HTTPStatusError as exc:
                 response = exc.response
                 detail = self._error_detail(response) if response is not None else str(exc)
                 if response is not None and response.status_code == 422 and "already_exists" in detail:
+                    cache.add(label)
                     usable_labels.append(label)
                     continue
                 logger.warning("Skipping invalid GitHub label %r on %s: %s", label, repo, detail)
                 continue
 
-            usable_labels.append(label)
         return usable_labels
 
     # --- Issues ---

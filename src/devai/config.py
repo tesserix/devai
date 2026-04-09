@@ -79,7 +79,12 @@ class Settings(BaseSettings):
 
     # --- Google Gemini ---
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash-preview-04-17"
+    # Switched from the deprecated gemini-2.5-flash-preview-04-17 model
+    # which now returns 404 from the v1beta API. gemini-3.1-pro-preview
+    # is the most capable current preview; override at runtime via the
+    # DEVAI_GEMINI_MODEL env var if you want a stable Flash variant for
+    # cheaper / faster TechDetector calls.
+    gemini_model: str = "gemini-3.1-pro-preview"
     gcp_secret_gemini_api_key: str = "prod-devai-gemini-api-key"
 
     # --- Groq (fallback / secondary) ---
