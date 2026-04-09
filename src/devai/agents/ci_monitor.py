@@ -1,10 +1,14 @@
-"""CI Monitor Agent — monitors GitHub Actions builds and reports results.
+"""CI Monitor / Builder Agent — owns the entire CI workflow lifecycle.
 
-Handles the tesserix private repo build limit:
-1. Makes repo public before CI runs (limited Actions minutes on private repos)
-2. Polls ALL workflow runs until every queued/in-progress run completes
-3. Makes repo private again only after ALL builds finish
-4. Never leaves repos public if builds are still running
+Three responsibilities:
+
+1. **Build the workflow** if the repo doesn't have one yet for the
+   detected stack. The agent reads the active SkillProfile and commits
+   ``.github/workflows/ci.yml`` rendered from the profile's template.
+2. **Manage repo visibility** for the public→build→private cycle that
+   tesserix private repos require because of limited Actions minutes.
+3. **Monitor + analyze + escalate** failures back to the Senior
+   Developer with a focused fix prompt instead of raw logs.
 
 Uses OpenAI for fast log analysis of build failures.
 """
@@ -15,6 +19,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
+from devai.agents.skills import get_skill_profile
 from devai.core.base_agent import BaseAgent
 
 # Primary: OpenAI | Fallback: Claude
@@ -43,10 +48,10 @@ class CIMonitorAgent(BaseAgent):
     publish_subject = "devai.pipeline.build_complete"
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
-        """Monitor the CI build for the PR branch.
+        """Build (if missing), monitor, and post-process the CI workflow.
 
-        Handles the public→build→private cycle for tesserix repos
-        with limited Actions minutes on private repos.
+        Handles the public→build→private cycle for tesserix repos with
+        limited Actions minutes on private repos.
         """
         repo = state.get("repo_full_name", "")
         branch = state.get("branch_name")
@@ -61,6 +66,11 @@ class CIMonitorAgent(BaseAgent):
                 "build_status": "failure",
                 "build_logs": "No branch found in pipeline state",
             }
+
+        # Step 0: Ensure a CI workflow exists for the active skill profile.
+        # If the repo has no .github/workflows/ files we render the
+        # profile's ci_workflow_template and commit it to the branch.
+        await self._ensure_ci_workflow_exists(repo, branch, state, a2a)
 
         # Step 1: Make repo public for CI (private repos have limited minutes)
         original_visibility = await self._make_public_for_ci(repo, a2a)
@@ -289,3 +299,78 @@ class CIMonitorAgent(BaseAgent):
         except Exception as e:
             logger.error("Failed to analyze build failure: %s", e)
             return f"Failed jobs: {', '.join(j['name'] for j in failed_jobs)}"
+
+    # ------------------------------------------------------------------
+    # CI Workflow Builder
+    # ------------------------------------------------------------------
+
+    async def _ensure_ci_workflow_exists(
+        self,
+        repo: str,
+        branch: str,
+        state: ALMState,
+        a2a: A2ABus,
+    ) -> None:
+        """If the repo has no .github/workflows on the branch, render the
+        active skill profile's CI template and commit it.
+
+        This is what makes the CI Agent a true "CI Builder" — it doesn't
+        just watch builds, it bootstraps them when missing. The template
+        is stack-aware (Next.js npm flow vs Go go-test vs Python pytest)
+        because it comes from the SkillProfile selected by the Tech
+        Detector.
+        """
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        if not profile.ci_workflow_template:
+            logger.debug(
+                "Skill profile %s has no CI template — skipping bootstrap",
+                profile.name,
+            )
+            return
+
+        try:
+            # Check if any workflow file exists on the branch we're going
+            # to build. We list .github/workflows; an empty/missing dir
+            # means we should bootstrap.
+            existing = await self.scm.list_files(repo, ".github/workflows", ref=branch)
+            workflow_files = [
+                item for item in (existing or [])
+                if isinstance(item, dict)
+                and item.get("name", "").endswith((".yml", ".yaml"))
+            ]
+            if workflow_files:
+                logger.info(
+                    "CI workflow already present on %s@%s (%d files), skipping bootstrap",
+                    repo, branch, len(workflow_files),
+                )
+                return
+        except Exception as e:
+            # 404 from GitHub when the directory doesn't exist is the
+            # expected path; treat it as "no workflow" and proceed.
+            logger.debug("No existing workflows on %s@%s (%s) — will bootstrap", repo, branch, e)
+
+        try:
+            await self.scm.create_or_update_file(
+                repo=repo,
+                path=".github/workflows/ci.yml",
+                content=profile.ci_workflow_template,
+                message=f"ci: bootstrap workflow for {profile.display_name}",
+                branch=branch,
+            )
+            logger.info(
+                "Bootstrapped CI workflow for %s@%s using profile %s",
+                repo, branch, profile.name,
+            )
+            a2a.notify(
+                "senior_developer",
+                "CI Workflow Bootstrapped",
+                f"Created `.github/workflows/ci.yml` for {profile.display_name} "
+                "since the repo had none. Future pushes will run lint + test + build.",
+            )
+        except Exception as e:
+            # Don't fail the run if we can't bootstrap — the existing
+            # build may still pass via repo-level config we couldn't see.
+            logger.warning(
+                "Failed to bootstrap CI workflow on %s@%s: %s — continuing",
+                repo, branch, e,
+            )
