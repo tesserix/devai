@@ -186,6 +186,126 @@ class GitHubClient:
         resp = await self._request("GET", f"/repos/{repo}/issues/{issue_number}")
         return resp.json()
 
+    async def list_issues(
+        self,
+        repo: str,
+        state: str = "open",
+        labels: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List issues on a repo. Filters out PRs (GitHub returns them as issues)."""
+        params: dict[str, str] = {"state": state, "per_page": str(min(limit, 100))}
+        if labels:
+            params["labels"] = ",".join(labels)
+        try:
+            resp = await self._request("GET", f"/repos/{repo}/issues", params=params)
+            data = resp.json()
+        except Exception as e:
+            logger.warning("Failed to list issues on %s: %s", repo, e)
+            return []
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if "pull_request" not in item]
+
+    async def create_issue_idempotent(
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+        dedupe_labels: list[str] | None = None,
+        fingerprint: str | None = None,
+    ) -> dict[str, Any]:
+        """Create an issue, but skip if a duplicate already exists.
+
+        Mirrors ``SCMClient.create_issue_idempotent`` so this legacy
+        client doesn't crash agents that depend on the dedup API. Uses
+        the same fingerprint marker + Jaccard fallback as the abstract
+        base, just inlined here so we don't have to subclass.
+        """
+        from devai.scm.base import (
+            DEDUPE_MARKER,
+            _normalize_title_tokens,
+            fingerprint_for,
+        )
+
+        if not fingerprint:
+            fingerprint = fingerprint_for(title, body)
+
+        search_labels = dedupe_labels if dedupe_labels is not None else labels
+
+        # Pull open + recently-closed candidates
+        try:
+            open_candidates = await self.list_issues(
+                repo, state="open", labels=search_labels, limit=100
+            )
+            closed_candidates = await self.list_issues(
+                repo, state="closed", labels=search_labels, limit=50
+            )
+            candidates = list(open_candidates) + list(closed_candidates)
+        except Exception as e:
+            logger.warning("Dedup search failed on %s, will create normally: %s", repo, e)
+            candidates = []
+            open_candidates = []
+
+        existing: dict[str, Any] | None = None
+
+        # Strongest signal: explicit fingerprint marker in the body
+        if candidates:
+            marker = f"<!-- {DEDUPE_MARKER}: {fingerprint} -->"
+            for issue in candidates:
+                if marker in (issue.get("body") or ""):
+                    existing = issue
+                    break
+
+        # Fallback: title Jaccard against open issues only
+        if existing is None and open_candidates:
+            target_tokens = _normalize_title_tokens(title)
+            target_label_set = set(search_labels or [])
+            best_score = 0.0
+            best_issue: dict[str, Any] | None = None
+            if target_tokens:
+                for issue in open_candidates:
+                    cand_tokens = _normalize_title_tokens(issue.get("title", ""))
+                    if not cand_tokens:
+                        continue
+                    jaccard = len(target_tokens & cand_tokens) / len(target_tokens | cand_tokens)
+                    if jaccard < 0.6:
+                        continue
+                    if target_label_set:
+                        cand_labels = {
+                            lbl.get("name") if isinstance(lbl, dict) else lbl
+                            for lbl in (issue.get("labels") or [])
+                        }
+                        if not (target_label_set & cand_labels):
+                            continue
+                    if jaccard > best_score:
+                        best_score = jaccard
+                        best_issue = issue
+            existing = best_issue
+
+        if existing:
+            issue_number = existing.get("number")
+            logger.info(
+                "Dedup hit on %s: re-using #%s instead of creating duplicate %r",
+                repo, issue_number, title[:60],
+            )
+            try:
+                await self.add_comment(
+                    repo,
+                    issue_number,
+                    "_DevAI agent attempted to create another issue with the same intent. "
+                    "Re-using this existing issue instead._\n\n"
+                    f"_Proposed title:_ `{title}`",
+                )
+            except Exception as e:
+                logger.debug("Could not add dedup comment to #%s: %s", issue_number, e)
+            return existing
+
+        marker = f"\n\n<!-- {DEDUPE_MARKER}: {fingerprint} -->"
+        body_with_marker = (body or "").rstrip() + marker
+        return await self.create_issue(repo, title, body_with_marker, labels)
+
     async def add_comment(self, repo: str, issue_number: int, body: str) -> dict[str, Any]:
         """Add a comment to an issue or PR."""
         resp = await self._request(

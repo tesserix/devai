@@ -329,13 +329,27 @@ class SupervisorAgent(BaseAgent):
         body = "\n".join(body_parts)
 
         try:
-            issue = await self.scm.create_issue_idempotent(
-                repo=repo,
-                title=f"[DevAI] {project_summary[:80]}",
-                body=body,
-                labels=["devai:tracking", "devai:supervisor-plan"],
-                dedupe_labels=["devai:supervisor-plan"],
-            )
+            # Defensive: fall back to plain create_issue if the SCM
+            # client doesn't have the dedup helper.
+            if hasattr(self.scm, "create_issue_idempotent"):
+                issue = await self.scm.create_issue_idempotent(
+                    repo=repo,
+                    title=f"[DevAI] {project_summary[:80]}",
+                    body=body,
+                    labels=["devai:tracking", "devai:supervisor-plan"],
+                    dedupe_labels=["devai:supervisor-plan"],
+                )
+            else:
+                logger.warning(
+                    "SCM client %s missing create_issue_idempotent — using plain create_issue",
+                    type(self.scm).__name__,
+                )
+                issue = await self.scm.create_issue(
+                    repo=repo,
+                    title=f"[DevAI] {project_summary[:80]}",
+                    body=body,
+                    labels=["devai:tracking", "devai:supervisor-plan"],
+                )
             logger.info(
                 "Created tracking issue #%s on %s",
                 issue.get("number", "?"),

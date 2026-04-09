@@ -136,7 +136,10 @@ should reflect the planning guidance above for this stack."""
 
         # Idempotent: scope dedup search to "devai:epic" so we re-use any
         # existing epic for the same intent instead of spamming new ones.
-        issue = await self.github.create_issue_idempotent(
+        # Falls back to create_issue if the SCM client doesn't expose
+        # the idempotent helper (defensive — we shouldn't ship a client
+        # without it but the agent shouldn't fail the run either way).
+        issue = await self._create_issue_safe(
             repo=repo,
             title=epic_data.get("title", "Feature Epic"),
             body=body,
@@ -262,7 +265,7 @@ context and ensure stories are actionable for developers."""
             ]
             story_title = (story.get("title") or "").strip() or "User Story"
 
-            issue = await self.github.create_issue_idempotent(
+            issue = await self._create_issue_safe(
                 repo=repo,
                 title=story_title,
                 body=body,
@@ -309,6 +312,43 @@ context and ensure stories are actionable for developers."""
             "story_issue_numbers": story_numbers,
             # a2a messages are merged by BaseAgent.run() automatically
         }
+
+    async def _create_issue_safe(
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+        dedupe_labels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Idempotent issue creation with a safe fallback.
+
+        Calls ``create_issue_idempotent`` if the SCM client exposes it
+        (the multi-SCM ``GitHubSCMClient`` and the legacy
+        ``core.github_client.GitHubClient`` both do as of the dedup
+        rollout). Falls back to ``create_issue`` for any other client
+        that doesn't have the helper, so the agent never crashes the
+        run with ``AttributeError`` over a missing dedup helper.
+        """
+        if hasattr(self.github, "create_issue_idempotent"):
+            return await self.github.create_issue_idempotent(
+                repo=repo,
+                title=title,
+                body=body,
+                labels=labels,
+                dedupe_labels=dedupe_labels,
+            )
+        logger.warning(
+            "SCM client %s has no create_issue_idempotent — falling back "
+            "to plain create_issue (this run will not dedup)",
+            type(self.github).__name__,
+        )
+        return await self.github.create_issue(
+            repo=repo,
+            title=title,
+            body=body,
+            labels=labels,
+        )
 
     async def _add_to_project(self, repo: str, project_id: str, issue_number: int) -> None:
         """Add an issue to the Supervisor's project board."""

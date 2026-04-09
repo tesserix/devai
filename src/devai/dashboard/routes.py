@@ -696,9 +696,14 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     trigger_ref = "dashboard"
 
     if issue_number:
-        from devai.core.github_client import GitHubClient
+        # Use the multi-SCM factory so we get the same GitHubSCMClient the
+        # webhook path uses — that's the one that inherits dedup helpers
+        # from SCMClient. The legacy core.github_client.GitHubClient
+        # doesn't have create_issue_idempotent() and would crash agents
+        # like Product Director that depend on it.
+        from devai.scm import create_scm_client
 
-        github = GitHubClient(config)
+        github = create_scm_client(config)
         issue = await github.get_issue(repo, issue_number)
         # Build full requirements from issue (same as webhook)
         labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
@@ -721,10 +726,12 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
 
     # Run the LangGraph pipeline in the background
     async def _run_bg() -> None:
-        from devai.core.github_client import GitHubClient
         from devai.graph.orchestrator import ALMOrchestrator
+        from devai.scm import create_scm_client
 
-        github = GitHubClient(config)
+        # Use the SCM factory — same client the webhook uses, so all
+        # agents get the proper SCMClient subclass with dedup helpers.
+        github = create_scm_client(config)
         try:
             orchestrator = ALMOrchestrator(github, state, config)
             await orchestrator.run(

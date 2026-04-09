@@ -132,11 +132,17 @@ class IncidentResponderAgent:
                 for f in repo_findings:
                     body += f"### {f.get('title', '')}\n{f.get('description', '')}\n\n"
                 with contextlib.suppress(Exception):
-                    await scm.create_issue_idempotent(
-                        repo, title, body,
-                        ["sre", "severity:medium", "devai:sre-detected"],
-                        dedupe_labels=["devai:sre-detected"],
-                    )
+                    if hasattr(scm, "create_issue_idempotent"):
+                        await scm.create_issue_idempotent(
+                            repo, title, body,
+                            ["sre", "severity:medium", "devai:sre-detected"],
+                            dedupe_labels=["devai:sre-detected"],
+                        )
+                    else:
+                        await scm.create_issue(
+                            repo, title, body,
+                            ["sre", "severity:medium", "devai:sre-detected"],
+                        )
 
         if scm is not None:
             with contextlib.suppress(Exception):
@@ -202,10 +208,13 @@ class IncidentResponderAgent:
                 "devai:sre-detected",
             ]
             try:
-                issue = await scm.create_issue_idempotent(
-                    repo, title, body, labels,
-                    dedupe_labels=["devai:sre-detected"],
-                )
+                if hasattr(scm, "create_issue_idempotent"):
+                    issue = await scm.create_issue_idempotent(
+                        repo, title, body, labels,
+                        dedupe_labels=["devai:sre-detected"],
+                    )
+                else:
+                    issue = await scm.create_issue(repo, title, body, labels)
                 issue_number = issue.get("number") or issue.get("iid")
 
                 if owners and issue_number:
