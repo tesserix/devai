@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
+GITHUB_LABEL_MAX_LENGTH = 50
 
 
 class GitHubClient:
@@ -72,8 +74,77 @@ class GitHubClient:
         """Make an authenticated GitHub API request."""
         headers = await self._headers()
         resp = await self._http.request(method, path, headers=headers, **kwargs)
+        if resp.is_error:
+            logger.error("GitHub API %s %s -> %s: %s", method, path, resp.status_code, self._error_detail(resp))
         resp.raise_for_status()
         return resp
+
+    def _error_detail(self, response: httpx.Response) -> str:
+        """Return a concise GitHub error summary from a failed response."""
+        try:
+            payload = response.json()
+        except json.JSONDecodeError:
+            return response.text[:500]
+
+        message = payload.get("message", "GitHub API error")
+        errors = payload.get("errors")
+        if not errors:
+            return str(message)
+
+        parts: list[str] = []
+        for err in errors:
+            if isinstance(err, dict):
+                code = err.get("code")
+                field = err.get("field")
+                err_message = err.get("message")
+                pieces = [str(piece) for piece in (field, code, err_message) if piece]
+                if pieces:
+                    parts.append(": ".join(pieces))
+            else:
+                parts.append(str(err))
+
+        if not parts:
+            return str(message)
+        return f"{message} ({'; '.join(parts)})"
+
+    def _normalize_labels(self, labels: list[str] | None) -> list[str]:
+        """Normalize labels to GitHub-safe names and remove duplicates."""
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for raw in labels or []:
+            if not isinstance(raw, str):
+                continue
+            label = " ".join(raw.strip().split())
+            if not label:
+                continue
+            label = label[:GITHUB_LABEL_MAX_LENGTH]
+            if label in seen:
+                continue
+            seen.add(label)
+            normalized.append(label)
+        return normalized
+
+    async def ensure_labels(self, repo: str, labels: list[str] | None) -> list[str]:
+        """Ensure labels exist and return the subset safe to include on issue creation."""
+        usable_labels: list[str] = []
+        for label in self._normalize_labels(labels):
+            try:
+                await self._request(
+                    "POST",
+                    f"/repos/{repo}/labels",
+                    json={"name": label, "color": "6366f1"},
+                )
+            except httpx.HTTPStatusError as exc:
+                response = exc.response
+                detail = self._error_detail(response) if response is not None else str(exc)
+                if response is not None and response.status_code == 422 and "already_exists" in detail:
+                    usable_labels.append(label)
+                    continue
+                logger.warning("Skipping invalid GitHub label %r on %s: %s", label, repo, detail)
+                continue
+
+            usable_labels.append(label)
+        return usable_labels
 
     # --- Issues ---
 
@@ -85,10 +156,27 @@ class GitHubClient:
         labels: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a GitHub issue."""
-        payload: dict[str, Any] = {"title": title, "body": body}
-        if labels:
-            payload["labels"] = labels
-        resp = await self._request("POST", f"/repos/{repo}/issues", json=payload)
+        safe_title = (title or "").strip() or "Untitled Issue"
+        safe_body = (body or "").strip()
+        safe_labels = await self.ensure_labels(repo, labels)
+
+        payload: dict[str, Any] = {"title": safe_title, "body": safe_body}
+        if safe_labels:
+            payload["labels"] = safe_labels
+
+        try:
+            resp = await self._request("POST", f"/repos/{repo}/issues", json=payload)
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            detail = self._error_detail(response) if response is not None else str(exc)
+            label_error = response is not None and response.status_code == 422 and "label" in detail.lower()
+            if label_error and "labels" in payload:
+                logger.warning("Retrying GitHub issue creation on %s without labels after 422: %s", repo, detail)
+                retry_payload = {"title": safe_title, "body": safe_body}
+                resp = await self._request("POST", f"/repos/{repo}/issues", json=retry_payload)
+            else:
+                raise RuntimeError(f"Failed to create issue on {repo}: {detail}") from exc
+
         issue = resp.json()
         logger.info("Created issue #%d on %s", issue["number"], repo)
         return issue
@@ -109,10 +197,13 @@ class GitHubClient:
 
     async def add_labels(self, repo: str, issue_number: int, labels: list[str]) -> None:
         """Add labels to an issue."""
+        safe_labels = await self.ensure_labels(repo, labels)
+        if not safe_labels:
+            return
         await self._request(
             "POST",
             f"/repos/{repo}/issues/{issue_number}/labels",
-            json={"labels": labels},
+            json={"labels": safe_labels},
         )
 
     # --- Branches ---

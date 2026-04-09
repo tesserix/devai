@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import time
 from typing import Any
@@ -31,6 +32,7 @@ from devai.scm.base import AuthMethod, SCMClient, SCMProvider
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
+GITHUB_LABEL_MAX_LENGTH = 50
 
 
 class GitHubSCMClient(SCMClient):
@@ -94,10 +96,54 @@ class GitHubSCMClient(SCMClient):
         headers = {"Authorization": f"token {token}"} if token else {}
         resp = await self._http.request(method, path, headers=headers, **kwargs)
         if resp.is_client_error or resp.is_server_error:
-            body = resp.text[:500]
-            logger.error("GitHub API %s %s → %s: %s", method, path, resp.status_code, body)
+            logger.error("GitHub API %s %s → %s: %s", method, path, resp.status_code, self._error_detail(resp))
             resp.raise_for_status()
         return resp
+
+    def _error_detail(self, response: httpx.Response) -> str:
+        """Return a concise GitHub error summary from a failed response."""
+        try:
+            payload = response.json()
+        except json.JSONDecodeError:
+            return response.text[:500]
+
+        message = payload.get("message", "GitHub API error")
+        errors = payload.get("errors")
+        if not errors:
+            return str(message)
+
+        parts: list[str] = []
+        for err in errors:
+            if isinstance(err, dict):
+                code = err.get("code")
+                field = err.get("field")
+                err_message = err.get("message")
+                pieces = [str(piece) for piece in (field, code, err_message) if piece]
+                if pieces:
+                    parts.append(": ".join(pieces))
+            else:
+                parts.append(str(err))
+
+        if not parts:
+            return str(message)
+        return f"{message} ({'; '.join(parts)})"
+
+    def _normalize_labels(self, labels: list[str] | None) -> list[str]:
+        """Normalize labels to GitHub-safe names and remove duplicates."""
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for raw in labels or []:
+            if not isinstance(raw, str):
+                continue
+            label = " ".join(raw.strip().split())
+            if not label:
+                continue
+            label = label[:GITHUB_LABEL_MAX_LENGTH]
+            if label in seen:
+                continue
+            seen.add(label)
+            normalized.append(label)
+        return normalized
 
     # --- Repositories ---
 
@@ -142,35 +188,51 @@ class GitHubSCMClient(SCMClient):
 
     # --- Issues ---
 
-    async def ensure_labels(self, repo: str, labels: list[str]) -> None:
+    async def ensure_labels(self, repo: str, labels: list[str] | None) -> list[str]:
         """Create labels on a repo if they don't already exist."""
-        import contextlib
-
-        for label in labels:
-            with contextlib.suppress(Exception):
+        usable_labels: list[str] = []
+        for label in self._normalize_labels(labels):
+            try:
                 await self._request(
                     "POST",
                     f"/repos/{repo}/labels",
                     json={"name": label, "color": "6366f1"},
                 )
+            except httpx.HTTPStatusError as exc:
+                response = exc.response
+                detail = self._error_detail(response) if response is not None else str(exc)
+                if response is not None and response.status_code == 422 and "already_exists" in detail:
+                    usable_labels.append(label)
+                    continue
+                logger.warning("Skipping invalid GitHub label %r on %s: %s", label, repo, detail)
+                continue
+
+            usable_labels.append(label)
+        return usable_labels
 
     async def create_issue(self, repo: str, title: str, body: str, labels: list[str] | None = None) -> dict[str, Any]:
         # GitHub requires a non-empty title
         safe_title = (title or "").strip() or "Untitled Issue"
         safe_body = (body or "").strip() or ""
-        if labels:
-            await self.ensure_labels(repo, labels)
+        safe_labels = await self.ensure_labels(repo, labels)
         payload: dict[str, Any] = {"title": safe_title, "body": safe_body}
-        if labels:
-            payload["labels"] = labels
+        if safe_labels:
+            payload["labels"] = safe_labels
         try:
             resp = await self._request("POST", f"/repos/{repo}/issues", json=payload)
             return resp.json()
         except httpx.HTTPStatusError as exc:
-            detail = exc.response.text[:300] if exc.response else "no body"
+            response = exc.response
+            detail = self._error_detail(response) if response is not None else str(exc)
+            label_error = response is not None and response.status_code == 422 and "label" in detail.lower()
+            if label_error and "labels" in payload:
+                logger.warning("Retrying GitHub issue creation on %s without labels after 422: %s", repo, detail)
+                retry_resp = await self._request(
+                    "POST", f"/repos/{repo}/issues", json={"title": safe_title, "body": safe_body}
+                )
+                return retry_resp.json()
             raise RuntimeError(
-                f"Failed to create issue on {repo} (HTTP {exc.response.status_code}): {detail}. "
-                f"Check that the repo exists and has Issues enabled."
+                f"Failed to create issue on {repo}: {detail}. Check that the repo exists and has Issues enabled."
             ) from exc
 
     async def get_issue(self, repo: str, issue_id: int | str) -> dict[str, Any]:
@@ -182,7 +244,10 @@ class GitHubSCMClient(SCMClient):
         return resp.json()
 
     async def add_labels(self, repo: str, issue_id: int | str, labels: list[str]) -> None:
-        await self._request("POST", f"/repos/{repo}/issues/{issue_id}/labels", json={"labels": labels})
+        safe_labels = await self.ensure_labels(repo, labels)
+        if not safe_labels:
+            return
+        await self._request("POST", f"/repos/{repo}/issues/{issue_id}/labels", json={"labels": safe_labels})
 
     # --- Branches ---
 
