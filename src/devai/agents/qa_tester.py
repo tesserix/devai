@@ -117,7 +117,7 @@ Branch: {branch}
 
 ## Story Under Test
 Story #{story_number}: {story_title}
-Description: {active_story.get('description', '')[:500]}
+Description: {active_story.get("description", "")[:500]}
 
 ### Acceptance Criteria to Verify
 {ac_text}

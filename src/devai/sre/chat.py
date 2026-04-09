@@ -107,7 +107,9 @@ Respond to the user's message using the live cluster data above. Be specific and
             if self.db:
                 rows = await self.db.pool.fetch("SELECT * FROM v_sre_cluster_health")
                 if rows:
-                    context_parts.append("### Cluster Health\n" + json.dumps([dict(r) for r in rows], indent=2, default=str))
+                    context_parts.append(
+                        "### Cluster Health\n" + json.dumps([dict(r) for r in rows], indent=2, default=str)
+                    )
         except Exception:
             pass
 
@@ -130,7 +132,9 @@ Respond to the user's message using the live cluster data above. Be specific and
                 pods_raw = await self.k8s._kubectl("get", "pods", "-n", ns, "-o", "jsonpath={.items[*].metadata.name}")
                 if pods_raw:
                     for pod in pods_raw.split()[:3]:
-                        logs = await self.k8s.execute("k8s_get_pod_logs", {"namespace": ns, "pod_name": pod, "lines": 50, "errors_only": True})
+                        logs = await self.k8s.execute(
+                            "k8s_get_pod_logs", {"namespace": ns, "pod_name": pod, "lines": 50, "errors_only": True}
+                        )
                         if logs and "No logs" not in logs:
                             context_parts.append(f"### Logs: {ns}/{pod}\n{logs[:3000]}")
 
@@ -162,7 +166,9 @@ Respond to the user's message using the live cluster data above. Be specific and
                         "SELECT id, severity, category, title, description, status, detected_by, created_at FROM sre_incidents ORDER BY created_at DESC LIMIT 15"
                     )
                     if rows:
-                        context_parts.append("### Recent Incidents\n" + json.dumps([dict(r) for r in rows], indent=2, default=str))
+                        context_parts.append(
+                            "### Recent Incidents\n" + json.dumps([dict(r) for r in rows], indent=2, default=str)
+                        )
             except Exception:
                 pass
 
@@ -170,11 +176,12 @@ Respond to the user's message using the live cluster data above. Be specific and
         if any(kw in msg_lower for kw in ["cost", "spend", "bill", "waste", "saving", "expensive"]):
             try:
                 if self.db:
-                    rows = await self.db.pool.fetch(
-                        "SELECT * FROM sre_cost_reports ORDER BY report_date DESC LIMIT 7"
-                    )
+                    rows = await self.db.pool.fetch("SELECT * FROM sre_cost_reports ORDER BY report_date DESC LIMIT 7")
                     if rows:
-                        context_parts.append("### Cost Reports (last 7 days)\n" + json.dumps([dict(r) for r in rows], indent=2, default=str))
+                        context_parts.append(
+                            "### Cost Reports (last 7 days)\n"
+                            + json.dumps([dict(r) for r in rows], indent=2, default=str)
+                        )
             except Exception:
                 pass
 
@@ -194,7 +201,9 @@ Respond to the user's message using the live cluster data above. Be specific and
                         "SELECT id, severity, category, title, status, created_at FROM sre_incidents WHERE status = 'open' ORDER BY created_at DESC LIMIT 10"
                     )
                     if rows:
-                        context_parts.append("### Open Incidents\n" + json.dumps([dict(r) for r in rows], indent=2, default=str))
+                        context_parts.append(
+                            "### Open Incidents\n" + json.dumps([dict(r) for r in rows], indent=2, default=str)
+                        )
             except Exception:
                 pass
 

@@ -176,9 +176,7 @@ The Staff Reviewer requested changes. Incorporate this feedback into revised pla
             "Per-Story Technical Plans Ready",
             f"Created {len(story_plans)} individual technical plans for {len(stories)} stories.\n"
             f"Each story will be implemented on its own feature branch.\n\n"
-            + "\n".join(
-                f"- Story #{s.get('number', '?')}: {s.get('title', '')}" for s in stories[:10]
-            ),
+            + "\n".join(f"- Story #{s.get('number', '?')}: {s.get('title', '')}" for s in stories[:10]),
         )
 
         # Notify QA about what to expect

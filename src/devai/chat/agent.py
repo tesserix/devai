@@ -556,9 +556,7 @@ class DevAIChatAgent:
                     "subject": "Additional Requirements from User",
                     "body": message,
                     "payload": {"source": "chat_agent", "run_id": run_id},
-                    "timestamp": __import__("datetime").datetime.now(
-                        __import__("datetime").timezone.utc
-                    ).isoformat(),
+                    "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
                 }
             )
             await state.redis.rpush(f"devai:run:{run_id}:a2a_messages", a2a_msg)

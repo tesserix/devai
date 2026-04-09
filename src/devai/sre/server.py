@@ -96,8 +96,14 @@ def create_sre_app() -> FastAPI:
 
         from devai.sre.chat import SREChatAgent
 
-        agent = SREChatAgent(settings, database=app.state.db)
-        response = await agent.chat(message, session_id)
+        if not hasattr(app.state, "chat_agent"):
+            app.state.chat_agent = SREChatAgent(settings, database=app.state.db)
+        agent = app.state.chat_agent
+        try:
+            response = await agent.chat(message, session_id)
+        except Exception as exc:
+            logger.exception("SRE chat failed for session %s", session_id)
+            response = f"Sorry, I encountered an error: {exc}"
         return {"response": response, "session_id": session_id}
 
     # --- Health ---

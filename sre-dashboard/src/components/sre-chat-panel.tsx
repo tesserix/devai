@@ -45,10 +45,13 @@ export function SREChatPanel() {
         body: JSON.stringify({ message: userMsg, session_id: sessionId.current }),
       });
 
+      if (!res.ok) {
+        throw new Error(`Server error (${res.status})`);
+      }
       const data = await res.json();
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: data.response || "No response.", timestamp: new Date() },
+        { role: "assistant", content: data.response || "No response from the model — check server logs.", timestamp: new Date() },
       ]);
     } catch {
       setMessages((prev) => [

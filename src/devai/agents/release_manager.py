@@ -52,8 +52,7 @@ class ReleaseManagerAgent(BaseAgent):
             a2a.escalate(
                 "supervisor",
                 "No Approved Stories to Merge",
-                f"Out of {len(story_branches)} stories, none were approved. "
-                f"{len(failed_stories)} failed.",
+                f"Out of {len(story_branches)} stories, none were approved. {len(failed_stories)} failed.",
             )
             return {
                 "deploy_status": "failed",
@@ -95,8 +94,7 @@ class ReleaseManagerAgent(BaseAgent):
                 a2a.notify(
                     "orchestrator",
                     f"Story #{story_number} Merged",
-                    f"PR #{pr_number} (Story #{story_number}) merged to main. "
-                    f"SHA: {merge_result.get('sha', '')[:8]}",
+                    f"PR #{pr_number} (Story #{story_number}) merged to main. SHA: {merge_result.get('sha', '')[:8]}",
                 )
             else:
                 error = merge_result.get("message", "Merge failed")

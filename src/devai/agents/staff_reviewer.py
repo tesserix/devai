@@ -108,7 +108,7 @@ Branch: {branch}
 
 ## Story Details
 Title: {story_title}
-Description: {active_story.get('description', '')[:500]}
+Description: {active_story.get("description", "")[:500]}
 
 ### Acceptance Criteria
 {ac_text}

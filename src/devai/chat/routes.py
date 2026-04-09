@@ -30,8 +30,14 @@ async def chat_message(request: Any) -> dict[str, str]:
     state = request.app.state.state_manager
     db = getattr(request.app.state, "database", None)
 
-    agent = DevAIChatAgent(config, state, database=db)
-    response = await agent.chat(message, session_id)
+    if not hasattr(request.app.state, "chat_agent"):
+        request.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
+    agent = request.app.state.chat_agent
+    try:
+        response = await agent.chat(message, session_id)
+    except Exception as exc:
+        logger.exception("Chat failed for session %s", session_id)
+        response = f"Sorry, I encountered an error: {exc}"
 
     return {"response": response, "session_id": session_id}
 
@@ -49,7 +55,9 @@ async def chat_stream(request: Any) -> StreamingResponse:
     state = request.app.state.state_manager
     db = getattr(request.app.state, "database", None)
 
-    agent = DevAIChatAgent(config, state, database=db)
+    if not hasattr(request.app.state, "chat_agent"):
+        request.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
+    agent = request.app.state.chat_agent
 
     async def event_stream():
         async for chunk in agent.stream_chat(message, session_id):
@@ -71,7 +79,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
     state = websocket.app.state.state_manager
     db = getattr(websocket.app.state, "database", None)
 
-    agent = DevAIChatAgent(config, state, database=db)
+    if not hasattr(websocket.app.state, "chat_agent"):
+        websocket.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
+    agent = websocket.app.state.chat_agent
 
     try:
         while True:
