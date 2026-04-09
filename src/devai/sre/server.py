@@ -127,14 +127,52 @@ def create_sre_app() -> FastAPI:
 
     # --- Scan API ---
 
+    # Track running scans so they don't get garbage collected
+    if not hasattr(app.state, "scan_tasks"):
+        app.state.scan_tasks = set()
+
     @app.post("/api/scan/trigger")
     async def trigger_scan(request: Request):
         """Manually trigger an SRE scan."""
         content_type = request.headers.get("content-type", "")
         body = await request.json() if content_type.startswith("application/json") else {}
         cluster_id = body.get("cluster_id", "default")
-        asyncio.create_task(_run_single_scan(app.state.db, cluster_id, "manual"))
-        return {"status": "triggered", "cluster": cluster_id}
+
+        # Ensure the cluster exists in sre_clusters (foreign key requirement)
+        try:
+            await app.state.db.pool.execute(
+                """INSERT INTO sre_clusters (id, name, provider, region)
+                   VALUES ($1, $2, 'gke', $3)
+                   ON CONFLICT (id) DO NOTHING""",
+                cluster_id,
+                cluster_id,
+                "asia-south1",
+            )
+        except Exception as e:
+            logger.error("Failed to ensure cluster row: %s", e)
+
+        # Insert a "running" scan record IMMEDIATELY so the dashboard shows it
+        from ulid import ULID
+
+        scan_id = str(ULID())
+        try:
+            await app.state.db.pool.execute(
+                """INSERT INTO sre_scan_runs (id, cluster_id, trigger, status, started_at)
+                   VALUES ($1, $2, $3, 'running', NOW())""",
+                scan_id,
+                cluster_id,
+                "manual",
+            )
+        except Exception as e:
+            logger.error("Failed to record scan start: %s", e)
+            return {"status": "error", "error": str(e)}
+
+        # Create task and KEEP a reference so it isn't garbage collected
+        task = asyncio.create_task(_run_single_scan(app.state.db, cluster_id, "manual", scan_id))
+        app.state.scan_tasks.add(task)
+        task.add_done_callback(app.state.scan_tasks.discard)
+
+        return {"status": "triggered", "cluster": cluster_id, "scan_id": scan_id}
 
     @app.get("/api/scan/runs")
     async def list_scan_runs(limit: int = 20):
@@ -261,30 +299,72 @@ async def _autonomous_scanner(db: Any) -> None:
         await asyncio.sleep(DEFAULT_SCAN_INTERVAL)
 
 
-async def _run_single_scan(db: Any, cluster_id: str, trigger: str) -> None:
+async def _run_single_scan(db: Any, cluster_id: str, trigger: str, scan_id: str | None = None) -> None:
     """Execute a single SRE monitoring scan."""
     from devai.sre.graph.orchestrator import SREOrchestrator
 
-    orchestrator = SREOrchestrator(settings, database=db)
-    final_state = await orchestrator.run(cluster_id=cluster_id, trigger=trigger)
+    logger.info("Starting SRE scan: cluster=%s trigger=%s scan_id=%s", cluster_id, trigger, scan_id)
 
-    # Record the scan run
     try:
-        await db.pool.execute(
-            """INSERT INTO sre_scan_runs (id, cluster_id, trigger, status, incidents_found,
-               apps_checked, checks_passed, checks_failed, agent_timings, completed_at)
-               VALUES ($1, $2, $3, 'completed', $4, $5, $6, $7, $8, NOW())""",
-            final_state.get("scan_id", ""),
-            cluster_id,
-            trigger,
-            final_state.get("incidents_created", 0),
-            len(final_state.get("apps", [])),
-            len(final_state.get("all_findings", [])),
-            0,
-            json.dumps(final_state.get("agent_timings", {})),
-        )
+        orchestrator = SREOrchestrator(settings, database=db)
+        final_state = await orchestrator.run(cluster_id=cluster_id, trigger=trigger)
+
+        # Use the provided scan_id (from trigger endpoint) or the orchestrator's
+        actual_scan_id = scan_id or final_state.get("scan_id", "")
+
+        # Update the existing record (or insert if not pre-created)
+        try:
+            if scan_id:
+                await db.pool.execute(
+                    """UPDATE sre_scan_runs
+                       SET status = 'completed',
+                           incidents_found = $2,
+                           apps_checked = $3,
+                           checks_passed = $4,
+                           checks_failed = $5,
+                           agent_timings = $6,
+                           completed_at = NOW()
+                       WHERE id = $1""",
+                    actual_scan_id,
+                    final_state.get("incidents_created", 0),
+                    len(final_state.get("apps", [])),
+                    len(final_state.get("all_findings", [])),
+                    0,
+                    json.dumps(final_state.get("agent_timings", {})),
+                )
+            else:
+                await db.pool.execute(
+                    """INSERT INTO sre_scan_runs (id, cluster_id, trigger, status, incidents_found,
+                       apps_checked, checks_passed, checks_failed, agent_timings, completed_at)
+                       VALUES ($1, $2, $3, 'completed', $4, $5, $6, $7, $8, NOW())""",
+                    actual_scan_id,
+                    cluster_id,
+                    trigger,
+                    final_state.get("incidents_created", 0),
+                    len(final_state.get("apps", [])),
+                    len(final_state.get("all_findings", [])),
+                    0,
+                    json.dumps(final_state.get("agent_timings", {})),
+                )
+            logger.info(
+                "SRE scan recorded: scan_id=%s apps=%d findings=%d incidents=%d",
+                actual_scan_id,
+                len(final_state.get("apps", [])),
+                len(final_state.get("all_findings", [])),
+                final_state.get("incidents_created", 0),
+            )
+        except Exception as e:
+            logger.error("Failed to record scan run: %s", e)
     except Exception as e:
-        logger.error("Failed to record scan run: %s", e)
+        logger.exception("SRE scan failed: %s", e)
+        if scan_id:
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                await db.pool.execute(
+                    """UPDATE sre_scan_runs SET status = 'failed', completed_at = NOW() WHERE id = $1""",
+                    scan_id,
+                )
 
 
 # CLI entrypoint
