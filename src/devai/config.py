@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     gke_project: str = "tesseracthub-480811"
     gke_use_in_cluster: bool = True  # Use in-cluster auth when running in GKE
 
+    # --- Monitoring ---
+    prometheus_url: str = "http://prometheus-server.monitoring.svc.cluster.local:80"
+    grafana_url: str = "http://grafana.monitoring.svc.cluster.local:80"
+
     # --- ArgoCD ---
     argocd_namespace: str = "argocd"
     argocd_sync_timeout: int = 300  # seconds to wait for ArgoCD sync

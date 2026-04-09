@@ -173,16 +173,25 @@ Create a GitHub Epic that encompasses all these requirements."""
 
         req_summary = ""
         if analyzed:
-            req_summary = "\n".join(
-                f"- [{r.get('priority', 'medium')}] {r.get('title', '')}: {r.get('description', '')[:150]}"
-                for r in analyzed[:15]
-            )
+            parts: list[str] = []
+            for r in analyzed[:15]:
+                if isinstance(r, dict):
+                    parts.append(
+                        f"- [{r.get('priority', 'medium')}] {r.get('title', '')}: {r.get('description', '')[:150]}"
+                    )
+                else:
+                    parts.append(f"- {str(r)[:200]}")
+            req_summary = "\n".join(parts)
         else:
             req_summary = requirements
 
         epic_context = ""
         if epics:
-            epic_context = f"\n## Parent Epic\n{epics[0].get('title', '')}\n{epics[0].get('description', '')[:300]}"
+            ep = epics[0]
+            if isinstance(ep, dict):
+                epic_context = f"\n## Parent Epic\n{ep.get('title', '')}\n{ep.get('description', '')[:300]}"
+            else:
+                epic_context = f"\n## Parent Epic\n{str(ep)[:300]}"
 
         prompt = f"""Repository: {repo}
 
@@ -211,6 +220,10 @@ Break these requirements into user stories. Consider the repository context and 
         story_numbers: list[int] = []
 
         for story in stories_data:
+            if isinstance(story, str):
+                story = {"title": story[:100], "description": story, "acceptance_criteria": [], "priority": "medium"}
+            if not isinstance(story, dict):
+                continue
             ac = story.get("acceptance_criteria", [])
             body = f"{story.get('description', '')}\n\n## Acceptance Criteria\n"
             for criterion in ac:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -93,7 +94,11 @@ class PerfMonitorAgent:
         self.config = config
         self.openai = OpenAIProvider(config)
         self.k8s = K8sToolExecutor()
-        self._prometheus_url = getattr(config, "prometheus_url", "http://prometheus.monitoring.svc.cluster.local:9090")
+        self._prometheus_url = (
+            getattr(config, "prometheus_url", None)
+            or os.environ.get("DEVAI_PROMETHEUS_URL")
+            or "http://prometheus-server.monitoring.svc.cluster.local:80"
+        )
 
     async def run(self, namespaces: list[str]) -> dict[str, Any]:
         """Deep performance analysis across monitored namespaces."""
