@@ -10,6 +10,7 @@ In the collaborative parallel model, the Senior Developer:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import TYPE_CHECKING, Any
@@ -111,11 +112,16 @@ class SeniorDeveloperAgent(BaseAgent):
         """Implement the active story on its own feature branch."""
         claude = ClaudeProvider(self.config)
         github_tools = GitHubToolExecutor(self.github)
-        validation_tools = ValidationToolExecutor()
+        validation_tools = ValidationToolExecutor(self.github)
+        observed_pr_number = state.get("pr_number")
 
         async def tool_executor(tool_name: str, tool_input: dict[str, Any]) -> str:
             if tool_name.startswith("github_"):
-                return await github_tools.execute(tool_name, tool_input)
+                result = await github_tools.execute(tool_name, tool_input)
+                nonlocal observed_pr_number
+                if tool_name == "github_create_pull_request":
+                    observed_pr_number = self._extract_pr_number(result) or observed_pr_number
+                return result
             if tool_name.startswith("validate_"):
                 return await validation_tools.execute(tool_name, tool_input)
             return f"Unknown tool: {tool_name}"
@@ -124,6 +130,8 @@ class SeniorDeveloperAgent(BaseAgent):
         plan = state.get("technical_plan", "")
         stories = state.get("stories", [])
         requirements = state.get("requirements", "")
+        tech_stack = state.get("detected_tech_stack", "")
+        memory_context = state.get("memory_context", "")
 
         # Get the active story context
         active_idx = state.get("active_story_index", 0)
@@ -166,6 +174,12 @@ Description: {story_desc}
 
 ## Technical Plan for This Story
 {plan}
+
+## Detected Tech Stack
+{tech_stack or "Not detected"}
+
+## Relevant Memory From Past Runs
+{memory_context or "(none)"}
 
 ## Original Requirements (for context)
 {requirements[:1500]}
@@ -220,7 +234,7 @@ Use the existing branch `{branch_name}` — push fixes to it, do NOT create a ne
         return {
             "implementation_summary": result_text,
             "branch_name": branch_name,
-            "pr_number": state.get("pr_number"),
+            "pr_number": observed_pr_number,
         }
 
     @staticmethod
@@ -232,3 +246,16 @@ Use the existing branch `{branch_name}` — push fixes to it, do NOT create a ne
         slug = re.sub(r"-+", "-", slug)
         slug = slug.strip("-")
         return slug[:40]
+
+    @staticmethod
+    def _extract_pr_number(tool_output: str) -> int | None:
+        try:
+            data = json.loads(tool_output)
+        except json.JSONDecodeError:
+            return None
+
+        for key in ("number", "iid"):
+            value = data.get(key)
+            if isinstance(value, int):
+                return value
+        return None

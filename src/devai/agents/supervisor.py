@@ -177,6 +177,10 @@ class SupervisorAgent(BaseAgent):
         if tech_stack:
             context_parts.append(f"## Detected Tech Stack\n{tech_stack}")
 
+        memory_context = state.get("memory_context", "")
+        if memory_context:
+            context_parts.append(f"## Relevant Memory From Past Runs\n{memory_context}")
+
         if review_feedback:
             context_parts.append(
                 "## Review Feedback from Previous Iteration\n" + "\n".join(f"- {fb}" for fb in review_feedback)

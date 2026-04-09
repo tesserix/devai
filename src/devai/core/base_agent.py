@@ -106,6 +106,13 @@ class BaseAgent(ABC):
         existing_messages = list(state.get("a2a_messages", []))
         existing_ids = {m.get("id") for m in existing_messages if isinstance(m, dict)}
 
+        direct_messages = result.get("a2a_messages", [])
+        if isinstance(direct_messages, list):
+            for msg in direct_messages:
+                if isinstance(msg, dict) and msg.get("id") not in existing_ids:
+                    existing_messages.append(msg)
+                    existing_ids.add(msg.get("id"))
+
         # Add outbox messages (sent via the a2a bus parameter)
         for msg in a2a.collect_outbox():
             if msg.get("id") not in existing_ids:

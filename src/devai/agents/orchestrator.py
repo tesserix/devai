@@ -182,6 +182,10 @@ class OrchestratorAgent(BaseAgent):
         if inbox_context:
             context_parts.append(f"\n{inbox_context}")
 
+        memory_context = state.get("memory_context", "")
+        if memory_context:
+            context_parts.append(f"\n## Relevant Memory From Past Runs\n{memory_context}")
+
         user_message = "\n".join(context_parts)
         user_message += "\n\nBased on the current state, what should happen next? Provide your routing decision."
 

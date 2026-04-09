@@ -8,6 +8,7 @@ import logging
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,9 @@ TEST_TOOLS: list[dict[str, Any]] = [
 class TestToolExecutor:
     """Executes Playwright test tools."""
 
+    def __init__(self, scm: Any | None = None) -> None:
+        self.scm = scm
+
     async def execute(self, tool_name: str, tool_input: dict[str, Any]) -> str:
         handler = getattr(self, f"_handle_{tool_name}", None)
         if handler is None:
@@ -64,6 +68,7 @@ class TestToolExecutor:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Clone the repo
+            clone_url = await self._build_clone_url(repo)
             clone_proc = await asyncio.create_subprocess_exec(
                 "git",
                 "clone",
@@ -71,7 +76,7 @@ class TestToolExecutor:
                 branch,
                 "--depth",
                 "1",
-                f"https://github.com/{repo}.git",
+                clone_url,
                 tmpdir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -133,7 +138,9 @@ class TestToolExecutor:
             }
 
             if results_path.exists():
-                results["json_results"] = json.loads(results_path.read_text())
+                parsed_json = json.loads(results_path.read_text())
+                results["json_results"] = parsed_json
+                results["summary"] = self._summarize_results(parsed_json)
 
             return results
 
@@ -172,6 +179,66 @@ class TestToolExecutor:
 
         walk_suites(suites)
 
+        return {
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "skipped": skipped,
+            "failures": failures,
+            "pass_rate": f"{(passed / total * 100) if total > 0 else 0:.1f}%",
+        }
+
+    async def _build_clone_url(self, repo: str) -> str:
+        """Build an authenticated clone URL when the SCM client supports it."""
+        if not self.scm:
+            return f"https://github.com/{repo}.git"
+
+        provider = str(getattr(self.scm, "provider", ""))
+        base_url = getattr(self.scm, "_base_url", "https://github.com")
+        token_getter = getattr(self.scm, "_get_token", None)
+        token = await token_getter() if callable(token_getter) else ""
+        host = urlparse(base_url).netloc or "github.com"
+
+        if provider.endswith("github"):
+            if token:
+                return f"https://x-access-token:{quote(token, safe='')}@{host}/{repo}.git"
+            return f"https://{host}/{repo}.git"
+
+        if provider.endswith("gitlab"):
+            if token:
+                return f"https://oauth2:{quote(token, safe='')}@{host}/{repo}.git"
+            return f"https://{host}/{repo}.git"
+
+        return f"https://{host}/{repo}.git"
+
+    def _summarize_results(self, data: dict[str, Any]) -> dict[str, Any]:
+        suites = data.get("suites", [])
+        total = passed = failed = skipped = 0
+        failures: list[dict[str, str]] = []
+
+        def walk_suites(suite_list: list[dict[str, Any]]) -> None:
+            nonlocal total, passed, failed, skipped
+            for suite in suite_list:
+                for spec in suite.get("specs", []):
+                    for test in spec.get("tests", []):
+                        for result in test.get("results", []):
+                            total += 1
+                            status = result.get("status", "")
+                            if status == "passed":
+                                passed += 1
+                            elif status == "failed":
+                                failed += 1
+                                failures.append(
+                                    {
+                                        "test": spec.get("title", "unknown"),
+                                        "error": str(result.get("error", {}).get("message", ""))[:500],
+                                    }
+                                )
+                            elif status == "skipped":
+                                skipped += 1
+                walk_suites(suite.get("suites", []))
+
+        walk_suites(suites)
         return {
             "total": total,
             "passed": passed,

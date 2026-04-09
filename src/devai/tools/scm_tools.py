@@ -207,8 +207,19 @@ SCM_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+
+def _legacy_tool_aliases(prefix: str = "github_") -> list[dict[str, Any]]:
+    """Expose SCM tools under legacy names for existing agents."""
+
+    aliased_tools: list[dict[str, Any]] = []
+    for tool in SCM_TOOLS:
+        name = tool["name"]
+        aliased_tools.append({**tool, "name": name.replace("scm_", prefix, 1)})
+    return aliased_tools
+
+
 # Backward-compatible aliases (old github_* names → new scm_* names)
-GITHUB_TOOLS = SCM_TOOLS
+GITHUB_TOOLS = _legacy_tool_aliases()
 
 
 class SCMToolExecutor:

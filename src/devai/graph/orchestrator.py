@@ -438,22 +438,33 @@ class ALMOrchestrator:
         module = importlib.import_module(module_path)
         agent_cls = getattr(module, class_name)
         agent = agent_cls(self.scm, self.state_manager, self.config)
+        await self.state_manager.set_agent_status(state.get("run_id", ""), agent.name, "running")
 
         # Inject memory context
-        await self._get_memory_context(agent.name, state)
+        memory_context = await self._get_memory_context(agent.name, state)
+        execution_state = dict(state)
+        if memory_context:
+            execution_state["memory_context"] = memory_context
 
         # Execute with timeout
         try:
-            coro = agent.run(state) if method == "run" else getattr(agent, method)(state)
+            coro = agent.run(execution_state) if method == "run" else getattr(agent, method)(execution_state)
 
             result = await with_timeout(coro, NODE_TIMEOUT, f"agent:{node_name}")
         except TimeoutError:
             logger.error("Agent %s timed out after %ds", node_name, NODE_TIMEOUT)
             self._report_progress(state, node_name, "failed", f"Timed out after {NODE_TIMEOUT}s")
+            await self.state_manager.set_agent_status(
+                state.get("run_id", ""),
+                agent.name,
+                "failed",
+                f"Timed out after {NODE_TIMEOUT}s",
+            )
             result = {"error": f"Agent {node_name} timed out after {NODE_TIMEOUT}s"}
         except Exception as e:
             logger.exception("Agent %s failed: %s", node_name, e)
             self._report_progress(state, node_name, "failed", str(e)[:200])
+            await self.state_manager.set_agent_status(state.get("run_id", ""), agent.name, "failed", str(e)[:500])
             # Learn from the failure
             await self._record_failure(agent.name, state, str(e))
             raise
@@ -471,10 +482,20 @@ class ALMOrchestrator:
             node_name: elapsed,
         }
 
-        self._report_progress(state, node_name, "completed", f"Done in {elapsed:.1f}s")
-
-        # Learn from success
-        await self._record_success(agent.name, state, node_name, elapsed)
+        if result.get("error"):
+            await self.state_manager.set_agent_status(
+                state.get("run_id", ""),
+                agent.name,
+                "failed",
+                str(result["error"])[:500],
+            )
+            self._report_progress(state, node_name, "failed", str(result["error"])[:200])
+            await self._record_failure(agent.name, state, str(result["error"]))
+        else:
+            await self.state_manager.set_agent_status(state.get("run_id", ""), agent.name, "completed")
+            self._report_progress(state, node_name, "completed", f"Done in {elapsed:.1f}s")
+            # Learn from success
+            await self._record_success(agent.name, state, node_name, elapsed)
 
         return result
 

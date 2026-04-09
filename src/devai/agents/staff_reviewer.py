@@ -118,6 +118,9 @@ Description: {active_story.get("description", "")[:500]}
 
 {inbox_context}
 
+## Relevant Memory From Past Runs
+{state.get("memory_context", "") or "(none)"}
+
 Start by getting the PR diff with github_get_pr_diff, then explore the repo structure and read relevant files to understand the codebase context. Verify the implementation satisfies the acceptance criteria."""
 
         governance = state.get("governance", "")

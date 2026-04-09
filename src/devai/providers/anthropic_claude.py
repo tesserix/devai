@@ -30,6 +30,7 @@ _claude_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=120, name
 AGENT_TIMEOUT = 900
 # Single API call timeout (3 minutes)
 API_CALL_TIMEOUT = 180
+DEFAULT_TOOL_TIMEOUT = 300
 
 
 class ClaudeProvider:
@@ -78,9 +79,12 @@ class ClaudeProvider:
                 for tc in tool_calls:
                     logger.debug("Executing tool: %s(%s)", tc.name, tc.input)
                     try:
+                        timeout_seconds = DEFAULT_TOOL_TIMEOUT
+                        if tc.name.startswith(("github_", "scm_", "doc_")):
+                            timeout_seconds = 120
                         result = await with_timeout(
                             tool_executor(tc.name, tc.input),
-                            timeout_seconds=60,
+                            timeout_seconds=timeout_seconds,
                             description=f"tool:{tc.name}",
                         )
                         tool_results.append(

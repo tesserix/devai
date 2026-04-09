@@ -14,6 +14,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,9 @@ SECURITY_TOOLS: list[dict[str, Any]] = [
 
 class SecurityToolExecutor:
     """Executes security scanning tools."""
+
+    def __init__(self, scm: Any | None = None) -> None:
+        self.scm = scm
 
     async def execute(self, tool_name: str, tool_input: dict[str, Any]) -> str:
         handler = getattr(self, f"_handle_{tool_name}", None)
@@ -706,6 +710,7 @@ class SecurityToolExecutor:
     # --- Helpers ---
 
     async def _clone(self, repo: str, branch: str, tmpdir: str) -> bool:
+        clone_url = await self._build_clone_url(repo)
         proc = await asyncio.create_subprocess_exec(
             "git",
             "clone",
@@ -713,7 +718,7 @@ class SecurityToolExecutor:
             branch,
             "--depth",
             "1",
-            f"https://github.com/{repo}.git",
+            clone_url,
             tmpdir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -723,6 +728,29 @@ class SecurityToolExecutor:
             logger.error("Clone failed: %s", stderr.decode()[:500])
             return False
         return True
+
+    async def _build_clone_url(self, repo: str) -> str:
+        """Build an authenticated clone URL when the SCM client supports it."""
+        if not self.scm:
+            return f"https://github.com/{repo}.git"
+
+        provider = str(getattr(self.scm, "provider", ""))
+        base_url = getattr(self.scm, "_base_url", "https://github.com")
+        token_getter = getattr(self.scm, "_get_token", None)
+        token = await token_getter() if callable(token_getter) else ""
+        host = urlparse(base_url).netloc or "github.com"
+
+        if provider.endswith("github"):
+            if token:
+                return f"https://x-access-token:{quote(token, safe='')}@{host}/{repo}.git"
+            return f"https://{host}/{repo}.git"
+
+        if provider.endswith("gitlab"):
+            if token:
+                return f"https://oauth2:{quote(token, safe='')}@{host}/{repo}.git"
+            return f"https://{host}/{repo}.git"
+
+        return f"https://{host}/{repo}.git"
 
     async def _run_cmd(
         self,

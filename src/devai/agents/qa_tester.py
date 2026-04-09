@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -74,12 +75,19 @@ class QATesterAgent(BaseAgent):
         """Write and run E2E tests for the implemented changes."""
         claude = ClaudeProvider(self.config)
         github_tools = GitHubToolExecutor(self.github)
-        test_tools = TestToolExecutor()
+        test_tools = TestToolExecutor(self.github)
+        latest_test_summary: dict[str, Any] = {}
 
         async def tool_executor(tool_name: str, tool_input: dict[str, Any]) -> str:
             if tool_name.startswith("github_"):
                 return await github_tools.execute(tool_name, tool_input)
-            return await test_tools.execute(tool_name, tool_input)
+            result = await test_tools.execute(tool_name, tool_input)
+            nonlocal latest_test_summary
+            if tool_name == "run_playwright_test":
+                latest_test_summary = self._extract_test_summary(result)
+            elif tool_name == "parse_test_results":
+                latest_test_summary = self._extract_json_object(result)
+            return result
 
         pr_number = state.get("pr_number")
         branch = state.get("branch_name")
@@ -105,6 +113,7 @@ class QATesterAgent(BaseAgent):
         story_number = active_story.get("number", "?")
         story_title = active_story.get("title", "")
         acceptance_criteria = active_story.get("acceptance_criteria", [])
+        memory_context = state.get("memory_context", "")
 
         ac_text = "\n".join(f"- {c}" for c in acceptance_criteria) if acceptance_criteria else "(none)"
 
@@ -126,6 +135,9 @@ Description: {active_story.get("description", "")[:500]}
 {state.get("requirements", "")[:1500]}
 
 {inbox_context}
+
+## Relevant Memory From Past Runs
+{memory_context or "(none)"}
 
 Write E2E tests that verify the acceptance criteria for Story #{story_number}. Then run them and report results.
 
@@ -167,7 +179,24 @@ Start by reading the PR diff to understand what was changed, explore existing te
 
         return {
             "test_summary": result_text,
-            "test_total": 0,  # Will be populated from actual test results
-            "test_passed": 0,
-            "test_failed": 0,
+            "test_total": int(latest_test_summary.get("total", 0)),
+            "test_passed": int(latest_test_summary.get("passed", 0)),
+            "test_failed": int(latest_test_summary.get("failed", 0)),
+            "test_failures": latest_test_summary.get("failures", []),
         }
+
+    @staticmethod
+    def _extract_json_object(text: str) -> dict[str, Any]:
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+
+    @classmethod
+    def _extract_test_summary(cls, text: str) -> dict[str, Any]:
+        data = cls._extract_json_object(text)
+        if "summary" in data and isinstance(data["summary"], dict):
+            return data["summary"]
+        if {"total", "passed", "failed"} <= data.keys():
+            return data
+        return {}

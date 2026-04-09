@@ -123,8 +123,11 @@ def create_sre_app() -> FastAPI:
     # --- Scan API ---
 
     @app.post("/api/scan/trigger")
-    async def trigger_scan(cluster_id: str = "default"):
+    async def trigger_scan(request: Request):
         """Manually trigger an SRE scan."""
+        content_type = request.headers.get("content-type", "")
+        body = await request.json() if content_type.startswith("application/json") else {}
+        cluster_id = body.get("cluster_id", "default")
         asyncio.create_task(_run_single_scan(app.state.db, cluster_id, "manual"))
         return {"status": "triggered", "cluster": cluster_id}
 

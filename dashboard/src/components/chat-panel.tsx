@@ -55,17 +55,19 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
       });
 
       if (!res.ok) {
-        throw new Error(`Server error (${res.status})`);
+        const errorText = await res.text();
+        throw new Error(errorText || `Server error (${res.status})`);
       }
       const data = await res.json();
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: data.response || "No response from the model — check server logs.", timestamp: new Date() },
       ]);
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect to the chat API.";
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Failed to connect to the chat API.", timestamp: new Date() },
+        { role: "assistant", content: message, timestamp: new Date() },
       ]);
     } finally {
       setLoading(false);

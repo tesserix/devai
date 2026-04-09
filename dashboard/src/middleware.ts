@@ -6,6 +6,7 @@ const PUBLIC_PATHS = [
   "/bff/",
   "/auth/",
   "/api/",
+  "/chat/",
   "/_next/",
   "/favicon.ico",
 ];

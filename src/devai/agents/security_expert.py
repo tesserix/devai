@@ -131,7 +131,7 @@ class SecurityExpertAgent(BaseAgent):
         """Run comprehensive security scans and make pass/block decision."""
         claude = ClaudeProvider(self.config)
         github_tools = GitHubToolExecutor(self.github)
-        security_tools = SecurityToolExecutor()
+        security_tools = SecurityToolExecutor(self.github)
 
         async def tool_executor(tool_name: str, tool_input: dict[str, Any]) -> str:
             if tool_name.startswith("github_"):
@@ -165,6 +165,7 @@ class SecurityExpertAgent(BaseAgent):
 
         # Check for messages from other agents
         inbox_context = a2a.format_inbox_context()
+        memory_context = state.get("memory_context", "")
 
         user_message = f"""Repository: {repo}
 PR: #{pr_number}
@@ -172,6 +173,9 @@ Branch: {branch}
 Story: #{story_number} — {story_title}
 
 {inbox_context}
+
+## Relevant Memory From Past Runs
+{memory_context or "(none)"}
 
 Run a comprehensive security scan of this PR (Story #{story_number}). Follow the process:
 1. Get the PR diff to understand changes
