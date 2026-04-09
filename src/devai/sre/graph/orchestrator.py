@@ -423,9 +423,7 @@ class SREOrchestrator:
             logger.error("Failed to persist health snapshots: %s", e)
 
     @staticmethod
-    def _match_finding_to_app(
-        finding: dict[str, Any], apps: list[dict[str, Any]]
-    ) -> dict[str, Any] | None:
+    def _match_finding_to_app(finding: dict[str, Any], apps: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Best-effort match a finding back to a discovered app.
 
         Mirrors IncidentResponderAgent._find_app but without the

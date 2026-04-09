@@ -134,13 +134,17 @@ class IncidentResponderAgent:
                 with contextlib.suppress(Exception):
                     if hasattr(scm, "create_issue_idempotent"):
                         await scm.create_issue_idempotent(
-                            repo, title, body,
+                            repo,
+                            title,
+                            body,
                             ["sre", "severity:medium", "devai:sre-detected"],
                             dedupe_labels=["devai:sre-detected"],
                         )
                     else:
                         await scm.create_issue(
-                            repo, title, body,
+                            repo,
+                            title,
+                            body,
                             ["sre", "severity:medium", "devai:sre-detected"],
                         )
 
@@ -210,7 +214,10 @@ class IncidentResponderAgent:
             try:
                 if hasattr(scm, "create_issue_idempotent"):
                     issue = await scm.create_issue_idempotent(
-                        repo, title, body, labels,
+                        repo,
+                        title,
+                        body,
+                        labels,
                         dedupe_labels=["devai:sre-detected"],
                     )
                 else:
@@ -283,7 +290,7 @@ class IncidentResponderAgent:
                 continue
             ref = image.split("@", 1)[0].split(":", 1)[0]
             if ref.startswith("ghcr.io/"):
-                parts = ref[len("ghcr.io/"):].split("/")
+                parts = ref[len("ghcr.io/") :].split("/")
                 if len(parts) >= 2:
                     return f"{parts[0]}/{parts[1]}"
         return ""
@@ -314,5 +321,3 @@ class IncidentResponderAgent:
 *This issue was automatically created by the DevAI SRE monitoring system.*
 """
         return body
-
-

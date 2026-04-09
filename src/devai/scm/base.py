@@ -35,10 +35,40 @@ logger = logging.getLogger(__name__)
 DEDUPE_MARKER = "devai-fingerprint"
 
 _TITLE_STOPWORDS = {
-    "the", "a", "an", "of", "for", "to", "in", "on", "and", "or", "with",
-    "by", "is", "be", "as", "at", "from", "this", "that", "into", "via",
-    "across", "over", "under", "about", "after", "before", "between",
-    "request", "task", "issue", "operational", "operation", "operations",
+    "the",
+    "a",
+    "an",
+    "of",
+    "for",
+    "to",
+    "in",
+    "on",
+    "and",
+    "or",
+    "with",
+    "by",
+    "is",
+    "be",
+    "as",
+    "at",
+    "from",
+    "this",
+    "that",
+    "into",
+    "via",
+    "across",
+    "over",
+    "under",
+    "about",
+    "after",
+    "before",
+    "between",
+    "request",
+    "task",
+    "issue",
+    "operational",
+    "operation",
+    "operations",
     "devai",
 }
 
@@ -152,12 +182,8 @@ class SCMClient(ABC):
         """
         # Pull both open and recently-closed candidates so we can dedup
         # against issues that an earlier successful run already finished.
-        open_candidates = await self.list_issues(
-            repo, state="open", labels=labels, limit=100
-        )
-        closed_candidates = await self.list_issues(
-            repo, state="closed", labels=labels, limit=50
-        )
+        open_candidates = await self.list_issues(repo, state="open", labels=labels, limit=100)
+        closed_candidates = await self.list_issues(repo, state="closed", labels=labels, limit=50)
         candidates = list(open_candidates) + list(closed_candidates)
         if not candidates:
             return None
@@ -192,10 +218,7 @@ class SCMClient(ABC):
 
             # Require at least one label overlap if we asked for any labels
             if target_labels:
-                cand_labels = {
-                    lbl.get("name") if isinstance(lbl, dict) else lbl
-                    for lbl in (issue.get("labels") or [])
-                }
+                cand_labels = {lbl.get("name") if isinstance(lbl, dict) else lbl for lbl in (issue.get("labels") or [])}
                 if not (target_labels & cand_labels):
                     continue
 
@@ -251,7 +274,9 @@ class SCMClient(ABC):
             issue_number = existing.get("number")
             logger.info(
                 "Dedup hit on %s: re-using #%s instead of creating duplicate %r",
-                repo, issue_number, title[:60],
+                repo,
+                issue_number,
+                title[:60],
             )
             try:
                 await self.add_comment(

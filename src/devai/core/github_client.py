@@ -236,12 +236,8 @@ class GitHubClient:
 
         # Pull open + recently-closed candidates
         try:
-            open_candidates = await self.list_issues(
-                repo, state="open", labels=search_labels, limit=100
-            )
-            closed_candidates = await self.list_issues(
-                repo, state="closed", labels=search_labels, limit=50
-            )
+            open_candidates = await self.list_issues(repo, state="open", labels=search_labels, limit=100)
+            closed_candidates = await self.list_issues(repo, state="closed", labels=search_labels, limit=50)
             candidates = list(open_candidates) + list(closed_candidates)
         except Exception as e:
             logger.warning("Dedup search failed on %s, will create normally: %s", repo, e)
@@ -274,8 +270,7 @@ class GitHubClient:
                         continue
                     if target_label_set:
                         cand_labels = {
-                            lbl.get("name") if isinstance(lbl, dict) else lbl
-                            for lbl in (issue.get("labels") or [])
+                            lbl.get("name") if isinstance(lbl, dict) else lbl for lbl in (issue.get("labels") or [])
                         }
                         if not (target_label_set & cand_labels):
                             continue
@@ -288,7 +283,9 @@ class GitHubClient:
             issue_number = existing.get("number")
             logger.info(
                 "Dedup hit on %s: re-using #%s instead of creating duplicate %r",
-                repo, issue_number, title[:60],
+                repo,
+                issue_number,
+                title[:60],
             )
             try:
                 await self.add_comment(

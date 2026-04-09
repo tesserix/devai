@@ -195,9 +195,7 @@ Start by getting the PR diff with github_get_pr_diff, then explore the repo stru
         if pr_already_resolved:
             review.decision = ReviewDecision.APPROVED
             review.summary = (
-                review.summary
-                + "\n\n_Note: PR was already merged/closed when the reviewer ran. "
-                "Treating as approved._"
+                review.summary + "\n\n_Note: PR was already merged/closed when the reviewer ran. Treating as approved._"
             )
 
         # A2A communication based on review decision — include story context

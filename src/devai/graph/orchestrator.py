@@ -469,8 +469,7 @@ class ALMOrchestrator:
             # the agent has a stale client interface. Re-instantiate
             # with a fresh client from the factory and retry once.
             logger.warning(
-                "Agent %s raised AttributeError (%s) — attempting self-heal "
-                "with a fresh SCM client and retrying once",
+                "Agent %s raised AttributeError (%s) — attempting self-heal with a fresh SCM client and retrying once",
                 node_name,
                 e,
             )

@@ -78,9 +78,7 @@ class ClaudeProvider:
 
                 # Capture any text the model produced this turn so we always
                 # have something to return at the end, even on a forced stop.
-                turn_text = "\n".join(
-                    block.text for block in assistant_content if isinstance(block, TextBlock)
-                )
+                turn_text = "\n".join(block.text for block in assistant_content if isinstance(block, TextBlock))
                 if turn_text.strip():
                     last_text = turn_text
 
@@ -115,19 +113,13 @@ class ClaudeProvider:
                     messages.append({"role": "user", "content": tool_results})
 
                     final = await self._call_api(system_prompt, tools, messages)
-                    final_text = "\n".join(
-                        block.text for block in final.content if isinstance(block, TextBlock)
-                    )
+                    final_text = "\n".join(block.text for block in final.content if isinstance(block, TextBlock))
                     if final_text.strip():
-                        logger.warning(
-                            "Claude agent wrapped up after iteration cap; returning partial result"
-                        )
+                        logger.warning("Claude agent wrapped up after iteration cap; returning partial result")
                         return final_text
                     if last_text:
                         return last_text
-                    raise RuntimeError(
-                        f"Claude agent exceeded {iterations} iterations and produced no text"
-                    )
+                    raise RuntimeError(f"Claude agent exceeded {iterations} iterations and produced no text")
 
                 tool_results = []
                 for tc in tool_calls:

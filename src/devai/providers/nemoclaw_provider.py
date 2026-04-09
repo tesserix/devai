@@ -173,9 +173,7 @@ class NemoClawProvider:
                         return final_text
                     if last_text:
                         return last_text
-                    raise RuntimeError(
-                        f"NemoClaw agent exceeded {iterations} iterations and produced no text"
-                    )
+                    raise RuntimeError(f"NemoClaw agent exceeded {iterations} iterations and produced no text")
 
                 # Execute tool calls
                 for tc in choice.message.tool_calls:

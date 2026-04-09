@@ -249,9 +249,7 @@ class CIMonitorAgent(BaseAgent):
                 # Otherwise escalate to the developer with the focused
                 # prompt the CI agent built (or the raw log summary if
                 # the agent didn't get that far).
-                escalation_body = (
-                    fix_outcome.get("developer_prompt") if fix_outcome else log_summary
-                ) or log_summary
+                escalation_body = (fix_outcome.get("developer_prompt") if fix_outcome else log_summary) or log_summary
                 a2a.escalate(
                     "senior_developer",
                     "CI Build Failed",
@@ -465,10 +463,13 @@ class CIMonitorAgent(BaseAgent):
         async def tool_executor(tool_name: str, tool_input: dict[str, Any]) -> str:
             return await github_tools.execute(tool_name, tool_input)
 
-        failed_summary = "\n".join(
-            f"- Job `{j.get('name', '?')}` — failed steps: {j.get('failed_steps', '?')}\n  URL: {j.get('url', '')}"
-            for j in failed_jobs
-        ) or "(no failed jobs returned by GitHub API)"
+        failed_summary = (
+            "\n".join(
+                f"- Job `{j.get('name', '?')}` — failed steps: {j.get('failed_steps', '?')}\n  URL: {j.get('url', '')}"
+                for j in failed_jobs
+            )
+            or "(no failed jobs returned by GitHub API)"
+        )
 
         user_message = f"""Repository: {repo}
 Branch: {branch}
@@ -509,7 +510,9 @@ Remember: NEVER touch application source files. Only `.github/workflows/`.
         decision = self._parse_ci_fix_decision(result_text)
         logger.info(
             "CI fix decision for build %d on %s@%s: %s (%s)",
-            build_run_id, repo, branch,
+            build_run_id,
+            repo,
+            branch,
             decision.get("decision"),
             decision.get("classification"),
         )
@@ -528,10 +531,10 @@ Remember: NEVER touch application source files. Only `.github/workflows/`.
                     f"**Summary:** {decision.get('summary', '(none)')}\n\n"
                     + (
                         f"**Files modified:** {', '.join(decision.get('files_modified', []))}\n"
-                        if decision.get('files_modified')
+                        if decision.get("files_modified")
                         else ""
                     )
-                    + f"\n_Posted by the DevAI CI Engineer agent — build run {build_run_id}._"
+                    + f"\n_Posted by the DevAI CI Engineer agent — build run {build_run_id}._",
                 )
 
         return decision
@@ -616,14 +619,16 @@ Remember: NEVER touch application source files. Only `.github/workflows/`.
             # means we should bootstrap.
             existing = await self.scm.list_files(repo, ".github/workflows", ref=branch)
             workflow_files = [
-                item for item in (existing or [])
-                if isinstance(item, dict)
-                and item.get("name", "").endswith((".yml", ".yaml"))
+                item
+                for item in (existing or [])
+                if isinstance(item, dict) and item.get("name", "").endswith((".yml", ".yaml"))
             ]
             if workflow_files:
                 logger.info(
                     "CI workflow already present on %s@%s (%d files), skipping bootstrap",
-                    repo, branch, len(workflow_files),
+                    repo,
+                    branch,
+                    len(workflow_files),
                 )
                 return
         except Exception as e:
@@ -641,7 +646,9 @@ Remember: NEVER touch application source files. Only `.github/workflows/`.
             )
             logger.info(
                 "Bootstrapped CI workflow for %s@%s using profile %s",
-                repo, branch, profile.name,
+                repo,
+                branch,
+                profile.name,
             )
             a2a.notify(
                 "senior_developer",
@@ -654,5 +661,7 @@ Remember: NEVER touch application source files. Only `.github/workflows/`.
             # build may still pass via repo-level config we couldn't see.
             logger.warning(
                 "Failed to bootstrap CI workflow on %s@%s: %s — continuing",
-                repo, branch, e,
+                repo,
+                branch,
+                e,
             )

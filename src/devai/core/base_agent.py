@@ -106,8 +106,7 @@ class BaseAgent(ABC):
             return healed
         except Exception as e:
             logger.warning(
-                "BaseAgent._heal_scm_client: could not heal %s (%s) — "
-                "keeping injected client",
+                "BaseAgent._heal_scm_client: could not heal %s (%s) — keeping injected client",
                 type(scm).__name__,
                 e,
             )
