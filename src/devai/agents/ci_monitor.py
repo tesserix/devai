@@ -1,29 +1,46 @@
-"""CI Monitor / Builder Agent — owns the entire CI workflow lifecycle.
+"""CI Engineer Agent — owns the entire CI workflow lifecycle end-to-end.
 
-Three responsibilities:
+Four responsibilities, in order:
 
-1. **Build the workflow** if the repo doesn't have one yet for the
-   detected stack. The agent reads the active SkillProfile and commits
-   ``.github/workflows/ci.yml`` rendered from the profile's template.
+1. **Bootstrap the workflow** if the repo doesn't have one yet for the
+   detected stack. Renders ``.github/workflows/ci.yml`` from the active
+   SkillProfile's template and commits it to the branch.
 2. **Manage repo visibility** for the public→build→private cycle that
    tesserix private repos require because of limited Actions minutes.
-3. **Monitor + analyze + escalate** failures back to the Senior
-   Developer with a focused fix prompt instead of raw logs.
+3. **Monitor the build** to completion.
+4. **Fix CI issues autonomously**. On failure, the agent uses Claude
+   with GitHub tools to read the failed logs + the workflow file,
+   classify the failure (workflow misconfiguration vs application
+   code), and either:
+     - **Fix workflow issues itself** (bump action versions, fix Node
+       version, add missing env vars, fix path filters, swap deprecated
+       runners) and commit the fix to the branch — then waits for the
+       new build, or
+     - **Escalate code issues to the Senior Developer** with a detailed
+       diagnosis pulled from the actual logs.
 
-Uses OpenAI for fast log analysis of build failures.
+That second pass is what makes it a real CI engineer rather than a
+passive monitor — it doesn't punt every failure back to the dev agent.
+
+Uses Claude for autonomous fixing (with tools) and OpenAI for the
+fast first-pass diagnosis.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
 from devai.agents.skills import get_skill_profile
 from devai.core.base_agent import BaseAgent
+from devai.providers.anthropic_claude import ClaudeProvider
 
 # Primary: OpenAI | Fallback: Claude
 from devai.providers.openai_provider import OpenAIProvider
+from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
 
 # Groq available as fallback: from devai.providers.groq_provider import GroqProvider
 
@@ -38,6 +55,78 @@ BUILD_TIMEOUT_SECONDS = 900
 POLL_INTERVAL_SECONDS = 15
 # Max time to wait for ALL builds to drain before making private
 DRAIN_TIMEOUT_SECONDS = 1200  # 20 minutes
+# Maximum number of autonomous CI fix attempts per pipeline run before
+# we give up and escalate to the Senior Developer
+MAX_CI_FIX_ATTEMPTS = 2
+
+# Subset of GitHub tools the CI Engineer needs to read + edit workflow
+# files. Deliberately excludes tools that touch application source files
+# — the CI agent only modifies .github/workflows/, not application code.
+CI_FIX_TOOLS = [
+    t
+    for t in GITHUB_TOOLS
+    if t["name"]
+    in {
+        "github_get_file_content",
+        "github_list_files",
+        "github_get_repo_tree",
+        "github_commit_file",
+        "github_add_comment",
+    }
+]
+
+CI_FIX_SYSTEM_PROMPT = """You are a Senior CI/CD Engineer fixing a failing GitHub Actions build.
+
+You have full read/write access to the repo's `.github/workflows/` directory
+via the github_* tools. You DO NOT touch application source files — your
+job is to fix the CI workflow itself when the failure is a workflow problem.
+
+## Your decision tree
+
+1. Read the failed job names + failed step names + the actual workflow YAML
+   for the failing workflow. Use `github_get_file_content` on every
+   `.yml` / `.yaml` file under `.github/workflows/`.
+2. Classify the root cause as ONE of:
+   - **WORKFLOW** — wrong action version, deprecated runner image, wrong
+     Node/Python/Go version, missing `permissions:`, missing env var that
+     should come from secrets, wrong working-directory, broken matrix,
+     bad cache key, missing `setup-*` step, deprecated action.
+   - **CODE** — failing tests, type errors, lint errors in the application
+     source, missing dependency in `package.json` / `go.mod` / `pyproject.toml`,
+     compilation errors.
+   - **INFRA** — runner out of disk, transient network failure, GHCR
+     login failed because token is invalid, GitHub Actions outage.
+
+3. Based on the classification:
+   - **WORKFLOW** → fix it. Make the smallest possible edit. Commit the
+     change with a descriptive message like "ci: bump actions/checkout to v4".
+     Then explain what you changed.
+   - **CODE** → DO NOT touch the workflow. Output a JSON object with
+     `decision="escalate"` and a focused fix prompt for the developer.
+   - **INFRA** → output `decision="retry"` (the orchestrator will retry).
+
+## Output format (always include at the end of your response)
+
+```json
+{
+  "decision": "fixed" | "escalate" | "retry",
+  "classification": "workflow" | "code" | "infra",
+  "summary": "one-line description of what you found",
+  "files_modified": ["path/to/file1.yml"],
+  "developer_prompt": "if escalating, the focused fix prompt for the dev"
+}
+```
+
+## Hard rules
+
+- NEVER edit application source code (anything outside `.github/workflows/`).
+- NEVER modify the workflow's trigger conditions to silence failures.
+- NEVER skip or `continue-on-error` a failing job to make it pass.
+- ALWAYS use `github_commit_file` with the branch from the user message,
+  not the default branch.
+- ALWAYS prefer the smallest possible diff.
+- After committing a fix, your job is done — return the JSON. The
+  orchestrator will re-run the build."""
 
 
 class CIMonitorAgent(BaseAgent):
@@ -117,17 +206,58 @@ class CIMonitorAgent(BaseAgent):
                 failed_jobs = await self._get_failed_jobs(repo, build_run_id)
                 result["failed_jobs"] = failed_jobs
 
-                # Use Groq to analyze the failure
+                # Use Groq for a fast first-pass diagnosis
                 log_summary = await self._analyze_failure(failed_jobs)
                 result["build_logs"] = log_summary
 
-                # Notify the developer about the failure
+                # Hand off to Claude with workflow-edit tools to attempt
+                # an autonomous fix. The CI agent's whole job description
+                # is "make the build green" — passing every failure
+                # straight back to the dev was a waste of senior dev
+                # cycles for things that are obviously CI misconfig.
+                fix_attempts = state.get("ci_fix_attempts", 0)
+                fix_outcome: dict[str, Any] | None = None
+                if fix_attempts < MAX_CI_FIX_ATTEMPTS:
+                    fix_outcome = await self._attempt_workflow_fix(
+                        repo=repo,
+                        branch=branch,
+                        build_run_id=build_run_id,
+                        failed_jobs=failed_jobs,
+                        log_summary=log_summary,
+                        state=state,
+                        a2a=a2a,
+                    )
+                    result["ci_fix_attempts"] = fix_attempts + 1
+                    if fix_outcome:
+                        result["ci_fix_decision"] = fix_outcome.get("decision")
+                        result["ci_fix_summary"] = fix_outcome.get("summary")
+
+                # If the agent fixed the workflow, return success-like
+                # state; the orchestrator can re-run this node to pick
+                # up the new build for the same branch.
+                if fix_outcome and fix_outcome.get("decision") == "fixed":
+                    a2a.notify(
+                        "senior_developer",
+                        "CI Workflow Fixed by CI Agent",
+                        f"CI Engineer fixed: {fix_outcome.get('summary', 'workflow change')}\n"
+                        f"Files: {', '.join(fix_outcome.get('files_modified', []))}\n"
+                        f"Build will re-run automatically.",
+                    )
+                    result["build_status"] = "ci_fix_committed"
+                    return result
+
+                # Otherwise escalate to the developer with the focused
+                # prompt the CI agent built (or the raw log summary if
+                # the agent didn't get that far).
+                escalation_body = (
+                    fix_outcome.get("developer_prompt") if fix_outcome else log_summary
+                ) or log_summary
                 a2a.escalate(
                     "senior_developer",
                     "CI Build Failed",
                     f"Build #{build_run_id} failed on branch '{branch}'.\n\n"
-                    f"## Failure Analysis\n{log_summary}\n\nURL: {url}",
-                    payload={"failed_jobs": failed_jobs},
+                    f"## Diagnosis from CI Engineer\n{escalation_body}\n\nURL: {url}",
+                    payload={"failed_jobs": failed_jobs, "ci_fix_outcome": fix_outcome},
                 )
 
                 a2a.notify(
@@ -299,6 +429,158 @@ class CIMonitorAgent(BaseAgent):
         except Exception as e:
             logger.error("Failed to analyze build failure: %s", e)
             return f"Failed jobs: {', '.join(j['name'] for j in failed_jobs)}"
+
+    # ------------------------------------------------------------------
+    # Autonomous CI Workflow Fixer
+    # ------------------------------------------------------------------
+
+    async def _attempt_workflow_fix(
+        self,
+        repo: str,
+        branch: str,
+        build_run_id: int,
+        failed_jobs: list[dict[str, str]],
+        log_summary: str,
+        state: ALMState,
+        a2a: A2ABus,
+    ) -> dict[str, Any] | None:
+        """Run a Claude tool-loop to diagnose + fix a failing build.
+
+        Returns the parsed decision dict, or None on hard failure of the
+        loop itself. The decision can be:
+
+        - ``fixed``    — agent committed a workflow change; build will re-run
+        - ``escalate`` — code-level issue; pass to Senior Developer
+        - ``retry``    — transient infra failure; orchestrator should retry
+        """
+        try:
+            claude = ClaudeProvider(self.config)
+        except Exception as e:
+            logger.warning("Cannot init Claude for CI fix: %s — escalating", e)
+            return None
+
+        github_tools = GitHubToolExecutor(self.github)
+        profile = get_skill_profile(state.get("skill_profile_name"))
+
+        async def tool_executor(tool_name: str, tool_input: dict[str, Any]) -> str:
+            return await github_tools.execute(tool_name, tool_input)
+
+        failed_summary = "\n".join(
+            f"- Job `{j.get('name', '?')}` — failed steps: {j.get('failed_steps', '?')}\n  URL: {j.get('url', '')}"
+            for j in failed_jobs
+        ) or "(no failed jobs returned by GitHub API)"
+
+        user_message = f"""Repository: {repo}
+Branch: {branch}
+Build run: {build_run_id}
+Active stack profile: {profile.display_name}
+
+## What failed
+{failed_summary}
+
+## First-pass log analysis (from a fast model)
+{log_summary}
+
+## Your task
+1. Use `github_get_repo_tree` to find every workflow file under `.github/workflows/`.
+2. Read each one with `github_get_file_content` (use ref="{branch}" to get the
+   branch version, not main).
+3. Diagnose the root cause and classify it as workflow / code / infra.
+4. If WORKFLOW: edit the right file with `github_commit_file` (also pass
+   ref="{branch}"). Make the smallest possible change. Use a clear commit
+   message starting with "ci:".
+5. Output the JSON decision block at the end of your final message.
+
+Remember: NEVER touch application source files. Only `.github/workflows/`.
+"""
+
+        try:
+            result_text = await claude.run_agent_loop(
+                system_prompt=CI_FIX_SYSTEM_PROMPT,
+                user_message=user_message,
+                tools=CI_FIX_TOOLS,
+                tool_executor=tool_executor,
+                max_iterations=self.config.claude_max_iterations_review,
+            )
+        except Exception as e:
+            logger.warning("CI fix tool-loop failed: %s — escalating to dev", e)
+            return None
+
+        decision = self._parse_ci_fix_decision(result_text)
+        logger.info(
+            "CI fix decision for build %d on %s@%s: %s (%s)",
+            build_run_id, repo, branch,
+            decision.get("decision"),
+            decision.get("classification"),
+        )
+
+        # Post a transparency comment on the PR so humans see what the
+        # CI engineer did
+        pr_number = state.get("pr_number")
+        if pr_number:
+            with contextlib.suppress(Exception):
+                await self.scm.add_comment(
+                    repo,
+                    pr_number,
+                    f"### CI Engineer Diagnosis\n\n"
+                    f"**Decision:** `{decision.get('decision', 'unknown')}` "
+                    f"(classification: `{decision.get('classification', 'unknown')}`)\n\n"
+                    f"**Summary:** {decision.get('summary', '(none)')}\n\n"
+                    + (
+                        f"**Files modified:** {', '.join(decision.get('files_modified', []))}\n"
+                        if decision.get('files_modified')
+                        else ""
+                    )
+                    + f"\n_Posted by the DevAI CI Engineer agent — build run {build_run_id}._"
+                )
+
+        return decision
+
+    @staticmethod
+    def _parse_ci_fix_decision(text: str) -> dict[str, Any]:
+        """Extract the JSON decision block from the agent's final message.
+
+        Tolerant of code-fenced or bare JSON. Returns a sensible default
+        if the agent didn't include a parseable block.
+        """
+        if not text:
+            return {"decision": "escalate", "classification": "unknown", "summary": "no output"}
+
+        # Find the LAST {...} block in the text — the agent may have
+        # narrated reasoning before printing the final JSON.
+        depth = 0
+        end_idx = None
+        start_idx = None
+        for i in range(len(text) - 1, -1, -1):
+            ch = text[i]
+            if ch == "}":
+                if depth == 0:
+                    end_idx = i + 1
+                depth += 1
+            elif ch == "{":
+                depth -= 1
+                if depth == 0:
+                    start_idx = i
+                    break
+
+        if start_idx is None or end_idx is None:
+            return {"decision": "escalate", "classification": "unknown", "summary": text[:300]}
+
+        try:
+            data = json.loads(text[start_idx:end_idx])
+            if not isinstance(data, dict):
+                raise ValueError("not a dict")
+            data.setdefault("decision", "escalate")
+            data.setdefault("classification", "unknown")
+            data.setdefault("summary", "")
+            data.setdefault("files_modified", [])
+            return data
+        except (json.JSONDecodeError, ValueError):
+            return {
+                "decision": "escalate",
+                "classification": "unknown",
+                "summary": text[:300],
+            }
 
     # ------------------------------------------------------------------
     # CI Workflow Builder

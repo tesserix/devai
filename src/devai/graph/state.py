@@ -134,6 +134,7 @@ class ALMState(TypedDict, total=False):
     orchestrator_decision_raw: str  # Raw LLM output from Orchestrator
     detected_tech_stack: str  # Tech stack detected by TechDetector
     skill_profile_name: str  # Skill profile picked by TechDetector (e.g. nextjs_react, go_gin)
+    ci_fix_attempts: int  # How many times the CI Engineer has tried to autonomously fix the workflow
 
     # --- A2A Communication ---
     a2a_messages: list[A2AMessageDict]
