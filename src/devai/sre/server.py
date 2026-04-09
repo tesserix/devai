@@ -20,6 +20,7 @@ Endpoints:
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -31,8 +32,10 @@ from devai.services.tracing import init_langsmith
 
 logger = logging.getLogger(__name__)
 
-# Scan interval (seconds)
-DEFAULT_SCAN_INTERVAL = 300  # 5 minutes
+# Auto-scan is disabled by default — manual triggers only.
+# Set DEVAI_SRE_AUTO_SCAN=true to re-enable autonomous scanning.
+AUTO_SCAN_ENABLED = os.environ.get("DEVAI_SRE_AUTO_SCAN", "false").lower() in ("true", "1", "yes")
+DEFAULT_SCAN_INTERVAL = int(os.environ.get("DEVAI_SRE_SCAN_INTERVAL", "300"))
 
 
 @asynccontextmanager
@@ -48,16 +51,20 @@ async def lifespan(app: FastAPI):
     await db.connect()
     app.state.db = db
 
-    # Start the autonomous scanner
-    scan_task = asyncio.create_task(_autonomous_scanner(db))
-    app.state.scan_task = scan_task
-
-    logger.info("SRE server started — autonomous scanning every %ds", DEFAULT_SCAN_INTERVAL)
+    # Start the autonomous scanner only if explicitly enabled
+    scan_task = None
+    if AUTO_SCAN_ENABLED:
+        scan_task = asyncio.create_task(_autonomous_scanner(db))
+        app.state.scan_task = scan_task
+        logger.info("SRE server started — autonomous scanning every %ds", DEFAULT_SCAN_INTERVAL)
+    else:
+        logger.info("SRE server started — auto-scan DISABLED, manual triggers only")
 
     yield
 
     # Shutdown
-    scan_task.cancel()
+    if scan_task is not None:
+        scan_task.cancel()
     await db.close()
 
 

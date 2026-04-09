@@ -138,8 +138,8 @@ export default function SREDashboard() {
           </button>
           <div className="flex items-center justify-between mt-2">
             <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Auto-scanning every 5m
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+              Manual scan only
             </div>
             <a
               href="/bff/logout"
