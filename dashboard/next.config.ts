@@ -10,12 +10,12 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        source: "/api/:path*",
-        destination: `${API_INTERNAL_URL}/dashboard/api/:path*`,
+        source: "/api/chat/:path*",
+        destination: `${API_INTERNAL_URL}/chat/api/:path*`,
       },
       {
-        source: "/chat/:path*",
-        destination: `${API_INTERNAL_URL}/chat/:path*`,
+        source: "/api/:path*",
+        destination: `${API_INTERNAL_URL}/dashboard/api/:path*`,
       },
     ];
   },
