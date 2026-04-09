@@ -59,6 +59,21 @@ export const api = {
       { method: "POST" },
     ),
 
+  pauseRun: (runId: string) =>
+    apiFetch<{ run_id: string; control: string }>(`/pipeline/runs/${runId}/pause`, {
+      method: "POST",
+    }),
+
+  resumeRun: (runId: string) =>
+    apiFetch<{ run_id: string; control: string }>(`/pipeline/runs/${runId}/resume`, {
+      method: "POST",
+    }),
+
+  stopRun: (runId: string) =>
+    apiFetch<{ run_id: string; control: string }>(`/pipeline/runs/${runId}/stop`, {
+      method: "POST",
+    }),
+
   // Config
   getConfig: (repo = "default") => apiFetch<PipelineConfig>(`/pipeline/config?repo=${repo}`),
 

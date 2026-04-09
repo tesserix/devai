@@ -840,6 +840,73 @@ async def retrigger_pipeline(run_id: str, request: Request) -> dict[str, Any]:
     }
 
 
+# ----------------------------------------------------------------------
+# Run control — pause / resume / stop
+#
+# These flip a Redis key (devai:run:<id>:control) that the orchestrator
+# polls at every node boundary. The orchestrator never interrupts an
+# in-flight Claude call (which would discard work and burn rate-limit
+# budget) — pause/stop take effect AT THE NEXT AGENT STEP.
+# ----------------------------------------------------------------------
+
+
+async def _set_run_control(state_manager: Any, run_id: str, value: str) -> None:
+    """Write the per-run control flag into Redis."""
+    key = f"devai:run:{run_id}:control"
+    if value == "running":
+        # Resume = clear the flag entirely
+        await state_manager.redis.delete(key)
+    else:
+        # 24h TTL so a forgotten paused run eventually clears itself
+        await state_manager.redis.set(key, value, ex=86400)
+
+
+@router.post("/api/pipeline/runs/{run_id}/pause")
+async def pause_pipeline(run_id: str, request: Request) -> dict[str, Any]:
+    """Pause a running pipeline at the next agent boundary.
+
+    The current in-flight agent finishes its node, then the orchestrator
+    blocks until the run is resumed (or stopped, or 1h max wait elapses).
+    """
+    state = request.app.state.state_manager
+    run = await state.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    await _set_run_control(state, run_id, "paused")
+    logger.info("Run %s paused via dashboard", run_id)
+    return {"run_id": run_id, "control": "paused"}
+
+
+@router.post("/api/pipeline/runs/{run_id}/resume")
+async def resume_pipeline(run_id: str, request: Request) -> dict[str, Any]:
+    """Resume a paused pipeline. The orchestrator detects the cleared
+    flag at the next 5s poll cycle and continues from where it stopped.
+    """
+    state = request.app.state.state_manager
+    run = await state.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    await _set_run_control(state, run_id, "running")
+    logger.info("Run %s resumed via dashboard", run_id)
+    return {"run_id": run_id, "control": "running"}
+
+
+@router.post("/api/pipeline/runs/{run_id}/stop")
+async def stop_pipeline(run_id: str, request: Request) -> dict[str, Any]:
+    """Stop a running (or paused) pipeline. The orchestrator raises a
+    RunStoppedError at the next node boundary, which the top-level run()
+    catches and marks the run as ``cancelled`` (NOT failed) so the
+    dashboard can render the distinction.
+    """
+    state = request.app.state.state_manager
+    run = await state.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    await _set_run_control(state, run_id, "stopped")
+    logger.info("Run %s stopped via dashboard", run_id)
+    return {"run_id": run_id, "control": "stopped"}
+
+
 @router.get("/api/pipeline/runs")
 async def get_pipeline_runs(request: Request, repo: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """Get recent pipeline runs."""

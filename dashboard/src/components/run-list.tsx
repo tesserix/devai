@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { useState } from "react";
 import { clsx } from "clsx";
 import type { PipelineRun } from "@/lib/api";
@@ -10,6 +11,11 @@ interface RunListProps {
   onSelect: (runId: string) => void;
   // Retrigger by run id (server replays the original requirements).
   onRetrigger?: (runId: string) => Promise<void> | void;
+  // Pause / resume / stop a running pipeline. Take effect at the next
+  // agent boundary (never mid-Claude-call).
+  onPause?: (runId: string) => Promise<void> | void;
+  onResume?: (runId: string) => Promise<void> | void;
+  onStop?: (runId: string) => Promise<void> | void;
 }
 
 const STAGE_DOT: Record<string, string> = {
@@ -26,10 +32,50 @@ const STAGE_DOT: Record<string, string> = {
   deployed: "bg-green-600",
   done: "bg-green-700",
   failed: "bg-red-600",
+  cancelled: "bg-gray-500",
+  paused: "bg-amber-400",
 };
 
-export function RunList({ runs, selectedRunId, onSelect, onRetrigger }: RunListProps) {
-  const [retriggeringId, setRetriggeringId] = useState<string | null>(null);
+// Stages where the run is considered "in flight" — pause/stop are
+// meaningful. Anything in this set shows the pause + stop controls.
+const ACTIVE_STAGES = new Set([
+  "triggered",
+  "requirements_analyzed",
+  "epic_created",
+  "stories_created",
+  "plan_created",
+  "code_implemented",
+  "code_reviewed",
+  "build_monitoring",
+  "tests_complete",
+  "deploying",
+  "running",
+  "paused",
+]);
+
+export function RunList({
+  runs,
+  selectedRunId,
+  onSelect,
+  onRetrigger,
+  onPause,
+  onResume,
+  onStop,
+}: RunListProps) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const handleControl = async (
+    runId: string,
+    action: ((id: string) => Promise<void> | void) | undefined,
+  ) => {
+    if (!action || busyId === runId) return;
+    setBusyId(runId);
+    try {
+      await action(runId);
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   if (runs.length === 0) {
     return (
@@ -49,6 +95,10 @@ export function RunList({ runs, selectedRunId, onSelect, onRetrigger }: RunListP
           (a) => a.status === "completed"
         ).length;
         const isFailed = run.stage === "failed";
+        const isPaused = run.stage === "paused";
+        const isCancelled = run.stage === "cancelled";
+        const isActive = ACTIVE_STAGES.has(run.stage) && !isFailed && !isCancelled;
+        const isBusy = busyId === run.run_id;
 
         return (
           <button
@@ -89,50 +139,95 @@ export function RunList({ runs, selectedRunId, onSelect, onRetrigger }: RunListP
               )}>
                 {run.stage.replace(/_/g, " ")}
               </span>
-              {isFailed && onRetrigger && (
-                <span
-                  role="button"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (retriggeringId === run.run_id) return;
-                    setRetriggeringId(run.run_id);
-                    try {
-                      // Pass the run id so the server can re-use the
-                      // ORIGINAL requirements text instead of inventing
-                      // new ones (which made the dev agent build a
-                      // pipeline-retry feature in the target repo).
-                      await onRetrigger(run.run_id);
-                    } finally {
-                      setRetriggeringId(null);
-                    }
-                  }}
-                  className={clsx(
-                    "text-xs px-2 py-0.5 rounded transition-colors",
-                    retriggeringId === run.run_id
-                      ? "bg-indigo-200 dark:bg-indigo-800/50 text-indigo-400 dark:text-indigo-500 cursor-not-allowed"
-                      : "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800/40 cursor-pointer"
-                  )}
-                  title="Retrigger pipeline for this repo"
-                  aria-disabled={retriggeringId === run.run_id}
-                >
-                  {retriggeringId === run.run_id ? (
-                    <span className="flex items-center gap-1">
-                      <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Retrying…
-                    </span>
-                  ) : (
-                    "Retry"
-                  )}
-                </span>
-              )}
+              <div className="flex items-center gap-1">
+                {isFailed && onRetrigger && (
+                  <ControlPill
+                    label="Retry"
+                    color="indigo"
+                    busy={isBusy}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await handleControl(run.run_id, onRetrigger);
+                    }}
+                  />
+                )}
+                {isActive && !isPaused && onPause && (
+                  <ControlPill
+                    label="Pause"
+                    color="amber"
+                    busy={isBusy}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await handleControl(run.run_id, onPause);
+                    }}
+                  />
+                )}
+                {isPaused && onResume && (
+                  <ControlPill
+                    label="Resume"
+                    color="emerald"
+                    busy={isBusy}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await handleControl(run.run_id, onResume);
+                    }}
+                  />
+                )}
+                {(isActive || isPaused) && onStop && (
+                  <ControlPill
+                    label="Stop"
+                    color="red"
+                    busy={isBusy}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await handleControl(run.run_id, onStop);
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </button>
         );
       })}
     </div>
+  );
+}
+
+type PillColor = "indigo" | "amber" | "emerald" | "red";
+
+const PILL_CLASSES: Record<PillColor, string> = {
+  indigo:
+    "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800/40",
+  amber:
+    "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/40",
+  emerald:
+    "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-800/40",
+  red:
+    "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/40",
+};
+
+interface ControlPillProps {
+  label: string;
+  color: PillColor;
+  busy: boolean;
+  onClick: (e: React.MouseEvent) => Promise<void> | void;
+}
+
+function ControlPill({ label, color, busy, onClick }: ControlPillProps) {
+  return (
+    <span
+      role="button"
+      onClick={onClick}
+      className={clsx(
+        "text-xs px-2 py-0.5 rounded transition-colors",
+        busy ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
+        PILL_CLASSES[color],
+      )}
+      title={label}
+      aria-disabled={busy}
+    >
+      {label}
+    </span>
   );
 }
 

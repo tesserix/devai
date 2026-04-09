@@ -77,6 +77,21 @@ export default function DashboardPage() {
     await fetchRuns();
   };
 
+  const handlePause = async (runId: string) => {
+    await api.pauseRun(runId);
+    await fetchRuns();
+  };
+
+  const handleResume = async (runId: string) => {
+    await api.resumeRun(runId);
+    await fetchRuns();
+  };
+
+  const handleStop = async (runId: string) => {
+    await api.stopRun(runId);
+    await fetchRuns();
+  };
+
   const handleApprove = async (gate: string) => {
     if (!selectedRunId) return;
     await api.approveGate(selectedRunId, gate);
@@ -133,7 +148,15 @@ export default function DashboardPage() {
           {loading ? (
             <div className="text-center py-8 text-gray-400 dark:text-gray-500 text-xs">Loading...</div>
           ) : (
-            <RunList runs={runs} selectedRunId={selectedRunId} onSelect={setSelectedRunId} onRetrigger={handleRetrigger} />
+            <RunList
+              runs={runs}
+              selectedRunId={selectedRunId}
+              onSelect={setSelectedRunId}
+              onRetrigger={handleRetrigger}
+              onPause={handlePause}
+              onResume={handleResume}
+              onStop={handleStop}
+            />
           )}
         </div>
 

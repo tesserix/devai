@@ -61,6 +61,7 @@ Features:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -83,6 +84,29 @@ logger = logging.getLogger(__name__)
 MAX_REVIEW_ITERATIONS = 3
 MAX_TEST_FIX_ITERATIONS = 2
 NODE_TIMEOUT = 900  # 15 minutes per agent
+
+# Pause/stop control. The dashboard writes one of these strings into the
+# per-run control key in Redis (devai:run:<id>:control) and the
+# orchestrator polls it at every node boundary.
+RUN_CONTROL_PAUSED = "paused"
+RUN_CONTROL_STOPPED = "stopped"
+RUN_CONTROL_RUNNING = "running"  # default / cleared
+RUN_CONTROL_KEY = "devai:run:{run_id}:control"
+PAUSE_POLL_INTERVAL = 5.0  # seconds — how often we check while paused
+PAUSE_MAX_WAIT = 3600.0  # 1h max pause before we give up and stop
+
+
+class RunStoppedError(Exception):
+    """Raised when a pipeline run is stopped via the dashboard.
+
+    Caught at the orchestrator's top-level run() so the run is marked
+    cancelled cleanly instead of bubbling as a generic exception.
+    """
+
+    def __init__(self, run_id: str, node_name: str = "") -> None:
+        self.run_id = run_id
+        self.node_name = node_name
+        super().__init__(f"Run {run_id} stopped by user request" + (f" before {node_name}" if node_name else ""))
 
 
 class ALMOrchestrator:
@@ -417,6 +441,69 @@ class ALMOrchestrator:
     # Node Wrapper
     # ------------------------------------------------------------------
 
+    async def _read_run_control(self, run_id: str) -> str:
+        """Read the per-run control flag from Redis. Returns running if unset."""
+        if not run_id:
+            return RUN_CONTROL_RUNNING
+        try:
+            redis = self.state_manager.redis
+            value = await redis.get(RUN_CONTROL_KEY.format(run_id=run_id))
+            if not value:
+                return RUN_CONTROL_RUNNING
+            if isinstance(value, bytes):
+                value = value.decode("utf-8")
+            return value
+        except Exception as e:
+            logger.debug("Could not read run control for %s: %s", run_id, e)
+            return RUN_CONTROL_RUNNING
+
+    async def _wait_if_paused_or_raise_if_stopped(self, state: ALMState, node_name: str) -> None:
+        """Honor the pause/stop control flag before starting a node.
+
+        - If the run is ``stopped``, raise ``RunStoppedError`` so the
+          top-level run() can mark it cancelled cleanly.
+        - If the run is ``paused``, sleep in PAUSE_POLL_INTERVAL chunks
+          until the flag flips to ``running`` (resumed) or ``stopped``,
+          or until PAUSE_MAX_WAIT elapses (then auto-stop).
+        - Otherwise return immediately.
+        """
+        run_id = state.get("run_id", "")
+        if not run_id:
+            return
+
+        control = await self._read_run_control(run_id)
+
+        if control == RUN_CONTROL_STOPPED:
+            logger.info("Run %s stopped before %s — raising RunStoppedError", run_id, node_name)
+            raise RunStoppedError(run_id, node_name)
+
+        if control != RUN_CONTROL_PAUSED:
+            return
+
+        # Paused — wait for resume or stop, with a wall-clock cap.
+        logger.info("Run %s paused before %s — waiting for resume", run_id, node_name)
+        self._report_progress(state, node_name, "paused", "Run paused — waiting for resume")
+        elapsed = 0.0
+        while elapsed < PAUSE_MAX_WAIT:
+            await asyncio.sleep(PAUSE_POLL_INTERVAL)
+            elapsed += PAUSE_POLL_INTERVAL
+            control = await self._read_run_control(run_id)
+            if control == RUN_CONTROL_STOPPED:
+                logger.info("Run %s stopped during pause — raising RunStoppedError", run_id)
+                raise RunStoppedError(run_id, node_name)
+            if control != RUN_CONTROL_PAUSED:
+                logger.info("Run %s resumed after %.0fs paused — continuing %s", run_id, elapsed, node_name)
+                self._report_progress(state, node_name, "running", "Resumed")
+                return
+
+        # Hit the wall-clock cap — treat as stopped
+        logger.warning(
+            "Run %s paused longer than PAUSE_MAX_WAIT (%.0fs) — auto-stopping",
+            run_id,
+            PAUSE_MAX_WAIT,
+        )
+        raise RunStoppedError(run_id, node_name)
+
     async def _run_node(
         self,
         node_name: str,
@@ -425,6 +512,13 @@ class ALMOrchestrator:
         method: str = "run",
     ) -> dict[str, Any]:
         """Wrapper that handles checkpointing, timeout, memory, and A2A persistence."""
+        # Honor pause/stop control before starting any node. The dashboard's
+        # Pause/Stop buttons write a control flag into Redis which we check
+        # at every node boundary. This is the natural place to do it — we
+        # never interrupt an in-flight Claude call (which would discard
+        # work and burn rate-limit budget), only between agent steps.
+        await self._wait_if_paused_or_raise_if_stopped(state, node_name)
+
         self._report_progress(state, node_name, "running", f"Starting {node_name}...")
         start = time.monotonic()
 
@@ -1032,6 +1126,18 @@ class ALMOrchestrator:
             )
 
             return final_state
+
+        except RunStoppedError as e:
+            # User clicked Stop on the dashboard. Mark the run as
+            # cancelled cleanly — NOT failed — so the dashboard renders
+            # it correctly and we don't trigger failure-handling agents.
+            logger.info("ALM pipeline cancelled by user: run_id=%s at %s", e.run_id, e.node_name)
+            await self.state_manager.update_run_stage(initial_state["run_id"], "cancelled")
+            # Clear the control flag so a future retry on this run id
+            # doesn't immediately re-stop.
+            with contextlib.suppress(Exception):
+                await self.state_manager.redis.delete(RUN_CONTROL_KEY.format(run_id=e.run_id))
+            return {**initial_state, "stage": "cancelled", "cancelled_at_node": e.node_name}
 
         except Exception:
             logger.exception("ALM pipeline failed: run_id=%s", initial_state["run_id"])
