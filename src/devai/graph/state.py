@@ -133,6 +133,7 @@ class ALMState(TypedDict, total=False):
     orchestrator_routing: dict[str, Any]  # Current routing decision from Orchestrator
     orchestrator_decision_raw: str  # Raw LLM output from Orchestrator
     detected_tech_stack: str  # Tech stack detected by TechDetector
+    skill_profile_name: str  # Skill profile picked by TechDetector (e.g. nextjs_react, go_gin)
 
     # --- A2A Communication ---
     a2a_messages: list[A2AMessageDict]

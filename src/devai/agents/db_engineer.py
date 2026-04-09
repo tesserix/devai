@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from devai.agents.skills import get_skill_profile
 from devai.core.base_agent import BaseAgent
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
@@ -164,8 +165,14 @@ Analyze the PR for database/schema changes:
 CRITICAL: Never delete existing migration files. Never generate DROP without explicit approval.
 Always include rollback/downgrade scripts."""
 
-        # Inject governance
+        # Inject governance + skill profile (ORM-specific guidance)
         system = SYSTEM_PROMPT
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        db_section = profile.render_for_db_engineer()
+        if db_section:
+            system += "\n\n" + db_section
+        logger.info("DB Engineer running with skill profile: %s", profile.display_name)
+
         governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance\n{governance}"

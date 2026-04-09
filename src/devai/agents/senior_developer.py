@@ -15,6 +15,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+from devai.agents.skills import get_skill_profile
 from devai.core.base_agent import BaseAgent
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
@@ -205,6 +206,19 @@ The Staff Reviewer requested the following changes. Address ALL of them:
 Use the existing branch `{branch_name}` — push fixes to it, do NOT create a new branch."""
 
         system = SYSTEM_PROMPT
+
+        # Inject the skill profile so Claude knows the exact directory
+        # layout, test framework, file conventions, and idioms for the
+        # detected stack. This is what makes the dev agent behave like a
+        # senior engineer in (e.g.) Next.js+React rather than a generic
+        # "implement code" assistant.
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        system += "\n\n" + profile.render_for_developer()
+        logger.info(
+            "Senior Developer running with skill profile: %s",
+            profile.display_name,
+        )
+
         governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance (CLAUDE.md)\nYou MUST follow these rules:\n\n{governance}"

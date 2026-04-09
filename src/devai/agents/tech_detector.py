@@ -21,6 +21,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from devai.agents.skills import detect_skill_profile, get_skill_profile
 from devai.core.base_agent import BaseAgent
 
 # Primary: Gemini | Fallback: OpenAI
@@ -206,18 +207,33 @@ Identify the complete tech stack.""",
         framework = tech_stack.get("framework", "unknown")
         deployment = tech_stack.get("deployment", "unknown")
 
+        # Pick the right skill profile by combining the requirements text
+        # with what we just detected from the repo. The profile travels
+        # through state to every downstream agent so they all build, test,
+        # and review in the same idiom.
+        requirements_text = state.get("requirements", "") or ""
+        profile = detect_skill_profile(requirements_text, repo_tech=tech_stack)
+        # Confirm profile name is valid; fall back to generic if not
+        profile = get_skill_profile(profile.name)
+        logger.info(
+            "Skill profile chosen for run %s: %s",
+            state.get("run_id", "?"),
+            profile.name,
+        )
+
         a2a.notify(
             "engineering_manager",
             "Tech Stack Detected",
-            f"{repo}: {lang} + {framework}, deploy={deployment}",
-            payload=tech_stack,
+            f"{repo}: {lang} + {framework}, deploy={deployment} → profile={profile.display_name}",
+            payload={**tech_stack, "skill_profile_name": profile.name},
         )
 
         a2a.notify(
             "senior_developer",
             "Tech Stack Context",
-            f"Repo uses {lang}/{framework}. Follow existing patterns: " + ", ".join(tech_stack.get("patterns", [])[:5]),
-            payload=tech_stack,
+            f"Repo uses {lang}/{framework}. Skill profile: {profile.display_name}. "
+            "Follow existing patterns: " + ", ".join(tech_stack.get("patterns", [])[:5]),
+            payload={**tech_stack, "skill_profile_name": profile.name},
         )
 
         a2a.notify(
@@ -227,6 +243,10 @@ Identify the complete tech stack.""",
             payload={"language": lang, "framework": framework},
         )
 
+        # CRITICAL: actually persist what we detected so downstream agents
+        # can read it. Returning {} here was a long-standing bug — every
+        # agent below this point was operating with no tech-stack context.
         return {
-            # Store tech stack in state for all agents to use
+            "detected_tech_stack": json.dumps(tech_stack, indent=2),
+            "skill_profile_name": profile.name,
         }

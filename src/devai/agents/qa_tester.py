@@ -6,6 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from devai.agents.skills import get_skill_profile
 from devai.core.base_agent import BaseAgent
 from devai.providers.anthropic_claude import ClaudeProvider
 from devai.tools.github_tools import GITHUB_TOOLS, GitHubToolExecutor
@@ -144,6 +145,10 @@ Write E2E tests that verify the acceptance criteria for Story #{story_number}. T
 Start by reading the PR diff to understand what was changed, explore existing tests for patterns, then write and commit test files, and finally run them."""
 
         system = SYSTEM_PROMPT
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        system += "\n\n" + profile.render_for_qa()
+        logger.info("QA Tester running with skill profile: %s", profile.display_name)
+
         governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance (CLAUDE.md)\nYou MUST follow these rules:\n\n{governance}"

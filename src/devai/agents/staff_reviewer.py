@@ -6,6 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from devai.agents.skills import get_skill_profile
 from devai.core.base_agent import BaseAgent
 from devai.models import CodeReview, ReviewDecision
 
@@ -122,6 +123,14 @@ Description: {active_story.get("description", "")[:500]}
 {state.get("memory_context", "") or "(none)"}
 
 Start by getting the PR diff with github_get_pr_diff, then explore the repo structure and read relevant files to understand the codebase context. Verify the implementation satisfies the acceptance criteria."""
+
+        # Inject the skill-specific review checklist so the reviewer
+        # checks the things that actually matter for the detected stack
+        # (e.g. "no useEffect for fetching" for React, "context.Context
+        # first arg" for Go).
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        review_system += "\n\n" + profile.render_for_reviewer()
+        logger.info("Staff Reviewer running with skill profile: %s", profile.display_name)
 
         governance = state.get("governance", "")
         if governance:
