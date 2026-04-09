@@ -446,10 +446,13 @@ class ALMOrchestrator:
         if memory_context:
             execution_state["memory_context"] = memory_context
 
-        # Execute with timeout
+        # Execute with timeout. AttributeError on the SCM client (e.g.
+        # a stale legacy client missing a newer dedup helper) is the
+        # canonical "interface drift" failure — we recover from it
+        # automatically by re-instantiating the agent with a fresh SCM
+        # client from the factory and retrying ONCE before failing.
         try:
             coro = agent.run(execution_state) if method == "run" else getattr(agent, method)(execution_state)
-
             result = await with_timeout(coro, NODE_TIMEOUT, f"agent:{node_name}")
         except TimeoutError:
             logger.error("Agent %s timed out after %ds", node_name, NODE_TIMEOUT)
@@ -461,6 +464,37 @@ class ALMOrchestrator:
                 f"Timed out after {NODE_TIMEOUT}s",
             )
             result = {"error": f"Agent {node_name} timed out after {NODE_TIMEOUT}s"}
+        except AttributeError as e:
+            # Self-heal: AttributeError on an SCM method usually means
+            # the agent has a stale client interface. Re-instantiate
+            # with a fresh client from the factory and retry once.
+            logger.warning(
+                "Agent %s raised AttributeError (%s) — attempting self-heal "
+                "with a fresh SCM client and retrying once",
+                node_name,
+                e,
+            )
+            try:
+                from devai.scm import create_scm_client
+
+                fresh_scm = create_scm_client(self.config)
+                healed_agent = agent_cls(fresh_scm, self.state_manager, self.config)
+                self._report_progress(state, node_name, "running", "Self-healing — retrying with fresh SCM client")
+                coro = (
+                    healed_agent.run(execution_state)
+                    if method == "run"
+                    else getattr(healed_agent, method)(execution_state)
+                )
+                result = await with_timeout(coro, NODE_TIMEOUT, f"agent:{node_name}:retry")
+                logger.info("Agent %s self-healed successfully after AttributeError", node_name)
+            except Exception as retry_e:
+                logger.exception("Agent %s self-heal retry failed: %s", node_name, retry_e)
+                self._report_progress(state, node_name, "failed", str(retry_e)[:200])
+                await self.state_manager.set_agent_status(
+                    state.get("run_id", ""), agent.name, "failed", str(retry_e)[:500]
+                )
+                await self._record_failure(agent.name, state, str(retry_e))
+                raise
         except Exception as e:
             logger.exception("Agent %s failed: %s", node_name, e)
             self._report_progress(state, node_name, "failed", str(e)[:200])

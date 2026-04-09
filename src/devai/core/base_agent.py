@@ -60,13 +60,58 @@ class BaseAgent(ABC):
         config: Settings,
         event_bus: EventBus | None = None,
     ) -> None:
-        self.scm = scm
+        # Self-heal the SCM client at construction time. The webhook
+        # path always passes a proper SCMClient subclass (created via
+        # the multi-SCM factory), but other entry points (the dashboard
+        # used to be one) sometimes passed the legacy
+        # ``core.github_client.GitHubClient``. That class is missing
+        # newer abstract-base helpers like ``create_issue_idempotent``
+        # and ``list_issues``, which would crash agents at runtime with
+        # an AttributeError. We detect that here and silently swap in
+        # the proper client so every agent gets a uniform interface.
+        self.scm = self._heal_scm_client(scm, config)
         # Backward-compatible alias (agents may still reference self.github)
-        self.github = scm
+        self.github = self.scm
         self.state = state_manager
         self.config = config
         self.event_bus = event_bus
         self.worker_id = f"{self.name}-{uuid.uuid4().hex[:8]}"
+
+    @staticmethod
+    def _heal_scm_client(scm: Any, config: Any) -> Any:
+        """If the injected SCM client is the legacy standalone class,
+        swap in the proper SCMClient subclass from the factory so all
+        agents get the full interface (dedup helpers, list_issues, etc.).
+
+        Defensive — never raises. If the swap fails for any reason, the
+        original client is returned and the agent falls back to whatever
+        interface the original client exposes (the agent-level
+        hasattr-checks are the second line of defense).
+        """
+        try:
+            from devai.scm.base import SCMClient as _SCMClient
+
+            if isinstance(scm, _SCMClient):
+                return scm
+
+            from devai.scm import create_scm_client as _factory
+
+            healed = _factory(config)
+            logger.warning(
+                "BaseAgent._heal_scm_client: replaced legacy %s with %s "
+                "from create_scm_client() so dedup helpers are available",
+                type(scm).__name__,
+                type(healed).__name__,
+            )
+            return healed
+        except Exception as e:
+            logger.warning(
+                "BaseAgent._heal_scm_client: could not heal %s (%s) — "
+                "keeping injected client",
+                type(scm).__name__,
+                e,
+            )
+            return scm
 
     # --- LangGraph Node Execution ---
 
