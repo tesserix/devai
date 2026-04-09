@@ -53,6 +53,12 @@ export const api = {
       body: JSON.stringify({ repo, requirements, issue_number: issueNumber }),
     }),
 
+  retriggerRun: (runId: string) =>
+    apiFetch<{ run_id: string; stage: string; repo: string; retry_of: string }>(
+      `/pipeline/runs/${runId}/retrigger`,
+      { method: "POST" },
+    ),
+
   // Config
   getConfig: (repo = "default") => apiFetch<PipelineConfig>(`/pipeline/config?repo=${repo}`),
 

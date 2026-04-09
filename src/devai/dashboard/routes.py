@@ -754,6 +754,92 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     }
 
 
+@router.post("/api/pipeline/runs/{run_id}/retrigger")
+async def retrigger_pipeline(run_id: str, request: Request) -> dict[str, Any]:
+    """Retrigger a previously-failed pipeline run.
+
+    Re-uses the ORIGINAL requirements text from the failed run, plus the
+    same trigger_type and trigger_ref, so the new run picks up exactly
+    the same intent as the original. This fixes the long-standing bug
+    where the dashboard's Retry button used to send the literal string
+    "Retry failed pipeline run" as the requirements, which caused the
+    dev agent to build a pipeline-retry feature in the target repo
+    (instead of retrying the original work).
+    """
+    import asyncio
+
+    state = request.app.state.state_manager
+    config = request.app.state.config
+
+    original = await state.get_run(run_id)
+    if not original:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    # The run record has both top-level fields (set on create) AND a
+    # `context` blob with the full ALMState. Try the context first since
+    # it's the source of truth for what the agents actually saw.
+    context = original.get("context") or {}
+    if isinstance(context, str):
+        try:
+            import json as _json
+
+            context = _json.loads(context)
+        except Exception:
+            context = {}
+
+    repo = context.get("repo_full_name") or original.get("repo_full_name") or original.get("repo")
+    requirements = context.get("requirements") or original.get("requirements") or ""
+    trigger_type = context.get("trigger_type") or original.get("trigger_type") or "cli"
+    trigger_ref = context.get("trigger_ref") or original.get("trigger_ref") or "dashboard-retry"
+
+    if not repo:
+        raise HTTPException(status_code=400, detail=f"Run {run_id} has no repo to retry against")
+    if not requirements:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Run {run_id} has no original requirements to replay — cannot retry",
+        )
+
+    from ulid import ULID
+
+    new_run_id = str(ULID())
+
+    async def _run_bg() -> None:
+        from devai.graph.orchestrator import ALMOrchestrator
+        from devai.scm import create_scm_client
+
+        github = create_scm_client(config)
+        try:
+            orchestrator = ALMOrchestrator(github, state, config)
+            await orchestrator.run(
+                repo_full_name=repo,
+                requirements=requirements,
+                trigger_type=trigger_type,
+                trigger_ref=f"{trigger_ref}#retry-of-{run_id}",
+            )
+        except Exception:
+            logger.exception("Background pipeline retry failed for %s", repo)
+        finally:
+            await github.close()
+
+    asyncio.create_task(_run_bg())
+
+    logger.info(
+        "Retriggering run %s on %s — new run %s — using original requirements (%d chars)",
+        run_id,
+        repo,
+        new_run_id,
+        len(requirements),
+    )
+
+    return {
+        "run_id": new_run_id,
+        "stage": "triggered",
+        "repo": repo,
+        "retry_of": run_id,
+    }
+
+
 @router.get("/api/pipeline/runs")
 async def get_pipeline_runs(request: Request, repo: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """Get recent pipeline runs."""

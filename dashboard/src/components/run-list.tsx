@@ -8,7 +8,8 @@ interface RunListProps {
   runs: PipelineRun[];
   selectedRunId?: string;
   onSelect: (runId: string) => void;
-  onRetrigger?: (repo: string) => Promise<void> | void;
+  // Retrigger by run id (server replays the original requirements).
+  onRetrigger?: (runId: string) => Promise<void> | void;
 }
 
 const STAGE_DOT: Record<string, string> = {
@@ -96,7 +97,11 @@ export function RunList({ runs, selectedRunId, onSelect, onRetrigger }: RunListP
                     if (retriggeringId === run.run_id) return;
                     setRetriggeringId(run.run_id);
                     try {
-                      await onRetrigger(run.repo);
+                      // Pass the run id so the server can re-use the
+                      // ORIGINAL requirements text instead of inventing
+                      // new ones (which made the dev agent build a
+                      // pipeline-retry feature in the target repo).
+                      await onRetrigger(run.run_id);
                     } finally {
                       setRetriggeringId(null);
                     }

@@ -66,8 +66,13 @@ export default function DashboardPage() {
     await fetchRuns();
   };
 
-  const handleRetrigger = async (repo: string) => {
-    const result = await api.triggerPipeline(repo, "Retry failed pipeline run");
+  const handleRetrigger = async (runId: string) => {
+    // Re-uses the ORIGINAL requirements from the failed run server-side.
+    // Previously this hardcoded the literal string "Retry failed pipeline
+    // run" as the requirements, which made the dev agent build a
+    // pipeline-retry feature in the target repo instead of replaying
+    // whatever the user actually asked for.
+    const result = await api.retriggerRun(runId);
     setSelectedRunId(result.run_id);
     await fetchRuns();
   };
