@@ -92,7 +92,15 @@ class ProductDirectorAgent(BaseAgent):
         else:
             req_summary = requirements
 
+        # Pull the active skill profile so the epic reflects how this
+        # stack actually breaks down work.
+        from devai.agents.skills import get_skill_profile
+
+        profile = get_skill_profile(state.get("skill_profile_name"))
+
         prompt = f"""Repository: {repo}
+
+{profile.render_for_planner()}
 
 ## Analyzed Requirements
 {req_summary}
@@ -102,7 +110,8 @@ class ProductDirectorAgent(BaseAgent):
 
 {inbox_context}
 
-Create a GitHub Epic that encompasses all these requirements."""
+Create a GitHub Epic that encompasses all these requirements. The epic
+should reflect the planning guidance above for this stack."""
 
         response = await openai.generate(
             prompt=prompt,
@@ -196,13 +205,25 @@ Create a GitHub Epic that encompasses all these requirements."""
             else:
                 epic_context = f"\n## Parent Epic\n{str(ep)[:300]}"
 
+        # Pull the active skill profile so stories follow the stack's
+        # natural breakdown (component-per-story for React, resource-per-
+        # story for Go/Python services).
+        from devai.agents.skills import get_skill_profile
+
+        profile = get_skill_profile(state.get("skill_profile_name"))
+
         prompt = f"""Repository: {repo}
+
+{profile.render_for_planner()}
 
 ## Requirements
 {req_summary}
 {epic_context}
 
-Break these requirements into user stories. Consider the repository context and ensure stories are actionable for developers."""
+Break these requirements into user stories following the stack's
+planning guidance above. Each story should be independently shippable
+and small enough for one developer's day. Consider the repository
+context and ensure stories are actionable for developers."""
 
         response = await openai.generate(
             prompt=prompt,

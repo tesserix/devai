@@ -145,8 +145,14 @@ Start by exploring the repo structure, then read relevant files to understand th
 The Staff Reviewer requested changes. Incorporate this feedback into revised plans:
 {feedback_text}"""
 
-        # Inject governance
+        # Inject skill profile so the EM plans stories the way the
+        # detected stack expects work to be broken down.
+        from devai.agents.skills import get_skill_profile
+
         system = SYSTEM_PROMPT
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        system += "\n\n" + profile.render_for_planner()
+
         governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance (CLAUDE.md)\nYou MUST follow these rules:\n\n{governance}"

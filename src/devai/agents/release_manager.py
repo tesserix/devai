@@ -295,7 +295,10 @@ class ReleaseManagerAgent(BaseAgent):
     async def _generate_release_summary(self, state: ALMState) -> str:
         """Generate a release summary covering all merged stories."""
         try:
+            from devai.agents.skills import get_skill_profile
+
             openai = OpenAIProvider(self.config)
+            profile = get_skill_profile(state.get("skill_profile_name"))
 
             story_branches = state.get("story_branches", [])
             merged = [sb for sb in story_branches if sb.get("status") == "merged"]
@@ -306,12 +309,16 @@ class ReleaseManagerAgent(BaseAgent):
             response = await openai.generate(
                 prompt=f"""Generate a brief release summary for these changes:
 
+Stack: {profile.display_name}
 Requirements: {state.get("requirements", "")[:500]}
 
 Merged Stories:
 {story_list}
 
 Total stories: {len(merged)} merged, {len(story_branches)} total
+
+Release flow for this stack:
+{profile.release_guidance or "(use the project's standard flow)"}
 
 Write a concise 2-3 sentence release note suitable for a changelog.""",
                 system="You are a technical writer. Write concise, professional release notes.",

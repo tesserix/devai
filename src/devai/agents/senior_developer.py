@@ -85,6 +85,21 @@ Important:
 - Never commit secrets, API keys, or credentials
 - Ensure all file paths are correct relative to the repo root
 
+## Containerization
+
+If the repo does NOT have a `Dockerfile` at the root, you MUST create one
+appropriate for the active skill profile (the profile section below
+includes a Dockerfile template — use it as the starting point and adapt
+the entrypoint to the actual code you wrote).
+
+- Use a multi-stage build (builder + minimal runtime)
+- Pick a slim/distroless runtime image where possible
+- Expose the port the application listens on
+- Never bake secrets or credentials into the image
+- After creating the Dockerfile, validate it with `validate_dockerfile`
+  if the tool is available; otherwise just verify the syntax is sane
+  and the COPY paths match what you committed
+
 ## Mandatory Guardrails (MUST follow before creating PR)
 
 After implementing code, you MUST run these validation checks:
@@ -211,9 +226,13 @@ Use the existing branch `{branch_name}` — push fixes to it, do NOT create a ne
         # layout, test framework, file conventions, and idioms for the
         # detected stack. This is what makes the dev agent behave like a
         # senior engineer in (e.g.) Next.js+React rather than a generic
-        # "implement code" assistant.
+        # "implement code" assistant. Also inject the infra guidance so
+        # the dev knows the right Dockerfile template for the stack and
+        # creates one if it's missing.
         profile = get_skill_profile(state.get("skill_profile_name"))
         system += "\n\n" + profile.render_for_developer()
+        if profile.infra_guidance:
+            system += "\n\n" + profile.render_for_infra()
         logger.info(
             "Senior Developer running with skill profile: %s",
             profile.display_name,

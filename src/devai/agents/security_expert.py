@@ -187,8 +187,14 @@ Run a comprehensive security scan of this PR (Story #{story_number}). Follow the
 
 Be thorough. This is the last security gate before production."""
 
-        # Inject governance
+        # Inject skill profile + governance — gives the security agent
+        # stack-specific OWASP/CWE guidance instead of generic checks.
+        from devai.agents.skills import get_skill_profile
+
         system = SYSTEM_PROMPT
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        system += "\n\n" + profile.render_for_security()
+
         governance = state.get("governance", "")
         if governance:
             system += f"\n\n## Repository Governance\n{governance}"

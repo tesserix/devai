@@ -92,6 +92,24 @@ class SkillProfile:
     """GitHub Actions workflow YAML template the CI Builder writes when
     no workflow exists. Should include lint, test, build steps."""
 
+    security_guidance: str = ""
+    """Optional: stack-specific OWASP / security checklist for the
+    Security Expert (e.g. ``dangerouslySetInnerHTML`` in React,
+    SQL injection risk in raw GORM string concat)."""
+
+    infra_guidance: str = ""
+    """Optional: deployment / Dockerfile / Helm hints for the Infra
+    Provisioner (e.g. multi-stage node20-slim → distroless for Next.js)."""
+
+    release_guidance: str = ""
+    """Optional: release flow hints for the Release Manager (semver tag
+    rules, GHCR image push, ArgoCD sync trigger)."""
+
+    planning_guidance: str = ""
+    """Optional: how the Engineering Manager / Product Director should
+    break down work in this stack (e.g. "one story per component +
+    test + route")."""
+
     extra_dev_dependencies: tuple[str, ...] = field(default_factory=tuple)
     """Dev dependencies the developer should install when scaffolding."""
 
@@ -167,6 +185,56 @@ You are operating in **{self.display_name}** mode. Follow these conventions exac
 
 ### Database Guidance
 {self.db_guidance}
+"""
+
+    def render_brief(self) -> str:
+        """Compact context block for any agent that just needs to know
+        what stack it's working in. Cheap, always safe to inject."""
+        return f"""## Active Skill Profile: {self.display_name}
+- Primary framework: {self.primary_framework}
+- Languages: {", ".join(self.languages) or "(unspecified)"}
+- Test framework: {self.test_framework}
+- Lint: `{self.lint_command}` · Test: `{self.test_command}`
+"""
+
+    def render_for_security(self) -> str:
+        """Stack-specific security checklist for the Security Expert."""
+        if not self.security_guidance:
+            return self.render_brief()
+        return f"""## Active Skill Profile: {self.display_name}
+
+### Security Checklist for this Stack
+{self.security_guidance}
+"""
+
+    def render_for_infra(self) -> str:
+        """Deployment / Dockerfile / Helm hints for the Infra Provisioner."""
+        if not self.infra_guidance:
+            return self.render_brief()
+        return f"""## Active Skill Profile: {self.display_name}
+
+### Infrastructure Guidance
+{self.infra_guidance}
+"""
+
+    def render_for_release(self) -> str:
+        """Release flow hints for the Release Manager."""
+        if not self.release_guidance:
+            return self.render_brief()
+        return f"""## Active Skill Profile: {self.display_name}
+
+### Release Flow
+{self.release_guidance}
+"""
+
+    def render_for_planner(self) -> str:
+        """How to break work down — Engineering Manager / Product Director."""
+        if not self.planning_guidance:
+            return self.render_brief()
+        return f"""## Active Skill Profile: {self.display_name}
+
+### Planning Guidance
+{self.planning_guidance}
 """
 
 
@@ -326,6 +394,56 @@ jobs:
       - run: npm run test -- --run
       - run: npm run build
 """,
+    security_guidance="""- **XSS:** Never use `dangerouslySetInnerHTML` without sanitizing
+  through DOMPurify. Server components reduce the attack surface.
+- **Auth:** Sessions in HttpOnly + Secure + SameSite=lax cookies. Never
+  store JWTs in localStorage.
+- **Secrets:** No process.env.X exposed to the client unless prefixed
+  with `NEXT_PUBLIC_` AND non-sensitive.
+- **CSRF:** Server actions are CSRF-protected by default in Next.js 15.
+  Don't disable it.
+- **Dependencies:** Run `npm audit` — block on high/critical.
+- **Open redirects:** Validate every URL passed to `redirect()`.
+- **CSP:** Set a strict Content-Security-Policy header in `next.config.ts`
+  or middleware.""",
+    infra_guidance="""**Multi-stage Dockerfile:**
+
+```dockerfile
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM gcr.io/distroless/nodejs20-debian12 AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+EXPOSE 3000
+CMD ["server.js"]
+```
+
+Use `output: "standalone"` in `next.config.ts`. Helm chart should expose
+port 3000 and set `NEXT_PUBLIC_API_URL` via env.""",
+    release_guidance="""1. Tag with `v<semver>` on main.
+2. CI builds + pushes `ghcr.io/<org>/<repo>:<sha>` and `:latest`.
+3. ArgoCD picks up the new image (image.tag = "latest" + pullPolicy: Always).
+4. Helm chart values rolled with `podAnnotations.deployedAt: <sha>` to
+   force rolling restart.""",
+    planning_guidance="""Break stories along **component boundaries**, not feature areas:
+- One story per top-level page/route in `src/app/`
+- One story per major component in `src/components/<feature>/`
+- Each story includes: the component file + co-located unit test +
+  integration into the parent route
+- Avoid stories larger than ~3 files. Big stories = split.""",
     extra_dev_dependencies=(
         "vitest",
         "@vitest/ui",
@@ -561,6 +679,47 @@ jobs:
       - run: go test ./... -race -count=1
       - run: go build ./...
 """,
+    security_guidance="""- **SQL injection:** Use GORM parameter binding, never string-concat
+  raw SQL into a query.
+- **Secrets:** From env vars only, never hardcoded. Use `os.Getenv` with
+  a fail-fast on missing.
+- **Auth:** Bearer tokens validated via middleware on protected routes.
+- **CORS:** Restrictive by default, allow specific origins only.
+- **Errors:** Don't leak internal errors to clients — wrap with a
+  user-friendly message in the handler.
+- **Race conditions:** Always run `go test -race` in CI. Use `sync.Mutex`
+  / channels, never bare maps for shared state.
+- **govulncheck:** Run on every CI build, fail on critical advisories.
+- **Dependencies:** No replace directives for forks of stdlib packages.""",
+    infra_guidance="""**Multi-stage Dockerfile:**
+
+```dockerfile
+FROM golang:1.26-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /server ./cmd/server
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /server /server
+EXPOSE 8080
+ENTRYPOINT ["/server"]
+```
+
+Helm chart exposes the configured port, sets DB env vars from
+ExternalSecret-synced K8s secrets, and includes liveness/readiness
+probes pointing at `/healthz` / `/readyz`.""",
+    release_guidance="""1. Tag with `v<semver>` on main.
+2. CI builds + pushes `ghcr.io/<org>/<repo>:<sha>` and `:latest`.
+3. ArgoCD syncs new image (image.tag = "latest" + pullPolicy: Always).
+4. Bump `podAnnotations.deployedAt` in values-prod.yaml in tesserix-k8s
+   to force a rollout.""",
+    planning_guidance="""Break stories along **resource boundaries**:
+- One story per HTTP resource (e.g. "Users CRUD endpoints")
+- Each story includes: handler + service + repository + tests
+- Migration changes (if any) live in tesserix-k8s, not the story
+- Avoid stories that span multiple resources — split them.""",
 )
 
 
@@ -687,6 +846,45 @@ jobs:
       - run: ruff check src/
       - run: pytest -q
 """,
+    security_guidance="""- **SQL injection:** Always use SQLAlchemy expression language with
+  bound parameters, never raw f-strings into `text()`.
+- **Pydantic validation:** Every request body uses a Pydantic schema —
+  this gives free input validation.
+- **Auth:** Bearer JWT validated via FastAPI dependency. Cookies are
+  HttpOnly + Secure + SameSite=lax.
+- **Secrets:** From env vars (Pydantic Settings). Never hardcoded.
+- **CORS:** Restrictive by default. Specific origin allowlist.
+- **Async safety:** Never call sync DB operations from an async route
+  (will block the event loop). Use AsyncSession everywhere.
+- **bandit + pip-audit:** Run on every CI build.
+- **No `eval`, `exec`, or unrestricted `pickle.load`.**""",
+    infra_guidance="""**Multi-stage Dockerfile:**
+
+```dockerfile
+FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --target=/install .
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages
+COPY src/ ./src/
+EXPOSE 8080
+CMD ["uvicorn", "<package>.main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+Helm chart with liveness probe on `/healthz`, readiness on `/readyz`,
+DB connection string from ExternalSecret.""",
+    release_guidance="""1. Tag with `v<semver>` on main.
+2. CI builds + pushes `ghcr.io/<org>/<repo>:<sha>` and `:latest`.
+3. ArgoCD syncs the new image.
+4. Bump `podAnnotations.deployedAt` in tesserix-k8s to roll the pod.""",
+    planning_guidance="""Break stories along **resource boundaries**:
+- One story per HTTP resource (e.g. "GET /users + POST /users + tests")
+- Each story includes: schema + route + service + repository + tests
+- Production schemas live in tesserix-k8s, not the story
+- Async-safe by default — every story uses AsyncSession.""",
 )
 
 

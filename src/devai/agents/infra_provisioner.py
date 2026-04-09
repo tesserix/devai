@@ -138,6 +138,14 @@ Generate the infrastructure code needed to deploy this application.
 Follow the patterns described in the system prompt.
 Commit the infrastructure code to the appropriate repository."""
 
+        # Inject skill profile so infra knows the right Dockerfile
+        # template (multi-stage for the detected stack), exposed ports,
+        # and helm conventions.
+        from devai.agents.skills import get_skill_profile
+
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        system_prompt += "\n\n" + profile.render_for_infra()
+
         governance = state.get("governance", "")
         if governance:
             system_prompt += f"\n\n## Repository Governance\n{governance}"
