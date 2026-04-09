@@ -93,7 +93,10 @@ class GitHubSCMClient(SCMClient):
         token = await self._get_token()
         headers = {"Authorization": f"token {token}"} if token else {}
         resp = await self._http.request(method, path, headers=headers, **kwargs)
-        resp.raise_for_status()
+        if resp.is_client_error or resp.is_server_error:
+            body = resp.text[:500]
+            logger.error("GitHub API %s %s → %s: %s", method, path, resp.status_code, body)
+            resp.raise_for_status()
         return resp
 
     # --- Repositories ---
@@ -160,8 +163,15 @@ class GitHubSCMClient(SCMClient):
         payload: dict[str, Any] = {"title": safe_title, "body": safe_body}
         if labels:
             payload["labels"] = labels
-        resp = await self._request("POST", f"/repos/{repo}/issues", json=payload)
-        return resp.json()
+        try:
+            resp = await self._request("POST", f"/repos/{repo}/issues", json=payload)
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:300] if exc.response else "no body"
+            raise RuntimeError(
+                f"Failed to create issue on {repo} (HTTP {exc.response.status_code}): {detail}. "
+                f"Check that the repo exists and has Issues enabled."
+            ) from exc
 
     async def get_issue(self, repo: str, issue_id: int | str) -> dict[str, Any]:
         resp = await self._request("GET", f"/repos/{repo}/issues/{issue_id}")
