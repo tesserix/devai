@@ -384,8 +384,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
@@ -528,8 +528,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
@@ -666,8 +666,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache: true
@@ -837,8 +837,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -888,6 +888,186 @@ DB connection string from ExternalSecret.""",
 )
 
 
+DJANGO = SkillProfile(
+    name="django",
+    display_name="Django + DRF (PostgreSQL)",
+    keywords=("django", "drf", "django rest", "celery", "manage.py"),
+    languages=("python",),
+    package_manager="pip",
+    primary_framework="Django 5 + DRF",
+    test_framework="pytest-django",
+    test_command="pytest",
+    lint_command="ruff check .",
+    format_command="ruff format .",
+    directory_layout="""<project>/
+├── manage.py
+├── <project>/
+│   ├── settings/{base,prod,dev}.py
+│   ├── urls.py
+│   └── wsgi.py
+├── apps/<feature>/
+│   ├── models.py
+│   ├── serializers.py
+│   ├── views.py
+│   ├── urls.py
+│   └── tests/test_views.py
+└── pyproject.toml
+""",
+    file_conventions="Django apps in apps/<feature>/. ViewSets, ModelSerializers, DRF DefaultRouter.",
+    developer_guidance="""Scaffolding a Django app:
+
+1. `python manage.py startapp <name>`, move to `apps/<name>/`.
+2. Models in `models.py`. ModelSerializer in `serializers.py`. ModelViewSet in `views.py`.
+3. URLs via DRF DefaultRouter, included in project urls.
+4. Tests in `tests/test_*.py` with pytest-django + APIClient.
+5. NEVER edit existing migration files. Run makemigrations to add new ones.
+6. Settings split: base / prod / dev. Secrets from env, not settings.py.""",
+    qa_guidance="pytest-django + APIClient. Use `@pytest.mark.django_db` for DB tests. Mock external HTTP with the `responses` library.",
+    db_guidance="Django ORM + auto-generated migrations. Use select_related/prefetch_related to avoid N+1.",
+    review_checklist="""- [ ] Type hints on public functions
+- [ ] No bare except
+- [ ] N+1 queries avoided
+- [ ] DRF permissions on every viewset
+- [ ] No raw SQL without parameter binding
+- [ ] DEBUG=False in prod, ALLOWED_HOSTS configured""",
+    ci_workflow_template="""name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest
+""",
+    security_guidance="""- CSRF protection on (never @csrf_exempt without justification)
+- Use the ORM, never raw SQL string concat
+- Templates auto-escape — never mark_safe on user input
+- Use permission_classes on every DRF viewset
+- DEBUG=False in prod, ALLOWED_HOSTS set""",
+    infra_guidance="""Multi-stage Dockerfile, gunicorn:
+
+```dockerfile
+FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --target=/install .
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages
+COPY . .
+RUN python manage.py collectstatic --noinput
+EXPOSE 8000
+CMD ["gunicorn", "<project>.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
+```""",
+    release_guidance="Tag v<semver>, CI builds image, ArgoCD syncs, run migrate as a Helm post-deploy hook.",
+    planning_guidance="One story per Django app or ViewSet. Each story includes model + migration + serializer + viewset + tests.",
+)
+
+
+NESTJS = SkillProfile(
+    name="nestjs",
+    display_name="NestJS (TypeScript)",
+    keywords=("nest", "nestjs", "@nestjs"),
+    languages=("typescript",),
+    package_manager="npm",
+    primary_framework="NestJS 10",
+    test_framework="Jest + supertest",
+    test_command="npm test",
+    lint_command="npm run lint",
+    format_command="npx prettier --write .",
+    directory_layout="""src/
+├── main.ts
+├── app.module.ts
+└── modules/<feature>/
+    ├── <feature>.module.ts
+    ├── <feature>.controller.ts
+    ├── <feature>.service.ts
+    ├── dto/
+    ├── entities/
+    └── tests/
+""",
+    file_conventions="One controller + service per module. DTOs use class-validator. TypeORM entities in entities/.",
+    developer_guidance="""Scaffolding a NestJS feature:
+
+1. `nest g module <feature>` then `nest g service <feature>` and `nest g controller <feature>`.
+2. DTOs in `dto/` with class-validator decorators (@IsString, @IsInt, etc).
+3. TypeORM entity in `entities/` with @Entity() / @Column() decorators.
+4. Inject Repository via @InjectRepository(Entity) in the service.
+5. Tests in `*.spec.ts` next to source using Test.createTestingModule.
+6. Enable global ValidationPipe in main.ts.""",
+    qa_guidance="Jest + supertest. Unit tests in *.spec.ts next to source, E2E in test/*.e2e-spec.ts.",
+    db_guidance="TypeORM with typed entities. Migrations via typeorm migration:generate.",
+    review_checklist="""- [ ] No `any` — strict TS
+- [ ] DTOs validated with class-validator
+- [ ] Controllers thin, services do work
+- [ ] Tests cover happy + error + auth paths
+- [ ] No console.log — use Logger
+- [ ] Helmet enabled""",
+    ci_workflow_template="""name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+""",
+    security_guidance="""- ValidationPipe with whitelist + forbidNonWhitelisted globally
+- @UseGuards(JwtAuthGuard) on protected routes
+- ConfigService for secrets, never hardcoded
+- Restrictive CORS via app.enableCors()
+- helmet() middleware enabled
+- TypeORM repository methods, never raw concat""",
+    infra_guidance="""```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+EXPOSE 3000
+CMD ["node", "dist/main"]
+```""",
+    release_guidance="Tag v<semver>, CI builds, ArgoCD syncs, TypeORM migrations as Helm pre-upgrade hook.",
+    planning_guidance="One story per NestJS module. Each story includes controller + service + DTOs + entity + tests.",
+)
+
+
 # A safe fallback for unknown stacks — gives the agent enough structure
 # to do something sensible without forcing the wrong conventions.
 GENERIC = SkillProfile(
@@ -923,7 +1103,15 @@ setup for the detected language and add tests for the new code only.""",
 
 PROFILES: dict[str, SkillProfile] = {
     p.name: p
-    for p in (NEXTJS_REACT, REACT_VITE, GO_GIN, PYTHON_FASTAPI, GENERIC)
+    for p in (
+        NEXTJS_REACT,
+        REACT_VITE,
+        GO_GIN,
+        PYTHON_FASTAPI,
+        DJANGO,
+        NESTJS,
+        GENERIC,
+    )
 }
 
 
