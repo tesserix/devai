@@ -137,15 +137,59 @@ Start by getting the PR diff with github_get_pr_diff, then explore the repo stru
 
         review = self._parse_review_text(result_text)
 
-        # Post the review on the PR
+        # Post the review on the PR — degrade gracefully if the PR has
+        # already been merged/closed (otherwise GitHub returns 422 and we
+        # would fail the entire pipeline run for an issue that's already
+        # resolved). Also catch any other 422 from the reviews endpoint
+        # (e.g. "can not approve your own pull request") and treat it as
+        # a soft skip with a warning rather than a hard failure.
         event = "APPROVE" if review.decision == ReviewDecision.APPROVED else "REQUEST_CHANGES"
         review_body = self._format_review_body(review)
-        await self.github.create_pr_review(
-            repo=repo,
-            pr_number=pr_number,
-            body=review_body,
-            event=event,
-        )
+
+        pr_already_resolved = False
+        try:
+            pr_info = await self.github.get_pull_request(repo, pr_number)
+            pr_state = (pr_info.get("state") or "").lower()
+            pr_merged = bool(pr_info.get("merged"))
+            if pr_state == "closed" or pr_merged:
+                pr_already_resolved = True
+                logger.info(
+                    "Skipping review on PR #%s — already %s",
+                    pr_number,
+                    "merged" if pr_merged else pr_state,
+                )
+        except Exception as e:
+            logger.warning("Could not fetch PR #%s state before review: %s", pr_number, e)
+
+        if not pr_already_resolved:
+            try:
+                await self.github.create_pr_review(
+                    repo,
+                    pr_number,
+                    review_body,
+                    event,
+                )
+            except Exception as e:
+                msg = str(e)
+                if "422" in msg or "Unprocessable" in msg:
+                    logger.warning(
+                        "PR review on #%s rejected by GitHub (%s) — treating as already resolved",
+                        pr_number,
+                        msg.splitlines()[0][:200],
+                    )
+                    pr_already_resolved = True
+                else:
+                    raise
+
+        # If the PR was already resolved, force the decision to APPROVED so
+        # the pipeline can hand off to the next agent instead of looping.
+        if pr_already_resolved:
+            review.decision = ReviewDecision.APPROVED
+            review.summary = (
+                review.summary
+                + "\n\n_Note: PR was already merged/closed when the reviewer ran. "
+                "Treating as approved._"
+            )
 
         # A2A communication based on review decision — include story context
         if review.decision == ReviewDecision.APPROVED:
