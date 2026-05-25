@@ -109,44 +109,41 @@ export default function DashboardPage() {
   const orchestratorRouting = runContext.orchestrator_routing;
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Sidebar */}
-      <aside className="w-68 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col" style={{ width: "272px" }}>
-        {/* Header */}
-        <div className="px-4 py-3.5 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
-              D
-            </div>
-            <div>
-              <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-100">DevAI</h1>
-              <p className="text-xs text-gray-400 dark:text-gray-500">Multi-Agent ALM Platform</p>
-            </div>
-          </div>
-        </div>
-
-        {/* New Run Button */}
-        <div className="px-3 pt-3 pb-2">
-          <button
-            onClick={() => setTriggerOpen(true)}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-          >
+    <div className="flex h-full" style={{ background: "var(--canvas)" }}>
+      {/* Recent runs column — sits inside the page (not the outer
+       * mission-control nav) because this column is specific to the
+       * Fleet view; other top-level pages (Registry, Blueprint) don't
+       * need a runs list. */}
+      <aside
+        className="w-64 shrink-0 flex flex-col border-r"
+        style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
+      >
+        <div className="px-4 pt-4 pb-3">
+          <button onClick={() => setTriggerOpen(true)} className="btn-primary w-full !py-2">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             New Pipeline Run
           </button>
         </div>
 
-        {/* Runs label */}
-        <div className="px-4 pt-2 pb-1">
-          <span className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">Recent Runs</span>
-        </div>
+        <div className="px-4 pt-1 pb-2 label-eyebrow">Recent Runs</div>
 
-        {/* Run List */}
         <div className="flex-1 overflow-y-auto px-3 pb-3">
           {loading ? (
-            <div className="text-center py-8 text-gray-400 dark:text-gray-500 text-xs">Loading...</div>
+            <div className="text-center py-8 text-xs" style={{ color: "var(--ink-muted)" }}>
+              Loading…
+            </div>
+          ) : runs.length === 0 ? (
+            <div className="text-center py-12 px-3">
+              <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
+                No pipeline runs yet
+              </p>
+              <p className="text-xs mt-1" style={{ color: "var(--ink-muted)" }}>
+                Trigger a run from the CLI or webhook
+              </p>
+            </div>
           ) : (
             <RunList
               runs={runs}
@@ -160,60 +157,56 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-600" />
-              Supervisor + Orchestrator
-            </div>
-            <a
-              href="/auth/logout"
-              className="text-xs text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-            >
-              Logout
-            </a>
-          </div>
+        <div
+          className="px-4 py-2.5 border-t flex items-center justify-between text-xs"
+          style={{ borderColor: "var(--border-subtle)", color: "var(--ink-muted)" }}
+        >
+          <span className="flex items-center gap-1.5">
+            <span className="dot dot-ok" />
+            Supervisor + Orchestrator
+          </span>
+          <a href="/auth/logout" className="hover:underline" style={{ color: "var(--ink-muted)" }}>
+            Logout
+          </a>
         </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Detail pane — task timeline / agent grid / chat / etc. */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {selectedRun ? (
           <>
-            {/* Top Bar */}
-            <header className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 py-3 shrink-0">
+            <header
+              className="border-b px-6 py-3 shrink-0"
+              style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
+            >
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  <h2 className="text-sm font-semibold" style={{ color: "var(--ink-strong)" }}>
                     {selectedRun.repo}
                   </h2>
-                  <p className="text-xs font-mono text-gray-400 dark:text-gray-500 mt-0.5">
+                  <p className="text-xs font-mono mt-0.5" style={{ color: "var(--ink-muted)" }}>
                     {selectedRun.run_id}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {orchestratorRouting?.progress_pct !== undefined && (
-                    <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 font-mono border border-indigo-100 dark:border-indigo-900">
-                      {orchestratorRouting.progress_pct}%
-                    </span>
+                    <span className="pill">{orchestratorRouting.progress_pct}%</span>
                   )}
-                  <span className="text-xs px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-medium border border-gray-200 dark:border-gray-600">
-                    {selectedRun.stage.replace(/_/g, " ")}
-                  </span>
+                  <span className="pill-muted pill">{selectedRun.stage.replace(/_/g, " ")}</span>
                 </div>
               </div>
             </header>
 
-            {/* Pipeline Flow */}
-            <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 shrink-0">
+            <div
+              className="border-b px-6 shrink-0"
+              style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
+            >
               <PipelineFlow
                 currentStage={selectedRun.stage}
                 agentTimings={(selectedRun as any)?.context?.agent_timings}
               />
             </div>
 
-            {/* Approval Banners */}
             {approvals.length > 0 && (
               <div className="px-6 pt-4 shrink-0">
                 <ApprovalBanner
@@ -224,8 +217,10 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Tabs */}
-            <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 shrink-0">
+            <div
+              className="border-b px-6 shrink-0"
+              style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
+            >
               <div className="flex gap-0 -mb-px">
                 {([
                   { key: "overview", label: "Overview" },
@@ -235,24 +230,26 @@ export default function DashboardPage() {
                   { key: "events", label: "Events" },
                   { key: "chat", label: "Chat" },
                   { key: "config", label: "Config" },
-                ] as const).map((t) => (
-                  <button
-                    key={t.key}
-                    onClick={() => setTab(t.key)}
-                    className={`px-3.5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                      tab === t.key
-                        ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400"
-                        : "border-transparent text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200"
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+                ] as const).map((t) => {
+                  const isActive = tab === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      onClick={() => setTab(t.key)}
+                      className="px-3.5 py-2.5 text-sm font-medium border-b-2 transition-colors"
+                      style={{
+                        borderColor: isActive ? "var(--accent)" : "transparent",
+                        color: isActive ? "var(--accent-soft-ink)" : "var(--ink-soft)",
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Tab Content */}
-            <div className="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
+            <div className="flex-1 overflow-y-auto p-6" style={{ background: "var(--canvas)" }}>
               {tab === "overview" && (
                 <OverviewTab run={selectedRun} a2aMessages={a2aMessages} orchestratorRouting={orchestratorRouting} />
               )}
@@ -271,22 +268,41 @@ export default function DashboardPage() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-            <div className="text-center">
-              <div className="w-14 h-14 rounded-xl bg-indigo-50 dark:bg-indigo-950 border border-indigo-100 dark:border-indigo-900 flex items-center justify-center mx-auto mb-4">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600 dark:text-indigo-400">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          // Empty state — shown when no run is selected. Polished to
+          // match the rest of the design system; tokens make this look
+          // right in both dark + light modes without conditional CSS.
+          <div className="flex-1 flex items-center justify-center" style={{ background: "var(--canvas)" }}>
+            <div className="text-center max-w-md px-6">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+                style={{
+                  background: "var(--accent-soft-bg)",
+                  border: "1px solid var(--accent-soft-bd)",
+                }}
+              >
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ color: "var(--accent)" }}
+                >
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                  <path d="M2 17l10 5 10-5" />
+                  <path d="M2 12l10 5 10-5" />
                 </svg>
               </div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">DevAI Multi-Agent Platform</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-sm">
-                Supervisor &rarr; Orchestrator &rarr; Specialist Agents.
-                AI-powered Application Lifecycle Management.
+              <h2 className="font-serif text-xl font-medium" style={{ color: "var(--ink-strong)" }}>
+                DevAI Multi-Agent Platform
+              </h2>
+              <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>
+                Supervisor &rarr; Orchestrator &rarr; Specialist Agents. AI-powered Application Lifecycle Management.
               </p>
-              <button
-                onClick={() => setTriggerOpen(true)}
-                className="mt-5 px-4 py-2 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-              >
+              <button onClick={() => setTriggerOpen(true)} className="btn-primary mt-6 !py-2 !px-4">
                 Start New Pipeline
               </button>
             </div>

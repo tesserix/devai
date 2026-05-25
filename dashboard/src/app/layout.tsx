@@ -22,10 +22,26 @@ export const metadata: Metadata = {
  * renders its own minimal full-width frame; the shell pass-throughs
  * when the current path is /login.
  *
- * We default <html> to `dark` (matches the Fiber screenshot) and the
- * MissionControlNav reads the localStorage override on mount, so the
- * first paint is correct for repeat visitors without an SSR flash.
+ * Theme application:
+ *   1. An inline blocking script reads localStorage('devai-theme') and
+ *      `prefers-color-scheme` BEFORE React paints, then toggles
+ *      `html.dark`. This eliminates the dark/light flash on reload
+ *      that every theme-toggle without SSR cookies suffers from.
+ *   2. The Settings page persists the choice into localStorage. The
+ *      sidebar toggle is a thin wrapper over the same key.
+ *   3. New visitors get the system preference; explicit toggles win.
  */
+const THEME_INIT_SCRIPT = `
+(function () {
+  try {
+    var stored = localStorage.getItem('devai-theme');
+    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var useDark = stored ? stored === 'dark' : prefersDark;
+    if (useDark) document.documentElement.classList.add('dark');
+  } catch (e) {}
+})();
+`.trim();
+
 export default function RootLayout({
   children,
 }: {
@@ -33,7 +49,10 @@ export default function RootLayout({
 }) {
   const fontVars = `${inter.variable} ${ibmPlexMono.variable} ${sourceSerif.variable} ${syne.variable}`;
   return (
-    <html lang="en" className={`dark ${fontVars}`} suppressHydrationWarning>
+    <html lang="en" className={fontVars} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-screen" suppressHydrationWarning>
         <ThemeProvider>
           <MissionControlShell>{children}</MissionControlShell>

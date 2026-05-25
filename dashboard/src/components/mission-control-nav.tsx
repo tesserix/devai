@@ -25,37 +25,42 @@ import {
 } from "lucide-react";
 
 /**
- * Fiber-style mission-control left nav (PLATFORM.md §14 Tactical
- * Monospace). The components here match the visual structure of the
- * reference screenshot:
+ * Fiber-style mission-control left nav.
  *
- *   ┌────────────────────────────┐
- *   │   ◆ DevAI                  │  logo block
- *   │   Mission control          │
- *   │                            │
- *   │   ROLE                     │
- *   │   ● Administrator    ▾     │  role chip
- *   │                            │
- *   │   ▣ Fleet              [1] │  top group (with count badges)
- *   │   ‖ Workflows              │
- *   │   ▢ Blueprint              │
- *   │   ⛨ Agents                 │
- *   │   ⌽ Memory                 │
- *   │                            │
- *   │   ▤ Registry               │  platform group
- *   │   ▦ Catalog                │
- *   │   ⇆ Control                │
- *   │   ⥤ Analytics              │
- *   │   ⚒ Tools                  │
- *   │   ⚙ Settings               │
- *   │                            │
- *   │   ☾ Dark mode              │  meta
- *   │                            │
- *   │   ┌──────────────────────┐ │
- *   │   │   + New task         │ │  primary CTA
- *   │   └──────────────────────┘ │
- *   └────────────────────────────┘
+ * Every colour / surface / border reads from the design tokens in
+ * globals.css. Neither the sidebar nor any nav row hardcodes a
+ * Tailwind grayscale utility — the same component renders cleanly
+ * in both dark and light modes without conditional rendering.
+ *
+ * Visual map (matches the screenshot we anchored on):
+ *
+ *   logo + "Mission control" eyebrow
+ *   ┌──────────────────────────┐
+ *   │  🔍 Jump to…       ⌘K    │  command palette trigger
+ *   └──────────────────────────┘
+ *   ROLE
+ *   • Administrator           ▾
+ *
+ *   FLEET
+ *   ▣ Fleet                [1]
+ *   ‖ Workflows
+ *   ▢ Blueprint
+ *   ⛨ Agents
+ *   ⌽ Memory
+ *
+ *   PLATFORM
+ *   ▤ Registry
+ *   ▦ Catalog
+ *   ⇆ Control
+ *   ⥤ Analytics
+ *   ⚒ Tools
+ *
+ *   ⚙ Settings
+ *   ☾ Dark   (toggle)
+ *   ─────────────────────────
+ *   [   + New task   ]   primary CTA, pinned bottom
  */
+
 type NavItem = {
   href: string;
   label: string;
@@ -92,16 +97,14 @@ function isActive(href: string, pathname: string): boolean {
 export function MissionControlNav() {
   const pathname = usePathname();
   const router = useRouter();
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(false);
 
-  // Read + persist the theme preference. We default to dark to match
-  // the Fiber screenshot; flipping persists across reloads.
+  // Read the resolved theme that the inline-init script applied. Doing
+  // it in useEffect rather than as a default prevents the SSR/CSR
+  // mismatch (window doesn't exist server-side).
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem("devai-theme");
-    const isDark = stored ? stored === "dark" : true;
-    setDark(isDark);
-    document.documentElement.classList.toggle("dark", isDark);
+    setDark(document.documentElement.classList.contains("dark"));
   }, []);
 
   function toggleDark() {
@@ -112,41 +115,63 @@ export function MissionControlNav() {
   }
 
   function newTask() {
-    // Dispatch route lives at /control — that's the action panel for
-    // Pipeline.Submit. Until the dialog is ported we route there.
     router.push("/control?action=new");
   }
 
   return (
-    <aside className="w-60 shrink-0 border-r border-[var(--surface-border)] bg-[var(--surface-1)] text-[var(--ink-100)] flex flex-col">
+    <aside
+      className="w-60 shrink-0 flex flex-col border-r"
+      style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
+    >
       {/* Logo + tag */}
       <div className="px-4 pt-4 pb-2 flex items-center gap-2.5">
-        <span className="inline-flex w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-700 text-white items-center justify-center shadow-sm">
+        <span
+          className="inline-flex w-8 h-8 rounded-lg items-center justify-center text-white shadow-sm"
+          style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
+        >
           <ShieldHalf className="w-4 h-4" />
         </span>
         <div className="min-w-0">
-          <div className="font-display text-[15px] leading-none text-[var(--ink-50)] tracking-wide">DevAI</div>
-          <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--ink-500)] mt-1">Mission control</div>
+          <div className="font-display text-[15px] leading-none tracking-wide" style={{ color: "var(--ink-strong)" }}>
+            DevAI
+          </div>
+          <div className="label-eyebrow mt-1">Mission control</div>
         </div>
       </div>
 
-      {/* Cmd-K hint — clicking it opens the palette via the global event. */}
+      {/* ⌘K palette trigger */}
       <button
         type="button"
-        onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-        className="mx-3 mt-3 flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] hover:border-[var(--surface-border-strong)] text-xs text-[var(--ink-300)] transition-colors"
+        onClick={() =>
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))
+        }
+        className="btn-secondary mx-3 mt-3 !justify-between !py-1.5"
       >
-        <Search className="w-3.5 h-3.5" />
-        <span className="flex-1 text-left">Jump to…</span>
-        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-3)] text-[var(--ink-300)]">⌘K</span>
+        <span className="inline-flex items-center gap-2">
+          <Search className="w-3.5 h-3.5" style={{ color: "var(--ink-muted)" }} />
+          <span style={{ color: "var(--ink-soft)" }}>Jump to…</span>
+        </span>
+        <kbd
+          className="font-mono text-[10px] px-1.5 py-0.5 rounded"
+          style={{ background: "var(--surface-muted)", color: "var(--ink-muted)" }}
+        >
+          ⌘K
+        </kbd>
       </button>
 
       {/* Role chip */}
       <div className="px-3 mt-4">
         <div className="label-eyebrow mb-1.5 px-1">Role</div>
-        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] text-sm">
+        <div
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm"
+          style={{
+            background: "var(--surface-muted)",
+            border: "1px solid var(--border-subtle)",
+            color: "var(--ink)",
+          }}
+        >
           <span className="dot dot-ok" />
-          <span className="flex-1 text-[var(--ink-100)]">Administrator</span>
+          <span className="flex-1">Administrator</span>
         </div>
       </div>
 
@@ -156,26 +181,18 @@ export function MissionControlNav() {
         <NavSection items={MID} pathname={pathname} label="Platform" />
       </div>
 
-      {/* Meta: theme toggle */}
-      <div className="px-2">
+      {/* Meta + theme toggle */}
+      <div className="px-2 pb-1">
         <NavSection items={BOTTOM} pathname={pathname} />
-        <button
-          type="button"
-          onClick={toggleDark}
-          className="w-full mt-1 flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-[var(--ink-300)] hover:bg-white/5 transition-colors"
-        >
-          {dark ? <Moon className="w-4 h-4 shrink-0" /> : <Sun className="w-4 h-4 shrink-0" />}
+        <button type="button" onClick={toggleDark} className="btn-ghost !justify-start w-full mt-0.5 !text-[13px]">
+          {dark ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           <span>{dark ? "Dark" : "Light"}</span>
         </button>
       </div>
 
       {/* Primary CTA */}
-      <div className="px-3 py-3 border-t border-[var(--surface-border)]">
-        <button
-          type="button"
-          onClick={newTask}
-          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-medium shadow-sm transition-colors"
-        >
+      <div className="px-3 py-3 border-t" style={{ borderColor: "var(--border-subtle)" }}>
+        <button type="button" onClick={newTask} className="btn-primary w-full !py-2 !text-sm">
           <Plus className="w-4 h-4" />
           New task
         </button>
@@ -205,16 +222,35 @@ function NavSection({
                 href={href}
                 title={description}
                 className={clsx(
-                  "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors group",
-                  active
-                    ? "bg-indigo-500/15 text-[var(--ink-50)] font-medium ring-1 ring-inset ring-indigo-500/30"
-                    : "text-[var(--ink-300)] hover:bg-white/5 hover:text-[var(--ink-100)]"
+                  "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors group"
                 )}
+                style={{
+                  background: active ? "var(--accent-soft-bg-2)" : "transparent",
+                  color: active ? "var(--accent-soft-ink)" : "var(--ink-soft)",
+                  fontWeight: active ? 500 : 400,
+                  boxShadow: active ? "inset 0 0 0 1px var(--accent-soft-bd)" : "none",
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) e.currentTarget.style.background = "var(--surface-hover)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) e.currentTarget.style.background = "transparent";
+                }}
               >
-                <Icon className={clsx("w-4 h-4 shrink-0", active ? "text-indigo-300" : "text-[var(--ink-500)] group-hover:text-[var(--ink-300)]")} />
+                <Icon
+                  className="w-4 h-4 shrink-0"
+                  style={{ color: active ? "var(--accent)" : "var(--ink-muted)" }}
+                />
                 <span className="truncate flex-1">{l}</span>
                 {badge && (
-                  <span className="font-mono text-[10px] text-[var(--ink-500)] px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--surface-border)]">
+                  <span
+                    className="font-mono text-[10px] px-1.5 py-0.5 rounded"
+                    style={{
+                      background: "var(--surface-muted)",
+                      color: "var(--ink-muted)",
+                      border: "1px solid var(--border-subtle)",
+                    }}
+                  >
                     {badge}
                   </span>
                 )}

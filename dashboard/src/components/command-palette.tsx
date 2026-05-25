@@ -140,29 +140,45 @@ export function CommandPalette({
           }
         }}
       >
-        <header className="flex items-center gap-2 px-4 py-3 border-b border-[var(--surface-border)]">
-          <Search className="w-4 h-4 text-[var(--ink-500)]" />
+        <header
+          className="flex items-center gap-2 px-4 py-3 border-b"
+          style={{ borderColor: "var(--border-subtle)" }}
+        >
+          <Search className="w-4 h-4" style={{ color: "var(--ink-muted)" }} />
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Jump to a panel or run a command…"
-            className="flex-1 bg-transparent text-sm text-[var(--ink-100)] placeholder-[var(--ink-500)] outline-none"
+            className="flex-1 bg-transparent text-sm outline-none"
+            style={{ color: "var(--ink)" }}
           />
-          <span className="font-mono text-[10px] text-[var(--ink-500)] px-1.5 py-0.5 rounded border border-[var(--surface-border)]">
+          <kbd
+            className="font-mono text-[10px] px-1.5 py-0.5 rounded border"
+            style={{
+              color: "var(--ink-muted)",
+              borderColor: "var(--border-subtle)",
+              background: "var(--surface-muted)",
+            }}
+          >
             ESC
-          </span>
+          </kbd>
         </header>
 
         <div className="max-h-[55vh] overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-[var(--ink-500)]">No matches.</div>
+            <div className="px-4 py-6 text-sm" style={{ color: "var(--ink-muted)" }}>
+              No matches.
+            </div>
           ) : (
             renderGroups(filtered, active, setActive, runActive)
           )}
         </div>
 
-        <footer className="px-3 py-2 border-t border-[var(--surface-border)] flex items-center justify-between text-[10px] font-mono text-[var(--ink-500)]">
+        <footer
+          className="px-3 py-2 border-t flex items-center justify-between text-[10px] font-mono"
+          style={{ borderColor: "var(--border-subtle)", color: "var(--ink-muted)" }}
+        >
           <span>↑↓ to move · ↵ to open</span>
           <span>{filtered.length} command{filtered.length === 1 ? "" : "s"}</span>
         </footer>
@@ -202,16 +218,23 @@ function renderGroups(
                   type="button"
                   onMouseEnter={() => setActive(captured)}
                   onClick={() => runActive()}
-                  className={`w-full flex items-center gap-3 px-4 py-2 text-sm text-left ${
-                    isActive
-                      ? "bg-indigo-500/10 text-indigo-100"
-                      : "text-[var(--ink-100)] hover:bg-white/5"
-                  }`}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm text-left transition-colors"
+                  style={{
+                    background: isActive ? "var(--accent-soft-bg-2)" : "transparent",
+                    color: isActive ? "var(--accent-soft-ink)" : "var(--ink)",
+                  }}
                 >
-                  <cmd.Icon className="w-4 h-4 text-[var(--ink-300)]" />
+                  <cmd.Icon
+                    className="w-4 h-4"
+                    style={{ color: isActive ? "var(--accent)" : "var(--ink-muted)" }}
+                  />
                   <span className="flex-1">{cmd.label}</span>
-                  {cmd.hint && <span className="text-xs text-[var(--ink-500)] truncate">{cmd.hint}</span>}
-                  {isActive && <ArrowRight className="w-3.5 h-3.5 text-indigo-400" />}
+                  {cmd.hint && (
+                    <span className="text-xs truncate" style={{ color: "var(--ink-muted)" }}>
+                      {cmd.hint}
+                    </span>
+                  )}
+                  {isActive && <ArrowRight className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />}
                 </button>
               </li>
             );

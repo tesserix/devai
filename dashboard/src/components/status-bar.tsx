@@ -62,7 +62,14 @@ export function StatusBar() {
   }, []);
 
   return (
-    <footer className="shrink-0 h-9 px-4 border-t border-[var(--surface-border)] bg-[var(--surface-1)]/80 backdrop-blur-sm flex items-center justify-between text-[11px] text-[var(--ink-300)]">
+    <footer
+      className="shrink-0 h-9 px-4 border-t flex items-center justify-between text-[11px]"
+      style={{
+        background: "var(--surface)",
+        borderColor: "var(--border-subtle)",
+        color: "var(--ink-soft)",
+      }}
+    >
       <div className="flex items-center gap-5 font-mono">
         <Stat label="active" value={counts.active} dot="dot-running" />
         <Stat label="complete" value={counts.complete} dot="dot-ok" />
@@ -86,8 +93,8 @@ function Stat({ label, value, dot }: { label: string; value: number; dot: string
   return (
     <span className="flex items-center gap-1.5">
       <span className={`dot ${dot}`} />
-      <span className="text-[var(--ink-100)] tabular-nums">{value}</span>
-      <span className="text-[var(--ink-500)]">{label}</span>
+      <span className="tabular-nums" style={{ color: "var(--ink-strong)" }}>{value}</span>
+      <span style={{ color: "var(--ink-muted)" }}>{label}</span>
     </span>
   );
 }
