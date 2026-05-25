@@ -66,8 +66,21 @@ func TestRead_TamperedCookie(t *testing.T) {
 		t.Fatalf("Mint: %v", err)
 	}
 	c := w.Result().Cookies()[0]
-	// Flip a single character in the encrypted payload — auth tag must reject it.
-	c.Value = strings.ReplaceAll(c.Value, "A", "B")
+	// Flip the LAST byte of the cookie deterministically. The string-
+	// replace approach was flaky: when the random nonce + ciphertext +
+	// auth tag happened to contain no 'A', the substitution was a no-op
+	// and the cookie still decoded cleanly. Picking a fixed index
+	// guarantees a mutation on every run.
+	if n := len(c.Value); n > 0 {
+		// XOR the trailing base64 char so the result is still a valid
+		// base64 byte (just a different one); decode will succeed, but
+		// the AEAD auth tag will reject it.
+		alt := byte('A')
+		if c.Value[n-1] == 'A' {
+			alt = 'B'
+		}
+		c.Value = c.Value[:n-1] + string(alt)
+	}
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.AddCookie(c)
