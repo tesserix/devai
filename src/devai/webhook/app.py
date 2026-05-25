@@ -135,6 +135,13 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
 
     app.include_router(agentic_router)
 
+    # SCM routes (/api/scm/*) — repo picker + create-new for the New
+    # Pipeline Run dialog; issue feed grouped by lane for the
+    # Workflows kanban. Reads the PAT from devai-github-pat.
+    from devai.scm.routes import router as scm_router
+
+    app.include_router(scm_router)
+
     # Pipeline runtime routes (/api/pipeline/*) — only useful when
     # PipelineService is started, but the routes themselves return a
     # readable 503 when disabled, so we mount unconditionally.

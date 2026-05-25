@@ -154,26 +154,60 @@ class GitHubSCMClient(SCMClient):
     # --- Repositories ---
 
     async def list_installation_repos(self, per_page: int = 100) -> list[dict[str, Any]]:
-        """List repos accessible to the GitHub App installation."""
+        """List repos the configured token can see.
+
+        The endpoint differs by auth method:
+
+          * GitHub App   → GET /installation/repositories      (returns {repositories:[...]})
+          * PAT / OAuth  → GET /user/repos                     (returns a flat list, all
+                                                                visibilities incl. private
+                                                                membership repos)
+
+        The /installation/* path is App-only — calling it with a PAT
+        yields 404. The dashboard's repo picker uses the PAT path
+        (devai-github-pat), so detect the auth method and pick the
+        right endpoint. Both return the same shape on the wire so
+        downstream callers don't change.
+
+        Extra fields returned to the caller (used by the New Pipeline
+        Run dialog): owner.login, pushed_at, html_url.
+        """
         repos: list[dict[str, Any]] = []
         page = 1
+        use_user_endpoint = self._auth_method in (AuthMethod.PAT, AuthMethod.OAUTH)
         while True:
-            resp = await self._request("GET", f"/installation/repositories?per_page={per_page}&page={page}")
-            data = resp.json()
-            for r in data.get("repositories", []):
+            if use_user_endpoint:
+                resp = await self._request(
+                    "GET",
+                    f"/user/repos?per_page={per_page}&page={page}&sort=pushed&direction=desc&affiliation=owner,collaborator,organization_member",
+                )
+                batch = resp.json()
+            else:
+                resp = await self._request(
+                    "GET",
+                    f"/installation/repositories?per_page={per_page}&page={page}",
+                )
+                batch = resp.json().get("repositories", [])
+
+            for r in batch:
                 repos.append(
                     {
                         "full_name": r["full_name"],
                         "name": r["name"],
+                        "owner": r.get("owner") or {},
                         "description": r.get("description") or "",
                         "language": r.get("language") or "",
                         "private": r.get("private", False),
                         "default_branch": r.get("default_branch", "main"),
+                        "html_url": r.get("html_url", ""),
+                        "pushed_at": r.get("pushed_at", ""),
                     }
                 )
-            if len(data.get("repositories", [])) < per_page:
+            if len(batch) < per_page:
                 break
             page += 1
+            if page > 10:  # hard cap — 1000 repos is enough for a picker
+                break
         return repos
 
     async def create_repo(self, org: str, name: str, description: str = "", private: bool = True) -> dict[str, Any]:

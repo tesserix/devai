@@ -51,6 +51,10 @@ const nextConfig: NextConfig = {
         source: "/api/specializations/:path*",
         destination: `${API_INTERNAL_URL}/api/specializations/:path*`,
       },
+      {
+        source: "/api/scm/:path*",
+        destination: `${API_INTERNAL_URL}/api/scm/:path*`,
+      },
       // Legacy catch-all — original dashboard endpoints sit under
       // /dashboard/api/* on devai-api. Keep this last so it doesn't
       // shadow the more-specific rewrites above.

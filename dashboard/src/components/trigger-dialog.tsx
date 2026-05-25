@@ -220,7 +220,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   };
 
   const inputClass =
-    "w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 transition-colors";
+    "w-full px-3 py-2.5 rounded-lg bg-[var(--surface-muted)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 transition-colors";
 
   const dropdownItemClass =
     "w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors";
@@ -233,14 +233,14 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl w-full max-w-lg p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 border border-[var(--border-subtle)] rounded-xl w-full max-w-lg p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+          <h2 className="text-base font-semibold ">
             New Pipeline Run
           </h2>
           <button
             onClick={onClose}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-md  hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -248,7 +248,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
             </svg>
           </button>
         </div>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+        <p className="text-sm  mb-5">
           Select a repository, link a project board, and describe your requirements
         </p>
 
@@ -281,31 +281,31 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                       className={dropdownItemClass}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <span className="text-sm font-medium ">
                           {r.full_name}
                         </span>
                         <div className="flex items-center gap-2">
                           {r.language && (
-                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                            <span className="text-xs ">
                               {r.language}
                             </span>
                           )}
                           {r.private && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-400">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-600 ">
                               Private
                             </span>
                           )}
                         </div>
                       </div>
                       {r.description && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        <p className="text-xs  mt-0.5 truncate">
                           {r.description}
                         </p>
                       )}
                     </button>
                   ))
                 ) : (
-                  <div className="px-3 py-3 text-sm text-gray-500 dark:text-gray-400">
+                  <div className="px-3 py-3 text-sm ">
                     {loadingRepos ? "Loading..." : "No repositories found"}
                   </div>
                 )}
@@ -326,7 +326,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
           {showCreate && (
             <div className="p-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/10 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                <span className="text-sm font-medium ">
                   Create Repository
                 </span>
                 <button
@@ -349,7 +349,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                       setNewRepoName(e.target.value);
                       checkRepoName(e.target.value);
                     }}
-                    className={`w-full px-3 py-2 rounded-lg bg-white dark:bg-gray-700 border text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none transition-colors ${
+                    className={`w-full px-3 py-2 rounded-lg bg-[var(--surface)] border text-sm  placeholder:text-gray-400 focus:outline-none transition-colors ${
                       repoNameStatus === "taken"
                         ? "border-red-400 focus:border-red-500"
                         : repoNameStatus === "available"
@@ -377,7 +377,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   placeholder="Brief description"
                   value={newRepoDesc}
                   onChange={(e) => setNewRepoDesc(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
               <button
@@ -419,22 +419,22 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                       className={dropdownItemClass}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <span className="text-sm font-medium ">
                           {p.title}
                         </span>
-                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                        <span className="text-xs ">
                           #{p.number}
                         </span>
                       </div>
                       {p.description && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        <p className="text-xs  mt-0.5 truncate">
                           {p.description}
                         </p>
                       )}
                     </button>
                   ))
                 ) : (
-                  <div className="px-3 py-3 text-sm text-gray-500 dark:text-gray-400">
+                  <div className="px-3 py-3 text-sm ">
                     {loadingProjects ? "Loading..." : "No projects found"}
                   </div>
                 )}
@@ -455,7 +455,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
           {showCreateProject && (
             <div className="p-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/10 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                <span className="text-sm font-medium ">
                   Create Project Board
                 </span>
                 <button
@@ -474,7 +474,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   placeholder="Sprint 1 — Feature X"
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
               <div>
@@ -486,7 +486,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   placeholder="What is this project about?"
                   value={newProjectDesc}
                   onChange={(e) => setNewProjectDesc(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
               <button
@@ -500,7 +500,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
           )}
 
           {/* Scaffold toggle */}
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-[var(--surface-muted)]/50 border border-gray-200 dark:border-gray-600">
             <input
               type="checkbox"
               id="scaffold"
@@ -509,10 +509,10 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
               className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
             />
             <label htmlFor="scaffold" className="cursor-pointer">
-              <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+              <span className="block text-sm font-medium ">
                 Initialize repository structure
               </span>
-              <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              <span className="block text-xs  mt-0.5">
                 Creates .github/workflows, CLAUDE.md with guardrails, and PR template
               </span>
             </label>
@@ -528,7 +528,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
               placeholder="Describe the feature or requirements..."
               value={requirements}
               onChange={(e) => setRequirements(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 resize-none transition-colors"
+              className="w-full px-3 py-2.5 rounded-lg bg-[var(--surface-muted)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 resize-none transition-colors"
             />
           </div>
         </div>
