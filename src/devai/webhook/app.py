@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 if TYPE_CHECKING:
+    from devai.adapters.event_bus.base import EventBusAdapter
     from devai.config import Settings
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
@@ -21,8 +22,23 @@ logger = logging.getLogger(__name__)
 _START_TIME = time.time()
 
 
-def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> FastAPI:
-    """Create the FastAPI app with shared resources injected."""
+def create_app(
+    event_bus: EventBus,
+    state: StateManager,
+    config: Settings,
+    *,
+    event_bus_adapter: "EventBusAdapter | None" = None,
+) -> FastAPI:
+    """Create the FastAPI app with shared resources injected.
+
+    `event_bus` is the legacy NATS JetStream wrapper that the
+    LangGraph-era PipelineOrchestrator still uses.
+
+    `event_bus_adapter` is the adapter-pattern wrapper that the new
+    PipelineService publishes through (and that legacy NATS subscribers
+    started via `devai start-agent` consume). Optional — if not passed,
+    PipelineService builds its own.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -46,6 +62,7 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
                     scm=scm,
                     state_manager=state,
                     event_bus=event_bus,
+                    event_bus_adapter=event_bus_adapter,
                 )
                 await pipeline_service.start()
                 app.state.pipeline_service = pipeline_service
@@ -106,6 +123,7 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
 
     # Store shared resources for access in routes
     app.state.event_bus = event_bus
+    app.state.event_bus_adapter = event_bus_adapter
     app.state.state_manager = state
     app.state.config = config
 
@@ -191,7 +209,7 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
 
     @app.get("/readyz")
     async def ready() -> JSONResponse:
-        """Readiness probe — checks Redis and NATS connectivity."""
+        """Readiness probe — checks Redis, NATS, and the event-bus adapter."""
         checks: dict[str, str] = {}
 
         # Redis check
@@ -201,7 +219,7 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
         except Exception as e:
             checks["redis"] = f"error: {e}"
 
-        # NATS check
+        # Legacy NATS connection (used by LangGraph PipelineOrchestrator)
         try:
             if event_bus._nc and not event_bus._nc.is_closed:
                 checks["nats"] = "ok"
@@ -210,7 +228,26 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
         except Exception as e:
             checks["nats"] = f"error: {e}"
 
-        all_ok = all(v == "ok" for v in checks.values())
+        # Adapter — prefers PipelineService's adapter, falls back to the
+        # one passed into create_app() if PipelineService isn't started.
+        adapter = None
+        ps = getattr(app.state, "pipeline_service", None)
+        if ps is not None:
+            adapter = getattr(ps, "event_bus_adapter", None)
+        if adapter is None:
+            adapter = getattr(app.state, "event_bus_adapter", None)
+        if adapter is not None:
+            try:
+                health = await adapter.health_check()
+                checks["event_bus_adapter"] = (
+                    f"ok ({health.get('provider')})"
+                    if health.get("ok")
+                    else f"error: {health.get('detail', 'unhealthy')}"
+                )
+            except Exception as e:
+                checks["event_bus_adapter"] = f"error: {e}"
+
+        all_ok = all(v == "ok" or v.startswith("ok ") for v in checks.values())
         return JSONResponse(
             content={"status": "ready" if all_ok else "not_ready", "checks": checks},
             status_code=200 if all_ok else 503,

@@ -257,7 +257,13 @@ async def _serve(host: str, port: int) -> None:
     state = StateManager(settings.redis_url, settings.redis_result_ttl, settings.redis_lock_ttl)
     GitHubClient(settings)
 
-    # Create the webhook app with LangGraph orchestrator
+    # Two pub/sub surfaces:
+    # 1. Legacy `EventBus` — used by the LangGraph PipelineOrchestrator
+    #    and the /readyz probe for backward compat.
+    # 2. New `EventBusAdapter` — used by the Fiber-style PipelineService
+    #    and `devai start-agent` legacy subscribers. Both point at the
+    #    same NATS connection but the adapter layer is the supported one.
+    from devai.adapters.event_bus import create_and_connect_event_bus
     from devai.core.event_bus import EventBus
 
     event_bus = EventBus(
@@ -265,9 +271,14 @@ async def _serve(host: str, port: int) -> None:
         max_deliver=settings.nats_max_deliver,
         ack_wait=settings.nats_ack_wait,
     )
-    await event_bus.connect(settings.nats_url)
+    try:
+        await event_bus.connect(settings.nats_url)
+    except Exception as e:
+        console.print(f"[yellow]Warning:[/yellow] legacy EventBus connect failed: {e}")
 
-    webhook_app = create_app(event_bus, state, settings)
+    event_bus_adapter = await create_and_connect_event_bus(settings)
+
+    webhook_app = create_app(event_bus, state, settings, event_bus_adapter=event_bus_adapter)
 
     console.print(
         Panel(
@@ -311,6 +322,16 @@ def agents() -> None:
         table.add_row(name, provider, role, a2a)
 
     console.print(table)
+
+    # Subject map — useful when wiring NATS subscribers from outside DevAI
+    subject_table = Table(title="ALM Agent NATS Subjects (legacy subscriber mode)")
+    subject_table.add_column("Agent", style="cyan")
+    subject_table.add_column("Subscribes to")
+    subject_table.add_column("Publishes to")
+    for agent_name, sub, pub in _agent_subject_map():
+        subject_table.add_row(agent_name, sub or "—", pub or "—")
+    console.print("\n")
+    console.print(subject_table)
 
     # Show pipeline flow
     console.print("\n[bold]Pipeline Flow (LangGraph):[/bold]")
@@ -596,3 +617,149 @@ def specializations_validate(
     for cat, n in sorted(counts.items()):
         console.print(f"  {cat:14} {n}")
     console.print(f"  [dim]yaml-only specs: {yaml_only}[/dim]")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# `devai start-agent <name>` — run a single legacy agent as a NATS subscriber
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _agent_class_registry() -> dict[str, type]:
+    """Map agent name -> class for the legacy NATS-driven subscribers.
+
+    Imports are lazy so a broken agent module doesn't prevent the CLI
+    from listing the others.
+    """
+    from devai.agents.ci_monitor import CIMonitorAgent
+    from devai.agents.db_engineer import DBEngineerAgent
+    from devai.agents.document_analyzer import DocumentAnalyzerAgent
+    from devai.agents.engineering_manager import EngineeringManagerAgent
+    from devai.agents.infra_provisioner import InfraProvisionerAgent
+    from devai.agents.product_director import ProductDirectorAgent
+    from devai.agents.qa_tester import QATesterAgent
+    from devai.agents.release_manager import ReleaseManagerAgent
+    from devai.agents.requirements_analyst import RequirementsAnalystAgent
+    from devai.agents.security_expert import SecurityExpertAgent
+    from devai.agents.senior_developer import SeniorDeveloperAgent
+    from devai.agents.staff_reviewer import StaffReviewerAgent
+    from devai.agents.tech_detector import TechDetectorAgent
+
+    return {
+        "document_analyzer": DocumentAnalyzerAgent,
+        "tech_detector": TechDetectorAgent,
+        "requirements_analyst": RequirementsAnalystAgent,
+        "product_director": ProductDirectorAgent,
+        "engineering_manager": EngineeringManagerAgent,
+        "senior_developer": SeniorDeveloperAgent,
+        "db_engineer": DBEngineerAgent,
+        "staff_reviewer": StaffReviewerAgent,
+        "security_expert": SecurityExpertAgent,
+        "ci_monitor": CIMonitorAgent,
+        "qa_tester": QATesterAgent,
+        "infra_provisioner": InfraProvisionerAgent,
+        "release_manager": ReleaseManagerAgent,
+    }
+
+
+def _agent_subject_map() -> list[tuple[str, str, str]]:
+    """Return (agent_name, subscribe_subject, publish_subject) for each agent."""
+    out: list[tuple[str, str, str]] = []
+    for name, klass in _agent_class_registry().items():
+        sub = getattr(klass, "subscribe_subject", "") or ""
+        pub = getattr(klass, "publish_subject", "") or ""
+        out.append((name, sub, pub))
+    return out
+
+
+@app.command("start-agent")
+def start_agent(
+    name: str = typer.Argument(..., help="Agent name (e.g. senior_developer). Use 'list' to see all."),
+) -> None:
+    """Run a single ALM agent as a standalone NATS JetStream subscriber.
+
+    The agent subscribes to its configured `subscribe_subject` with a
+    durable consumer named `devai-<agent>`, processes each message via
+    `_handle_message`, and publishes the result to `publish_subject` on
+    success or to `devai.pipeline.errors` on failure.
+
+    Run multiple in parallel (one per process) to scale the legacy
+    pipeline horizontally. The new Fiber-style PipelineService publishes
+    the same `devai.pipeline.*` subjects, so a mix is fine.
+    """
+    registry = _agent_class_registry()
+
+    if name == "list":
+        table = Table(title="Known agents (use `devai start-agent <name>`)")
+        table.add_column("Name", style="cyan")
+        table.add_column("Class")
+        table.add_column("Subscribes to")
+        table.add_column("Publishes to")
+        for n, klass in registry.items():
+            table.add_row(
+                n,
+                klass.__name__,
+                getattr(klass, "subscribe_subject", "") or "—",
+                getattr(klass, "publish_subject", "") or "—",
+            )
+        console.print(table)
+        return
+
+    if name not in registry:
+        console.print(
+            f"[red]Unknown agent {name!r}.[/red] Known: {', '.join(sorted(registry))}"
+        )
+        raise typer.Exit(1)
+
+    asyncio.run(_start_agent_async(name, registry[name]))
+
+
+async def _start_agent_async(name: str, klass: type) -> None:
+    from devai.adapters.event_bus import create_and_connect_event_bus
+    from devai.core.state import StateManager
+    from devai.scm import create_scm_client
+
+    state = StateManager(settings.redis_url, settings.redis_result_ttl, settings.redis_lock_ttl)
+    try:
+        scm = create_scm_client(settings)
+    except Exception as e:
+        console.print(f"[red]SCM client construction failed:[/red] {e}")
+        raise typer.Exit(1) from e
+
+    adapter = await create_and_connect_event_bus(settings)
+
+    agent = klass(scm, state, settings, adapter)
+    try:
+        await agent.start()
+    except Exception as e:
+        console.print(f"[red]Agent {name} failed to subscribe:[/red] {e}")
+        await adapter.close()
+        await state.close()
+        raise typer.Exit(1) from e
+
+    console.print(
+        Panel(
+            f"[bold]Agent:[/bold] {name}\n"
+            f"[bold]Subscribes to:[/bold] {agent.subscribe_subject}\n"
+            f"[bold]Publishes to:[/bold] {agent.publish_subject or '(none)'}\n"
+            f"[bold]Durable:[/bold] devai-{name}\n"
+            f"[bold]Adapter:[/bold] {adapter.provider_name}",
+            title="DevAI Agent Worker",
+            border_style="green",
+        )
+    )
+    console.print("[dim]Listening — Ctrl-C to stop.[/dim]")
+
+    stop = asyncio.Event()
+    try:
+        await stop.wait()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        try:
+            await adapter.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await state.close()
+        except Exception:  # noqa: BLE001
+            pass

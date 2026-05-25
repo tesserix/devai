@@ -70,6 +70,7 @@ def register_defaults(registry: StageRegistry) -> None:
     """
     # Lazy imports so this file stays cheap and circular-import-free.
     from devai.pipeline.stages import alm as _alm
+    from devai.pipeline.stages import job_runner as _job_runner
     from devai.pipeline.stages import lifecycle as _lifecycle
     from devai.pipeline.stages import specialization as _specialization
     from devai.pipeline.stages import sre as _sre
@@ -103,6 +104,12 @@ def register_defaults(registry: StageRegistry) -> None:
 
     # ─── Specialization runner (YAML role catalog) ───────────────────
     registry.register("run_specialization", _specialization.run_specialization_stage)
+
+    # ─── K8s Job runner (default once k8s_runtime_enabled=true) ──────
+    # Blueprints declare `stage: run_as_job` + `config.agent: <name>` to
+    # execute an agent in a dedicated Pod. The Pod resolves its skills
+    # and prompts from aregistry at boot. See pipeline/stages/job_runner.py.
+    registry.register("run_as_job", _job_runner.job_runner_stage)
 
     # ─── SRE agent adapters ──────────────────────────────────────────
     registry.register("sre_discover", _sre.discover_stage)

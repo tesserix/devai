@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,14 @@ class Settings(BaseSettings):
     nats_stream: str = "DEVAI"
     nats_max_deliver: int = 3
     nats_ack_wait: int = 300  # seconds
+
+    # --- Event-bus adapter ---
+    # Single switch picks the pub/sub backend; the rest of DevAI talks
+    # only to `devai.adapters.event_bus.EventBusAdapter`. Swap providers
+    # with one env var, no code changes. Missing SDK / unreachable broker
+    # degrade gracefully to "noop" (in-process loopback) so the pod
+    # never crashes on a transient broker outage.
+    event_bus_provider: str = "nats"  # noop | nats
 
     # --- Redis ---
     redis_url: str = "redis://localhost:6379"
@@ -115,7 +124,7 @@ class Settings(BaseSettings):
     # tasks through the new YAML-blueprint runtime (devai.pipeline.Pipeline)
     # instead of the legacy LangGraph orchestrators. The legacy path stays
     # wired so the cut-over is reversible by flipping a single env var.
-    pipeline_enabled: bool = False
+    pipeline_enabled: bool = True
     pipeline_blueprint_dir: str = "blueprints"
     pipeline_default_blueprint: str = "alm-pipeline"
     pipeline_pr_review_blueprint: str = "pr-review"
@@ -136,6 +145,39 @@ class Settings(BaseSettings):
     gke_region: str = "asia-south1"
     gke_project: str = "tesseracthub-480811"
     gke_use_in_cluster: bool = True  # Use in-cluster auth when running in GKE
+
+    # --- K8s Job runtime (Spec-Driven Development runner) ---
+    # When `k8s_runtime_enabled` is True, the blueprint executor spawns
+    # one K8s Job per agent run instead of executing the agent in-process.
+    # The Job pulls its skills/prompts/mcp-servers from the registry at
+    # boot, runs the agent, writes a RESULT:: line to stdout, and exits.
+    k8s_runtime_enabled: bool = False
+    k8s_runtime_namespace: str = "devai"
+    k8s_runner_service_account: str = "devai-runner"
+    k8s_pull_secret_name: str = ""
+    k8s_job_ttl_seconds: int = 3600
+    k8s_job_backoff_limit: int = 0
+
+    # Runner base image — entrypoint resolves agent + skills from registry.
+    runner_image: str = "ghcr.io/tesserix/devai/devai-runner:main"
+
+    # Per-stack runner images. The scaffold + preview stages pick a
+    # stack-specific image (Next.js, Vite, Go, …) so dev-server frameworks
+    # don't bloat the base runner.
+    runner_image_per_stack: dict[str, str] = Field(
+        default_factory=lambda: {
+            "default": "ghcr.io/tesserix/devai/devai-runner:main",
+            "nextjs": "ghcr.io/tesserix/devai/devai-runner-nextjs:main",
+            "vite": "ghcr.io/tesserix/devai/devai-runner-vite:main",
+            "go": "ghcr.io/tesserix/devai/devai-runner-go:main",
+            "python": "ghcr.io/tesserix/devai/devai-runner-python:main",
+        }
+    )
+
+    # Live preview pods route at `preview-<run_id>.<preview_domain>` and
+    # the Claude-Code editor bridge at `editor-<run_id>.<preview_domain>`.
+    preview_domain: str = "devai.tesserix.app"
+    editor_bridge_image: str = "ghcr.io/tesserix/devai/devai-editor-bridge:main"
 
     # --- Monitoring ---
     prometheus_url: str = "http://prometheus-server.monitoring.svc.cluster.local:80"

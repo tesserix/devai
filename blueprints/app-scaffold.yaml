@@ -1,0 +1,113 @@
+# Live-preview "build me an app" blueprint.
+#
+# Picked automatically when the repo scan reports the working tree is
+# blank. Mirrors the Bolt / Lovable interaction model:
+#
+#   user picks repo + types intent
+#     → scan classifies as blank
+#     → agent picks stack (or user confirms)
+#     → scaffold (curated template + LLM customisation)
+#     → install deps
+#     → preview pod boots dev server
+#     → editor-bridge sidecar exposes Claude Code over WebSocket
+#     → user iterates live; HMR reflects edits instantly
+#
+# Every heavy stage runs as a Job (k8s_runtime_enabled=true). Lifecycle
+# stages (open PR, post report) run inline in the api pod.
+
+name: app-scaffold
+description: |
+  Build a working web app in a blank repo. Scaffolds a curated template,
+  installs dependencies, opens a live preview pod with the dev server
+  on a public URL, and attaches a Claude Code editor bridge so the
+  user can iterate in real time.
+
+metadata:
+  category: scaffolding
+  default_for_blank_repo: true
+  expected_duration_minutes: 4
+
+stages:
+  - name: scan
+    stage: run_as_job
+    config:
+      agent: scan_repo            # uses _stage_scan_repo special handler
+      stack: default
+    timeout: 180
+    on_failure: stop
+
+  - name: detect_blank
+    stage: noop                   # the scan output is enough — we surface
+                                  # is_blank to the next stage via condition.
+    depends_on: [scan]
+
+  # The agent picks a curated template (next-storefront / next-blog /
+  # vite-spa / fastapi-crud / go-api) based on the user's prompt.
+  - name: propose_stack
+    stage: run_as_job
+    config:
+      agent: stack_picker
+      next_state: PLANNING
+    depends_on: [detect_blank]
+    condition: "agent_context.scan_output.is_blank"
+    timeout: 120
+    on_failure: stop
+
+  # Pull the chosen template from /templates/<name>, then LLM-customise
+  # for the prompt (file content, routes, schema).
+  - name: scaffold_app
+    stage: run_as_job
+    config:
+      agent: senior_developer
+      stack: nextjs               # overridden at runtime by propose_stack
+      next_state: IMPLEMENTING
+      runner_required: true       # don't degrade to inline — needs the cluster
+    depends_on: [propose_stack]
+    timeout: 600
+    on_failure: rollback
+
+  # `npm install` (or `go mod download`, etc.) ahead of the preview pod
+  # so the dev server boots fast.
+  - name: install_deps
+    stage: run_as_job
+    config:
+      agent: dep_installer
+      stack: nextjs
+    depends_on: [scaffold_app]
+    timeout: 600
+    on_failure: stop
+
+  # Mock data and starter API routes for the dev preview. The agent
+  # reads the prompt and decides what's needed (e.g. for a pet store:
+  # products.json + /api/products route).
+  - name: seed_mocks
+    stage: run_as_job
+    config:
+      agent: senior_developer
+      stack: nextjs
+    depends_on: [install_deps]
+    timeout: 300
+    on_failure: continue
+
+  - name: open_branch_pr
+    stage: detect_pr              # uses the existing lifecycle stage
+                                  # (no Job — fast inline SCM call)
+    depends_on: [seed_mocks]
+
+  # Long-lived preview pod. Spawns Deployment + Service + VirtualService
+  # at preview-<run_id>.devai.tesserix.app. The editor-bridge sidecar
+  # exposes Claude Code at editor-<run_id>.devai.tesserix.app.
+  - name: spin_preview_pod
+    stage: run_as_job
+    config:
+      agent: preview_spinner      # owns the Deployment / VS create logic
+      runner_required: true
+    depends_on: [open_branch_pr]
+    timeout: 600
+    on_failure: stop
+
+  - name: post_report
+    stage: post_report            # inline — writes a summary to Redis
+                                  # so the dashboard shows preview_url +
+                                  # editor_url on the run detail page.
+    depends_on: [spin_preview_pod]

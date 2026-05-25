@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+#
+# devai-runner — generic agent-execution image.
+#
+# Each stage of a blueprint runs in a Pod backed by THIS image (or a
+# stack-specific variant for heavyweight stages). The Pod's entrypoint
+# reads `DEVAI_RUNNER_*` env vars, resolves its agent against aregistry,
+# pulls skills/prompts, runs the agent, and emits a `RESULT::<json>`
+# line on stdout that the JobRunnerStage in devai-api parses back into
+# a StageResult.
+#
+# Kept slim — language-specific scaffolding (Node, Go, Python) lives in
+# stack variants: devai-runner-nextjs, devai-runner-go, devai-runner-python.
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Minimal OS dependencies. We deliberately avoid build-essential — the
+# runner does NOT compile native extensions; everything is wheels.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git \
+        ca-certificates \
+        curl \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user — matches `securityContext.runAsUser: 1000` in the Job
+# spec (see src/devai/runtime/job_spec.py).
+RUN useradd --uid 1000 --create-home runner
+WORKDIR /devai
+
+# Install devai (api code + adapters + agents) but skip heavyweight
+# optional deps. The runner needs LangChain, registry client, SCM, and
+# adapters — same surface used by the agents themselves.
+COPY pyproject.toml /devai/
+COPY src /devai/src
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir /devai
+
+# The entrypoint is `python -m devai.runner.entrypoint`. tini handles
+# PID 1 so subprocess signal handling works correctly.
+USER 1000
+WORKDIR /devai/work
+ENTRYPOINT ["/usr/bin/tini", "--", "python", "-m", "devai.runner.entrypoint"]

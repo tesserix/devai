@@ -148,9 +148,12 @@ class BlueprintExecutor:
             self._emit(task, StageEvent(spec.name, StageEventPhase.SKIPPED, message=f"condition: {spec.condition}"))
             return
 
-        # Resolve the stage instance.
+        # Resolve the stage instance. We stamp `__stage_name` into the
+        # config so generic stage handlers (`run_as_job`, `noop`, etc.)
+        # can recover the YAML stage name without parsing the blueprint.
         try:
-            stage = self._registry.resolve(spec.stage, self._deps, spec.config)
+            cfg_with_name = {**spec.config, "__stage_name": spec.name}
+            stage = self._registry.resolve(spec.stage, self._deps, cfg_with_name)
         except StageRegistryError as e:
             task.stages_failed.append(spec.name)
             task.error = str(e)

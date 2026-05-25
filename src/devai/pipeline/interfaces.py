@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol
 from devai.pipeline.types import DevAITask, StageResult
 
 if TYPE_CHECKING:
+    from devai.adapters.event_bus.base import EventBusAdapter
     from devai.adapters.llm.base import LLMAdapter
     from devai.adapters.memory.base import MemoryAdapter
     from devai.config import Settings
@@ -47,6 +48,11 @@ class StageDeps:
     config: "Settings"
     scm: "SCMClient | None" = None
     state_manager: "StateManager | None" = None
+    # Legacy raw EventBus reference — kept for the handful of stages
+    # that still call `core/pipeline.py:PipelineOrchestrator`. New code
+    # should publish via `event_bus_adapter` instead. The two point at
+    # the same NATS connection but the adapter exposes the stable
+    # `EventBusAdapter` interface (noop fallback, headers, request/reply).
     event_bus: "EventBus | None" = None
     a2a_bus: "A2ABus | None" = None
 
@@ -55,6 +61,7 @@ class StageDeps:
     # corresponding integration is disabled; stages must tolerate it.
     memory: "MemoryAdapter | None" = None
     llm: "LLMAdapter | None" = None
+    event_bus_adapter: "EventBusAdapter | None" = None
 
     # Pluggable LLM providers — None means "stages use their hardcoded
     # default provider" (the way existing agents do today). Once we move

@@ -24,9 +24,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from devai.pipeline.interfaces import StageDeps
-from devai.pipeline.types import DevAITask, StageEvent
+from devai.pipeline.types import (
+    FAILURE_STATES,
+    TERMINAL_STATES,
+    DevAITask,
+    StageEvent,
+    StageEventPhase,
+    TaskState,
+)
 
 if TYPE_CHECKING:
+    from devai.adapters.event_bus.base import EventBusAdapter
     from devai.config import Settings
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
@@ -55,16 +63,19 @@ class PipelineService:
         scm: "SCMClient | None" = None,
         state_manager: "StateManager | None" = None,
         event_bus: "EventBus | None" = None,
+        event_bus_adapter: "EventBusAdapter | None" = None,
         blueprint_dir: str | Path | None = None,
     ) -> None:
         self.config = config
         self.scm = scm
         self.state_manager = state_manager
         self.event_bus = event_bus
+        self.event_bus_adapter = event_bus_adapter
         self.blueprint_dir = Path(blueprint_dir or config.pipeline_blueprint_dir)
 
         self._pipeline: Pipeline | None = None
         self._started = False
+        self._owns_event_bus_adapter = False  # True when we constructed it
         self._ring: deque[tuple[float, str, dict[str, Any]]] = deque(
             maxlen=getattr(config, "pipeline_event_ring_size", 1000)
         )
@@ -81,6 +92,7 @@ class PipelineService:
         if self._started:
             return
 
+        from devai.adapters.event_bus import create_event_bus_adapter
         from devai.adapters.llm import create_llm_adapter
         from devai.adapters.memory import create_memory_adapter
         from devai.pipeline.pipeline import Pipeline  # local import to avoid cycle
@@ -100,6 +112,33 @@ class PipelineService:
         self._memory_adapter = memory_adapter
         llm_adapter = create_llm_adapter(self.config)
         self._llm_adapter = llm_adapter
+
+        # Event-bus adapter — built here and connected immediately so
+        # `_on_event` can publish stage events to NATS without needing
+        # to lazy-init on the hot path. If the caller already injected
+        # an adapter (test path), we use that one and don't take
+        # ownership of close().
+        if self.event_bus_adapter is None:
+            self.event_bus_adapter = create_event_bus_adapter(self.config)
+            self._owns_event_bus_adapter = True
+            try:
+                await self.event_bus_adapter.connect()
+                logger.info(
+                    "PipelineService event-bus connected: provider=%s",
+                    self.event_bus_adapter.provider_name,
+                )
+            except Exception:
+                # Factory's create_and_connect is what we'd normally call,
+                # but we wanted ownership tracking. Degrade to noop on
+                # connect failure rather than crashing the pipeline.
+                logger.exception(
+                    "PipelineService event-bus connect failed (%s) — degrading to in-process noop",
+                    self.event_bus_adapter.provider_name,
+                )
+                from devai.adapters.event_bus.noop import NoopEventBusAdapter
+
+                self.event_bus_adapter = NoopEventBusAdapter()
+                await self.event_bus_adapter.connect()
 
         # Load the YAML specialization catalog once at startup and hand
         # the registry to stages via StageDeps.extra. The run_specialization
@@ -121,6 +160,43 @@ class PipelineService:
             except Exception:
                 logger.exception("Specialization registry load failed — run_specialization will degrade to stubs")
 
+        # ── K8s Job runtime ────────────────────────────────────────────
+        # When enabled (DEVAI_K8S_RUNTIME_ENABLED=true), every stage that
+        # uses `stage: run_as_job` dispatches a Pod and waits via the
+        # JobWatcher. When disabled, the runtime is None and JobRunnerStage
+        # falls back to a stub — the pipeline keeps running, just inline.
+        k8s_runtime = None
+        job_watcher = None
+        registry_client = getattr(self, "registry_client", None)
+        try:
+            from devai.runtime import JobWatcher, create_runtime
+
+            k8s_runtime = await create_runtime(self.config)
+            if k8s_runtime is not None:
+                job_watcher = JobWatcher(k8s_runtime)
+                await job_watcher.start()
+                logger.info(
+                    "PipelineService: k8s runtime active (namespace=%s, runner=%s)",
+                    k8s_runtime.config.namespace,
+                    k8s_runtime.config.runner_image,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("PipelineService: k8s runtime init failed — continuing without it")
+            k8s_runtime = None
+            job_watcher = None
+        self._k8s_runtime = k8s_runtime
+        self._job_watcher = job_watcher
+
+        extra: dict[str, Any] = {}
+        if spec_registry is not None:
+            extra["specialization_registry"] = spec_registry
+        if k8s_runtime is not None:
+            extra["k8s_runtime"] = k8s_runtime
+        if job_watcher is not None:
+            extra["job_watcher"] = job_watcher
+        if registry_client is not None:
+            extra["registry_client"] = registry_client
+
         deps = StageDeps(
             config=self.config,
             scm=self.scm,
@@ -128,7 +204,8 @@ class PipelineService:
             event_bus=self.event_bus,
             memory=memory_adapter,
             llm=llm_adapter,
-            extra={"specialization_registry": spec_registry} if spec_registry else None,
+            event_bus_adapter=self.event_bus_adapter,
+            extra=extra or None,
         )
         self._pipeline = Pipeline(
             deps,
@@ -170,6 +247,23 @@ class PipelineService:
                 await llm.close()
             except Exception:  # noqa: BLE001
                 logger.exception("llm adapter close failed")
+        if self._owns_event_bus_adapter and self.event_bus_adapter is not None:
+            try:
+                await self.event_bus_adapter.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("event_bus adapter close failed")
+        watcher = getattr(self, "_job_watcher", None)
+        if watcher is not None:
+            try:
+                await watcher.stop()
+            except Exception:  # noqa: BLE001
+                logger.exception("JobWatcher stop failed")
+        runtime = getattr(self, "_k8s_runtime", None)
+        if runtime is not None:
+            try:
+                await runtime.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("K8sJobRuntime close failed")
         self._started = False
         logger.info("PipelineService stopped")
 
@@ -204,6 +298,7 @@ class PipelineService:
         if agent_context:
             task.agent_context.update(agent_context)
         await self._pipeline.submit(task)
+        await self._publish_task_event("created", task)
         return task.id
 
     async def run_once(
@@ -226,7 +321,20 @@ class PipelineService:
         task = DevAITask(intent=intent, blueprint=bp, repo=repo, trigger_type=trigger_type)
         if agent_context:
             task.agent_context.update(agent_context)
-        return await self._pipeline.run_once(task)
+        await self._publish_task_event("created", task)
+        result = await self._pipeline.run_once(task)
+        # run_once is synchronous from the caller's POV, so emit a terminal
+        # event here too — the stage-event path also fires, but a
+        # subscriber that's listening for task.* without subject wildcards
+        # gets a definitive end-of-run signal.
+        terminal_kind = (
+            "failed" if result.state in FAILURE_STATES
+            else "completed" if result.state == TaskState.COMPLETED
+            else None
+        )
+        if terminal_kind:
+            await self._publish_task_event(terminal_kind, result)
+        return result
 
     # ── Read surface ─────────────────────────────────────────────────
 
@@ -322,10 +430,13 @@ class PipelineService:
     def _on_event(self, task: DevAITask, event: StageEvent) -> None:
         """Called by Pipeline / BlueprintExecutor for every stage event.
 
-        We do three things:
+        We do four things:
           1. Append to the ring buffer for SSE replay.
           2. Push to every subscribed SSE queue.
           3. Schedule a persist_task to Redis (best-effort, fire-and-forget).
+          4. Publish to NATS via the event-bus adapter so any external
+             subscriber (legacy agents, dashboards, downstream services)
+             sees stage transitions and terminal state changes.
         """
         ts = event.timestamp
         payload = {
@@ -354,6 +465,90 @@ class PipelineService:
             except RuntimeError:
                 # No running loop (test context) — skip persistence.
                 pass
+
+        # Mirror to NATS. Subject layout:
+        #   devai.pipeline.stage.<stage>.<phase>   per-stage progress
+        #   devai.pipeline.task.<completed|failed> on terminal transitions
+        # Failure-mode: NATS goes down → publish raises → we log + carry on.
+        # The pipeline must never crash because the broker is gone.
+        try:
+            self._schedule_publish(
+                f"devai.pipeline.stage.{event.stage}.{event.phase.value}",
+                {"task_id": task.id, **payload, "timestamp": ts},
+            )
+        except RuntimeError:
+            pass  # no running loop
+
+        if task.state in TERMINAL_STATES and event.phase in (
+            StageEventPhase.COMPLETED,
+            StageEventPhase.FAILED,
+        ):
+            kind = "failed" if task.state in FAILURE_STATES else "completed"
+            try:
+                self._schedule_publish(
+                    f"devai.pipeline.task.{kind}",
+                    self._task_event_payload(kind, task),
+                )
+            except RuntimeError:
+                pass
+
+    # ── Internal: NATS publish helpers ───────────────────────────────
+
+    def _task_event_payload(self, kind: str, task: DevAITask) -> dict[str, Any]:
+        return {
+            "kind": kind,
+            "task_id": task.id,
+            "blueprint": task.blueprint,
+            "repo": task.repo,
+            "intent": task.intent,
+            "trigger_type": task.trigger_type,
+            "state": task.state.value,
+            "current_stage": task.current_stage,
+            "stages_completed": list(task.stages_completed),
+            "stages_failed": list(task.stages_failed),
+            "error": task.error,
+            "failed_stage": task.failed_stage,
+            "pr_number": task.pr_number,
+            "issue_number": task.issue_number,
+            "branch_name": task.branch_name,
+            "timestamp": time.time(),
+        }
+
+    async def _publish_task_event(self, kind: str, task: DevAITask) -> None:
+        """Publish a task-level event (`created`, `completed`, `failed`)."""
+        adapter = self.event_bus_adapter
+        if adapter is None:
+            return
+        try:
+            await adapter.publish(
+                f"devai.pipeline.task.{kind}",
+                self._task_event_payload(kind, task),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "event_bus publish failed: subject=devai.pipeline.task.%s task=%s",
+                kind,
+                task.id,
+                exc_info=True,
+            )
+
+    def _schedule_publish(self, subject: str, payload: dict[str, Any]) -> None:
+        """Fire-and-forget publish from sync context (the _on_event hook
+        is sync). Schedules a task on the running loop; raises RuntimeError
+        when called outside one so the caller can no-op."""
+        adapter = self.event_bus_adapter
+        if adapter is None:
+            return
+
+        async def _pub() -> None:
+            try:
+                await adapter.publish(subject, payload)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "event_bus publish failed: subject=%s", subject, exc_info=True
+                )
+
+        asyncio.create_task(_pub())
 
     def _ensure_started(self) -> None:
         if not self._started or self._pipeline is None:

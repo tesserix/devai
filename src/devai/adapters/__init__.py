@@ -8,13 +8,13 @@ single env var to choose which backend instance to hand out.
 
 Today's families:
 
-    adapters.memory   — Agentic AI memory (mem0 | zep | pgvector | redis | hondo | noop)
-    adapters.llm      — LLM providers (anthropic | openai | noop)
+    adapters.memory     — Agentic AI memory (mem0 | zep | pgvector | redis | hondo | noop)
+    adapters.llm        — LLM providers (anthropic | openai | noop)
+    adapters.event_bus  — pub/sub (nats | noop)
 
 Planned (slot in with no churn elsewhere):
 
     adapters.vector_store     — embeddings (pgvector | pinecone | qdrant | weaviate | chroma)
-    adapters.event_bus        — pub/sub (nats | redis_streams | kafka | inproc)
     adapters.object_store     — blobs (s3 | gcs | azure_blob | local)
     adapters.secrets          — runtime secret resolution (gcp_sm | aws_sm | vault | env)
     adapters.telemetry        — traces/metrics (otel | langsmith | datadog | noop)

@@ -22,8 +22,7 @@ from devai.graph.state import ALMState
 from devai.services.tracing import is_tracing_enabled
 
 if TYPE_CHECKING:
-    from nats.aio.msg import Msg
-
+    from devai.adapters.event_bus.base import EventBusAdapter, EventMessage
     from devai.config import Settings
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
@@ -58,7 +57,7 @@ class BaseAgent(ABC):
         scm: SCMClient,
         state_manager: StateManager,
         config: Settings,
-        event_bus: EventBus | None = None,
+        event_bus: "EventBus | EventBusAdapter | None" = None,
     ) -> None:
         # Self-heal the SCM client at construction time. The webhook
         # path always passes a proper SCMClient subclass (created via
@@ -183,17 +182,32 @@ class BaseAgent(ABC):
     # --- NATS Legacy Execution ---
 
     async def start(self) -> None:
-        """Subscribe to the agent's NATS subject and begin processing (legacy mode)."""
+        """Subscribe to the agent's NATS subject and begin processing (legacy mode).
+
+        Works against both the new EventBusAdapter and the legacy
+        EventBus wrapper — both expose `subscribe(subject, handler,
+        durable_name=...)`. The handler signature is duck-typed: both
+        envelopes carry `.data` (bytes) and an async `.ack()`.
+        """
         if not self.event_bus:
             raise RuntimeError(f"Agent {self.name}: event_bus required for NATS mode")
+        if not self.subscribe_subject:
+            raise RuntimeError(
+                f"Agent {self.name}: subscribe_subject is empty — agent has no inbound subject"
+            )
         await self.event_bus.subscribe(
             self.subscribe_subject,
             self._handle_message,
             durable_name=f"devai-{self.name}",
         )
-        logger.info("Agent %s started (worker=%s, mode=nats)", self.name, self.worker_id)
+        logger.info(
+            "Agent %s started (worker=%s, mode=nats, subject=%s)",
+            self.name,
+            self.worker_id,
+            self.subscribe_subject,
+        )
 
-    async def _handle_message(self, msg: Msg) -> None:
+    async def _handle_message(self, msg: Any) -> None:
         """Deserialize context, acquire lock, execute, publish downstream (legacy)."""
         from devai.models import PipelineContext
 
