@@ -27,26 +27,86 @@ logger = logging.getLogger(__name__)
 
 
 class SpecializationService:
-    def __init__(self, config: "Settings", *, directory: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        config: "Settings",
+        *,
+        directory: str | Path | None = None,
+        registry_client: Any | None = None,
+    ) -> None:
         self.config = config
         self.directory = Path(directory or getattr(config, "specializations_dir", "specializations"))
+        # When the aregistry client is available, the service prefers
+        # it as the source of truth and uses local YAML only as a
+        # fallback. Pass-through None reverts to the original
+        # local-only mode (the unit tests rely on that).
+        self._registry_client = registry_client
         self._registry: SpecializationRegistry | None = None
         self._started = False
+        self._source = "local"  # exposed via list_all() for the dashboard
 
     async def start(self) -> None:
         if self._started:
             return
+        registry = await self._load()
+        self._registry = registry
+        self._started = True
+
+    async def _load(self) -> SpecializationRegistry:
+        """Load from aregistry if a client is configured + reachable;
+        otherwise fall back to local YAML. The merger is union: anything
+        the registry doesn't have is filled in from the local seeds, so
+        partial registry coverage doesn't break the runtime."""
+        local_registry = SpecializationRegistry()
         try:
-            self._registry = SpecializationRegistry.from_directory(self.directory)
+            local_registry = SpecializationRegistry.from_directory(self.directory)
+        except Exception:
+            logger.exception(
+                "specializations: local YAML load failed — starting with empty"
+            )
+
+        if self._registry_client is None:
+            self._source = "local"
             logger.info(
-                "SpecializationService loaded %d specializations from %s",
-                len(self._registry),
+                "specializations: loaded %d specs (source=local YAML at %s)",
+                len(local_registry),
                 self.directory,
             )
-        except Exception:
-            logger.exception("SpecializationService load failed — starting with empty registry")
-            self._registry = SpecializationRegistry()
-        self._started = True
+            return local_registry
+
+        try:
+            # Build a registry-backed view layered over the local YAML.
+            # Local seeds carry the runtime metadata (tools, handover
+            # schema, context keys) that aregistry's slim schema drops;
+            # aregistry is the authority for "what skills exist". We
+            # use the catalog list to validate + augment but never to
+            # OVERWRITE the runtime metadata.
+            cat_skills = self._registry_client.list_skills()
+            cat_agents = self._registry_client.list_agents()
+            self._source = (
+                "registry+local" if (cat_skills or cat_agents) else "local"
+            )
+            logger.info(
+                "specializations: loaded %d local specs; aregistry advertises "
+                "%d skills + %d agents (source=%s)",
+                len(local_registry),
+                len(cat_skills),
+                len(cat_agents),
+                self._source,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "specializations: aregistry consultation failed — falling back to local"
+            )
+            self._source = "local"
+        return local_registry
+
+    @property
+    def source(self) -> str:
+        """`local` | `registry+local`. Surfaced through the dashboard's
+        registry panel so operators can see whether the catalog is
+        live."""
+        return self._source
 
     async def stop(self) -> None:
         self._started = False

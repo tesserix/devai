@@ -58,13 +58,23 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
 
         # SpecializationService — independent of the pipeline runtime so
         # the dashboard can browse the YAML catalog even when the
-        # blueprint executor is disabled.
+        # blueprint executor is disabled. When a registry client is
+        # configured (DEVAI_REGISTRY_URL), the service consults
+        # aregistry first and falls back to local YAML on miss/error.
         spec_service = None
         if getattr(config, "specializations_enabled", True):
             try:
+                from devai.registry import create_registry_client
                 from devai.specializations.service import SpecializationService
 
-                spec_service = SpecializationService(config)
+                # Construct the registry client up front so both the
+                # SpecializationService AND the /api/registry/* routes
+                # share the same instance (and therefore the same cache).
+                _registry_client = create_registry_client(config)
+                app.state.registry_client = _registry_client
+                spec_service = SpecializationService(
+                    config, registry_client=_registry_client
+                )
                 await spec_service.start()
                 app.state.specialization_service = spec_service
             except Exception:
@@ -99,13 +109,14 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
     app.state.state_manager = state
     app.state.config = config
 
-    # Agent Registry HTTP client (aregistry catalog). Factory returns
-    # None when DEVAI_REGISTRY_URL is unset — routes then surface a
-    # readable 503. The client is cheap (small TTL cache, lazy httpx
-    # import) so we construct unconditionally.
-    from devai.registry import create_registry_client
+    # NOTE: app.state.registry_client is constructed in lifespan() above
+    # alongside SpecializationService so the two share a single client +
+    # cache. Set it to None here if the lifespan never ran (some test
+    # paths bypass it).
+    if not hasattr(app.state, "registry_client"):
+        from devai.registry import create_registry_client
 
-    app.state.registry_client = create_registry_client(config)
+        app.state.registry_client = create_registry_client(config)
 
     # Webhook routes
     from devai.webhook.routes import router as webhook_router

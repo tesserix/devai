@@ -21,7 +21,7 @@ from typing import Any
 
 _MCP_NAME_RE = re.compile(r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$")
 _MCP_SCHEMA_URL = (
-    "https://modelcontextprotocol.io/schemas/draft/2025-07-09/server.schema.json"
+    "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json"
 )
 _MCP_DESCRIPTION_MAX = 100
 
@@ -191,6 +191,11 @@ class McpServer:
         return self._name
 
     def to_dict(self) -> dict[str, Any]:
+        # ServerJSON wire shape (NOT the embedded McpServerType used
+        # in some other schemas — easy to confuse). Required:
+        # {$schema, name, description, version}. Endpoints go under
+        # remotes:[] for HTTP transports or packages:[] for container
+        # / stdio. The validator rejects top-level `type`/`url`.
         name = self._name
         if not _MCP_NAME_RE.match(name):
             # Default publisher when the caller passed a bare name.
@@ -198,22 +203,25 @@ class McpServer:
         body: dict[str, Any] = {
             "$schema": _MCP_SCHEMA_URL,
             "name": name,
-            "type": self._type,
             "version": str(self._version),
             "description": _truncate(self._description or self._name, _MCP_DESCRIPTION_MAX),
         }
-        if self._url:
-            body["url"] = self._url
-        if self._image:
-            body["image"] = self._image
-        if self._command:
-            body["command"] = self._command
-        if self._args:
-            body["args"] = self._args
-        if self._env:
-            body["env"] = self._env
-        if self._headers:
-            body["headers"] = self._headers
+        if self._type == "remote" and self._url:
+            transport: dict[str, Any] = {"type": "streamable-http", "url": self._url}
+            if self._headers:
+                transport["headers"] = [
+                    {"name": k, "value": v} for k, v in self._headers.items()
+                ]
+            body["remotes"] = [transport]
+        elif self._type == "container" and self._image:
+            pkg: dict[str, Any] = {"registryType": "oci", "identifier": self._image}
+            if self._args:
+                pkg["runtimeArguments"] = [{"type": "positional", "value": a} for a in self._args]
+            if self._env:
+                pkg["environmentVariables"] = [
+                    {"name": k, "value": v} for k, v in self._env.items()
+                ]
+            body["packages"] = [pkg]
         return body
 
 
