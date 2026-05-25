@@ -40,20 +40,20 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces — warm paper. Less yellow than bone, more body than
-   * pure white. The contrast between paper-200 (canvas) and #ffffff
-   * (surface) is the elevation cue. */
-  --canvas:          #f7f6f2;
-  --surface:         #ffffff;
-  --surface-muted:   #f1efe9;
-  --surface-hover:   #ebe9e1;
-  --surface-raised:  #ffffff;
-  --surface-overlay: rgba(14, 14, 12, 0.45);
+  /* Surfaces — cool neutral gray, slate-leaning. Canvas is a touch
+   * deeper than surface so panels float visibly without needing a
+   * shadow. Avoids the warm cream cast that read as washed-out. */
+  --canvas:          #e9eaee;
+  --surface:         #f6f6f8;
+  --surface-muted:   #eeeff2;
+  --surface-hover:   #e3e4e8;
+  --surface-raised:  #f9f9fb;
+  --surface-overlay: rgba(15, 17, 21, 0.45);
 
-  /* Borders — ink-toned, never pure gray. */
-  --border-subtle:   #e7e4d9;
-  --border:          #d6d2c4;
-  --border-strong:   #b8b3a3;
+  /* Borders — neutral cool gray to match the desaturated surfaces. */
+  --border-subtle:   #dcdee2;
+  --border:          #c5c7cc;
+  --border-strong:   #a6a9af;
   --border-focus:    rgba(67, 72, 84, 0.45);
 
   /* Ink — near-black with almost no warmth. Sharp contrast over
