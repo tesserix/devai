@@ -8,7 +8,8 @@ single env var to choose which backend instance to hand out.
 
 Today's families:
 
-    adapters.memory   — Agentic AI memory (mem0 | zep | pgvector | redis | noop)
+    adapters.memory   — Agentic AI memory (mem0 | zep | pgvector | redis | hondo | noop)
+    adapters.llm      — LLM providers (anthropic | openai | noop)
 
 Planned (slot in with no churn elsewhere):
 

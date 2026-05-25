@@ -81,6 +81,7 @@ class PipelineService:
         if self._started:
             return
 
+        from devai.adapters.llm import create_llm_adapter
         from devai.adapters.memory import create_memory_adapter
         from devai.pipeline.pipeline import Pipeline  # local import to avoid cycle
 
@@ -97,6 +98,8 @@ class PipelineService:
 
         memory_adapter = create_memory_adapter(self.config)
         self._memory_adapter = memory_adapter
+        llm_adapter = create_llm_adapter(self.config)
+        self._llm_adapter = llm_adapter
 
         # Load the YAML specialization catalog once at startup and hand
         # the registry to stages via StageDeps.extra. The run_specialization
@@ -124,6 +127,7 @@ class PipelineService:
             state_manager=self.state_manager,
             event_bus=self.event_bus,
             memory=memory_adapter,
+            llm=llm_adapter,
             extra={"specialization_registry": spec_registry} if spec_registry else None,
         )
         self._pipeline = Pipeline(
@@ -160,6 +164,12 @@ class PipelineService:
                 await memory.close()
             except Exception:  # noqa: BLE001
                 logger.exception("memory adapter close failed")
+        llm = getattr(self, "_llm_adapter", None)
+        if llm is not None:
+            try:
+                await llm.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("llm adapter close failed")
         self._started = False
         logger.info("PipelineService stopped")
 

@@ -99,7 +99,8 @@ src/devai/adapters/<family>/
 
 | Family | Concrete providers we'd start with |
 |---|---|
-| `adapters.memory` ✓ | mem0, zep, pgvector, redis, noop |
+| `adapters.memory` ✓ | mem0, zep, pgvector, redis, hondo, noop |
+| `adapters.llm` ✓ | anthropic, openai, noop (extensible: groq, gemini, nemoclaw, codex) |
 | `adapters.vector_store` | pgvector, pinecone, qdrant, weaviate, chroma |
 | `adapters.event_bus` | nats, redis_streams, kafka, inproc |
 | `adapters.object_store` | s3, gcs, azure_blob, local |
@@ -107,7 +108,6 @@ src/devai/adapters/<family>/
 | `adapters.telemetry` | otel, langsmith, datadog, noop |
 | `adapters.cache` | redis, memcached, dragonfly, inproc |
 | `adapters.queue` | nats, redis, celery, rq |
-| `adapters.llm` | claude, openai, groq, gemini, nemoclaw, codex |
 | `adapters.scm` (already exists) | github, gitlab, azure_devops |
 | `adapters.ticketing` | jira, linear, github_issues |
 

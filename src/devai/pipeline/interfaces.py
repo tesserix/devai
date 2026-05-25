@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol
 from devai.pipeline.types import DevAITask, StageResult
 
 if TYPE_CHECKING:
+    from devai.adapters.llm.base import LLMAdapter
     from devai.adapters.memory.base import MemoryAdapter
     from devai.config import Settings
     from devai.core.event_bus import EventBus
@@ -53,6 +54,7 @@ class StageDeps:
     # Constructed via devai.adapters.* factories. `None` means the
     # corresponding integration is disabled; stages must tolerate it.
     memory: "MemoryAdapter | None" = None
+    llm: "LLMAdapter | None" = None
 
     # Pluggable LLM providers — None means "stages use their hardcoded
     # default provider" (the way existing agents do today). Once we move

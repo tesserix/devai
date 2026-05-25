@@ -159,6 +159,21 @@ class Settings(BaseSettings):
     specializations_enabled: bool = True
     specializations_dir: str = "specializations"
 
+    # --- LLM adapter ---
+    # Single switch picks the default LLM backend; specialization YAMLs
+    # override per-role via their `llm_provider:` field. Missing SDKs /
+    # config degrade gracefully to "noop" — adapter pattern, identical
+    # to the memory family. See src/devai/adapters/llm/.
+    llm_provider: str = "anthropic"  # noop | anthropic | openai
+    llm_noop_canned_text: str = "[noop response]"
+
+    # Optional per-provider overrides (the existing anthropic_api_key /
+    # openai_api_key / openai_model / claude_model fields above feed the
+    # factory).
+    anthropic_base_url: str = ""
+    openai_base_url: str = ""
+    openai_organization: str = ""
+
     # --- Memory adapter (Agentic AI Memory) ---
     # Single switch picks the backend; the rest of DevAI talks only to
     # `devai.adapters.memory.MemoryAdapter`. Swap providers with one env var,
