@@ -90,6 +90,16 @@ export default function WorkflowsPage() {
     window.localStorage.setItem("devai-workflows-repo", full);
     setRepoOpen(false);
     setRepoQuery("");
+    // Fire-and-forget repo scan so the memory adapter has a fresh
+    // profile (tech, frameworks, package managers) before the next
+    // pipeline run picks this repo up.
+    const [owner, name] = full.split("/", 2);
+    if (owner && name) {
+      fetch(
+        `/api/scm/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/scan`,
+        { method: "POST" }
+      ).catch(() => undefined);
+    }
   }
 
   useEffect(() => {
@@ -106,7 +116,12 @@ export default function WorkflowsPage() {
     if (!repoOpen) return;
     let cancelled = false;
     setRepoLoading(true);
-    const url = `/api/scm/repos${repoQuery ? `?q=${encodeURIComponent(repoQuery)}` : ""}`;
+    // Only enrolled repos (those with .platform/devai.yaml on the
+    // default branch) belong on the Workflows board. Anything else
+    // should go through ⌘K @ to opt in first.
+    const params = new URLSearchParams({ initialised: "true" });
+    if (repoQuery) params.set("q", repoQuery);
+    const url = `/api/scm/repos?${params.toString()}`;
     fetch(url)
       .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: Repo[]) => {
@@ -217,7 +232,18 @@ export default function WorkflowsPage() {
               </div>
             ) : repoList.length === 0 ? (
               <div className="px-3 py-4 text-sm" style={{ color: "var(--ink-muted)" }}>
-                No repositories matched. Check the PAT scope.
+                No enrolled repositories. Press{" "}
+                <kbd
+                  className="font-mono text-[10px] px-1 py-0.5 rounded border"
+                  style={{
+                    borderColor: "var(--border-subtle)",
+                    background: "var(--surface-muted)",
+                    color: "var(--ink)",
+                  }}
+                >
+                  ⌘K
+                </kbd>{" "}
+                then type <code>@</code> to enrol one.
               </div>
             ) : (
               <ul className="divide-y" style={{ borderColor: "var(--border-subtle)" }}>
@@ -288,7 +314,21 @@ export default function WorkflowsPage() {
 
       {!activeRepo ? (
         <div className="panel p-8 text-center" style={{ color: "var(--ink-soft)" }}>
-          <p className="text-sm">Pick a repository above to load its workflow.</p>
+          <p className="text-sm">Pick an enrolled repository above to load its workflow.</p>
+          <p className="text-xs mt-2" style={{ color: "var(--ink-muted)" }}>
+            Need to add one? Press{" "}
+            <kbd
+              className="font-mono text-[10px] px-1 py-0.5 rounded border"
+              style={{
+                borderColor: "var(--border-subtle)",
+                background: "var(--surface-muted)",
+                color: "var(--ink)",
+              }}
+            >
+              ⌘K
+            </kbd>{" "}
+            and type <code>@</code> to enrol it.
+          </p>
         </div>
       ) : (
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">

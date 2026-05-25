@@ -139,6 +139,16 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
     setSelectedRepo(fullName);
     setSearch(fullName);
     setDropdownOpen(false);
+    // Warm the repo profile in memory so the pipeline run launched
+    // from this dialog already has tech-stack context. Fire-and-forget;
+    // the run itself doesn't block on the scan.
+    const [owner, name] = fullName.split("/", 2);
+    if (owner && name) {
+      fetch(
+        `/api/scm/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/scan`,
+        { method: "POST" }
+      ).catch(() => undefined);
+    }
   };
 
   const handleSelectProject = (project: Project) => {

@@ -80,8 +80,34 @@ class CreateRepoRequest(BaseModel):
     )
 
 
+# Path inside a repo that proves DevAI has been initialised. We probe
+# its existence with a HEAD-on-contents API call and treat 200 as
+# 'initialised', 404 as 'not yet'. See /initialise below for what gets
+# written.
+PLATFORM_MARKER_PATH = ".platform/devai.yaml"
+
+
+async def _probe_initialised(client, full_name: str, default_branch: str = "main") -> bool:
+    """Return True iff ``.platform/devai.yaml`` exists on the default
+    branch. Tolerates upstream errors (treat as 'unknown / not init')
+    so a single slow repo doesn't break the whole listing."""
+    try:
+        await client.get_file_content(repo=full_name, path=PLATFORM_MARKER_PATH, ref=default_branch)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @router.get("/repos")
-async def list_repos(request: Request, q: str = Query("", description="Search filter")) -> list[dict[str, Any]]:
+async def list_repos(
+    request: Request,
+    q: str = Query("", description="Search filter (matches full_name + description)"),
+    initialised: str = Query(
+        "",
+        description="Filter by DevAI init status: 'true' = only repos with .platform/devai.yaml; "
+                    "'false' = only repos without it; empty = all repos (no probe).",
+    ),
+) -> list[dict[str, Any]]:
     """List repos the configured PAT / installation can see.
 
     Order: most-recently-pushed first. Each entry exposes the fields
@@ -89,6 +115,11 @@ async def list_repos(request: Request, q: str = Query("", description="Search fi
     default_branch, html_url, pushed_at). ``q`` filters by substring
     over full_name + description (case-insensitive). Empty ``q``
     returns the first page (~100 entries).
+
+    When ``initialised`` is set, each candidate is probed for the
+    presence of ``.platform/devai.yaml`` on its default branch — the
+    DevAI initialisation marker. Probes run in parallel and cap at 30
+    so a misconfigured org doesn't fan out into thousands of API hits.
     """
     client = _client(request)
     try:
@@ -120,9 +151,26 @@ async def list_repos(request: Request, q: str = Query("", description="Search fi
                 "html_url": r.get("html_url", ""),
                 "pushed_at": r.get("pushed_at", ""),
                 "language": r.get("language") or "",
+                "initialised": None,
             }
         )
     out.sort(key=lambda r: r.get("pushed_at", ""), reverse=True)
+
+    init_filter = initialised.lower().strip()
+    if init_filter in ("true", "false"):
+        import asyncio
+
+        # Cap fan-out: probe the top ~30 most-recent repos. Beyond that
+        # users should narrow with ?q=.
+        probe_set = out[:30]
+        results = await asyncio.gather(
+            *(_probe_initialised(client, r["full_name"], r["default_branch"]) for r in probe_set),
+            return_exceptions=True,
+        )
+        for r, is_init in zip(probe_set, results):
+            r["initialised"] = bool(is_init) if not isinstance(is_init, Exception) else False
+        want = init_filter == "true"
+        out = [r for r in out if r["initialised"] is want]
     return out
 
 
@@ -295,3 +343,286 @@ async def list_issues(
     for arr in lanes.values():
         arr.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     return lanes
+
+
+# --------------------------------------------------------------------------- #
+# Initialise — drop the .platform/ marker so this repo is "DevAI-tracked"
+# --------------------------------------------------------------------------- #
+
+
+_PLATFORM_FILES: dict[str, str] = {
+    ".platform/devai.yaml": (
+        "# DevAI platform marker\n"
+        "#\n"
+        "# This file's presence on the default branch tells DevAI that\n"
+        "# the repo is enrolled in the agentic workflow. The Workflows\n"
+        "# kanban (devai.tesserix.app/workflows) filters its repo picker\n"
+        "# on this marker — repos without it are listed under ⌘K @ as\n"
+        "# candidates to enroll.\n"
+        "apiVersion: devai.tesserix.app/v1alpha1\n"
+        "kind: PlatformConfig\n"
+        "metadata:\n"
+        "  name: devai\n"
+        "spec:\n"
+        "  # Blueprint to use as the default for new pipeline runs in this\n"
+        "  # repo. Override per-task from the New Pipeline Run dialog.\n"
+        "  defaultBlueprint: default\n"
+        "  # Lane → labels (mirrors src/devai/scm/routes.py _LANE_LABELS).\n"
+        "  # Override here to introduce repo-specific labels (e.g. a custom\n"
+        "  # 'pending-design' label that should land in REVIEW).\n"
+        "  lanes:\n"
+        "    queued:      [queued, todo, backlog]\n"
+        "    in_progress: [in-progress, wip, doing]\n"
+        "    review:      [review, in-review]\n"
+        "    deployed:    [deployed, staging, in-staging]\n"
+        "    shipped:     [shipped, released, production]\n"
+        "  # Specialisations that may dispatch in this repo. Empty list =\n"
+        "  # all catalogued specialisations are permitted.\n"
+        "  allowedSpecialisations: []\n"
+    ),
+    ".platform/README.md": (
+        "# .platform — DevAI control surface\n\n"
+        "DevAI uses this directory to track the repo. Don't delete it.\n\n"
+        "## Files\n\n"
+        "- `devai.yaml` — repo-level config (default blueprint, lane labels, "
+        "specialisation allow-list).\n\n"
+        "## Editing\n\n"
+        "Edit `devai.yaml` and open a PR like any other change — DevAI re-reads "
+        "it on the next pipeline run.\n"
+    ),
+}
+
+
+class InitialiseResponse(BaseModel):
+    full_name: str
+    branch: str
+    pr_url: str
+    already_initialised: bool
+
+
+@router.post("/repos/{owner}/{name}/initialise")
+async def initialise_repo(request: Request, owner: str, name: str) -> InitialiseResponse:
+    """Enroll a repo into the DevAI workflow surface.
+
+    Steps:
+      1. Check default branch.
+      2. If ``.platform/devai.yaml`` already exists, return
+         ``already_initialised=True`` (no-op, idempotent re-call).
+      3. Otherwise:
+         a. Branch off default as ``devai/init-platform``.
+         b. Commit the two seed files (devai.yaml + README.md).
+         c. Open a PR back to default. CI on the seed branch is
+            skipped — the files are configuration, not code.
+      4. Return PR url + branch name.
+
+    The branch + PR approach (instead of direct-to-main) means
+    operators see the enrolment in their normal review queue and can
+    audit it. Auto-merge is intentionally NOT triggered here — the
+    repo's existing branch-protection rules win.
+    """
+    client = _client(request)
+    full = f"{owner}/{name}"
+
+    try:
+        default_branch = await client.get_default_branch(full)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"get_default_branch: {e}") from e
+
+    if await _probe_initialised(client, full, default_branch):
+        return InitialiseResponse(
+            full_name=full,
+            branch=default_branch,
+            pr_url=f"https://github.com/{full}",
+            already_initialised=True,
+        )
+
+    branch = "devai/init-platform"
+    try:
+        await client.create_branch(repo=full, branch_name=branch, from_branch=default_branch)
+    except Exception as e:  # noqa: BLE001
+        # GitHub returns 422 if the branch already exists from an
+        # earlier failed run — that's fine, reuse it.
+        if "422" not in str(e):
+            raise HTTPException(status_code=502, detail=f"create_branch: {e}") from e
+
+    for path, content in _PLATFORM_FILES.items():
+        try:
+            await client.create_or_update_file(
+                repo=full,
+                path=path,
+                content=content,
+                message=f"chore(devai): scaffold {path}",
+                branch=branch,
+            )
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"write {path}: {e}") from e
+
+    try:
+        pr = await client.create_pull_request(
+            repo=full,
+            title="chore(devai): initialise platform config",
+            body=(
+                "Enrolls this repo into the **DevAI** agentic workflow.\n\n"
+                "Adds:\n\n"
+                "- `.platform/devai.yaml` — repo-level config (default blueprint, lane labels)\n"
+                "- `.platform/README.md` — what this directory is for\n\n"
+                "After this merges, the Workflows kanban + Cmd-K repo pickers will list this repo."
+            ),
+            head_branch=branch,
+            base_branch=default_branch,
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"create_pull_request: {e}") from e
+
+    return InitialiseResponse(
+        full_name=full,
+        branch=branch,
+        pr_url=pr.get("html_url", f"https://github.com/{full}/pulls"),
+        already_initialised=False,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Scan — capture a repo profile into memory
+# --------------------------------------------------------------------------- #
+
+
+# Files the scan reads (top-level) — enough to detect the tech stack
+# and write a short profile. We deliberately don't traverse — too many
+# repos, too much I/O.
+_SCAN_TARGETS: tuple[str, ...] = (
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "Gemfile",
+    "Dockerfile",
+    "Makefile",
+    "README.md",
+    ".platform/devai.yaml",
+)
+
+
+def _classify_stack(found: dict[str, str]) -> dict[str, Any]:
+    """Cheap, deterministic tech detection from the captured files."""
+    languages: list[str] = []
+    frameworks: list[str] = []
+    package_managers: list[str] = []
+    if "package.json" in found:
+        languages.append("typescript" if "typescript" in found["package.json"].lower() else "javascript")
+        package_managers.append("npm")
+        pj = found["package.json"].lower()
+        if '"next"' in pj: frameworks.append("next.js")
+        if '"react"' in pj: frameworks.append("react")
+        if '"vite"' in pj: frameworks.append("vite")
+        if '"express"' in pj: frameworks.append("express")
+    if "pyproject.toml" in found or "requirements.txt" in found:
+        languages.append("python")
+        package_managers.append("pip" if "requirements.txt" in found else "poetry/pip")
+        body = (found.get("pyproject.toml", "") + found.get("requirements.txt", "")).lower()
+        if "fastapi" in body: frameworks.append("fastapi")
+        if "django" in body: frameworks.append("django")
+        if "flask" in body: frameworks.append("flask")
+        if "langchain" in body or "langgraph" in body: frameworks.append("langchain/langgraph")
+    if "go.mod" in found:
+        languages.append("go")
+        package_managers.append("go modules")
+        if "gin-gonic" in found["go.mod"]: frameworks.append("gin")
+    if "Cargo.toml" in found:
+        languages.append("rust")
+        package_managers.append("cargo")
+    if "Dockerfile" in found:
+        frameworks.append("docker")
+    return {
+        "languages": sorted(set(languages)),
+        "frameworks": sorted(set(frameworks)),
+        "package_managers": sorted(set(package_managers)),
+    }
+
+
+class ScanResponse(BaseModel):
+    full_name: str
+    default_branch: str
+    profile: dict[str, Any]
+    files_seen: list[str]
+    stored_in_memory: bool
+
+
+@router.post("/repos/{owner}/{name}/scan")
+async def scan_repo(request: Request, owner: str, name: str) -> ScanResponse:
+    """Read the repo's top-level metadata, build a tech profile, store it.
+
+    The captured profile lands in the memory adapter under
+    ``repo_profiles/<owner>/<name>`` (semantic memory). Stages that
+    dispatch into the repo can pull it back via the standard memory
+    `recall(...)` API — that's the 'use the related existing info'
+    contract the operator asked for.
+
+    Fast path — we never recurse into the tree, only read a hard-
+    coded set of top-level files. A full code-walk is the next step
+    (`/scan/deep` later) but this profile is enough to seed agent
+    prompts with 'what kind of repo am I in'.
+    """
+    client = _client(request)
+    full = f"{owner}/{name}"
+
+    try:
+        default_branch = await client.get_default_branch(full)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"get_default_branch: {e}") from e
+
+    found: dict[str, str] = {}
+    for path in _SCAN_TARGETS:
+        try:
+            content = await client.get_file_content(repo=full, path=path, ref=default_branch)
+        except Exception:  # noqa: BLE001
+            continue
+        # Cap at 16 KB per file — README/Dockerfile can be long; we
+        # only need the first few KB for classification.
+        found[path] = content[:16 * 1024]
+
+    stack = _classify_stack(found)
+    readme_lead = ""
+    if "README.md" in found:
+        # First non-empty line that isn't a heading marker.
+        for line in found["README.md"].splitlines():
+            s = line.strip().lstrip("#").strip()
+            if s:
+                readme_lead = s[:240]
+                break
+
+    profile = {
+        "full_name": full,
+        "default_branch": default_branch,
+        "tech": stack,
+        "summary": readme_lead,
+        "scanned_paths": list(found.keys()),
+    }
+
+    # Persist to the memory adapter so the pipeline can recall it on
+    # future runs without re-scanning. Best-effort: a missing or noop
+    # adapter still returns a useful response to the caller.
+    stored = False
+    try:
+        memory = getattr(request.app.state, "memory_adapter", None)
+        if memory is not None:
+            await memory.remember(
+                category="repo_profiles",
+                key=full,
+                content=profile,
+            )
+            stored = True
+    except Exception:  # noqa: BLE001
+        logger.exception("memory.remember failed — profile not persisted")
+
+    return ScanResponse(
+        full_name=full,
+        default_branch=default_branch,
+        profile=profile,
+        files_seen=list(found.keys()),
+        stored_in_memory=stored,
+    )

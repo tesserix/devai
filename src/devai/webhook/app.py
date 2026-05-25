@@ -118,6 +118,19 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
 
         app.state.registry_client = create_registry_client(config)
 
+    # Memory adapter — used by /api/scm/repos/{...}/scan to persist
+    # captured repo profiles so future pipeline runs can recall the
+    # tech stack without rescanning. Falls back to noop when the
+    # backend is unreachable; the SCM route handles both shapes.
+    if not hasattr(app.state, "memory_adapter"):
+        try:
+            from devai.adapters.memory import create_memory_adapter
+
+            app.state.memory_adapter = create_memory_adapter(config)
+        except Exception:
+            logger.exception("memory adapter construction failed — scan results won't persist")
+            app.state.memory_adapter = None
+
     # Webhook routes
     from devai.webhook.routes import router as webhook_router
 
