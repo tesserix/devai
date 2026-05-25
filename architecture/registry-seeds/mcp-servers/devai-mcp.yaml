@@ -1,0 +1,24 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: devai-mcp
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: lifecycle
+spec:
+  displayName: DevAI Pipeline MCP
+  description: >-
+    Pipeline lifecycle tools — dispatch tasks, query runs, list
+    blueprints / specializations. Same surface the chat agent exposes
+    via tools today.
+  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/devai
+  authMode: jwt
+  tools:
+    - devai_pipeline_dispatch
+    - devai_pipeline_list_runs
+    - devai_pipeline_get_run
+    - devai_pipeline_list_blueprints
+    - devai_pipeline_list_stages
+    - devai_specializations_list
+    - devai_specializations_get

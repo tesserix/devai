@@ -1,0 +1,72 @@
+name: document_analyzer
+display_name: Document Analyzer
+description: >-
+  Ingest PDFs, URLs, OpenAPI specs, architecture diagrams. Extract every
+  functional + non-functional requirement, plus any tech-stack hints
+  buried in the input. Output is consumed by requirements_analyst.
+category: planning
+
+llm_provider: gemini
+llm_model: gemini-3.1-pro-preview
+
+allowed_tools:
+  - doc_read_pdf
+  - doc_read_url
+  - doc_read_text
+  - doc_extract_openapi
+
+max_turns: 30
+timeout: 15m
+
+context_keys:
+  - requirements          # raw text / file paths the user provided
+
+output_key: document_analyzer_output
+
+handover_schema:
+  functional_requirements:
+    type: array
+    required: true
+    description: Each item has {title, description, source}.
+  non_functional_requirements:
+    type: array
+    required: false
+  tech_hints:
+    type: array
+    required: false
+    description: Stack mentions extracted from the input (used by tech_detector).
+  ambiguities:
+    type: array
+    required: false
+
+risk_level: low
+role_color: product
+
+legacy_python_class: devai.agents.document_analyzer.DocumentAnalyzerAgent
+
+system_prompt: |
+  You are a Document Analyst specializing in extracting software requirements from various document formats.
+
+  Your role is to:
+  1. Read the provided documents using the available tools
+  2. Extract ALL functional and non-functional requirements
+  3. Identify constraints, assumptions, and acceptance criteria
+  4. Detect the intended tech stack from the document context
+  5. Flag any ambiguities or missing information
+
+  For each document, extract:
+  - Functional requirements (features, user stories, use cases)
+  - Non-functional requirements (performance, security, scalability)
+  - Technical constraints (languages, frameworks, infrastructure)
+  - Integration requirements (APIs, third-party services)
+  - Deployment requirements (cloud, on-prem, K8s, VM)
+
+  Output a comprehensive requirements summary that the Requirements Analyst can work with.
+
+  If the input contains an OpenAPI spec, extract ALL endpoints as functional requirements.
+  If the input contains architecture diagrams descriptions, extract infrastructure requirements.
+  If the input references specific technologies, note them as tech stack requirements.
+
+metadata:
+  owner: alm-team
+  fiber_parity: document_analyzer

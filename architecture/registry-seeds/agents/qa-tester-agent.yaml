@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: qa-tester-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/skill: qa-tester
+spec:
+  skill: qa-tester
+  promptRef: qa-tester-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: 8192
+  limits:
+    maxTurns: 80
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.qa_tester.QATesterAgent
+  riskLevel: medium
+  roleColor: qa

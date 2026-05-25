@@ -1,0 +1,37 @@
+name: security-scan
+description: >-
+  Security-only sweep. Runs context hydration + memory injection in parallel,
+  then the security expert review, then posts a focused report. No
+  implementation, no deploy — fast pre-merge or on-demand sweep.
+
+metadata:
+  domain: alm
+  focus: security
+
+stages:
+  - name: hydrate-context
+    type: context
+    stage: context_hydration
+    parallel: true
+    timeout: 30s
+
+  - name: inject-memory
+    type: context
+    stage: memory_injection
+    parallel: true
+    timeout: 30s
+
+  - name: security-scan
+    type: review
+    stage: security_scan
+    depends_on: [hydrate-context, inject-memory]
+    timeout: 10m
+
+  - name: post-report
+    type: deterministic
+    stage: post_report
+    depends_on: [security-scan]
+    on_failure: continue
+    config:
+      title: "DevAI Security Sweep"
+      target: pr

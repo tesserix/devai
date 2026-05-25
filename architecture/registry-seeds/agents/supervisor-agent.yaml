@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: supervisor-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/skill: supervisor
+spec:
+  skill: supervisor
+  promptRef: supervisor-prompt-v1
+  llm:
+    provider: openai
+    model: o3
+    temperature: 0.3
+    maxTokens: null
+  limits:
+    maxTurns: 30
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.supervisor.SupervisorAgent
+  riskLevel: low
+  roleColor: admin

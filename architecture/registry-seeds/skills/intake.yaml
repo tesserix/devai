@@ -1,0 +1,41 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: intake
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/risk-level: low
+spec:
+  displayName: Intake Triager
+  description: "Pre-sandbox decision: should the pipeline proceed, ask the user to clarify, or propose\
+    \ an alternate plan? Acts as the human-friendly front door \u2014 never modifies code, never opens\
+    \ a PR."
+  category: specialist
+  tools: []
+  handoverSchema:
+    decision:
+      type: string
+      required: true
+      description: proceed | clarify | propose_plan
+    rationale:
+      type: string
+      required: true
+    clarifying_questions:
+      type: array
+      required: false
+      description: When decision == clarify, the questions to ask the user.
+    proposed_plan:
+      type: string
+      required: false
+      description: When decision == propose_plan, the alternate plan as markdown.
+  contextKeys:
+  - requirements
+  - tech_detector_output
+  - memory_context
+  outputKey: intake_output
+  metadata:
+    owner: alm-team
+    fiber_parity: intake
+    status: yaml_only

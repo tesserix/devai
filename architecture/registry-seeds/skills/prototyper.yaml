@@ -1,0 +1,42 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: prototyper
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/risk-level: low
+spec:
+  displayName: Prototype Builder
+  description: Bolt-style fast prototyping role. Scaffolds a Vite + React 19 + Tailwind + shadcn UI from
+    a screenshot / description, commits + pushes + opens PR before polishing. Used by the `prototype.yaml`
+    blueprint.
+  category: specialist
+  tools:
+  - scm_get_repo_tree
+  - scm_read_file
+  - scm_create_branch
+  - scm_commit_file
+  - scm_create_pr
+  handoverSchema:
+    branch_name:
+      type: string
+      required: true
+    pr_number:
+      type: integer
+      required: true
+    preview_url:
+      type: string
+      required: false
+    scaffold_summary:
+      type: string
+      required: true
+  contextKeys:
+  - requirements
+  - attachments
+  outputKey: prototyper_output
+  metadata:
+    owner: alm-team
+    fiber_parity: prototyper
+    status: yaml_only

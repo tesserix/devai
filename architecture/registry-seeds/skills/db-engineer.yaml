@@ -1,0 +1,42 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: db-engineer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: coding
+    devai.io/risk-level: high
+spec:
+  displayName: Database Engineer
+  description: Schema management, migration safety, data integrity. Produces Liquibase changesets for
+    any schema deltas the senior_developer introduced via ORM models. Hard-gates the pipeline on destructive
+    changes (drops, type narrows).
+  category: coding
+  tools:
+  - scm_get_repo_tree
+  - scm_read_file
+  - scm_commit_file
+  - validate_sql
+  handoverSchema:
+    db_decision:
+      type: string
+      required: true
+      description: One of safe | review_needed | blocked | not_applicable.
+    db_summary:
+      type: string
+      required: true
+    migration_files:
+      type: array
+      required: false
+      description: Paths of Liquibase changesets the agent committed.
+    destructive_changes:
+      type: array
+      required: false
+  contextKeys:
+  - senior_developer_output
+  - skill_profile_name
+  outputKey: db_engineer_output
+  metadata:
+    owner: alm-team
+    fiber_parity: backend_engineer

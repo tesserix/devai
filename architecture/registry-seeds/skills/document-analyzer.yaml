@@ -1,0 +1,40 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: document-analyzer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/risk-level: low
+spec:
+  displayName: Document Analyzer
+  description: Ingest PDFs, URLs, OpenAPI specs, architecture diagrams. Extract every functional + non-functional
+    requirement, plus any tech-stack hints buried in the input. Output is consumed by requirements_analyst.
+  category: planning
+  tools:
+  - doc_read_pdf
+  - doc_read_url
+  - doc_read_text
+  - doc_extract_openapi
+  handoverSchema:
+    functional_requirements:
+      type: array
+      required: true
+      description: Each item has {title, description, source}.
+    non_functional_requirements:
+      type: array
+      required: false
+    tech_hints:
+      type: array
+      required: false
+      description: Stack mentions extracted from the input (used by tech_detector).
+    ambiguities:
+      type: array
+      required: false
+  contextKeys:
+  - requirements
+  outputKey: document_analyzer_output
+  metadata:
+    owner: alm-team
+    fiber_parity: document_analyzer

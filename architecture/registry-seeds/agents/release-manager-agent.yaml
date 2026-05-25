@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: release-manager-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/skill: release-manager
+spec:
+  skill: release-manager
+  promptRef: release-manager-prompt-v1
+  llm:
+    provider: groq
+    model: llama-3.3-70b-versatile
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 30
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.release_manager.ReleaseManagerAgent
+  riskLevel: critical
+  roleColor: admin

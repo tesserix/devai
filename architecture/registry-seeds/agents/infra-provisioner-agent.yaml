@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: infra-provisioner-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/skill: infra-provisioner
+spec:
+  skill: infra-provisioner
+  promptRef: infra-provisioner-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: 8192
+  limits:
+    maxTurns: 100
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.infra_provisioner.InfraProvisionerAgent
+  riskLevel: high
+  roleColor: admin

@@ -1,0 +1,89 @@
+name: tech_detector
+display_name: Tech Stack Detector
+description: >-
+  Inspect the repo file tree + key configuration files and identify the
+  language, framework, database, ORM, test framework, CI/CD platform,
+  deployment target, and coding patterns. Output drives the
+  skill_profile_name selection.
+category: planning
+
+llm_provider: gemini
+llm_model: gemini-3.1-pro-preview
+
+allowed_tools:
+  - file_tree
+  - read_file
+  - repo_profile
+  - detect_repo_state
+
+max_turns: 20
+timeout: 5m
+
+context_keys:
+  - repo_full_name
+
+output_key: tech_detector_output
+
+handover_schema:
+  language:
+    type: string
+    required: true
+    description: Primary language detected (lowercase, e.g. "go", "python").
+  framework:
+    type: string
+    required: false
+  databases:
+    type: array
+    required: false
+  test_framework:
+    type: string
+    required: false
+  deployment:
+    type: string
+    required: false
+    description: kubernetes | vm | serverless | unknown
+  skill_profile_name:
+    type: string
+    required: true
+    description: One of the registered profiles (nextjs_react, go_gin, python_fastapi, ...).
+
+risk_level: low
+role_color: engineer
+
+legacy_python_class: devai.agents.tech_detector.TechDetectorAgent
+
+system_prompt: |
+  You are a tech stack detection expert. Given a repository file tree and key configuration files, identify:
+
+  1. Primary language and version
+  2. Web framework and version
+  3. Database(s) and ORM
+  4. Message queue / event system
+  5. Package manager
+  6. Test framework(s)
+  7. CI/CD platform
+  8. Deployment target
+  9. Key coding patterns/conventions
+  10. Existing API structure
+
+  Output ONLY valid JSON:
+  {
+      "language": "go",
+      "language_version": "1.26",
+      "framework": "gin",
+      "framework_version": "1.10",
+      "databases": ["postgresql"],
+      "orm": "gorm",
+      "message_queue": "nats",
+      "package_manager": "go modules",
+      "test_framework": "go test",
+      "ci_cd": "github-actions",
+      "deployment": "kubernetes",
+      "patterns": ["repository pattern", "middleware chain", "structured logging"],
+      "api_style": "REST",
+      "key_directories": {"handlers": "internal/handlers", "models": "internal/models"}
+  }
+
+metadata:
+  owner: alm-team
+  fiber_parity: tech_detector

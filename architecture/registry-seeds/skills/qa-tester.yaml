@@ -1,0 +1,46 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: qa-tester
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/risk-level: medium
+spec:
+  displayName: Senior QA Engineer
+  description: Write and run E2E tests for the implemented story. Verifies acceptance criteria pass against
+    the real running app (when a preview is up) or the deployed branch. Loops back to senior_developer
+    on test failures.
+  category: review
+  tools:
+  - scm_read_file
+  - scm_commit_file
+  - validate_e2e_playwright
+  - validate_e2e_cypress
+  - validate_unit_tests
+  handoverSchema:
+    test_total:
+      type: integer
+      required: true
+    test_passed:
+      type: integer
+      required: true
+    test_failed:
+      type: integer
+      required: true
+    test_summary:
+      type: string
+      required: true
+    test_failures:
+      type: array
+      required: false
+      description: Each item {test, file, error, suggestion}.
+  contextKeys:
+  - senior_developer_output
+  - product_director_output
+  - skill_profile_name
+  outputKey: qa_tester_output
+  metadata:
+    owner: alm-team
+    fiber_parity: quality_analyst

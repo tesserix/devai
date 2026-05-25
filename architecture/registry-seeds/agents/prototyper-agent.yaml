@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: prototyper-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/skill: prototyper
+spec:
+  skill: prototyper
+  promptRef: prototyper-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: 8192
+  limits:
+    maxTurns: 100
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: ux

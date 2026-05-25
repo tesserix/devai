@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: reflector-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/skill: reflector
+spec:
+  skill: reflector
+  promptRef: reflector-prompt-v1
+  llm:
+    provider: groq
+    model: llama-3.3-70b-versatile
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 8
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: admin

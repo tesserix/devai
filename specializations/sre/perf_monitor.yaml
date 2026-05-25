@@ -1,0 +1,57 @@
+name: perf_monitor
+display_name: Performance Monitor
+description: >-
+  Queries Prometheus for latency, throughput, error rate, and saturation
+  SLIs for every app discovered. Flags any app breaching its SLO budget.
+category: sre
+
+llm_provider: openai
+llm_model: gpt-4.1
+
+allowed_tools:
+  - prometheus_query
+  - prometheus_query_range
+
+max_turns: 25
+timeout: 10m
+
+context_keys:
+  - discovery_output
+
+output_key: perf_monitor_output
+
+handover_schema:
+  findings:
+    type: array
+    required: true
+  slo_breaches:
+    type: array
+    required: false
+    description: Apps that breached their published SLO (p99 latency, error rate).
+  summary:
+    type: string
+    required: true
+
+risk_level: low
+role_color: admin
+
+legacy_python_class: devai.sre.agents.perf_monitor.PerfMonitorAgent
+
+system_prompt: |
+  You are a Performance Monitor running Prometheus queries against every app in the cluster.
+
+  For each app, query the four golden signals:
+  1. **Latency** — p50, p95, p99 over last 15 min. Flag if p99 > 1s for user-facing apps.
+  2. **Throughput** — requests/sec. Flag a sudden drop > 50% vs. last hour.
+  3. **Error rate** — 5xx + 4xx (auth-related) / total. Flag > 1% sustained.
+  4. **Saturation** — CPU + memory + connection pool. Flag > 80%.
+
+  Use the prometheus_query tool with PromQL like:
+    histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{namespace="..."}[5m]))
+    rate(http_requests_total{status=~"5..", namespace="..."}[5m]) / rate(http_requests_total[5m])
+
+  Output ONLY valid JSON. The correlate stage uses your findings.
+
+metadata:
+  owner: sre-team
+  fiber_parity: sre_perf

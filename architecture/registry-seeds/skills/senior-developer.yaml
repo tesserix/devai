@@ -1,0 +1,53 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: senior-developer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: coding
+    devai.io/risk-level: medium
+spec:
+  displayName: Senior Software Engineer
+  description: Implement ONE user story on its own feature branch. Read the story plan, follow repo conventions,
+    write code + co-located unit tests, validate compile/lint/test, open a PR linked to the story issue.
+  category: coding
+  tools:
+  - scm_get_repo_tree
+  - scm_read_file
+  - scm_create_branch
+  - scm_commit_file
+  - scm_create_pr
+  - validate_compile
+  - validate_lint
+  - validate_unit_tests
+  - validate_format
+  - validate_dockerfile
+  handoverSchema:
+    branch_name:
+      type: string
+      required: true
+      description: Feature branch the implementation was pushed to (story/<num>-<slug>).
+    pr_number:
+      type: integer
+      required: true
+      description: GitHub PR number the agent opened.
+    implementation_summary:
+      type: string
+      required: true
+    committed_files:
+      type: array
+      required: false
+    validations_passed:
+      type: array
+      required: false
+      description: Names of validate_* tools that returned ok.
+  contextKeys:
+  - engineering_manager_output
+  - tech_detector_output
+  - skill_profile_name
+  - active_story_index
+  outputKey: senior_developer_output
+  metadata:
+    owner: alm-team
+    fiber_parity: coder

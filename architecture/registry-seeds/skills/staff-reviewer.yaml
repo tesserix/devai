@@ -1,0 +1,53 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: staff-reviewer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/risk-level: medium
+spec:
+  displayName: Staff Code Reviewer
+  description: 'Final review gate before merge. Checks: code quality, story completeness against acceptance
+    criteria, scope (no creep), performance, security, error handling, testability. Loops up to 3 iterations
+    on changes_requested then escalates to human.'
+  category: review
+  tools:
+  - scm_get_pr_diff
+  - scm_read_file
+  - scm_get_repo_tree
+  - scm_post_pr_review
+  handoverSchema:
+    review_decision:
+      type: string
+      required: true
+      description: approved | changes_requested
+    summary:
+      type: string
+      required: true
+    comments:
+      type: array
+      required: false
+    security_issues:
+      type: array
+      required: false
+    performance_issues:
+      type: array
+      required: false
+    style_issues:
+      type: array
+      required: false
+    review_iteration:
+      type: integer
+      required: false
+  contextKeys:
+  - senior_developer_output
+  - product_director_output
+  - active_story_index
+  - memory_context
+  outputKey: staff_reviewer_output
+  metadata:
+    owner: alm-team
+    fiber_parity: staff_reviewer
+    max_iterations: 3

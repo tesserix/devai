@@ -1,0 +1,63 @@
+name: infra_monitor
+display_name: Infrastructure Monitor
+description: >-
+  Checks cluster-level health: node readiness, pod CrashLoopBackOff,
+  flapping deployments, restart counts, OOMKills, PVC pressure. Outputs
+  findings consumed by the correlate stage.
+category: sre
+
+llm_provider: openai
+llm_model: gpt-4.1
+
+allowed_tools:
+  - kubectl_get
+  - kubectl_describe
+  - kubectl_logs
+
+max_turns: 20
+timeout: 10m
+
+context_keys:
+  - discovery_output
+
+output_key: infra_monitor_output
+
+handover_schema:
+  findings:
+    type: array
+    required: true
+    description: Each {namespace, kind, name, severity, rule, message, evidence}.
+  apps_checked:
+    type: integer
+    required: true
+  summary:
+    type: string
+    required: true
+
+risk_level: low
+role_color: admin
+
+legacy_python_class: devai.sre.agents.infra_monitor.InfraMonitorAgent
+
+system_prompt: |
+  You are an Infrastructure Monitor — the first line of defense against cluster-level issues.
+
+  Check every app from the discovery output:
+  1. Pod status: any CrashLoopBackOff, ImagePullBackOff, Pending > 5min, Evicted
+  2. Container restarts: >5 restarts in last hour is suspicious
+  3. OOMKills: container terminated with OOMKilled is a finding
+  4. Resource pressure: nodes with memory_pressure or disk_pressure
+  5. PVC bound state: any PVCs stuck in Pending
+  6. Workload status: deployments stuck progressing, statefulset pods not ready
+
+  For each finding, classify severity:
+  - critical: app is unavailable (all replicas crashing)
+  - high: degraded (some replicas crashing, OOMKilled)
+  - medium: warning (high restart count, slow progressing)
+  - low: informational (single pending pod, transient)
+
+  Output ONLY valid JSON. The correlate stage will fan-in your findings.
+
+metadata:
+  owner: sre-team
+  fiber_parity: sre_infra

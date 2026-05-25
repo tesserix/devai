@@ -1,0 +1,85 @@
+name: sre-monitor
+description: >-
+  Autonomous SRE monitoring sweep. Discovers cluster topology, fans out
+  five monitoring agents in parallel, correlates their findings, dispatches
+  the incident responder if anything is actionable, and writes learnings
+  back to agent memory.
+
+metadata:
+  domain: sre
+  replaces: devai.sre.graph.orchestrator
+  cadence: every 5 minutes
+
+stages:
+  # ─── Discovery ─────────────────────────────────────────────────────
+  - name: discover
+    type: agentic
+    stage: sre_discover
+    timeout: 5m
+
+  # ─── Parallel monitoring fan-out ───────────────────────────────────
+  - name: monitor-infra
+    type: agentic
+    stage: sre_monitor_infra
+    depends_on: [discover]
+    parallel: true
+    timeout: 10m
+    on_failure: continue
+
+  - name: monitor-perf
+    type: agentic
+    stage: sre_monitor_perf
+    depends_on: [discover]
+    parallel: true
+    timeout: 10m
+    on_failure: continue
+
+  - name: monitor-logs
+    type: agentic
+    stage: sre_monitor_logs
+    depends_on: [discover]
+    parallel: true
+    timeout: 10m
+    on_failure: continue
+
+  - name: monitor-cost
+    type: agentic
+    stage: sre_monitor_cost
+    depends_on: [discover]
+    parallel: true
+    timeout: 10m
+    on_failure: continue
+
+  - name: monitor-capacity
+    type: agentic
+    stage: sre_monitor_capacity
+    depends_on: [discover]
+    parallel: true
+    timeout: 10m
+    on_failure: continue
+
+  # ─── Correlate + respond + learn ───────────────────────────────────
+  - name: correlate
+    type: analyst
+    stage: sre_correlate
+    depends_on:
+      - monitor-infra
+      - monitor-perf
+      - monitor-logs
+      - monitor-cost
+      - monitor-capacity
+    timeout: 5m
+
+  - name: respond
+    type: agentic
+    stage: sre_respond
+    depends_on: [correlate]
+    timeout: 10m
+    on_failure: continue
+
+  - name: learn
+    type: deterministic
+    stage: sre_learn
+    depends_on: [respond]
+    timeout: 2m
+    on_failure: continue

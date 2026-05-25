@@ -1,0 +1,38 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: negotiator
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/risk-level: low
+spec:
+  displayName: Requirement Negotiator
+  description: "Multi-turn clarifying Q&A with the user. Used when intake decided \"clarify\" \u2014 the\
+    \ negotiator asks one question at a time, waits for the user's answer, and continues until requirements\
+    \ are concrete enough to proceed. Parks the task between turns."
+  category: specialist
+  tools: []
+  handoverSchema:
+    conversation:
+      type: array
+      required: true
+      description: 'Each item {role: agent|user, content, timestamp}.'
+    final_requirements:
+      type: string
+      required: false
+      description: The refined requirements after negotiation (when terminated).
+    status:
+      type: string
+      required: true
+      description: asking (waiting on user) | complete | abandoned
+  contextKeys:
+  - requirements
+  - intake_output
+  - user_responses
+  outputKey: negotiator_output
+  metadata:
+    owner: alm-team
+    fiber_parity: negotiator
+    status: yaml_only

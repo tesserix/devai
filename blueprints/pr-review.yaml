@@ -1,0 +1,43 @@
+name: pr-review
+description: >-
+  Review an existing pull request. No implementation, no deployment — just
+  hydrate context, run the review + security gates, and post a report as a
+  PR comment. Used when DevAI is invoked on a PR webhook event rather than
+  a fresh requirement.
+
+metadata:
+  domain: alm
+  expects: task.has_pr
+
+stages:
+  - name: hydrate-context
+    type: context
+    stage: context_hydration
+    timeout: 30s
+
+  - name: inject-memory
+    type: context
+    stage: memory_injection
+    depends_on: [hydrate-context]
+    timeout: 30s
+
+  - name: review-code
+    type: review
+    stage: review_code
+    depends_on: [hydrate-context, inject-memory]
+    timeout: 15m
+
+  - name: security-scan
+    type: review
+    stage: security_scan
+    depends_on: [review-code]
+    timeout: 10m
+
+  - name: post-report
+    type: deterministic
+    stage: post_report
+    depends_on: [security-scan]
+    on_failure: continue
+    config:
+      title: "DevAI PR Review"
+      target: pr

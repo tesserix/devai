@@ -1,0 +1,44 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: infra-provisioner
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/risk-level: high
+spec:
+  displayName: Platform Engineer
+  description: "Creates Kubernetes deployment manifests (Helm charts) or VM deploy scripts based on the\
+    \ deployment target. Owns the Dockerfile and all infra files \u2014 every other role escalates here\
+    \ for infra changes."
+  category: orchestration
+  tools:
+  - scm_read_file
+  - scm_commit_file
+  - validate_dockerfile
+  - validate_helm_lint
+  - validate_yaml
+  handoverSchema:
+    deploy_target:
+      type: string
+      required: true
+      description: kubernetes | vm | serverless
+    artifacts:
+      type: array
+      required: true
+      description: Paths of infra files the agent created/modified.
+    helm_chart_path:
+      type: string
+      required: false
+    dockerfile_path:
+      type: string
+      required: false
+  contextKeys:
+  - senior_developer_output
+  - tech_detector_output
+  - skill_profile_name
+  outputKey: infra_provisioner_output
+  metadata:
+    owner: alm-team
+    fiber_parity: infra_engineer

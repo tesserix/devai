@@ -51,10 +51,32 @@ async def lifespan(app: FastAPI):
     await db.connect()
     app.state.db = db
 
+    # Optional: stand up the Fiber-style PipelineService so SRE scans can
+    # be driven via the sre-monitor blueprint instead of the hardcoded
+    # SREOrchestrator. Falls back gracefully if Redis is unreachable.
+    app.state.pipeline_service = None
+    if getattr(settings, "pipeline_enabled", False):
+        try:
+            from devai.core.state import StateManager
+            from devai.pipeline.service import PipelineService
+
+            state_manager = StateManager(settings.redis_url)
+            app.state.pipeline_state_manager = state_manager
+            pipeline_service = PipelineService(
+                settings,
+                scm=None,  # SRE doesn't need an SCM client
+                state_manager=state_manager,
+            )
+            await pipeline_service.start()
+            app.state.pipeline_service = pipeline_service
+            logger.info("SRE PipelineService started — sre-monitor blueprint is the default scan path")
+        except Exception:
+            logger.exception("SRE PipelineService failed to start — falling back to legacy SREOrchestrator")
+
     # Start the autonomous scanner only if explicitly enabled
     scan_task = None
     if AUTO_SCAN_ENABLED:
-        scan_task = asyncio.create_task(_autonomous_scanner(db))
+        scan_task = asyncio.create_task(_autonomous_scanner(db, app.state.pipeline_service))
         app.state.scan_task = scan_task
         logger.info("SRE server started — autonomous scanning every %ds", DEFAULT_SCAN_INTERVAL)
     else:
@@ -65,7 +87,20 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if scan_task is not None:
         scan_task.cancel()
+    if app.state.pipeline_service is not None:
+        with contextlib_suppress(Exception):
+            await app.state.pipeline_service.stop()
+        if hasattr(app.state, "pipeline_state_manager"):
+            with contextlib_suppress(Exception):
+                await app.state.pipeline_state_manager.close()
     await db.close()
+
+
+def contextlib_suppress(*excs):
+    """Tiny shim — saves us a top-level import_alias dance."""
+    import contextlib as _c
+
+    return _c.suppress(*excs)
 
 
 def create_sre_app() -> FastAPI:
@@ -168,7 +203,9 @@ def create_sre_app() -> FastAPI:
             return {"status": "error", "error": str(e)}
 
         # Create task and KEEP a reference so it isn't garbage collected
-        task = asyncio.create_task(_run_single_scan(app.state.db, cluster_id, "manual", scan_id))
+        task = asyncio.create_task(
+            _run_single_scan(app.state.db, cluster_id, "manual", scan_id, app.state.pipeline_service)
+        )
         app.state.scan_tasks.add(task)
         task.add_done_callback(app.state.scan_tasks.discard)
 
@@ -308,11 +345,11 @@ def create_sre_app() -> FastAPI:
 # --- Autonomous Scanner ---
 
 
-async def _autonomous_scanner(db: Any) -> None:
+async def _autonomous_scanner(db: Any, pipeline_service: Any = None) -> None:
     """Continuously run SRE scans on a schedule."""
     while True:
         try:
-            await _run_single_scan(db, "default", "cron")
+            await _run_single_scan(db, "default", "cron", None, pipeline_service)
         except asyncio.CancelledError:
             break
         except Exception:
@@ -321,11 +358,73 @@ async def _autonomous_scanner(db: Any) -> None:
         await asyncio.sleep(DEFAULT_SCAN_INTERVAL)
 
 
-async def _run_single_scan(db: Any, cluster_id: str, trigger: str, scan_id: str | None = None) -> None:
-    """Execute a single SRE monitoring scan."""
-    from devai.sre.graph.orchestrator import SREOrchestrator
+async def _run_single_scan(
+    db: Any,
+    cluster_id: str,
+    trigger: str,
+    scan_id: str | None = None,
+    pipeline_service: Any = None,
+) -> None:
+    """Execute a single SRE monitoring scan.
 
+    Routes through the Fiber-style `sre-monitor` blueprint when a
+    PipelineService is available; otherwise falls back to the legacy
+    `SREOrchestrator`. The DB-side `sre_scan_runs` row is updated in
+    both paths so the dashboard sees the same rows.
+    """
     logger.info("Starting SRE scan: cluster=%s trigger=%s scan_id=%s", cluster_id, trigger, scan_id)
+
+    # ── New path: sre-monitor blueprint via PipelineService ──────────
+    if pipeline_service is not None:
+        try:
+            blueprint = getattr(settings, "pipeline_sre_blueprint", "sre-monitor")
+            task = await pipeline_service.run_once(
+                intent=f"SRE scan cluster={cluster_id} trigger={trigger}",
+                blueprint=blueprint,
+                trigger_type=trigger,
+                agent_context={"cluster_id": cluster_id, "trigger": trigger, "scan_id": scan_id},
+            )
+            findings = task.agent_context.get("correlated_findings", []) or []
+            apps = task.agent_context.get("discovery_output", {}).get("apps", []) if isinstance(
+                task.agent_context.get("discovery_output"), dict
+            ) else []
+            response = task.agent_context.get("incident_responder_output") or {}
+            incidents_created = (
+                response.get("incidents_created", 0) if isinstance(response, dict) else 0
+            )
+            agent_timings = {
+                ev.stage: ev.duration_ms / 1000.0
+                for ev in task.stage_events
+                if ev.phase.value == "completed"
+            }
+            actual_scan_id = scan_id or task.id
+
+            await _record_scan_row(
+                db,
+                actual_scan_id,
+                cluster_id,
+                trigger,
+                incidents_created=incidents_created,
+                apps_checked=len(apps) if apps else 0,
+                findings=len(findings),
+                agent_timings=agent_timings,
+                pre_created=scan_id is not None,
+                blueprint=blueprint,
+                task_id=task.id,
+            )
+            logger.info(
+                "SRE blueprint scan complete: scan_id=%s blueprint=%s findings=%d incidents=%d",
+                actual_scan_id,
+                blueprint,
+                len(findings),
+                incidents_created,
+            )
+            return
+        except Exception:
+            logger.exception("sre-monitor blueprint failed — falling back to legacy SREOrchestrator")
+
+    # ── Legacy path: SREOrchestrator ─────────────────────────────────
+    from devai.sre.graph.orchestrator import SREOrchestrator
 
     try:
         orchestrator = SREOrchestrator(settings, database=db)
@@ -387,6 +486,64 @@ async def _run_single_scan(db: Any, cluster_id: str, trigger: str, scan_id: str 
                     """UPDATE sre_scan_runs SET status = 'failed', completed_at = NOW() WHERE id = $1""",
                     scan_id,
                 )
+
+
+async def _record_scan_row(
+    db: Any,
+    scan_id: str,
+    cluster_id: str,
+    trigger: str,
+    *,
+    incidents_created: int,
+    apps_checked: int,
+    findings: int,
+    agent_timings: dict[str, float],
+    pre_created: bool,
+    blueprint: str = "",
+    task_id: str = "",
+) -> None:
+    """Persist a completed scan into `sre_scan_runs`.
+
+    Used by the blueprint-driven scan path so the dashboard row schema
+    stays identical between legacy and new paths. When `pre_created` is
+    True the row was inserted by the trigger endpoint; we UPDATE it
+    in place. Otherwise we INSERT.
+    """
+    try:
+        if pre_created:
+            await db.pool.execute(
+                """UPDATE sre_scan_runs
+                       SET status = 'completed',
+                           incidents_found = $2,
+                           apps_checked = $3,
+                           checks_passed = $4,
+                           checks_failed = $5,
+                           agent_timings = $6,
+                           completed_at = NOW()
+                       WHERE id = $1""",
+                scan_id,
+                incidents_created,
+                apps_checked,
+                findings,
+                0,
+                json.dumps({**agent_timings, "_blueprint": blueprint, "_task_id": task_id}),
+            )
+        else:
+            await db.pool.execute(
+                """INSERT INTO sre_scan_runs (id, cluster_id, trigger, status, incidents_found,
+                       apps_checked, checks_passed, checks_failed, agent_timings, completed_at)
+                       VALUES ($1, $2, $3, 'completed', $4, $5, $6, $7, $8, NOW())""",
+                scan_id,
+                cluster_id,
+                trigger,
+                incidents_created,
+                apps_checked,
+                findings,
+                0,
+                json.dumps({**agent_timings, "_blueprint": blueprint, "_task_id": task_id}),
+            )
+    except Exception:
+        logger.exception("Failed to record blueprint scan row scan_id=%s", scan_id)
 
 
 # CLI entrypoint

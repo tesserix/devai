@@ -133,6 +133,112 @@ class StateManager:
             return True
         return False
 
+    # --- Pipeline tasks (Fiber-style runtime) ---
+    #
+    # Namespaced under `devai:pipeline:*` so they don't collide with the
+    # legacy `devai:run:*` keys used by the LangGraph orchestrator. Both
+    # surfaces can coexist while we cut over.
+
+    PIPELINE_TASK_KEY = "devai:pipeline:task:{task_id}"
+    PIPELINE_RECENT_KEY = "devai:pipeline:tasks:recent"
+    PIPELINE_BY_BLUEPRINT_KEY = "devai:pipeline:tasks:by_blueprint:{blueprint}"
+    PIPELINE_BY_REPO_KEY = "devai:pipeline:tasks:by_repo:{repo}"
+
+    async def persist_task(self, task_dict: dict[str, Any], *, ttl: int | None = None) -> None:
+        """Write a DevAITask dict to Redis.
+
+        Idempotent — the Pipeline calls this after every state mutation,
+        so the latest snapshot always wins. The recent / by_blueprint /
+        by_repo indices are upserted on first persist; later persists
+        just overwrite the snapshot.
+        """
+        task_id = task_dict.get("id")
+        if not task_id:
+            logger.warning("persist_task: dict missing 'id' — ignored")
+            return
+
+        blueprint = task_dict.get("blueprint", "unknown")
+        repo = task_dict.get("repo", "")
+        ttl = ttl if ttl is not None else self.result_ttl
+        now = time.time()
+
+        payload = json.dumps(task_dict)
+        pipe = self.redis.pipeline()
+        pipe.set(self.PIPELINE_TASK_KEY.format(task_id=task_id), payload, ex=ttl)
+        # Sorted set keyed by updated_at so we can list "most recent"
+        pipe.zadd(self.PIPELINE_RECENT_KEY, {task_id: task_dict.get("updated_at", now)})
+        # Cap the recent index at 1000 entries
+        pipe.zremrangebyrank(self.PIPELINE_RECENT_KEY, 0, -1001)
+        if blueprint:
+            pipe.zadd(self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint), {task_id: now})
+        if repo:
+            pipe.zadd(self.PIPELINE_BY_REPO_KEY.format(repo=repo), {task_id: now})
+        await pipe.execute()
+
+    async def get_pipeline_task(self, task_id: str) -> dict[str, Any] | None:
+        """Read back a previously-persisted task dict."""
+        raw = await self.redis.get(self.PIPELINE_TASK_KEY.format(task_id=task_id))
+        if raw is None:
+            return None
+        return json.loads(raw)
+
+    async def list_pipeline_tasks(
+        self,
+        *,
+        limit: int = 50,
+        blueprint: str | None = None,
+        repo: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the most-recent pipeline tasks as dicts.
+
+        Filters are AND-combined when both are passed (we intersect the
+        sorted sets). When neither is given we return the global recent
+        index. Newest first.
+        """
+        if blueprint and repo:
+            ids = await self.redis.zinterstore(
+                "_devai:pipeline:_tmpfilter",
+                {
+                    self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint): 1.0,
+                    self.PIPELINE_BY_REPO_KEY.format(repo=repo): 1.0,
+                },
+            )
+            ids = await self.redis.zrevrange("_devai:pipeline:_tmpfilter", 0, limit - 1)
+            await self.redis.delete("_devai:pipeline:_tmpfilter")
+        elif blueprint:
+            ids = await self.redis.zrevrange(
+                self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint), 0, limit - 1
+            )
+        elif repo:
+            ids = await self.redis.zrevrange(
+                self.PIPELINE_BY_REPO_KEY.format(repo=repo), 0, limit - 1
+            )
+        else:
+            ids = await self.redis.zrevrange(self.PIPELINE_RECENT_KEY, 0, limit - 1)
+
+        if not ids:
+            return []
+
+        # Multi-get the actual task payloads
+        keys = [self.PIPELINE_TASK_KEY.format(task_id=tid) for tid in ids]
+        values = await self.redis.mget(keys)
+        return [json.loads(v) for v in values if v]
+
+    async def delete_pipeline_task(self, task_id: str) -> None:
+        """Remove a task from all indices."""
+        task = await self.get_pipeline_task(task_id)
+        pipe = self.redis.pipeline()
+        pipe.delete(self.PIPELINE_TASK_KEY.format(task_id=task_id))
+        pipe.zrem(self.PIPELINE_RECENT_KEY, task_id)
+        if task:
+            bp = task.get("blueprint")
+            repo = task.get("repo")
+            if bp:
+                pipe.zrem(self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=bp), task_id)
+            if repo:
+                pipe.zrem(self.PIPELINE_BY_REPO_KEY.format(repo=repo), task_id)
+        await pipe.execute()
+
     # --- Cleanup ---
 
     async def close(self) -> None:

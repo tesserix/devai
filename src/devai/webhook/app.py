@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,12 +17,82 @@ if TYPE_CHECKING:
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
 
+logger = logging.getLogger(__name__)
 _START_TIME = time.time()
 
 
 def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> FastAPI:
     """Create the FastAPI app with shared resources injected."""
-    app = FastAPI(title="DevAI", version="0.2.0", description="AI-powered ALM Pipeline")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Start the Fiber-style pipeline runtime when enabled. SCM is
+        # constructed lazily so this doesn't trip start-up when the SCM
+        # provider isn't configured yet.
+        pipeline_service = None
+        if getattr(config, "pipeline_enabled", False):
+            try:
+                from devai.pipeline.service import PipelineService
+                from devai.scm import create_scm_client
+
+                scm = None
+                try:
+                    scm = create_scm_client(config)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("PipelineService: SCM construction failed (%s); stages run with no SCM", e)
+
+                pipeline_service = PipelineService(
+                    config,
+                    scm=scm,
+                    state_manager=state,
+                    event_bus=event_bus,
+                )
+                await pipeline_service.start()
+                app.state.pipeline_service = pipeline_service
+            except Exception:
+                logger.exception("PipelineService failed to start — continuing without it")
+                app.state.pipeline_service = None
+        else:
+            app.state.pipeline_service = None
+            logger.info("PipelineService disabled (DEVAI_PIPELINE_ENABLED is not true)")
+
+        # SpecializationService — independent of the pipeline runtime so
+        # the dashboard can browse the YAML catalog even when the
+        # blueprint executor is disabled.
+        spec_service = None
+        if getattr(config, "specializations_enabled", True):
+            try:
+                from devai.specializations.service import SpecializationService
+
+                spec_service = SpecializationService(config)
+                await spec_service.start()
+                app.state.specialization_service = spec_service
+            except Exception:
+                logger.exception("SpecializationService failed to start")
+                app.state.specialization_service = None
+        else:
+            app.state.specialization_service = None
+
+        try:
+            yield
+        finally:
+            if pipeline_service is not None:
+                try:
+                    await pipeline_service.stop()
+                except Exception:  # noqa: BLE001
+                    logger.exception("PipelineService stop failed")
+            if spec_service is not None:
+                try:
+                    await spec_service.stop()
+                except Exception:  # noqa: BLE001
+                    logger.exception("SpecializationService stop failed")
+
+    app = FastAPI(
+        title="DevAI",
+        version="0.3.0",
+        description="AI-powered ALM Pipeline + Fiber-style blueprint runtime",
+        lifespan=lifespan,
+    )
 
     # Store shared resources for access in routes
     app.state.event_bus = event_bus
@@ -31,6 +103,18 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
     from devai.webhook.routes import router as webhook_router
 
     app.include_router(webhook_router)
+
+    # Pipeline runtime routes (/api/pipeline/*) — only useful when
+    # PipelineService is started, but the routes themselves return a
+    # readable 503 when disabled, so we mount unconditionally.
+    from devai.pipeline.routes import router as pipeline_router
+
+    app.include_router(pipeline_router)
+
+    # Specializations catalog routes (/api/specializations/*)
+    from devai.specializations.routes import router as specializations_router
+
+    app.include_router(specializations_router)
 
     # Dashboard routes (UI + API)
     from devai.dashboard.routes import router as dashboard_router

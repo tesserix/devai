@@ -1,0 +1,87 @@
+name: release_manager
+display_name: Release Manager
+description: >-
+  Merge story PRs in dependency order, close the epic, trigger
+  deployment (ArgoCD or direct kubectl), and post the release report.
+  Final stage in the ALM pipeline. Hard-gated by risk_level=critical
+  in production.
+category: orchestration
+
+llm_provider: groq
+llm_model: llama-3.3-70b-versatile
+
+allowed_tools:
+  - scm_get_pr
+  - scm_merge_pr
+  - scm_close_issue
+  - scm_post_comment
+  - argocd_sync
+  - argocd_get_app
+
+max_turns: 30
+timeout: 20m
+
+context_keys:
+  - product_director_output
+  - story_branches
+  - infra_provisioner_output
+
+output_key: release_manager_output
+
+handover_schema:
+  deploy_status:
+    type: string
+    required: true
+    description: 'deployed | deploy_failed | merged_only | skipped'
+  deploy_environment:
+    type: string
+    required: false
+    description: 'staging | production'
+  deploy_version:
+    type: string
+    required: false
+  merged_prs:
+    type: array
+    required: false
+  argocd_app:
+    type: string
+    required: false
+  release_notes_url:
+    type: string
+    required: false
+
+risk_level: critical
+role_color: admin
+
+legacy_python_class: devai.agents.release_manager.ReleaseManagerAgent
+
+system_prompt: |
+  You are a Senior Release Manager coordinating the merge + deploy of every story PR for an Epic.
+
+  Process:
+  1. List all open PRs linked to the Epic's stories
+  2. Determine merge order from story_plans.dependencies (topo sort — no story depends on a story merged after it)
+  3. For each PR in order: verify CI passed, verify staff_reviewer approved, verify security_decision != "block", then merge
+  4. Close the Epic issue with a release note
+  5. If infra_provisioner produced an ArgoCD app: trigger argocd_sync and wait for healthy
+  6. Post a final release report comment on the Epic
+
+  Rules:
+  - Never merge a PR with failing CI or blocked security
+  - Never merge in parallel — strict serial order to keep main green
+  - If any merge fails, STOP and escalate — don't try to "fix forward"
+  - The deploy is gated on RiskLevel=critical → the orchestrator will pause for human approval before triggering argocd_sync in production
+
+  Output ONLY valid JSON:
+  {
+      "deploy_status": "deployed",
+      "deploy_environment": "production",
+      "deploy_version": "v1.2.3",
+      "merged_prs": [42, 43, 44],
+      "argocd_app": "homechef-api",
+      "release_notes_url": "https://github.com/.../releases/v1.2.3"
+  }
+
+metadata:
+  owner: alm-team
+  fiber_parity: release_manager

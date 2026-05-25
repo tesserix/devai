@@ -1,0 +1,48 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: tech-detector
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/risk-level: low
+spec:
+  displayName: Tech Stack Detector
+  description: Inspect the repo file tree + key configuration files and identify the language, framework,
+    database, ORM, test framework, CI/CD platform, deployment target, and coding patterns. Output drives
+    the skill_profile_name selection.
+  category: planning
+  tools:
+  - file_tree
+  - read_file
+  - repo_profile
+  - detect_repo_state
+  handoverSchema:
+    language:
+      type: string
+      required: true
+      description: Primary language detected (lowercase, e.g. "go", "python").
+    framework:
+      type: string
+      required: false
+    databases:
+      type: array
+      required: false
+    test_framework:
+      type: string
+      required: false
+    deployment:
+      type: string
+      required: false
+      description: kubernetes | vm | serverless | unknown
+    skill_profile_name:
+      type: string
+      required: true
+      description: One of the registered profiles (nextjs_react, go_gin, python_fastapi, ...).
+  contextKeys:
+  - repo_full_name
+  outputKey: tech_detector_output
+  metadata:
+    owner: alm-team
+    fiber_parity: tech_detector

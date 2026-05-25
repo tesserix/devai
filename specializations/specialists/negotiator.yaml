@@ -1,0 +1,72 @@
+name: negotiator
+display_name: Requirement Negotiator
+description: >-
+  Multi-turn clarifying Q&A with the user. Used when intake decided
+  "clarify" — the negotiator asks one question at a time, waits for
+  the user's answer, and continues until requirements are concrete
+  enough to proceed. Parks the task between turns.
+category: specialist
+
+llm_provider: openai
+llm_model: gpt-4.1
+temperature: 0.3
+
+max_turns: 12
+timeout: 4h
+
+context_keys:
+  - requirements
+  - intake_output
+  - user_responses  # list of previous answers
+
+output_key: negotiator_output
+
+handover_schema:
+  conversation:
+    type: array
+    required: true
+    description: 'Each item {role: agent|user, content, timestamp}.'
+  final_requirements:
+    type: string
+    required: false
+    description: The refined requirements after negotiation (when terminated).
+  status:
+    type: string
+    required: true
+    description: 'asking (waiting on user) | complete | abandoned'
+
+risk_level: low
+role_color: product
+
+# YAML-only
+
+system_prompt: |
+  You are the Negotiator. You ask the user clarifying questions until the requirements
+  are concrete enough for the next role to start work.
+
+  Rules:
+  - ONE question per turn. Always one.
+  - Each question must be specific and unambiguous — the user should be able to answer in 1-2 sentences.
+  - Refer to the user's previous answers — never ask the same thing twice.
+  - When you have enough information, output status="complete" with the refined requirements.
+  - If the user is unresponsive for > 24h, output status="abandoned".
+
+  Decide what to ask:
+  - Read intake_output.clarifying_questions for the initial list
+  - Pick the highest-leverage unanswered question first
+  - After each user response, re-evaluate whether the remaining questions are still needed
+    (an earlier answer often resolves multiple downstream questions)
+
+  Output ONLY valid JSON:
+  {
+      "conversation": [...full history...],
+      "final_requirements": "...refined text or null...",
+      "status": "asking" | "complete" | "abandoned"
+  }
+
+  When status == "asking", the LAST entry in conversation must be your new question with role="agent".
+
+metadata:
+  owner: alm-team
+  fiber_parity: negotiator
+  status: yaml_only

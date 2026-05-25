@@ -1,0 +1,29 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: sre-mcp
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+spec:
+  displayName: DevAI SRE MCP
+  description: >-
+    SRE observability + remediation tools — kubectl wrappers, Prometheus
+    queries, ArgoCD status, cost analysis. Exposed via the SRE service.
+  endpoint: http://devai-sre.devai.svc.cluster.local:8090/mcp/sre
+  authMode: jwt
+  tools:
+    - sre_runtime_list
+    - sre_runtime_status
+    - sre_k8s_pods_unhealthy
+    - sre_k8s_pods_flapping
+    - sre_k8s_events
+    - sre_argo_workflow_failed
+    - sre_argo_workflow_logs
+    - sre_argocd_app_health
+    - sre_argocd_app_events
+    - sre_metrics_query
+    - sre_aregistry_health
+    - sre_gateway_stats
+    - sre_gateway_health

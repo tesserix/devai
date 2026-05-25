@@ -1,0 +1,44 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: ci-monitor
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/risk-level: medium
+spec:
+  displayName: CI Engineer
+  description: "Watches GitHub Actions for the PR's CI run and either confirms green or autonomously fixes\
+    \ a broken workflow. Owns `.github/workflows/` \u2014 every other role escalates to ci_monitor for\
+    \ CI changes."
+  category: review
+  tools:
+  - scm_read_file
+  - scm_commit_file
+  - scm_get_workflow_runs
+  - scm_get_workflow_logs
+  handoverSchema:
+    build_status:
+      type: string
+      required: true
+      description: success | failure | pending | unknown
+    build_run_id:
+      type: integer
+      required: false
+    build_url:
+      type: string
+      required: false
+    failed_jobs:
+      type: array
+      required: false
+    fixes_applied:
+      type: array
+      required: false
+      description: List of .github/workflows/*.yml paths the agent edited.
+  contextKeys:
+  - senior_developer_output
+  outputKey: ci_monitor_output
+  metadata:
+    owner: alm-team
+    fiber_parity: release_engineer

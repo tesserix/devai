@@ -110,6 +110,21 @@ class Settings(BaseSettings):
     pipeline_label: str = "devai:automate"
     project_ready_column: str = "Ready for DevAI"
 
+    # --- Fiber-style blueprint runtime ---
+    # When `pipeline_enabled` is True, webhooks and the SRE scanner dispatch
+    # tasks through the new YAML-blueprint runtime (devai.pipeline.Pipeline)
+    # instead of the legacy LangGraph orchestrators. The legacy path stays
+    # wired so the cut-over is reversible by flipping a single env var.
+    pipeline_enabled: bool = False
+    pipeline_blueprint_dir: str = "blueprints"
+    pipeline_default_blueprint: str = "alm-pipeline"
+    pipeline_pr_review_blueprint: str = "pr-review"
+    pipeline_sre_blueprint: str = "sre-monitor"
+    pipeline_concurrency: int = 4
+    pipeline_default_stage_timeout: int = 900  # 15 min — Fiber default
+    pipeline_event_ring_size: int = 1000  # SSE replay buffer
+    pipeline_task_ttl: int = 86400 * 30  # 30 days — keep parity with redis_result_ttl
+
     # --- LangSmith ---
     langchain_tracing_v2: str = ""  # Set to "true" to enable
     langchain_api_key: str = ""  # LangSmith API key (lsv2_pt_xxx)
@@ -139,6 +154,34 @@ class Settings(BaseSettings):
     # --- Observability ---
     otel_endpoint: str = ""
     metrics_enabled: bool = True
+
+    # --- Specializations (Fiber-style YAML role catalog) ---
+    specializations_enabled: bool = True
+    specializations_dir: str = "specializations"
+
+    # --- Memory adapter (Agentic AI Memory) ---
+    # Single switch picks the backend; the rest of DevAI talks only to
+    # `devai.adapters.memory.MemoryAdapter`. Swap providers with one env var,
+    # no code changes. Missing SDKs / config degrade gracefully to "noop".
+    memory_provider: str = "redis"  # noop | redis | pgvector | mem0 | zep
+
+    # mem0 (cloud or self-hosted). Cloud needs only DEVAI_MEM0_API_KEY;
+    # self-hosted needs DEVAI_MEM0_HOST (and optionally an API key).
+    mem0_api_key: str = ""
+    mem0_host: str = ""
+
+    # Zep (always self-hosted or Zep Cloud — both need a URL).
+    zep_url: str = ""
+    zep_api_key: str = ""
+
+    # Hondo (cloud or self-hosted — at least one of url/api_key required).
+    hondo_url: str = ""
+    hondo_api_key: str = ""
+
+    # Internal toggle — used by the NoopMemoryAdapter test mode.
+    # Production should leave this False so a misconfigured provider can't
+    # silently accumulate memories in process memory.
+    memory_noop_keep_in_memory: bool = False
 
     @property
     def is_github_app_configured(self) -> bool:

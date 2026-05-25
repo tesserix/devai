@@ -1,0 +1,42 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: incident-responder
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: high
+spec:
+  displayName: Incident Responder
+  description: Final SRE stage. Reads correlated findings from the parallel monitor fan-out and decides
+    whether to create an incident, remediate automatically (where safe), or escalate to a human via PagerDuty/Slack.
+  category: sre
+  tools:
+  - kubectl_rollout_restart
+  - kubectl_scale
+  - argocd_sync
+  - pagerduty_create_incident
+  - slack_post_message
+  handoverSchema:
+    incidents_created:
+      type: integer
+      required: true
+    remediations_attempted:
+      type: array
+      required: false
+      description: "Auto-remediations the agent ran \u2014 each {action, target, result}."
+    escalations:
+      type: array
+      required: false
+      description: "Findings handed off to humans \u2014 each {service, severity, page_id}."
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - correlated_findings
+  - discovery_output
+  outputKey: incident_responder_output
+  metadata:
+    owner: sre-team
+    fiber_parity: sre_responder

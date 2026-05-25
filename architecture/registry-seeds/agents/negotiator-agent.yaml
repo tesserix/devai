@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: negotiator-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/skill: negotiator
+spec:
+  skill: negotiator
+  promptRef: negotiator-prompt-v1
+  llm:
+    provider: openai
+    model: gpt-4.1
+    temperature: 0.3
+    maxTokens: null
+  limits:
+    maxTurns: 12
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: product

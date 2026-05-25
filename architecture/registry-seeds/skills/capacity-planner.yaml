@@ -1,0 +1,35 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: capacity-planner
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Capacity Planner
+  description: Forecasts when each app will hit its current resource ceiling at the current growth rate.
+    Recommends HPA / VPA / cluster-autoscaler tweaks. Runs the long-tail (7-day, 30-day) trend analysis
+    the other monitors don't cover.
+  category: sre
+  tools:
+  - prometheus_query_range
+  - kubectl_get
+  handoverSchema:
+    findings:
+      type: array
+      required: true
+    capacity_at_risk:
+      type: array
+      required: false
+      description: Apps projected to exhaust resources within X days.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  outputKey: capacity_planner_output
+  metadata:
+    owner: sre-team
+    fiber_parity: sre_capacity

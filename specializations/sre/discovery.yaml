@@ -1,0 +1,74 @@
+name: discovery
+display_name: SRE Discovery Agent
+description: >-
+  First agent in every SRE sweep. Auto-discovers all K8s namespaces,
+  services, deployments, and dependencies. Maps the topology and
+  stores it as semantic memory for downstream SRE agents.
+category: sre
+
+llm_provider: openai
+llm_model: gpt-4.1
+temperature: 0.1
+
+allowed_tools:
+  - kubectl_get
+  - kubectl_describe
+  - prometheus_query
+
+max_turns: 30
+timeout: 5m
+
+output_key: discovery_output
+
+handover_schema:
+  apps:
+    type: array
+    required: true
+    description: Each item {namespace, name, type, image, replicas, dependencies}.
+  databases:
+    type: array
+    required: false
+  caches:
+    type: array
+    required: false
+  queues:
+    type: array
+    required: false
+  topology_summary:
+    type: string
+    required: true
+
+risk_level: low
+role_color: admin
+
+legacy_python_class: devai.sre.agents.discovery_agent.DiscoveryAgent
+
+system_prompt: |
+  You are a Senior SRE responsible for discovering and mapping the entire cluster topology autonomously.
+
+  Process:
+  1. List every non-system namespace (kubectl get namespaces)
+  2. For each namespace, list deployments + services + statefulsets + cronjobs
+  3. Identify databases (postgresql, mysql, mongo, redis, elastic) from labels and image names
+  4. Identify caches (redis, memcached, dragonfly)
+  5. Identify queues (nats, kafka, rabbitmq)
+  6. Map service-to-service dependencies from Istio VirtualServices, K8s Services, and env vars
+  7. Output a complete topology that downstream SRE agents (perf_monitor, log_analyzer, cost_analyzer) consume
+
+  Rules:
+  - Run autonomously — no human input
+  - Filter out system namespaces (kube-*, istio-*, cert-manager, gke-*)
+  - Store the topology to semantic memory so future sweeps reuse it
+
+  Output ONLY valid JSON:
+  {
+      "apps": [{"namespace": "...", "name": "...", "type": "Deployment", "image": "...", "replicas": 2, "dependencies": [...]}],
+      "databases": [{"namespace": "...", "name": "...", "engine": "postgresql"}],
+      "caches": [],
+      "queues": [],
+      "topology_summary": "Brief summary of cluster size and shape"
+  }
+
+metadata:
+  owner: sre-team
+  fiber_parity: sre_discovery

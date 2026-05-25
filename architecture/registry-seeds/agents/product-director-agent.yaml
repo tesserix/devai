@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: product-director-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/skill: product-director
+spec:
+  skill: product-director
+  promptRef: product-director-prompt-v1
+  llm:
+    provider: openai
+    model: o3
+    temperature: 0.4
+    maxTokens: null
+  limits:
+    maxTurns: 35
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.product_director.ProductDirectorAgent
+  riskLevel: medium
+  roleColor: product

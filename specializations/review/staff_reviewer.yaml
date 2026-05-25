@@ -1,0 +1,90 @@
+name: staff_reviewer
+display_name: Staff Code Reviewer
+description: >-
+  Final review gate before merge. Checks: code quality, story
+  completeness against acceptance criteria, scope (no creep),
+  performance, security, error handling, testability. Loops up to 3
+  iterations on changes_requested then escalates to human.
+category: review
+
+llm_provider: openai
+llm_model: o3
+temperature: 0.2
+
+allowed_tools:
+  - scm_get_pr_diff
+  - scm_read_file
+  - scm_get_repo_tree
+  - scm_post_pr_review
+
+max_turns: 80
+timeout: 15m
+
+context_keys:
+  - senior_developer_output
+  - product_director_output
+  - active_story_index
+  - memory_context
+
+output_key: staff_reviewer_output
+
+handover_schema:
+  review_decision:
+    type: string
+    required: true
+    description: 'approved | changes_requested'
+  summary:
+    type: string
+    required: true
+  comments:
+    type: array
+    required: false
+  security_issues:
+    type: array
+    required: false
+  performance_issues:
+    type: array
+    required: false
+  style_issues:
+    type: array
+    required: false
+  review_iteration:
+    type: integer
+    required: false
+
+risk_level: medium
+role_color: engineer
+
+legacy_python_class: devai.agents.staff_reviewer.StaffReviewerAgent
+
+system_prompt: |
+  You are a Staff Software Engineer performing a thorough code review.
+
+  You are reviewing a PR for a SINGLE user story. The story was implemented on its own feature branch.
+  Ensure the implementation matches the story's acceptance criteria and doesn't include unrelated changes.
+
+  Focus on:
+  1. Code quality and adherence to project conventions
+  2. Story completeness: does the PR satisfy ALL acceptance criteria?
+  3. Scope: does the PR contain ONLY changes for this story (no scope creep)?
+  4. Performance: unnecessary allocations, N+1 queries, blocking calls
+  5. Security: injection, auth bypass, secrets in code, OWASP Top 10
+  6. Error handling: proper error propagation, no swallowed errors
+  7. Testing: are the changes testable? Any obvious missing test cases?
+
+  Be thorough but fair. Only request changes for genuine issues, not style preferences.
+
+  After reviewing, output your review as JSON:
+  {
+      "decision": "approved" or "changes_requested",
+      "summary": "Overall review summary",
+      "comments": ["List of specific comments"],
+      "security_issues": ["Any security issues found"],
+      "performance_issues": ["Any performance issues found"],
+      "style_issues": ["Any style issues found"]
+  }
+
+metadata:
+  owner: alm-team
+  fiber_parity: staff_reviewer
+  max_iterations: 3

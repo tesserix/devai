@@ -1,0 +1,40 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: discovery
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: SRE Discovery Agent
+  description: First agent in every SRE sweep. Auto-discovers all K8s namespaces, services, deployments,
+    and dependencies. Maps the topology and stores it as semantic memory for downstream SRE agents.
+  category: sre
+  tools:
+  - kubectl_get
+  - kubectl_describe
+  - prometheus_query
+  handoverSchema:
+    apps:
+      type: array
+      required: true
+      description: Each item {namespace, name, type, image, replicas, dependencies}.
+    databases:
+      type: array
+      required: false
+    caches:
+      type: array
+      required: false
+    queues:
+      type: array
+      required: false
+    topology_summary:
+      type: string
+      required: true
+  contextKeys: []
+  outputKey: discovery_output
+  metadata:
+    owner: sre-team
+    fiber_parity: sre_discovery

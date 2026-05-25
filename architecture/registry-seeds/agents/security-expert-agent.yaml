@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: security-expert-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/skill: security-expert
+spec:
+  skill: security-expert
+  promptRef: security-expert-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: 8192
+  limits:
+    maxTurns: 80
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.security_expert.SecurityExpertAgent
+  riskLevel: high
+  roleColor: security

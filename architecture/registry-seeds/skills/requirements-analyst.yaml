@@ -1,0 +1,34 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: requirements-analyst
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/risk-level: low
+spec:
+  displayName: Requirements Analyst
+  description: Take raw, unstructured requirements and produce a typed list of refined requirements with
+    acceptance criteria, gaps, and assumptions. Output is consumed by product_director (epic + stories).
+  category: planning
+  tools: []
+  handoverSchema:
+    requirements:
+      type: array
+      required: true
+      description: Each item has {title, description, category, priority, acceptance_criteria, assumptions,
+        risks}.
+    gaps:
+      type: array
+      required: false
+    overall_assessment:
+      type: string
+      required: false
+  contextKeys:
+  - requirements
+  - document_analyzer_output
+  outputKey: requirements_analyst_output
+  metadata:
+    owner: alm-team
+    fiber_parity: requirements_engineer

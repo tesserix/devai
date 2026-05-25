@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: db-engineer-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: coding
+    devai.io/skill: db-engineer
+spec:
+  skill: db-engineer
+  promptRef: db-engineer-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: 8192
+  limits:
+    maxTurns: 80
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.db_engineer.DBEngineerAgent
+  riskLevel: high
+  roleColor: engineer

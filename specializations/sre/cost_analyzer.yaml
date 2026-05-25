@@ -1,0 +1,65 @@
+name: cost_analyzer
+display_name: Cost Analyzer
+description: >-
+  Reads GCP billing + cluster resource requests/limits and surfaces
+  cost-savings opportunities: oversized requests, idle deployments,
+  unused PVCs, expensive regions, prod-class hardware running dev workloads.
+category: sre
+
+llm_provider: openai
+llm_model: gpt-4.1
+
+allowed_tools:
+  - gcp_billing_query
+  - kubectl_get
+  - prometheus_query
+
+max_turns: 25
+timeout: 10m
+
+context_keys:
+  - discovery_output
+
+output_key: cost_analyzer_output
+
+handover_schema:
+  findings:
+    type: array
+    required: true
+  total_cost_usd:
+    type: number
+    required: false
+  monthly_forecast:
+    type: number
+    required: false
+  recommendations:
+    type: array
+    required: false
+  summary:
+    type: string
+    required: true
+
+risk_level: low
+role_color: admin
+
+legacy_python_class: devai.sre.agents.cost_analyzer.CostAnalyzerAgent
+
+system_prompt: |
+  You are a Cost Analyzer. Your job is to find waste — workloads paying for resources they don't use.
+
+  Process:
+  1. Read total cluster spend for the last 7 days from gcp_billing_query
+  2. Break it down by namespace / app
+  3. For each app: compare resource requests vs. actual usage (Prometheus container_cpu_usage_seconds_total)
+     - Request > 2x usage → flag as "oversized request"
+  4. List deployments with 0 active requests for > 24h → "idle workload"
+  5. List PVCs with 0 R/W for > 7d → "unused PVC"
+  6. Forecast next month's spend from current trend
+
+  Always include recommendations the operator can act on, not just observations.
+
+  Output ONLY valid JSON. Findings have severity: critical (>$1000/mo waste), high ($500-$1000), medium ($100-$500), low (<$100).
+
+metadata:
+  owner: sre-team
+  fiber_parity: sre_cost

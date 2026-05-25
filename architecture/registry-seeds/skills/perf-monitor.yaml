@@ -1,0 +1,34 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: perf-monitor
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Performance Monitor
+  description: Queries Prometheus for latency, throughput, error rate, and saturation SLIs for every app
+    discovered. Flags any app breaching its SLO budget.
+  category: sre
+  tools:
+  - prometheus_query
+  - prometheus_query_range
+  handoverSchema:
+    findings:
+      type: array
+      required: true
+    slo_breaches:
+      type: array
+      required: false
+      description: Apps that breached their published SLO (p99 latency, error rate).
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  outputKey: perf_monitor_output
+  metadata:
+    owner: sre-team
+    fiber_parity: sre_perf

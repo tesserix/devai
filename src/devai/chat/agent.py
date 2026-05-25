@@ -567,6 +567,82 @@ class DevAIChatAgent:
                 f"The Supervisor will pick this up at the next story boundary and adjust the plan."
             )
 
+        # ─── Fiber-style blueprint runtime tools ────────────────────────
+        # These query the new pipeline runtime (DevAITask + blueprints)
+        # which coexists with the legacy LangGraph runs above.
+
+        @tool
+        async def list_blueprints() -> str:
+            """List every YAML blueprint registered with the DevAI Fiber-style runtime.
+            Returns name, description, and stage count. Use this to discover
+            available workflows like 'alm-pipeline', 'sre-monitor', 'pr-review',
+            or 'security-scan'."""
+            from devai.blueprint import discover_blueprints
+            from devai.blueprint.registry import StageRegistry, register_defaults
+
+            bp_dir = getattr(config, "pipeline_blueprint_dir", "blueprints")
+            blueprints = discover_blueprints(bp_dir)
+            reg = StageRegistry()
+            register_defaults(reg)
+            out = []
+            for name, bp in blueprints.items():
+                missing = [s.stage for s in bp.stages if not reg.has(s.stage)]
+                out.append(
+                    {
+                        "name": bp.name,
+                        "description": (bp.description or "").split("\n")[0],
+                        "stages": len(bp.stages),
+                        "missing_stages": missing,
+                    }
+                )
+            return json.dumps(out, indent=2) if out else "No blueprints found."
+
+        @tool
+        async def list_pipeline_tasks(
+            blueprint: str = "",
+            repo: str = "",
+            limit: int = 10,
+        ) -> str:
+            """List recent DevAITask runs from the Fiber-style blueprint runtime
+            (these are SEPARATE from the legacy LangGraph runs returned by
+            query_pipeline_runs). Optionally filter by blueprint name and/or repo."""
+            tasks = await state.list_pipeline_tasks(
+                limit=limit,
+                blueprint=blueprint or None,
+                repo=repo or None,
+            )
+            if not tasks:
+                return "No pipeline tasks found in the blueprint runtime."
+            summary = [
+                {
+                    "task_id": t.get("id"),
+                    "blueprint": t.get("blueprint"),
+                    "state": t.get("state"),
+                    "repo": t.get("repo"),
+                    "stages_completed": len(t.get("stages_completed", [])),
+                    "stages_failed": len(t.get("stages_failed", [])),
+                    "error": t.get("error"),
+                    "updated_at": t.get("updated_at"),
+                }
+                for t in tasks
+            ]
+            return json.dumps(summary, indent=2, default=str)
+
+        @tool
+        async def get_pipeline_task(task_id: str) -> str:
+            """Get full detail on a DevAITask by id (e.g. 'devai-a1b2c3d4...').
+            Returns state, stages_completed, stage_events, agent_context handover
+            data, and any error. Use this AFTER list_pipeline_tasks finds a run
+            you want to dig into."""
+            task = await state.get_pipeline_task(task_id)
+            if task is None:
+                return f"Task {task_id} not found in the blueprint runtime."
+            # Strip the agent_context to top-level keys to keep the response readable
+            ac = task.get("agent_context", {})
+            task["agent_context_keys"] = sorted(ac.keys()) if isinstance(ac, dict) else []
+            task.pop("agent_context", None)
+            return json.dumps(task, indent=2, default=str)
+
         return [
             query_pipeline_runs,
             query_pipeline_detail,
@@ -584,6 +660,9 @@ class DevAIChatAgent:
             scm_get_pr,
             scm_get_issue,
             inject_pipeline_requirements,
+            list_blueprints,
+            list_pipeline_tasks,
+            get_pipeline_task,
         ]
 
     @traceable_if_enabled(name="chat.respond", run_type="chain")

@@ -1,0 +1,41 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: cost-analyzer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Cost Analyzer
+  description: 'Reads GCP billing + cluster resource requests/limits and surfaces cost-savings opportunities:
+    oversized requests, idle deployments, unused PVCs, expensive regions, prod-class hardware running
+    dev workloads.'
+  category: sre
+  tools:
+  - gcp_billing_query
+  - kubectl_get
+  - prometheus_query
+  handoverSchema:
+    findings:
+      type: array
+      required: true
+    total_cost_usd:
+      type: number
+      required: false
+    monthly_forecast:
+      type: number
+      required: false
+    recommendations:
+      type: array
+      required: false
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  outputKey: cost_analyzer_output
+  metadata:
+    owner: sre-team
+    fiber_parity: sre_cost

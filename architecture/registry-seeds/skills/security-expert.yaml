@@ -1,0 +1,50 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: security-expert
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/risk-level: high
+spec:
+  displayName: Principal Security Engineer
+  description: "Hard security gate. Runs SAST + SCA + secret detection + container scan + OWASP Top 10\
+    \ against the PR diff. READ-ONLY on application code \u2014 files findings, doesn't fix them. Blocks\
+    \ pipeline on CRITICAL/HIGH findings."
+  category: review
+  tools:
+  - scm_get_pr_diff
+  - scm_get_repo_tree
+  - scm_read_file
+  - scm_post_pr_review
+  - scm_create_issue
+  - security_scan_sast
+  - security_scan_dependencies
+  - security_scan_secrets
+  - security_scan_container
+  - security_check_owasp
+  - security_generate_sbom
+  handoverSchema:
+    security_decision:
+      type: string
+      required: true
+      description: pass | pass_with_warnings | block
+    security_summary:
+      type: string
+      required: true
+    security_findings:
+      type: array
+      required: true
+      description: Each item {scanner, severity, file, line, rule, cve_id, message, suggestion}.
+    sbom_url:
+      type: string
+      required: false
+  contextKeys:
+  - senior_developer_output
+  - staff_reviewer_output
+  outputKey: security_expert_output
+  metadata:
+    owner: alm-team
+    fiber_parity: security_reviewer
+    scanner_namespace: security:llm-

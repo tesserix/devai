@@ -1,0 +1,38 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: engineering-manager
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/risk-level: medium
+spec:
+  displayName: Engineering Manager
+  description: Create per-story technical implementation plans. Each plan declares the files to create/modify,
+    the approach, dependencies on other stories, and the estimated complexity. Output drives the collaborative
+    parallel implementation model.
+  category: planning
+  tools:
+  - scm_get_repo_tree
+  - scm_read_file
+  - scm_list_files
+  - repo_profile
+  handoverSchema:
+    story_plans:
+      type: array
+      required: true
+      description: "One plan per story \u2014 {story_number, story_title, summary, files, approach, dependencies,\
+        \ complexity}."
+    integration_notes:
+      type: string
+      required: false
+      description: File ownership conflicts, suggested merge order, shared infrastructure changes.
+  contextKeys:
+  - product_director_output
+  - tech_detector_output
+  - skill_profile_name
+  outputKey: engineering_manager_output
+  metadata:
+    owner: alm-team
+    fiber_parity: engineering_manager

@@ -1,0 +1,39 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: reflector
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/risk-level: low
+spec:
+  displayName: Post-Run Reflector
+  description: Runs AFTER a pipeline task terminates. Reviews what happened (success or failure), extracts
+    lessons, and writes them to agent memory as either episodic or semantic memories. Closes the learning
+    loop.
+  category: specialist
+  tools:
+  - agent_memory_remember
+  - agent_memory_recall
+  handoverSchema:
+    memories_written:
+      type: integer
+      required: true
+    lessons:
+      type: array
+      required: true
+      description: Each {memory_type, content, tags}.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - stage_events
+  - stages_completed
+  - stages_failed
+  - error
+  outputKey: reflector_output
+  metadata:
+    owner: alm-team
+    fiber_parity: reflector
+    status: yaml_only

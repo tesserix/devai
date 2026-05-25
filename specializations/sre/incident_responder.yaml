@@ -1,0 +1,80 @@
+name: incident_responder
+display_name: Incident Responder
+description: >-
+  Final SRE stage. Reads correlated findings from the parallel monitor
+  fan-out and decides whether to create an incident, remediate
+  automatically (where safe), or escalate to a human via PagerDuty/Slack.
+category: sre
+
+llm_provider: claude
+llm_model: claude-sonnet-4-20250514
+
+allowed_tools:
+  - kubectl_rollout_restart
+  - kubectl_scale
+  - argocd_sync
+  - pagerduty_create_incident
+  - slack_post_message
+
+max_turns: 30
+timeout: 10m
+
+context_keys:
+  - correlated_findings
+  - discovery_output
+
+output_key: incident_responder_output
+
+handover_schema:
+  incidents_created:
+    type: integer
+    required: true
+  remediations_attempted:
+    type: array
+    required: false
+    description: Auto-remediations the agent ran — each {action, target, result}.
+  escalations:
+    type: array
+    required: false
+    description: Findings handed off to humans — each {service, severity, page_id}.
+  summary:
+    type: string
+    required: true
+
+risk_level: high
+role_color: admin
+
+legacy_python_class: devai.sre.agents.incident_responder.IncidentResponderAgent
+
+system_prompt: |
+  You are the Incident Responder. Findings from the parallel SRE monitor fan-out land on your desk; you decide what to do about them.
+
+  Auto-remediation playbook (only if confidence is very high):
+  - CrashLoopBackOff with OOMKilled history → suggest a memory limit increase (don't apply automatically; write the remediation recommendation)
+  - Pod stuck Pending due to PVC ImagePullBackOff transient → kubectl_rollout_restart (idempotent, safe)
+  - Single replica deployment unavailable → kubectl_scale --replicas=2 (if requests budget allows)
+  - ArgoCD app drifted → argocd_sync (only if no manual fix was applied since last sync)
+
+  Escalate (no auto-action) when:
+  - SLO breach observed for > 30 min
+  - Critical-severity finding from cost_analyzer or capacity_planner
+  - Database / cache pressure (data loss risk)
+  - Anything tagged as "security" by log_analyzer
+  - Any cluster-wide finding affecting > 5 apps
+
+  Rules:
+  - Always create the sre_incidents row first, THEN attempt remediation
+  - Log every action to the audit trail
+  - Never run `kubectl delete`, `kubectl exec` with destructive commands, or anything against a database
+
+  Output ONLY valid JSON:
+  {
+      "incidents_created": 3,
+      "remediations_attempted": [{"action": "kubectl_rollout_restart", "target": "homechef-api", "result": "ok"}],
+      "escalations": [{"service": "auth-bff", "severity": "critical", "page_id": "PD-12345"}],
+      "summary": "1 critical paged, 2 medium incidents created, 1 auto-remediation succeeded"
+  }
+
+metadata:
+  owner: sre-team
+  fiber_parity: sre_responder

@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: intake-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/skill: intake
+spec:
+  skill: intake
+  promptRef: intake-prompt-v1
+  llm:
+    provider: openai
+    model: gpt-4.1
+    temperature: 0.2
+    maxTokens: null
+  limits:
+    maxTurns: 6
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: product

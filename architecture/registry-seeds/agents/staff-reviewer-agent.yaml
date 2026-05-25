@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: staff-reviewer-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/skill: staff-reviewer
+spec:
+  skill: staff-reviewer
+  promptRef: staff-reviewer-prompt-v1
+  llm:
+    provider: openai
+    model: o3
+    temperature: 0.2
+    maxTokens: null
+  limits:
+    maxTurns: 80
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.staff_reviewer.StaffReviewerAgent
+  riskLevel: medium
+  roleColor: engineer

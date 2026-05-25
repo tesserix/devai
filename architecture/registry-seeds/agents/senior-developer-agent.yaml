@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: senior-developer-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: coding
+    devai.io/skill: senior-developer
+spec:
+  skill: senior-developer
+  promptRef: senior-developer-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: 8192
+  limits:
+    maxTurns: 120
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.senior_developer.SeniorDeveloperAgent
+  riskLevel: medium
+  roleColor: engineer

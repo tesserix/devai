@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: document-analyzer-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/skill: document-analyzer
+spec:
+  skill: document-analyzer
+  promptRef: document-analyzer-prompt-v1
+  llm:
+    provider: gemini
+    model: gemini-3.1-pro-preview
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 30
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.document_analyzer.DocumentAnalyzerAgent
+  riskLevel: low
+  roleColor: product

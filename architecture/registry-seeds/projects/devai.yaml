@@ -1,0 +1,19 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Project
+metadata:
+  name: devai
+  namespace: devai
+  labels:
+    devai.io/source: devai
+spec:
+  displayName: DevAI Platform
+  description: >-
+    AI-powered Application Lifecycle Management + SRE monitoring platform.
+    Ships 26 specialization roles (13 ALM, 7 SRE, 4 Fiber-parity specialists)
+    plus 4 YAML blueprints (alm-pipeline, sre-monitor, pr-review, security-scan).
+  owners:
+    - tesserix-platform
+  links:
+    repo: https://github.com/tesserix/devai
+    dashboard: https://devai.tesserix.app
+    sre-dashboard: https://sre.tesserix.app

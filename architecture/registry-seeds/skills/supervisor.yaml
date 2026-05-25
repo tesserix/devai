@@ -1,0 +1,46 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: supervisor
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/risk-level: low
+spec:
+  displayName: Supervisor Architect
+  description: Senior technical architect that plans the run before execution starts. Reviews requirements
+    + repo + memory + governance, produces a delegation plan (which roles run, in what order, with what
+    depends_on). The orchestrator_pre stage hands off to it.
+  category: orchestration
+  tools:
+  - scm_get_repo_tree
+  - scm_read_file
+  - scm_create_issue
+  - scm_create_project_v2
+  handoverSchema:
+    delegation_plan:
+      type: object
+      required: true
+      description: Roles, dependencies, estimated complexity per role.
+    tracking_issue:
+      type: integer
+      required: false
+      description: GitHub issue number for the supervisor's tracking thread.
+    project_id:
+      type: string
+      required: false
+      description: GitHub Projects v2 node ID for the run.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - requirements
+  - tech_detector_output
+  - skill_profile_name
+  - memory_context
+  - governance
+  outputKey: supervisor_output
+  metadata:
+    owner: alm-team
+    fiber_parity: requirements_engineer

@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: tech-detector-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/skill: tech-detector
+spec:
+  skill: tech-detector
+  promptRef: tech-detector-prompt-v1
+  llm:
+    provider: gemini
+    model: gemini-3.1-pro-preview
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 20
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.tech_detector.TechDetectorAgent
+  riskLevel: low
+  roleColor: engineer

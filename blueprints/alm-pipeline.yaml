@@ -1,0 +1,146 @@
+name: alm-pipeline
+description: >-
+  Full Application Lifecycle Management pipeline — ports the existing 14-node
+  LangGraph orchestrator. Drives a requirement from intake through epic /
+  stories / planning / implementation, gates with review + security + tests,
+  then deploys via release manager. Each stage delegates to one of the
+  existing agents in src/devai/agents/.
+
+metadata:
+  domain: alm
+  replaces: devai.graph.orchestrator.ALMOrchestrator
+
+stages:
+  # ─── Intake ────────────────────────────────────────────────────────
+  - name: create-issue
+    type: deterministic
+    stage: create_issue
+    timeout: 60s
+    config:
+      title_template: "[devai] {intent}"
+
+  - name: hydrate-context
+    type: context
+    stage: context_hydration
+    depends_on: [create-issue]
+    timeout: 30s
+
+  - name: inject-memory
+    type: context
+    stage: memory_injection
+    depends_on: [create-issue]
+    timeout: 30s
+    config:
+      k: "5"
+
+  # ─── Planning chain ────────────────────────────────────────────────
+  - name: ingest-documents
+    type: agentic
+    stage: ingest_documents
+    depends_on: [hydrate-context, inject-memory]
+    timeout: 15m
+
+  - name: detect-tech-stack
+    type: agentic
+    stage: detect_tech_stack
+    depends_on: [ingest-documents]
+    timeout: 5m
+
+  - name: analyze-requirements
+    type: agentic
+    stage: analyze_requirements
+    depends_on: [detect-tech-stack]
+    timeout: 10m
+
+  - name: create-epic
+    type: agentic
+    stage: create_epic
+    depends_on: [analyze-requirements]
+    timeout: 10m
+
+  - name: create-stories
+    type: agentic
+    stage: create_stories
+    depends_on: [create-epic]
+    timeout: 5m
+    on_failure: continue
+
+  - name: create-plan
+    type: agentic
+    stage: create_plan
+    depends_on: [create-stories]
+    timeout: 15m
+
+  # ─── Implementation ─────────────────────────────────────────────────
+  - name: implement-code
+    type: agentic
+    stage: implement_code
+    depends_on: [create-plan]
+    timeout: 30m
+
+  - name: db-engineering
+    type: agentic
+    stage: db_engineering
+    depends_on: [implement-code]
+    timeout: 10m
+    on_failure: continue
+
+  # ─── Quality gates ──────────────────────────────────────────────────
+  - name: review-code
+    type: review
+    stage: review_code
+    depends_on: [implement-code, db-engineering]
+    timeout: 15m
+
+  - name: security-scan
+    type: review
+    stage: security_scan
+    depends_on: [review-code]
+    timeout: 10m
+
+  - name: monitor-build
+    type: deterministic
+    stage: monitor_build
+    depends_on: [security-scan]
+    timeout: 20m
+
+  - name: run-tests
+    type: review
+    stage: run_tests
+    depends_on: [monitor-build]
+    timeout: 20m
+
+  # ─── Final review + deploy ──────────────────────────────────────────
+  - name: staff-review
+    type: review
+    stage: staff_review
+    depends_on: [run-tests]
+    timeout: 15m
+
+  - name: provision-infra
+    type: deploy
+    stage: provision_infra
+    depends_on: [staff-review]
+    timeout: 15m
+
+  - name: deploy-release
+    type: deploy
+    stage: deploy_release
+    depends_on: [provision-infra]
+    timeout: 20m
+
+  # ─── Reporting + cleanup ────────────────────────────────────────────
+  - name: post-report
+    type: deterministic
+    stage: post_report
+    depends_on: [deploy-release]
+    on_failure: continue
+    config:
+      title: "DevAI ALM Pipeline Report"
+      target: pr
+
+  - name: cleanup
+    type: deterministic
+    stage: cleanup
+    depends_on: [post-report]
+    on_failure: continue

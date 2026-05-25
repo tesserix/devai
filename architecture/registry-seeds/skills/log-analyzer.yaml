@@ -1,0 +1,34 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: log-analyzer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Log Analyzer
+  description: Scans recent logs from every app for error spikes, exception patterns, and security signals
+    (auth failures, scrapers, port scans). Correlates timestamps with metric anomalies from perf_monitor.
+  category: sre
+  tools:
+  - kubectl_logs
+  - prometheus_query
+  handoverSchema:
+    findings:
+      type: array
+      required: true
+    error_patterns:
+      type: array
+      required: false
+      description: Recurring stack traces or error messages.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  outputKey: log_analyzer_output
+  metadata:
+    owner: sre-team
+    fiber_parity: sre_logs

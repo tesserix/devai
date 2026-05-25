@@ -1,0 +1,32 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: scm-mcp
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: scm
+spec:
+  displayName: DevAI SCM MCP
+  description: >-
+    Multi-SCM operations (GitHub / GitLab / Azure DevOps) behind a
+    single interface. Tools normalize the vendor differences so agent
+    prompts stay portable.
+  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/scm
+  authMode: jwt
+  tools:
+    - scm_get_repo_tree
+    - scm_read_file
+    - scm_list_files
+    - scm_create_branch
+    - scm_commit_file
+    - scm_create_pr
+    - scm_get_pr
+    - scm_get_pr_diff
+    - scm_merge_pr
+    - scm_create_issue
+    - scm_close_issue
+    - scm_post_comment
+    - scm_post_pr_review
+    - scm_get_workflow_runs
+    - scm_get_workflow_logs

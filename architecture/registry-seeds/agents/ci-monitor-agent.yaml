@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: ci-monitor-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: review
+    devai.io/skill: ci-monitor
+spec:
+  skill: ci-monitor
+  promptRef: ci-monitor-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 60
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.ci_monitor.CIMonitorAgent
+  riskLevel: medium
+  roleColor: engineer

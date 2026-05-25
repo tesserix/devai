@@ -1,0 +1,35 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: infra-monitor
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Infrastructure Monitor
+  description: 'Checks cluster-level health: node readiness, pod CrashLoopBackOff, flapping deployments,
+    restart counts, OOMKills, PVC pressure. Outputs findings consumed by the correlate stage.'
+  category: sre
+  tools:
+  - kubectl_get
+  - kubectl_describe
+  - kubectl_logs
+  handoverSchema:
+    findings:
+      type: array
+      required: true
+      description: Each {namespace, kind, name, severity, rule, message, evidence}.
+    apps_checked:
+      type: integer
+      required: true
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  outputKey: infra_monitor_output
+  metadata:
+    owner: sre-team
+    fiber_parity: sre_infra

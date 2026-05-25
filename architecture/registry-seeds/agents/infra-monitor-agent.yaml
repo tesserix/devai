@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: infra-monitor-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/skill: infra-monitor
+spec:
+  skill: infra-monitor
+  promptRef: infra-monitor-prompt-v1
+  llm:
+    provider: openai
+    model: gpt-4.1
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 20
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.sre.agents.infra_monitor.InfraMonitorAgent
+  riskLevel: low
+  roleColor: admin

@@ -375,12 +375,51 @@ async def _run_pipeline(
     trigger_type: str,
     trigger_ref: str,
 ) -> None:
-    """Run the LangGraph ALM pipeline as a background task."""
-    from devai.graph.orchestrator import ALMOrchestrator
+    """Run the ALM pipeline as a background task.
+
+    Routing:
+      - If `settings.pipeline_enabled` is True AND `app.state.pipeline_service`
+        is started, dispatch through the Fiber-style blueprint runtime.
+        Blueprint selection: `pr-review` for PR triggers, otherwise the
+        configured default (`alm-pipeline`).
+      - Otherwise fall back to the legacy LangGraph `ALMOrchestrator`.
+
+    The fallback path stays intact so flipping `DEVAI_PIPELINE_ENABLED`
+    is a one-line cut-over (and reversible).
+    """
     from devai.scm import create_scm_client
 
     config = request.app.state.config
     state_manager = request.app.state.state_manager
+    pipeline_service = getattr(request.app.state, "pipeline_service", None)
+
+    # ── New path: blueprint runtime ──────────────────────────────────
+    if getattr(config, "pipeline_enabled", False) and pipeline_service is not None:
+        blueprint = _select_blueprint_for_trigger(config, trigger_type)
+        try:
+            task_id = await pipeline_service.dispatch(
+                intent=requirements,
+                blueprint=blueprint,
+                repo=repo,
+                trigger_type=trigger_type,
+                label=f"{trigger_type}:{trigger_ref}"[:80],
+                agent_context={"trigger_ref": trigger_ref, "requirements": requirements},
+            )
+            logger.info(
+                "Dispatched pipeline task %s blueprint=%s repo=%s trigger=%s",
+                task_id,
+                blueprint,
+                repo,
+                trigger_type,
+            )
+            return
+        except Exception:
+            # Fall through to legacy path on dispatch failure so a misconfigured
+            # blueprint doesn't kill a webhook delivery silently.
+            logger.exception("Pipeline dispatch failed — falling back to legacy ALMOrchestrator")
+
+    # ── Legacy path: LangGraph ALMOrchestrator ───────────────────────
+    from devai.graph.orchestrator import ALMOrchestrator
 
     scm = create_scm_client(config)
 
@@ -428,3 +467,15 @@ async def _run_pipeline(
 
     finally:
         await scm.close()
+
+
+def _select_blueprint_for_trigger(config, trigger_type: str) -> str:
+    """Map a webhook trigger to the right blueprint.
+
+    Falls back to the configured default when the trigger doesn't map to
+    a known specialized blueprint.
+    """
+    tt = (trigger_type or "").lower()
+    if tt in {"pull_request", "pr", "github_pr"}:
+        return getattr(config, "pipeline_pr_review_blueprint", "pr-review")
+    return getattr(config, "pipeline_default_blueprint", "alm-pipeline")

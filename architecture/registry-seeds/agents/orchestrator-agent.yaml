@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: orchestrator-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/skill: orchestrator
+spec:
+  skill: orchestrator
+  promptRef: orchestrator-prompt-v1
+  llm:
+    provider: openai
+    model: o3
+    temperature: 0.2
+    maxTokens: null
+  limits:
+    maxTurns: 15
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.orchestrator.OrchestratorAgent
+  riskLevel: low
+  roleColor: admin

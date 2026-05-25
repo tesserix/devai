@@ -68,6 +68,58 @@ The existing `db/migrations/` files are reference schemas only. Production schem
 
 This repo should only contain SQLAlchemy/asyncpg ORM logic in `src/devai/services/database.py` — never raw `.sql` files.
 
+### 6. Adapter Pattern — Mandatory for ALL Integrations
+
+**Every** integration to an external system (database, cache, memory, vector store, queue, event bus, object store, secrets manager, telemetry, LLM provider, SCM, ticketing, observability) goes through `src/devai/adapters/<family>/`. **No vendor SDK is ever imported directly into business logic.**
+
+Why: DevAI is multi-cloud / multi-vendor / multi-tenant. The pattern means a config change picks a backend; the rest of the code is identical. Swap `mem0 → zep → pgvector → redis` with one env var, not a refactor. Same applies to every other family.
+
+**The shape every family follows** (canonical example: `src/devai/adapters/memory/`):
+
+```
+src/devai/adapters/<family>/
+  __init__.py            re-exports the public surface
+  base.py                <Family>Adapter ABC + canonical record dataclass
+  factory.py             create_<family>_adapter(settings) — reads DEVAI_<FAMILY>_PROVIDER
+  noop.py                MANDATORY — used in tests and as the graceful-degrade fallback
+  <provider>.py          ONE file per backend (mem0, zep, pgvector, redis, etc.)
+```
+
+**Hard rules:**
+
+1. **One ABC per family.** It declares the minimum surface (e.g. `remember/recall/semantic_search/forget` for memory). Every backend subclasses it; nothing else.
+2. **Lazy SDK imports.** `from mem0 import ...` lives **inside** `__init__` or a method, never at module top-level. A backend you don't use never loads its SDK.
+3. **Factory never raises.** Unknown provider → log + Noop. Missing SDK → catch `AdapterNotInstalled` → Noop. Missing config → catch `AdapterNotConfigured` → Noop. The pod must degrade, not crash.
+4. **Noop is required.** Every family ships a `noop.py` that satisfies the ABC. Used for tests, disabled mode, and fallback.
+5. **Wire through `StageDeps`.** The pipeline injects adapters as typed `Optional[<Family>Adapter]` fields. Stages read `deps.<family>` and tolerate `None`.
+6. **Settings convention.** One `DEVAI_<FAMILY>_PROVIDER` env var + per-backend creds. Document in `config.py` under a `# --- <family> adapter ---` block.
+7. **Contract tests.** Every backend passes the same test suite (`tests/unit/test_<family>_adapters.py`) — that's what proves the swap is real.
+
+**Planned families** (all slot in with no churn elsewhere):
+
+| Family | Concrete providers we'd start with |
+|---|---|
+| `adapters.memory` ✓ | mem0, zep, pgvector, redis, noop |
+| `adapters.vector_store` | pgvector, pinecone, qdrant, weaviate, chroma |
+| `adapters.event_bus` | nats, redis_streams, kafka, inproc |
+| `adapters.object_store` | s3, gcs, azure_blob, local |
+| `adapters.secrets` | gcp_sm, aws_sm, vault, env |
+| `adapters.telemetry` | otel, langsmith, datadog, noop |
+| `adapters.cache` | redis, memcached, dragonfly, inproc |
+| `adapters.queue` | nats, redis, celery, rq |
+| `adapters.llm` | claude, openai, groq, gemini, nemoclaw, codex |
+| `adapters.scm` (already exists) | github, gitlab, azure_devops |
+| `adapters.ticketing` | jira, linear, github_issues |
+
+**Don't:**
+
+- Don't add a sixth backend as an `if/elif` branch in `factory.py`. Use `AdapterRegistry.register()`.
+- Don't import a vendor SDK at module top-level. Lazy-import inside the adapter only.
+- Don't let any adapter operation that can fail raise out of the family — degrade to Noop or return `ok=False` from `health_check()`.
+- Don't write business logic that calls `redis.Redis(...)` or `boto3.client(...)` directly. Talk to the adapter.
+
+See `src/devai/adapters/__init__.py` for the canonical list of planned families and `src/devai/adapters/memory/` for the reference implementation.
+
 ---
 
 ## Project Structure

@@ -1,0 +1,61 @@
+name: capacity_planner
+display_name: Capacity Planner
+description: >-
+  Forecasts when each app will hit its current resource ceiling at the
+  current growth rate. Recommends HPA / VPA / cluster-autoscaler
+  tweaks. Runs the long-tail (7-day, 30-day) trend analysis the other
+  monitors don't cover.
+category: sre
+
+llm_provider: openai
+llm_model: gpt-4.1
+
+allowed_tools:
+  - prometheus_query_range
+  - kubectl_get
+
+max_turns: 20
+timeout: 10m
+
+context_keys:
+  - discovery_output
+
+output_key: capacity_planner_output
+
+handover_schema:
+  findings:
+    type: array
+    required: true
+  capacity_at_risk:
+    type: array
+    required: false
+    description: Apps projected to exhaust resources within X days.
+  summary:
+    type: string
+    required: true
+
+risk_level: low
+role_color: admin
+
+legacy_python_class: devai.sre.agents.capacity_planner.CapacityPlannerAgent
+
+system_prompt: |
+  You are a Capacity Planner. Look at multi-day trends — not point-in-time spikes — and project when each app will need more headroom.
+
+  Process:
+  1. For each app in discovery, query 30-day CPU & memory usage from Prometheus (prometheus_query_range, step=1h)
+  2. Fit a simple linear or exponential trend to the daily mean
+  3. Project when usage would exceed the current request/limit
+  4. Flag any app projected to exhaust within 14 days
+  5. Recommend HPA min/max changes, VPA recommendations, or cluster-autoscaler node-pool adjustments
+
+  Rules:
+  - Ignore single-day spikes — capacity is about trends
+  - Distinguish "growing organically" from "regressing in efficiency"
+  - Output is actionable: "scale ABC to maxReplicas=6 by 2026-06-15" not "ABC is busy"
+
+  Output ONLY valid JSON.
+
+metadata:
+  owner: sre-team
+  fiber_parity: sre_capacity

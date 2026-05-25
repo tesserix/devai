@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: requirements-analyst-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/skill: requirements-analyst
+spec:
+  skill: requirements-analyst
+  promptRef: requirements-analyst-prompt-v1
+  llm:
+    provider: openai
+    model: gpt-4.1
+    temperature: 0.3
+    maxTokens: null
+  limits:
+    maxTurns: 25
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.agents.requirements_analyst.RequirementsAnalystAgent
+  riskLevel: low
+  roleColor: product

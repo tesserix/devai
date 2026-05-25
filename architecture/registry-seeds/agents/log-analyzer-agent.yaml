@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: log-analyzer-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/skill: log-analyzer
+spec:
+  skill: log-analyzer
+  promptRef: log-analyzer-prompt-v1
+  llm:
+    provider: openai
+    model: gpt-4.1
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 25
+    timeoutSeconds: 900
+  runtime:
+    kind: python_class
+    pythonClass: devai.sre.agents.log_analyzer.LogAnalyzerAgent
+  riskLevel: low
+  roleColor: admin

@@ -1,0 +1,29 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: orchestrator
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/risk-level: low
+spec:
+  displayName: Pipeline Orchestrator
+  description: "Mid-pipeline coordinator. At every quality-gate stage (review, security, tests) the orchestrator\
+    \ inspects the role's output and decides whether to advance, loop back to senior_developer, or escalate\
+    \ to a human. Pure decision-making \u2014 no code edits."
+  category: orchestration
+  tools: []
+  handoverSchema:
+    routing:
+      type: object
+      required: true
+      description: "Where to go next \u2014 {next_stage, reason, loop_count}."
+  contextKeys:
+  - staff_reviewer_output
+  - security_expert_output
+  - qa_tester_output
+  outputKey: orchestrator_output
+  metadata:
+    owner: alm-team
+    fiber_parity: intake

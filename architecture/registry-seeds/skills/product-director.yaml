@@ -1,0 +1,39 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: product-director
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: planning
+    devai.io/risk-level: medium
+spec:
+  displayName: Product Director
+  description: Turn analyzed requirements into a GitHub Epic plus a list of user stories. Each story has
+    acceptance criteria, priority, labels, and is sized for 1-3 days of work.
+  category: planning
+  tools:
+  - scm_create_issue
+  - scm_get_repo_tree
+  - scm_list_files
+  handoverSchema:
+    epic_issue_number:
+      type: integer
+      required: true
+      description: GitHub issue number of the created Epic.
+    stories:
+      type: array
+      required: true
+      description: Each item has {number, title, description, acceptance_criteria, priority, labels}.
+    story_issue_numbers:
+      type: array
+      required: true
+      description: "Just the issue numbers from `stories` \u2014 convenience handover."
+  contextKeys:
+  - requirements_analyst_output
+  - tech_detector_output
+  - skill_profile_name
+  outputKey: product_director_output
+  metadata:
+    owner: alm-team
+    fiber_parity: product_manager

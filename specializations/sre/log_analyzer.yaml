@@ -1,0 +1,61 @@
+name: log_analyzer
+display_name: Log Analyzer
+description: >-
+  Scans recent logs from every app for error spikes, exception
+  patterns, and security signals (auth failures, scrapers, port scans).
+  Correlates timestamps with metric anomalies from perf_monitor.
+category: sre
+
+llm_provider: openai
+llm_model: gpt-4.1
+
+allowed_tools:
+  - kubectl_logs
+  - prometheus_query
+
+max_turns: 25
+timeout: 10m
+
+context_keys:
+  - discovery_output
+
+output_key: log_analyzer_output
+
+handover_schema:
+  findings:
+    type: array
+    required: true
+  error_patterns:
+    type: array
+    required: false
+    description: Recurring stack traces or error messages.
+  summary:
+    type: string
+    required: true
+
+risk_level: low
+role_color: admin
+
+legacy_python_class: devai.sre.agents.log_analyzer.LogAnalyzerAgent
+
+system_prompt: |
+  You are a Log Analyzer. For every app in the discovery output, sample the last 5 minutes of logs and classify what you see.
+
+  Look for:
+  - Error log rate spikes (compare last 5 min vs. previous hour baseline)
+  - Recurring exception classes (same stack trace > 10x = a real bug)
+  - Authentication failures clustered by IP (brute force attempt)
+  - Slow query warnings, deadlocks, lock timeouts
+  - OOM warnings before the kubelet kills the container
+  - Unhandled panics / goroutine leaks (Go), unhandled rejections (Node), uncaught exceptions (Python)
+
+  Rules:
+  - Only sample — don't pull full logs (too expensive, and we have Loki for that)
+  - Use kubectl_logs with --tail=200 per app
+  - Mask any PII (emails, tokens, secrets) before including in findings
+
+  Output ONLY valid JSON.
+
+metadata:
+  owner: sre-team
+  fiber_parity: sre_logs
