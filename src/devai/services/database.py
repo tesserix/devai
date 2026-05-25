@@ -27,11 +27,63 @@ class Database:
         self._pool = None
 
     async def connect(self) -> None:
-        """Create the connection pool."""
+        """Create the connection pool with retry + lazy init.
+
+        Previously this opened ``min_size=2`` connections eagerly at
+        startup. In the production mesh that's flaky — one of the two
+        initial connections occasionally gets reset mid-handshake by
+        ambient ztunnel under load, and the pool init then fails the
+        whole process with ConnectionDoesNotExistError. devai-sre
+        would CrashLoopBackOff while devai-api survived only because
+        its lifespan happened to swallow the exception.
+
+        Fix: ``min_size=0`` (lazy — connections dial on first
+        ``pool.acquire()``) plus an exponential-backoff retry. Both
+        services now start cleanly even when the first one or two SYN
+        attempts get reset.
+        """
+        import asyncio
+
         import asyncpg
 
-        self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=10)
-        logger.info("PostgreSQL connected: %s", self._dsn.split("@")[-1] if "@" in self._dsn else "local")
+        attempts = 5
+        delay = 1.0
+        last: Exception | None = None
+        for i in range(attempts):
+            try:
+                self._pool = await asyncpg.create_pool(
+                    self._dsn,
+                    min_size=0,
+                    max_size=10,
+                    timeout=10.0,
+                    command_timeout=30.0,
+                )
+                logger.info(
+                    "PostgreSQL pool ready: %s (attempt %d/%d)",
+                    self._dsn.split("@")[-1] if "@" in self._dsn else "local",
+                    i + 1,
+                    attempts,
+                )
+                return
+            except (
+                asyncpg.exceptions.ConnectionDoesNotExistError,
+                asyncpg.exceptions.PostgresError,
+                ConnectionResetError,
+                OSError,
+            ) as e:
+                last = e
+                logger.warning(
+                    "PostgreSQL pool init attempt %d/%d failed: %s — retrying in %.1fs",
+                    i + 1,
+                    attempts,
+                    e,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 8.0)
+        raise RuntimeError(
+            f"PostgreSQL pool init failed after {attempts} attempts: {last}"
+        )
 
     async def close(self) -> None:
         if self._pool:

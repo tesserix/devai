@@ -44,12 +44,22 @@ async def lifespan(app: FastAPI):
     settings.export_langsmith_env()
     init_langsmith()
 
-    # Connect to database
+    # Connect to database. The pool init now retries with backoff
+    # (services/database.py); we wrap in a final try so even a total
+    # outage doesn't crash the pod — /readyz keeps serving and the
+    # SRE scanner can pick up the DB on its next periodic tick.
     from devai.services.database import Database
 
     db = Database(settings.database_url)
-    await db.connect()
-    app.state.db = db
+    try:
+        await db.connect()
+        app.state.db = db
+    except Exception:
+        logger.exception(
+            "SRE database connection failed at startup — running without DB; "
+            "the scanner will retry per its schedule"
+        )
+        app.state.db = None
 
     # Optional: stand up the Fiber-style PipelineService so SRE scans can
     # be driven via the sre-monitor blueprint instead of the hardcoded
