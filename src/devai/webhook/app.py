@@ -99,10 +99,23 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
     app.state.state_manager = state
     app.state.config = config
 
+    # Agent Registry HTTP client (aregistry catalog). Factory returns
+    # None when DEVAI_REGISTRY_URL is unset — routes then surface a
+    # readable 503. The client is cheap (small TTL cache, lazy httpx
+    # import) so we construct unconditionally.
+    from devai.registry import create_registry_client
+
+    app.state.registry_client = create_registry_client(config)
+
     # Webhook routes
     from devai.webhook.routes import router as webhook_router
 
     app.include_router(webhook_router)
+
+    # Agent Registry catalog routes (/api/registry/*).
+    from devai.registry.routes import router as registry_router
+
+    app.include_router(registry_router)
 
     # Pipeline runtime routes (/api/pipeline/*) — only useful when
     # PipelineService is started, but the routes themselves return a

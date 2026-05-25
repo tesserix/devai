@@ -159,6 +159,18 @@ class Settings(BaseSettings):
     specializations_enabled: bool = True
     specializations_dir: str = "specializations"
 
+    # --- Agent Registry (aregistry HTTP client) ---
+    # The shared catalog of skills + prompts + MCP servers + agents.
+    # When `registry_url` is empty, DevAI runs in pure-local-YAML mode
+    # (the seeds in architecture/registry-seeds/ are the source of
+    # truth). When set, every loader prefers the registry and falls
+    # back to local YAML only on miss / error. See
+    # src/devai/registry/.
+    registry_url: str = ""
+    registry_token: str = ""
+    registry_timeout_seconds: float = 5.0
+    registry_cache_ttl_seconds: float = 30.0
+
     # --- LLM adapter ---
     # Single switch picks the default LLM backend; specialization YAMLs
     # override per-role via their `llm_provider:` field. Missing SDKs /
