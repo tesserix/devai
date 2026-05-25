@@ -36,6 +36,14 @@ specializations_app = typer.Typer(
 )
 app.add_typer(specializations_app, name="specializations")
 
+# `devai sdk ...` — quick smoke-tests for the consuming-side SDK.
+# `devai adk ...` — author + publish new catalog entries.
+from devai.cli.adk_commands import adk_app
+from devai.cli.sdk_commands import sdk_app
+
+app.add_typer(sdk_app, name="sdk")
+app.add_typer(adk_app, name="adk")
+
 
 @app.command()
 def run(
