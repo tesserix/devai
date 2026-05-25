@@ -26,6 +26,7 @@ from devai.adapters.event_bus.base import (
 )
 from devai.adapters.event_bus.factory import (
     KNOWN_PROVIDERS,
+    create_and_connect_event_bus,
     create_event_bus_adapter,
     event_bus_registry,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "EventBusAdapter",
     "EventMessage",
     "Subscription",
+    "create_and_connect_event_bus",
     "create_event_bus_adapter",
     "event_bus_registry",
 ]
