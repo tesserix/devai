@@ -1,24 +1,32 @@
 @import "tailwindcss";
 
 /* ===========================================================================
- * DevAI Mission Control — Design System
+ * DevAI Mission Control — Design System v2
  *
- * One token surface, two themes (dark + light). Every UI primitive in the
- * dashboard reads from these variables; no component should hardcode hex
- * codes or Tailwind grayscale utilities. Switching the html element
- * between (no class) and `.dark` flips every surface, ink, border, and
- * state colour atomically.
+ * Direction: editorial-control-room. Adopted from the Mark8ly admin
+ * Paper · Ink · Moss tokens (apps/admin/app/globals.css), then layered
+ * with a calm slate accent for the developer-tool surfaces.
  *
- * Categories:
- *   * Surfaces — backgrounds layered from canvas (page) outward.
- *   * Borders  — three weights for hairlines, panels, and emphasis.
- *   * Ink      — text colours, four contrast tiers + an accent variant.
- *   * Accent   — primary indigo + soft/strong tints.
- *   * States   — semantic success/warning/error/info with dark+light tints.
- *   * Effects  — focus ring, shadow stack, blur backdrop.
+ * Two themes:
+ *   light — warm-neutral paper canvas, near-black ink, subtle slate accent.
+ *           Primary CTA is ink-black (not coloured): reads expensive,
+ *           never loud. Mark8ly's "modern editorial luxury" applied to
+ *           DevOps.
+ *   dark  — deep zinc canvas, paper-tinted text, same calm accent
+ *           inverted. The slate accent stays soft so it never feels
+ *           like a neon arcade.
  *
- * Naming follows Mozilla colour-name conventions (canvas → field → raised)
- * so the intent is obvious from a property name alone.
+ * Token layers:
+ *   * Surfaces   — canvas → surface → muted → hover → raised → overlay
+ *   * Borders    — subtle / border / strong / focus
+ *   * Ink        — strong / ink / soft / muted / disabled / inverse
+ *   * Primary    — ink-on-paper button (the professional CTA)
+ *   * Accent     — slate-indigo for links + secondary highlights
+ *   * States     — ok / warn / error / info (soft bg + ink)
+ *   * Effects    — shadows, focus ring, backdrop blur
+ *
+ * Switching the html element between (default) and `.dark` flips every
+ * surface atomically. No component should hardcode hex codes.
  * =========================================================================== */
 
 @theme {
@@ -28,158 +36,168 @@
   --font-display: "Syne", "Inter", system-ui, sans-serif;
 }
 
-/* ---------------- LIGHT (default) ---------------- */
+/* ---------------- LIGHT (default) — Paper · Ink · Slate ---------------- */
 :root {
-  /* Surfaces — five tiers, ramp from coolest canvas to most-raised modal. */
-  --canvas:          #f6f7fb;   /* page background */
-  --surface:         #ffffff;   /* default panel, sidebar */
-  --surface-muted:   #f1f3f9;   /* secondary panel (cards inside panels) */
-  --surface-hover:   #e9edf5;   /* row hover */
-  --surface-raised:  #ffffff;   /* modal / dropdown (paired with shadow) */
-  --surface-overlay: rgba(15, 23, 42, 0.45);
+  color-scheme: light;
 
-  /* Borders */
-  --border-subtle:   #e6e9f0;
-  --border:          #d6dae3;
-  --border-strong:   #c0c6d2;
-  --border-focus:    rgba(99, 102, 241, 0.5);
+  /* Surfaces — warm paper. Less yellow than bone, more body than
+   * pure white. The contrast between paper-200 (canvas) and #ffffff
+   * (surface) is the elevation cue. */
+  --canvas:          #f7f6f2;
+  --surface:         #ffffff;
+  --surface-muted:   #f1efe9;
+  --surface-hover:   #ebe9e1;
+  --surface-raised:  #ffffff;
+  --surface-overlay: rgba(14, 14, 12, 0.45);
 
-  /* Ink (text) */
-  --ink-strong:      #0b1220;   /* page headers, primary numbers */
-  --ink:             #1f2937;   /* body */
-  --ink-soft:        #475569;   /* descriptions, secondary labels */
-  --ink-muted:       #64748b;   /* placeholders, eyebrows */
-  --ink-disabled:    #94a3b8;
-  --ink-inverse:     #ffffff;   /* text on accent fills */
+  /* Borders — ink-toned, never pure gray. */
+  --border-subtle:   #e7e4d9;
+  --border:          #d6d2c4;
+  --border-strong:   #b8b3a3;
+  --border-focus:    rgba(67, 72, 84, 0.45);
 
-  /* Accent — indigo. Light mode uses slightly darker variants
-   * because the surface is lighter — the contrast ratio shifts. */
-  --accent:           #6366f1;
-  --accent-hover:     #4f46e5;
-  --accent-strong:    #4338ca;
-  --accent-soft-bg:   rgba(99, 102, 241, 0.10);
-  --accent-soft-bg-2: rgba(99, 102, 241, 0.18);
-  --accent-soft-bd:   rgba(99, 102, 241, 0.32);
-  --accent-soft-ink:  #4338ca;
+  /* Ink — near-black with almost no warmth. Sharp contrast over
+   * paper is what makes the system feel expensive. */
+  --ink-strong:      #0e0e0c;
+  --ink:             #2b2a27;
+  --ink-soft:        #5c5953;
+  --ink-muted:       #7a766e;
+  --ink-disabled:    #a09c92;
+  --ink-inverse:     #fdfcf8;
 
-  /* States */
-  --ok:           #10b981;
-  --ok-soft-bg:   rgba(16, 185, 129, 0.12);
-  --ok-soft-bd:   rgba(16, 185, 129, 0.35);
-  --ok-ink:       #047857;
+  /* PRIMARY — ink-on-paper. This replaces the vibrant indigo CTA.
+   * Black-on-paper reads as a professional admin tool; saturated
+   * coloured buttons read as a demo. */
+  --primary:         #0e0e0c;
+  --primary-hover:   #1c1b19;
+  --primary-strong:  #000000;
+  --primary-ink:     #fdfcf8;
 
-  --warn:         #f59e0b;
-  --warn-soft-bg: rgba(245, 158, 11, 0.12);
-  --warn-soft-bd: rgba(245, 158, 11, 0.35);
-  --warn-ink:     #b45309;
+  /* Accent — calm slate-indigo. Used for the active-nav highlight,
+   * link colour, and secondary chip. Soft enough that it never
+   * fights the ink primary. */
+  --accent:           #475569;
+  --accent-hover:     #334155;
+  --accent-strong:    #1e293b;
+  --accent-soft-bg:   rgba(71, 85, 105, 0.08);
+  --accent-soft-bg-2: rgba(71, 85, 105, 0.14);
+  --accent-soft-bd:   rgba(71, 85, 105, 0.20);
+  --accent-soft-ink:  #1e293b;
 
-  --error:        #ef4444;
-  --error-soft-bg: rgba(239, 68, 68, 0.10);
-  --error-soft-bd: rgba(239, 68, 68, 0.35);
-  --error-ink:    #b91c1c;
+  /* States — kept compact and functional. */
+  --ok:           #2d4a2b;          /* moss-700, mark8ly's success */
+  --ok-soft-bg:   rgba(45, 74, 43, 0.08);
+  --ok-soft-bd:   rgba(45, 74, 43, 0.25);
+  --ok-ink:       #1c2f1a;
 
-  --info:         #3b82f6;
-  --info-soft-bg: rgba(59, 130, 246, 0.10);
-  --info-soft-bd: rgba(59, 130, 246, 0.30);
-  --info-ink:     #1d4ed8;
+  --warn:         #b5751f;          /* amber-bronze, never lemon */
+  --warn-soft-bg: rgba(181, 117, 31, 0.10);
+  --warn-soft-bd: rgba(181, 117, 31, 0.28);
+  --warn-ink:     #7a4f0f;
+
+  --error:        #8b2e20;          /* oxblood, not vermillion */
+  --error-soft-bg: rgba(139, 46, 32, 0.08);
+  --error-soft-bd: rgba(139, 46, 32, 0.28);
+  --error-ink:    #6a1d12;
+
+  --info:         #475569;
+  --info-soft-bg: rgba(71, 85, 105, 0.08);
+  --info-soft-bd: rgba(71, 85, 105, 0.22);
+  --info-ink:     #1e293b;
 
   /* Effects */
-  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
-  --shadow-raised: 0 16px 48px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
-  --shadow-focus: 0 0 0 3px var(--border-focus);
+  --shadow-card:   0 1px 2px rgba(14, 14, 12, 0.04), 0 1px 1px rgba(14, 14, 12, 0.03);
+  --shadow-raised: 0 12px 32px rgba(14, 14, 12, 0.08), 0 2px 6px rgba(14, 14, 12, 0.04);
+  --shadow-focus:  0 0 0 3px var(--border-focus);
 }
 
-/* ---------------- DARK ---------------- */
+/* ---------------- DARK — Zinc · Paper-text · Slate ---------------- */
 .dark {
-  --canvas:          #07090d;
-  --surface:         #0e1118;
-  --surface-muted:   #141823;
-  --surface-hover:   #1b212d;
-  --surface-raised:  #1a1f2a;
-  --surface-overlay: rgba(2, 4, 8, 0.65);
+  color-scheme: dark;
 
-  --border-subtle:   #1c2230;
-  --border:          #242b39;
-  --border-strong:   #303849;
-  --border-focus:    rgba(129, 140, 248, 0.55);
+  --canvas:          #09090b;        /* zinc-950 */
+  --surface:         #18181b;        /* zinc-900 */
+  --surface-muted:   #1f1f23;
+  --surface-hover:   #27272a;
+  --surface-raised:  #1c1c20;
+  --surface-overlay: rgba(0, 0, 0, 0.65);
 
-  --ink-strong:      #f8fafc;
-  --ink:             #e2e8f0;
-  --ink-soft:        #b4bdcd;
-  --ink-muted:       #7f8aa0;
-  --ink-disabled:    #4f5a73;
-  --ink-inverse:     #0b1220;
+  --border-subtle:   #27272a;
+  --border:          #2e2e33;
+  --border-strong:   #3f3f46;
+  --border-focus:    rgba(148, 163, 184, 0.4);
 
-  --accent:           #818cf8;
-  --accent-hover:     #6366f1;
-  --accent-strong:    #4f46e5;
-  --accent-soft-bg:   rgba(129, 140, 248, 0.10);
-  --accent-soft-bg-2: rgba(129, 140, 248, 0.18);
-  --accent-soft-bd:   rgba(129, 140, 248, 0.30);
-  --accent-soft-ink:  #c7d2fe;
+  --ink-strong:      #fafaf9;
+  --ink:             #e7e5e4;
+  --ink-soft:        #b7b3ad;
+  --ink-muted:       #837f78;
+  --ink-disabled:    #57534e;
+  --ink-inverse:     #0a0a0a;
 
-  --ok:           #34d399;
-  --ok-soft-bg:   rgba(52, 211, 153, 0.10);
-  --ok-soft-bd:   rgba(52, 211, 153, 0.30);
-  --ok-ink:       #6ee7b7;
+  /* Dark-mode primary inverts to paper-on-ink. */
+  --primary:         #fafaf9;
+  --primary-hover:   #e7e5e4;
+  --primary-strong:  #ffffff;
+  --primary-ink:     #0a0a0a;
 
-  --warn:         #fbbf24;
-  --warn-soft-bg: rgba(251, 191, 36, 0.10);
-  --warn-soft-bd: rgba(251, 191, 36, 0.30);
-  --warn-ink:     #fcd34d;
+  --accent:           #94a3b8;
+  --accent-hover:     #cbd5e1;
+  --accent-strong:    #e2e8f0;
+  --accent-soft-bg:   rgba(148, 163, 184, 0.08);
+  --accent-soft-bg-2: rgba(148, 163, 184, 0.14);
+  --accent-soft-bd:   rgba(148, 163, 184, 0.22);
+  --accent-soft-ink:  #cbd5e1;
 
-  --error:        #f87171;
-  --error-soft-bg: rgba(248, 113, 113, 0.10);
-  --error-soft-bd: rgba(248, 113, 113, 0.30);
+  --ok:           #84cc16;
+  --ok-soft-bg:   rgba(132, 204, 22, 0.10);
+  --ok-soft-bd:   rgba(132, 204, 22, 0.25);
+  --ok-ink:       #bef264;
+
+  --warn:         #d97706;
+  --warn-soft-bg: rgba(217, 119, 6, 0.10);
+  --warn-soft-bd: rgba(217, 119, 6, 0.25);
+  --warn-ink:     #fbbf24;
+
+  --error:        #dc2626;
+  --error-soft-bg: rgba(220, 38, 38, 0.10);
+  --error-soft-bd: rgba(220, 38, 38, 0.25);
   --error-ink:    #fca5a5;
 
-  --info:         #60a5fa;
-  --info-soft-bg: rgba(96, 165, 250, 0.10);
-  --info-soft-bd: rgba(96, 165, 250, 0.30);
-  --info-ink:     #93c5fd;
+  --info:         #94a3b8;
+  --info-soft-bg: rgba(148, 163, 184, 0.10);
+  --info-soft-bd: rgba(148, 163, 184, 0.25);
+  --info-ink:     #cbd5e1;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card:   0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-raised: 0 24px 60px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.4);
-  --shadow-focus: 0 0 0 3px var(--border-focus);
+  --shadow-focus:  0 0 0 3px var(--border-focus);
 }
 
 /* ===========================================================================
- * Base typography + body
+ * Base
  * =========================================================================== */
 html {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Stable scrollbar gutter so a route change with/without a scrollbar
-   * doesn't shift the layout half a pixel. */
   scrollbar-gutter: stable;
 }
-
 body {
   background: var(--canvas);
   color: var(--ink);
   font-size: 14px;
   line-height: 1.5;
 }
-
-/* Heading defaults — the actual page titles compose these with
- * font-serif / font-display as needed. */
-h1, h2, h3, h4 {
-  color: var(--ink-strong);
-}
+h1, h2, h3, h4 { color: var(--ink-strong); }
 
 /* ===========================================================================
- * Utility classes the components compose
- *
- * Naming: each describes the visual role, not the colour. .panel renders
- * differently in light vs dark; callers don't care.
+ * Utility classes
  * =========================================================================== */
 
 .font-mono   { font-family: var(--font-mono); }
 .font-display { font-family: var(--font-display); letter-spacing: 0.02em; }
 .font-serif { font-family: var(--font-serif); }
 
-/* Eyebrow label — tactical Monospace micro-headlines on cards + nav groups. */
 .label-eyebrow {
   font-family: var(--font-display);
   text-transform: uppercase;
@@ -189,36 +207,29 @@ h1, h2, h3, h4 {
   color: var(--ink-muted);
 }
 
-/* Surfaces ----------------------------------------------------------------- */
-
-/* Default flat panel — the most common chrome. Borders are subtle.
- * Use this for content groups; use .panel-raised for items that need
- * to feel above the canvas (modals, popovers). */
+/* Surfaces */
 .panel {
   background: var(--surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 8px;
 }
-
 .panel-muted {
   background: var(--surface-muted);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 8px;
 }
-
 .panel-raised {
   background: var(--surface-raised);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow: var(--shadow-raised);
 }
 
-/* Inputs ------------------------------------------------------------------- */
-
+/* Inputs */
 .field {
-  background: var(--surface-muted);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   color: var(--ink);
   font-size: 14px;
   padding: 6px 10px;
@@ -228,12 +239,14 @@ h1, h2, h3, h4 {
 .field:focus,
 .field:focus-visible {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--ink-strong);
   box-shadow: 0 0 0 3px var(--accent-soft-bg-2);
 }
 
-/* Buttons ------------------------------------------------------------------ */
-
+/* Buttons ----------------------------------------------------------------
+ * PRIMARY is ink-on-paper. The vibrant indigo primary in v1 was loud
+ * for an admin surface; a near-black button reads as professional in
+ * every context. SECONDARY is the bordered surface. GHOST is text-only. */
 .btn,
 .btn-primary,
 .btn-secondary,
@@ -242,28 +255,37 @@ h1, h2, h3, h4 {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
-  padding: 6px 12px;
-  transition: background 120ms, border-color 120ms, color 120ms, box-shadow 120ms;
+  padding: 7px 14px;
+  transition: background 120ms, border-color 120ms, color 120ms, box-shadow 120ms, transform 80ms;
   cursor: pointer;
   user-select: none;
   border: 1px solid transparent;
+  white-space: nowrap;
 }
 .btn:focus-visible,
 .btn-primary:focus-visible,
 .btn-secondary:focus-visible,
 .btn-ghost:focus-visible {
   box-shadow: var(--shadow-focus);
+  outline: none;
+}
+.btn-primary:active,
+.btn-secondary:active,
+.btn-ghost:active {
+  transform: translateY(0.5px);
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: var(--ink-inverse);
+  background: var(--primary);
+  color: var(--primary-ink);
+  border-color: var(--primary);
 }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:active { background: var(--accent-strong); }
+.btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.btn-primary:active { background: var(--primary-strong); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-secondary {
   background: var(--surface);
@@ -284,14 +306,36 @@ h1, h2, h3, h4 {
   color: var(--ink);
 }
 
-/* Pills / Badges ----------------------------------------------------------- */
+/* Accent button — for the rare slate-tinted CTA (e.g. New task in the
+ * sidebar). Less visual weight than the primary; sits in a footer rail. */
+.btn-accent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 14px;
+  background: var(--ink-strong);
+  color: var(--ink-inverse);
+  border: 1px solid var(--ink-strong);
+  transition: background 120ms, border-color 120ms;
+  cursor: pointer;
+}
+.btn-accent:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* Pills ------------------------------------------------------------------ */
 
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 1px 8px;
-  border-radius: 6px;
+  border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -311,7 +355,7 @@ h1, h2, h3, h4 {
   border-color: var(--border-subtle);
 }
 
-/* Dots --------------------------------------------------------------------- */
+/* Dots ------------------------------------------------------------------- */
 
 .dot {
   display: inline-block;
@@ -321,27 +365,25 @@ h1, h2, h3, h4 {
   vertical-align: middle;
   background: var(--ink-disabled);
 }
-.dot-ok      { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft-bg); }
-.dot-running { background: var(--info); box-shadow: 0 0 0 3px var(--info-soft-bg); }
+.dot-ok      { background: var(--ok); }
+.dot-running { background: var(--info); }
 .dot-warn    { background: var(--warn); }
 .dot-error   { background: var(--error); }
 .dot-muted   { background: var(--ink-disabled); }
 
-/* Progress bar ------------------------------------------------------------- */
+/* Bars + tables ---------------------------------------------------------- */
 
 .bar-track {
   height: 4px;
   border-radius: 9999px;
-  background: var(--surface-hover);
+  background: var(--surface-muted);
   overflow: hidden;
 }
 .bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%);
+  background: var(--ink-strong);
   transition: width 280ms ease-out;
 }
-
-/* Tables ------------------------------------------------------------------- */
 
 .tbl {
   width: 100%;
@@ -365,14 +407,10 @@ h1, h2, h3, h4 {
   border-bottom: 1px solid var(--border-subtle);
   color: var(--ink-soft);
 }
-.tbl tbody tr:hover td {
-  background: var(--surface-hover);
-}
-.tbl tbody tr:last-child td {
-  border-bottom: none;
-}
+.tbl tbody tr:hover td { background: var(--surface-hover); }
+.tbl tbody tr:last-child td { border-bottom: none; }
 
-/* Cmd-K palette ------------------------------------------------------------ */
+/* Cmd-K palette ---------------------------------------------------------- */
 
 .cmdk-backdrop {
   position: fixed;
@@ -388,7 +426,7 @@ h1, h2, h3, h4 {
   left: 50%;
   transform: translateX(-50%);
   width: min(580px, calc(100vw - 32px));
-  border-radius: 14px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface-raised);
   box-shadow: var(--shadow-raised);
@@ -396,7 +434,7 @@ h1, h2, h3, h4 {
   overflow: hidden;
 }
 
-/* Scrollbar — minimal, blends into the panel chrome --------------------- */
+/* Scrollbar -------------------------------------------------------------- */
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -411,7 +449,7 @@ h1, h2, h3, h4 {
   background-clip: padding-box;
 }
 
-/* Focus ring — single style, both modes ----------------------------------- */
+/* Focus ring + selection ------------------------------------------------ */
 
 :focus-visible {
   outline: 2px solid var(--border-focus);
@@ -423,9 +461,6 @@ a:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
 }
-
-/* Selection ---------------------------------------------------------------- */
-
 ::selection {
   background: var(--accent-soft-bg-2);
   color: var(--ink-strong);

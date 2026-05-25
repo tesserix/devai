@@ -268,42 +268,44 @@ export default function DashboardPage() {
             </div>
           </>
         ) : (
-          // Empty state — shown when no run is selected. Polished to
-          // match the rest of the design system; tokens make this look
-          // right in both dark + light modes without conditional CSS.
+          // Empty state — shown when no run is selected. Editorial
+          // treatment: paper-backed icon well, serif headline, sober
+          // ink primary button. Aligns with the mark8ly admin look —
+          // an admin tool that doesn't shout.
           <div className="flex-1 flex items-center justify-center" style={{ background: "var(--canvas)" }}>
             <div className="text-center max-w-md px-6">
               <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+                className="w-14 h-14 rounded-lg flex items-center justify-center mx-auto mb-5"
                 style={{
-                  background: "var(--accent-soft-bg)",
-                  border: "1px solid var(--accent-soft-bd)",
+                  background: "var(--surface)",
+                  border: "1px solid var(--border-subtle)",
+                  boxShadow: "var(--shadow-card)",
                 }}
               >
                 <svg
-                  width="28"
-                  height="28"
+                  width="22"
+                  height="22"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="1.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  style={{ color: "var(--accent)" }}
+                  style={{ color: "var(--ink-strong)" }}
                 >
                   <path d="M12 2L2 7l10 5 10-5-10-5z" />
                   <path d="M2 17l10 5 10-5" />
                   <path d="M2 12l10 5 10-5" />
                 </svg>
               </div>
-              <h2 className="font-serif text-xl font-medium" style={{ color: "var(--ink-strong)" }}>
+              <h2 className="font-serif text-xl font-medium tracking-tight" style={{ color: "var(--ink-strong)" }}>
                 DevAI Multi-Agent Platform
               </h2>
-              <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>
+              <p className="text-sm mt-2 leading-relaxed" style={{ color: "var(--ink-soft)" }}>
                 Supervisor &rarr; Orchestrator &rarr; Specialist Agents. AI-powered Application Lifecycle Management.
               </p>
-              <button onClick={() => setTriggerOpen(true)} className="btn-primary mt-6 !py-2 !px-4">
-                Start New Pipeline
+              <button onClick={() => setTriggerOpen(true)} className="btn-primary mt-6">
+                Start new pipeline
               </button>
             </div>
           </div>

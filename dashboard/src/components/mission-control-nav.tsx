@@ -125,19 +125,25 @@ export function MissionControlNav() {
       className="w-60 shrink-0 flex flex-col border-r"
       style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
     >
-      {/* Logo + tag */}
+      {/* Logo + tag. Logomark is ink (near-black) on paper — same
+       * editorial treatment as the mark8ly admin. The previous
+       * indigo gradient read like a SaaS app icon; this reads like
+       * a tool. */}
       <div className="px-4 pt-4 pb-2 flex items-center gap-2.5">
         <span
-          className="inline-flex w-8 h-8 rounded-lg items-center justify-center text-white shadow-sm"
-          style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
+          className="inline-flex w-8 h-8 rounded-md items-center justify-center shadow-sm"
+          style={{ background: "var(--primary)", color: "var(--primary-ink)" }}
         >
           <ShieldHalf className="w-4 h-4" />
         </span>
         <div className="min-w-0">
-          <div className="font-display text-[15px] leading-none tracking-wide" style={{ color: "var(--ink-strong)" }}>
+          <div
+            className="font-serif text-[15px] leading-none"
+            style={{ color: "var(--ink-strong)" }}
+          >
             DevAI
           </div>
-          <div className="label-eyebrow mt-1">Mission control</div>
+          <div className="label-eyebrow mt-1.5">Mission control</div>
         </div>
       </div>
 
@@ -192,10 +198,10 @@ export function MissionControlNav() {
         </button>
       </div>
 
-      {/* Primary CTA */}
+      {/* Primary CTA — ink button (mark8ly admin pattern). */}
       <div className="px-3 py-3 border-t" style={{ borderColor: "var(--border-subtle)" }}>
         <button type="button" onClick={newTask} className="btn-primary w-full !py-2 !text-sm">
-          <Plus className="w-4 h-4" />
+          <Plus className="w-3.5 h-3.5" />
           New task
         </button>
       </div>
@@ -227,13 +233,15 @@ function NavSection({
                   "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors group"
                 )}
                 style={{
-                  background: active ? "var(--accent-soft-bg-2)" : "transparent",
-                  color: active ? "var(--accent-soft-ink)" : "var(--ink-soft)",
-                  fontWeight: active ? 500 : 400,
-                  boxShadow: active ? "inset 0 0 0 1px var(--accent-soft-bd)" : "none",
+                  // Active state uses an ink-soft tint (mark8ly admin
+                  // pattern) — a calm filled rail. The previous accent-
+                  // soft + ring read too prominently for a side rail.
+                  background: active ? "var(--surface-hover)" : "transparent",
+                  color: active ? "var(--ink-strong)" : "var(--ink-soft)",
+                  fontWeight: active ? 600 : 400,
                 }}
                 onMouseEnter={(e) => {
-                  if (!active) e.currentTarget.style.background = "var(--surface-hover)";
+                  if (!active) e.currentTarget.style.background = "var(--surface-muted)";
                 }}
                 onMouseLeave={(e) => {
                   if (!active) e.currentTarget.style.background = "transparent";
@@ -241,7 +249,7 @@ function NavSection({
               >
                 <Icon
                   className="w-4 h-4 shrink-0"
-                  style={{ color: active ? "var(--accent)" : "var(--ink-muted)" }}
+                  style={{ color: active ? "var(--ink-strong)" : "var(--ink-muted)" }}
                 />
                 <span className="truncate flex-1">{l}</span>
                 {badge && (
