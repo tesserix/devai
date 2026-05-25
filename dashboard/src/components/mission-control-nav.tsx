@@ -16,6 +16,7 @@ import {
   Moon,
   PackageOpen,
   Plus,
+  Radio,
   Search,
   Settings,
   ShieldHalf,
@@ -79,6 +80,7 @@ const TOP: NavItem[] = [
 
 const MID: NavItem[] = [
   { href: "/registry", label: "Registry", Icon: PackageOpen, description: "Skills · Prompts · MCP · Agents" },
+  { href: "/gateway", label: "Gateway", Icon: Radio, description: "Agent Gateway + LLM proxy health" },
   { href: "/catalog", label: "Catalog", Icon: Database, description: "Resolved capability map" },
   { href: "/control", label: "Control", Icon: ChevronsLeftRight, description: "Manual pause / takeover" },
   { href: "/analytics", label: "Analytics", Icon: LineChart, description: "Cost + duration trends" },

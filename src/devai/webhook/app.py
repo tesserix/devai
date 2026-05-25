@@ -128,6 +128,13 @@ def create_app(event_bus: EventBus, state: StateManager, config: Settings) -> Fa
 
     app.include_router(registry_router)
 
+    # Agentic control-plane status (/api/agentic/status + smoke probes).
+    # Backs the dashboard's Gateway panel; one endpoint aggregates the
+    # health of registry / agentgateway / ai-gateway / kagent.
+    from devai.agentic.routes import router as agentic_router
+
+    app.include_router(agentic_router)
+
     # Pipeline runtime routes (/api/pipeline/*) — only useful when
     # PipelineService is started, but the routes themselves return a
     # readable 503 when disabled, so we mount unconditionally.
