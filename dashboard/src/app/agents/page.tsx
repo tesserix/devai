@@ -37,13 +37,14 @@ export default function AgentsPage() {
     : agents;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-7 space-y-6">
       <header className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <Users className="w-5 h-5" /> Agents
+          <div className="label-eyebrow">Catalog</div>
+          <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
+            <Users className="w-5 h-5 text-indigo-400" /> Agents
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-sm text-[var(--ink-300)] mt-1">
             Agents catalogued in aregistry. Each card shows the model + framework binding the runtime will instantiate.
           </p>
         </div>
@@ -51,20 +52,20 @@ export default function AgentsPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter by name…"
-          className="px-3 py-1.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-indigo-400"
+          className="px-3 py-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] text-sm text-[var(--ink-100)] placeholder-[var(--ink-500)] focus:outline-none focus:border-indigo-500/50"
         />
       </header>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+        <div className="text-sm text-[var(--ink-500)]">Loading…</div>
       ) : filtered.length === 0 ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400">
+        <div className="text-sm text-[var(--ink-500)]">
           {agents.length === 0
             ? "Registry returned 0 agents. Make sure the registry-bootstrap Job has completed."
             : `No agents match "${query}".`}
@@ -74,20 +75,20 @@ export default function AgentsPage() {
           {filtered.map((a) => (
             <article
               key={a.name}
-              className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4"
+              className="panel p-4 hover:border-[var(--surface-border-strong)] transition-colors"
             >
               <div className="flex items-baseline justify-between gap-2">
-                <h2 className="text-sm font-mono font-semibold text-gray-900 dark:text-gray-100">{a.name}</h2>
-                <span className="text-[11px] text-gray-400">v{a.version}</span>
+                <h2 className="text-sm font-mono font-semibold text-[var(--ink-50)]">{a.name}</h2>
+                <span className="text-[11px] font-mono text-[var(--ink-500)]">v{a.version}</span>
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">{a.description}</p>
+              <p className="text-sm text-[var(--ink-300)] mt-1">{a.description}</p>
               <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                <dt className="text-gray-400">Model</dt>
-                <dd className="font-mono text-gray-700 dark:text-gray-200">{a.model_provider}/{a.model_name}</dd>
-                <dt className="text-gray-400">Framework</dt>
-                <dd className="text-gray-700 dark:text-gray-200">{a.framework}</dd>
-                <dt className="text-gray-400">Language</dt>
-                <dd className="text-gray-700 dark:text-gray-200">{a.language}</dd>
+                <dt className="label-eyebrow">Model</dt>
+                <dd className="font-mono text-[var(--ink-100)]">{a.model_provider}/{a.model_name}</dd>
+                <dt className="label-eyebrow">Framework</dt>
+                <dd className="text-[var(--ink-100)]">{a.framework}</dd>
+                <dt className="label-eyebrow">Language</dt>
+                <dd className="text-[var(--ink-100)]">{a.language}</dd>
               </dl>
             </article>
           ))}

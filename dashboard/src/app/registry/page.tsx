@@ -77,28 +77,29 @@ export default function RegistryPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-7 space-y-6">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <PackageOpen className="w-5 h-5" /> Agent Registry
+          <div className="label-eyebrow">Catalog</div>
+          <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
+            <PackageOpen className="w-5 h-5 text-indigo-400" /> Agent Registry
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-sm text-[var(--ink-300)] mt-1">
             Catalogue browser — backed by aregistry, augmented with local YAML.
           </p>
           {health && (
-            <p className="text-xs mt-2">
-              Status:{" "}
-              <span className={health.reachable ? "text-emerald-600" : "text-red-600"}>
+            <p className="text-xs mt-2 flex items-center gap-2 font-mono">
+              <span className={`dot ${health.reachable ? "dot-ok" : "dot-error"}`} />
+              <span className={health.reachable ? "text-emerald-400" : "text-red-400"}>
                 {health.reachable ? "reachable" : "unreachable"}
               </span>
-              {health.error && <span className="text-gray-400 ml-2">— {health.error}</span>}
+              {health.error && <span className="text-[var(--ink-500)]">· {health.error}</span>}
             </p>
           )}
         </div>
         <button
           onClick={refresh}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border border-[var(--surface-border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--ink-100)] transition-colors"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Refresh
         </button>
@@ -117,16 +118,16 @@ export default function RegistryPage() {
       </div>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">
           {error}
         </div>
       )}
 
-      <section className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
+      <section className="panel overflow-hidden">
         {loading ? (
-          <div className="p-6 text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+          <div className="p-6 text-sm text-[var(--ink-500)]">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="p-6 text-sm text-gray-500 dark:text-gray-400">No entries.</div>
+          <div className="p-6 text-sm text-[var(--ink-500)]">No entries.</div>
         ) : (
           renderTable(tab, items)
         )}
@@ -141,12 +142,12 @@ function CountCard({ label, value, active, onClick }: { label: string; value?: n
       onClick={onClick}
       className={`text-left rounded-lg border px-4 py-3 transition-colors ${
         active
-          ? "border-indigo-300 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-900/30"
-          : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:hover:bg-gray-800"
+          ? "border-indigo-500/50 bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/20"
+          : "border-[var(--surface-border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] hover:border-[var(--surface-border-strong)]"
       }`}
     >
-      <div className="text-[11px] uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</div>
-      <div className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mt-1">{value ?? "—"}</div>
+      <div className="label-eyebrow">{label}</div>
+      <div className="text-2xl font-mono font-medium text-[var(--ink-50)] mt-1 tabular-nums">{value ?? "—"}</div>
     </button>
   );
 }
@@ -156,16 +157,16 @@ function renderTable(tab: Tab, items: Skill[] | Prompt[] | McpServer[] | Agent[]
     const rows = items as Skill[];
     return (
       <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 dark:bg-gray-800/40 text-left text-xs uppercase tracking-wider text-gray-500">
+        <thead className="bg-[var(--surface-2)] text-left label-eyebrow">
           <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Category</th><th className="px-4 py-2">Version</th><th className="px-4 py-2">Title</th></tr>
         </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+        <tbody className="divide-y divide-[var(--surface-border)]">
           {rows.map((s) => (
             <tr key={s.name}>
-              <td className="px-4 py-2 font-mono text-gray-900 dark:text-gray-100">{s.name}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{s.category}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{s.version}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{s.title}</td>
+              <td className="px-4 py-2 font-mono text-[var(--ink-100)]">{s.name}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)]">{s.category}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)]">{s.version}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)]">{s.title}</td>
             </tr>
           ))}
         </tbody>
@@ -176,15 +177,15 @@ function renderTable(tab: Tab, items: Skill[] | Prompt[] | McpServer[] | Agent[]
     const rows = items as Prompt[];
     return (
       <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 dark:bg-gray-800/40 text-left text-xs uppercase tracking-wider text-gray-500">
+        <thead className="bg-[var(--surface-2)] text-left label-eyebrow">
           <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Version</th><th className="px-4 py-2">Description</th></tr>
         </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+        <tbody className="divide-y divide-[var(--surface-border)]">
           {rows.map((p) => (
             <tr key={p.name}>
-              <td className="px-4 py-2 font-mono text-gray-900 dark:text-gray-100">{p.name}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{p.version}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{p.description}</td>
+              <td className="px-4 py-2 font-mono text-[var(--ink-100)]">{p.name}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)]">{p.version}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)]">{p.description}</td>
             </tr>
           ))}
         </tbody>
@@ -195,16 +196,16 @@ function renderTable(tab: Tab, items: Skill[] | Prompt[] | McpServer[] | Agent[]
     const rows = items as McpServer[];
     return (
       <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 dark:bg-gray-800/40 text-left text-xs uppercase tracking-wider text-gray-500">
+        <thead className="bg-[var(--surface-2)] text-left label-eyebrow">
           <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Type</th><th className="px-4 py-2">URL</th><th className="px-4 py-2">Version</th></tr>
         </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+        <tbody className="divide-y divide-[var(--surface-border)]">
           {rows.map((m) => (
             <tr key={m.name}>
-              <td className="px-4 py-2 font-mono text-gray-900 dark:text-gray-100">{m.name}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{m.type}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400 font-mono text-xs">{m.url || "—"}</td>
-              <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{m.version}</td>
+              <td className="px-4 py-2 font-mono text-[var(--ink-100)]">{m.name}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)]">{m.type}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)] font-mono text-xs">{m.url || "—"}</td>
+              <td className="px-4 py-2 text-[var(--ink-300)]">{m.version}</td>
             </tr>
           ))}
         </tbody>
@@ -214,16 +215,16 @@ function renderTable(tab: Tab, items: Skill[] | Prompt[] | McpServer[] | Agent[]
   const rows = items as Agent[];
   return (
     <table className="min-w-full text-sm">
-      <thead className="bg-gray-50 dark:bg-gray-800/40 text-left text-xs uppercase tracking-wider text-gray-500">
+      <thead className="bg-[var(--surface-2)] text-left label-eyebrow">
         <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Framework</th><th className="px-4 py-2">Model</th><th className="px-4 py-2">Description</th></tr>
       </thead>
-      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+      <tbody className="divide-y divide-[var(--surface-border)]">
         {rows.map((a) => (
           <tr key={a.name}>
-            <td className="px-4 py-2 font-mono text-gray-900 dark:text-gray-100">{a.name}</td>
-            <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{a.framework}</td>
-            <td className="px-4 py-2 text-gray-600 dark:text-gray-400 font-mono text-xs">{a.model_provider}/{a.model_name}</td>
-            <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{a.description}</td>
+            <td className="px-4 py-2 font-mono text-[var(--ink-100)]">{a.name}</td>
+            <td className="px-4 py-2 text-[var(--ink-300)]">{a.framework}</td>
+            <td className="px-4 py-2 text-[var(--ink-300)] font-mono text-xs">{a.model_provider}/{a.model_name}</td>
+            <td className="px-4 py-2 text-[var(--ink-300)]">{a.description}</td>
           </tr>
         ))}
       </tbody>

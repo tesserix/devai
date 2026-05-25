@@ -26,26 +26,27 @@ export default function BlueprintPage() {
   }, []);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-7 space-y-6">
       <header>
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Layers className="w-5 h-5" /> Blueprints
+        <div className="label-eyebrow">Pipeline</div>
+        <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
+          <Layers className="w-5 h-5 text-indigo-400" /> Blueprints
         </h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-sm text-[var(--ink-300)] mt-1">
           DAGs of stages. Each blueprint composes deterministic + agentic stages into a runnable pipeline.
         </p>
       </header>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+        <div className="text-sm text-[var(--ink-500)]">Loading…</div>
       ) : bps.length === 0 ? (
-        <div className="text-sm text-gray-500 dark:text-gray-400">
+        <div className="text-sm text-[var(--ink-500)]">
           No blueprints registered. The pipeline runtime must be enabled (DEVAI_PIPELINE_ENABLED=true) for this list to populate.
         </div>
       ) : (
@@ -53,16 +54,16 @@ export default function BlueprintPage() {
           {bps.map((b) => (
             <article
               key={b.name}
-              className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4"
+              className="panel p-4"
             >
               <div className="flex items-baseline justify-between gap-3">
-                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{b.name}</h2>
-                <span className="text-[11px] uppercase tracking-wider text-gray-400">
+                <h2 className="text-base font-display font-medium text-[var(--ink-50)]">{b.name}</h2>
+                <span className="label-eyebrow">
                   {b.stages?.length ?? 0} stages
                 </span>
               </div>
               {b.description && (
-                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">{b.description}</p>
+                <p className="text-sm text-[var(--ink-300)] mt-1">{b.description}</p>
               )}
               {b.stages && b.stages.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -72,7 +73,7 @@ export default function BlueprintPage() {
                       title={
                         s.depends_on?.length ? `depends on: ${s.depends_on.join(", ")}` : undefined
                       }
-                      className="text-xs px-2 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+                      className="text-xs px-2 py-0.5 rounded font-mono border border-[var(--surface-border)] bg-[var(--surface-2)] text-[var(--ink-100)]"
                     >
                       {s.name}
                     </span>
