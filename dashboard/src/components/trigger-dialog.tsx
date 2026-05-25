@@ -229,28 +229,54 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
     }
   };
 
-  const inputClass =
-    "w-full px-3 py-2.5 rounded-lg bg-[var(--surface-muted)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 transition-colors";
-
-  const dropdownItemClass =
-    "w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors";
-
-  const dropdownContainerClass =
-    "absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg max-h-56 overflow-y-auto";
+  // All chrome reads from design tokens so the dialog adapts to the
+  // active theme (light slate / dark zinc). No hard-coded grays or
+  // indigo — that's how the previous version went black-on-black in
+  // light mode.
+  const inputStyle = {
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    color: "var(--ink-strong)",
+  } as const;
+  const subInputStyle = {
+    background: "var(--surface-muted)",
+    border: "1px solid var(--border-subtle)",
+    color: "var(--ink-strong)",
+  } as const;
+  const inputBase =
+    "w-full px-3 py-2.5 rounded-md text-sm outline-none focus:border-[var(--ink-strong)] focus:ring-1 focus:ring-[var(--accent-soft-bg-2)] transition-colors placeholder:opacity-60";
+  const dropdownContainerStyle = {
+    background: "var(--surface-raised)",
+    border: "1px solid var(--border)",
+    boxShadow: "var(--shadow-raised)",
+  } as const;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: "var(--surface-overlay)", backdropFilter: "blur(4px)" }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white dark:bg-gray-800 border border-[var(--border-subtle)] rounded-xl w-full max-w-lg p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+      <div
+        className="rounded-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
+        style={{
+          background: "var(--surface-raised)",
+          border: "1px solid var(--border)",
+          boxShadow: "var(--shadow-raised)",
+          color: "var(--ink)",
+        }}
+      >
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-base font-semibold ">
+          <h2 className="font-serif text-lg font-medium" style={{ color: "var(--ink-strong)" }}>
             New Pipeline Run
           </h2>
           <button
             onClick={onClose}
-            className="w-7 h-7 flex items-center justify-center rounded-md  hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-md transition-colors"
+            style={{ color: "var(--ink-muted)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            aria-label="Close"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -258,14 +284,14 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
             </svg>
           </button>
         </div>
-        <p className="text-sm  mb-5">
-          Select a repository, link a project board, and describe your requirements
+        <p className="text-sm mb-5" style={{ color: "var(--ink-soft)" }}>
+          Select a repository, link a project board, and describe your requirements.
         </p>
 
         <div className="space-y-4">
           {/* Repository selector */}
           <div ref={dropdownRef} className="relative">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--ink-strong)" }}>
               Repository
             </label>
             <input
@@ -278,44 +304,58 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                 setDropdownOpen(true);
               }}
               onFocus={() => setDropdownOpen(true)}
-              className={inputClass}
+              className={inputBase}
+              style={inputStyle}
             />
 
             {dropdownOpen && (
-              <div className={dropdownContainerClass}>
+              <div
+                className="absolute z-10 w-full mt-1 rounded-md max-h-56 overflow-y-auto"
+                style={dropdownContainerStyle}
+              >
                 {filteredRepos.length > 0 ? (
                   filteredRepos.map((r) => (
                     <button
                       key={r.full_name}
                       onClick={() => handleSelectRepo(r.full_name)}
-                      className={dropdownItemClass}
+                      className="w-full text-left px-3 py-2.5 transition-colors"
+                      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-hover)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium ">
+                        <span className="text-sm font-medium font-mono" style={{ color: "var(--ink-strong)" }}>
                           {r.full_name}
                         </span>
                         <div className="flex items-center gap-2">
                           {r.language && (
-                            <span className="text-xs ">
+                            <span className="text-xs" style={{ color: "var(--ink-muted)" }}>
                               {r.language}
                             </span>
                           )}
                           {r.private && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-600 ">
-                              Private
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                              style={{
+                                background: "var(--surface-muted)",
+                                color: "var(--ink-soft)",
+                                border: "1px solid var(--border-subtle)",
+                              }}
+                            >
+                              private
                             </span>
                           )}
                         </div>
                       </div>
                       {r.description && (
-                        <p className="text-xs  mt-0.5 truncate">
+                        <p className="text-xs mt-0.5 truncate" style={{ color: "var(--ink-soft)" }}>
                           {r.description}
                         </p>
                       )}
                     </button>
                   ))
                 ) : (
-                  <div className="px-3 py-3 text-sm ">
+                  <div className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
                     {loadingRepos ? "Loading..." : "No repositories found"}
                   </div>
                 )}
@@ -324,7 +364,13 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                     setShowCreate(true);
                     setDropdownOpen(false);
                   }}
-                  className="w-full text-left px-3 py-2.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 border-t border-gray-200 dark:border-gray-600 transition-colors"
+                  className="w-full text-left px-3 py-2.5 text-sm font-medium transition-colors"
+                  style={{
+                    color: "var(--accent)",
+                    borderTop: "1px solid var(--border-subtle)",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft-bg)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   + Create new repository
                 </button>
@@ -334,20 +380,29 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
 
           {/* Create repo inline form */}
           {showCreate && (
-            <div className="p-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/10 space-y-3">
+            <div
+              className="p-4 rounded-md space-y-3"
+              style={{
+                background: "var(--accent-soft-bg)",
+                border: "1px solid var(--accent-soft-bd)",
+              }}
+            >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium ">
+                <span className="text-sm font-medium" style={{ color: "var(--ink-strong)" }}>
                   Create Repository
                 </span>
                 <button
                   onClick={() => setShowCreate(false)}
-                  className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  className="text-xs transition-colors"
+                  style={{ color: "var(--ink-muted)" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "var(--ink)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "var(--ink-muted)")}
                 >
                   Cancel
                 </button>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                <label className="block text-xs font-medium mb-1" style={{ color: "var(--ink-soft)" }}>
                   Name (tesserix/...)
                 </label>
                 <div className="relative">
@@ -359,27 +414,38 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                       setNewRepoName(e.target.value);
                       checkRepoName(e.target.value);
                     }}
-                    className={`w-full px-3 py-2 rounded-lg bg-[var(--surface)] border text-sm  placeholder:text-gray-400 focus:outline-none transition-colors ${
-                      repoNameStatus === "taken"
-                        ? "border-red-400 focus:border-red-500"
-                        : repoNameStatus === "available"
-                          ? "border-green-400 focus:border-green-500"
-                          : "border-gray-200 dark:border-gray-600 focus:border-indigo-500"
-                    }`}
+                    className="w-full px-3 py-2 rounded-md text-sm outline-none transition-colors placeholder:opacity-60"
+                    style={{
+                      background: "var(--surface)",
+                      color: "var(--ink-strong)",
+                      border: `1px solid ${
+                        repoNameStatus === "taken"
+                          ? "var(--error)"
+                          : repoNameStatus === "available"
+                            ? "var(--ok)"
+                            : "var(--border)"
+                      }`,
+                    }}
                   />
                   {repoNameStatus === "checking" && (
-                    <span className="absolute right-3 top-2.5 text-xs text-gray-400">checking...</span>
+                    <span className="absolute right-3 top-2.5 text-xs" style={{ color: "var(--ink-muted)" }}>
+                      checking…
+                    </span>
                   )}
                   {repoNameStatus === "available" && (
-                    <span className="absolute right-3 top-2.5 text-xs text-green-500">available</span>
+                    <span className="absolute right-3 top-2.5 text-xs" style={{ color: "var(--ok)" }}>
+                      available
+                    </span>
                   )}
                   {repoNameStatus === "taken" && (
-                    <span className="absolute right-3 top-2.5 text-xs text-red-500">already exists</span>
+                    <span className="absolute right-3 top-2.5 text-xs" style={{ color: "var(--error)" }}>
+                      already exists
+                    </span>
                   )}
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                <label className="block text-xs font-medium mb-1" style={{ color: "var(--ink-soft)" }}>
                   Description (optional)
                 </label>
                 <input
@@ -387,24 +453,31 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   placeholder="Brief description"
                   value={newRepoDesc}
                   onChange={(e) => setNewRepoDesc(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-md text-sm outline-none transition-colors placeholder:opacity-60"
+                  style={inputStyle}
                 />
               </div>
               <button
                 onClick={handleCreateRepo}
                 disabled={creating || !newRepoName.trim() || repoNameStatus === "taken" || repoNameStatus === "checking"}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ background: "var(--primary)", color: "var(--primary-ink)" }}
               >
-                {creating ? "Creating..." : "Create"}
+                {creating ? "Creating…" : "Create"}
               </button>
             </div>
           )}
 
           {/* Project selector */}
           <div ref={projectDropdownRef} className="relative">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+            <label
+              className="block text-sm font-medium mb-1.5 flex items-baseline gap-1.5"
+              style={{ color: "var(--ink-strong)" }}
+            >
               Project Board
-              <span className="ml-1 text-xs font-normal text-gray-400">(optional)</span>
+              <span className="text-xs font-normal" style={{ color: "var(--ink-muted)" }}>
+                (optional)
+              </span>
             </label>
             <input
               type="text"
@@ -416,35 +489,42 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                 setProjectDropdownOpen(true);
               }}
               onFocus={() => setProjectDropdownOpen(true)}
-              className={inputClass}
+              className={inputBase}
+              style={inputStyle}
             />
 
             {projectDropdownOpen && (
-              <div className={dropdownContainerClass}>
+              <div
+                className="absolute z-10 w-full mt-1 rounded-md max-h-56 overflow-y-auto"
+                style={dropdownContainerStyle}
+              >
                 {filteredProjects.length > 0 ? (
                   filteredProjects.map((p) => (
                     <button
                       key={p.id}
                       onClick={() => handleSelectProject(p)}
-                      className={dropdownItemClass}
+                      className="w-full text-left px-3 py-2.5 transition-colors"
+                      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-hover)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium ">
+                        <span className="text-sm font-medium" style={{ color: "var(--ink-strong)" }}>
                           {p.title}
                         </span>
-                        <span className="text-xs ">
+                        <span className="text-xs font-mono" style={{ color: "var(--ink-muted)" }}>
                           #{p.number}
                         </span>
                       </div>
                       {p.description && (
-                        <p className="text-xs  mt-0.5 truncate">
+                        <p className="text-xs mt-0.5 truncate" style={{ color: "var(--ink-soft)" }}>
                           {p.description}
                         </p>
                       )}
                     </button>
                   ))
                 ) : (
-                  <div className="px-3 py-3 text-sm ">
+                  <div className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
                     {loadingProjects ? "Loading..." : "No projects found"}
                   </div>
                 )}
@@ -453,7 +533,13 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                     setShowCreateProject(true);
                     setProjectDropdownOpen(false);
                   }}
-                  className="w-full text-left px-3 py-2.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 border-t border-gray-200 dark:border-gray-600 transition-colors"
+                  className="w-full text-left px-3 py-2.5 text-sm font-medium transition-colors"
+                  style={{
+                    color: "var(--accent)",
+                    borderTop: "1px solid var(--border-subtle)",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft-bg)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   + Create new project board
                 </button>
@@ -463,20 +549,29 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
 
           {/* Create project inline form */}
           {showCreateProject && (
-            <div className="p-4 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/10 space-y-3">
+            <div
+              className="p-4 rounded-md space-y-3"
+              style={{
+                background: "var(--accent-soft-bg)",
+                border: "1px solid var(--accent-soft-bd)",
+              }}
+            >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium ">
+                <span className="text-sm font-medium" style={{ color: "var(--ink-strong)" }}>
                   Create Project Board
                 </span>
                 <button
                   onClick={() => setShowCreateProject(false)}
-                  className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  className="text-xs transition-colors"
+                  style={{ color: "var(--ink-muted)" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "var(--ink)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "var(--ink-muted)")}
                 >
                   Cancel
                 </button>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                <label className="block text-xs font-medium mb-1" style={{ color: "var(--ink-soft)" }}>
                   Project Title
                 </label>
                 <input
@@ -484,11 +579,12 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   placeholder="Sprint 1 — Feature X"
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-md text-sm outline-none transition-colors placeholder:opacity-60"
+                  style={inputStyle}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                <label className="block text-xs font-medium mb-1" style={{ color: "var(--ink-soft)" }}>
                   Description (optional)
                 </label>
                 <input
@@ -496,49 +592,59 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   placeholder="What is this project about?"
                   value={newProjectDesc}
                   onChange={(e) => setNewProjectDesc(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-md text-sm outline-none transition-colors placeholder:opacity-60"
+                  style={inputStyle}
                 />
               </div>
               <button
                 onClick={handleCreateProject}
                 disabled={creatingProject || !newProjectName.trim()}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ background: "var(--primary)", color: "var(--primary-ink)" }}
               >
-                {creatingProject ? "Creating..." : "Create Project"}
+                {creatingProject ? "Creating…" : "Create Project"}
               </button>
             </div>
           )}
 
           {/* Scaffold toggle */}
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-[var(--surface-muted)]/50 border border-gray-200 dark:border-gray-600">
+          <div
+            className="flex items-start gap-3 p-3 rounded-md"
+            style={{
+              background: "var(--surface-muted)",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
             <input
               type="checkbox"
               id="scaffold"
               checked={scaffold}
               onChange={(e) => setScaffold(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              className="mt-0.5 h-4 w-4 rounded cursor-pointer"
+              style={{ accentColor: "var(--accent)" }}
             />
             <label htmlFor="scaffold" className="cursor-pointer">
-              <span className="block text-sm font-medium ">
+              <span className="block text-sm font-medium" style={{ color: "var(--ink-strong)" }}>
                 Initialize repository structure
               </span>
-              <span className="block text-xs  mt-0.5">
-                Creates .github/workflows, CLAUDE.md with guardrails, and PR template
+              <span className="block text-xs mt-0.5" style={{ color: "var(--ink-soft)" }}>
+                Creates .github/workflows, CLAUDE.md guardrails, and PR template.
               </span>
             </label>
           </div>
 
           {/* Requirements */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--ink-strong)" }}>
               Requirements
             </label>
             <textarea
               rows={5}
-              placeholder="Describe the feature or requirements..."
+              placeholder="Describe the feature or requirements…"
               value={requirements}
               onChange={(e) => setRequirements(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg bg-[var(--surface-muted)] border border-gray-200 dark:border-gray-600 text-sm  placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 dark:focus:ring-indigo-900 resize-none transition-colors"
+              className="w-full px-3 py-2.5 rounded-md text-sm outline-none resize-none transition-colors placeholder:opacity-60"
+              style={subInputStyle}
             />
           </div>
         </div>
@@ -546,16 +652,24 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium rounded-lg text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            className="px-4 py-2 text-sm font-medium rounded-md transition-colors"
+            style={{
+              color: "var(--ink)",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "var(--surface)")}
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={loading || !selectedRepo || !requirements}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            style={{ background: "var(--primary)", color: "var(--primary-ink)" }}
           >
-            {scaffolding ? "Scaffolding..." : loading ? "Starting..." : "Start Pipeline"}
+            {scaffolding ? "Scaffolding…" : loading ? "Starting…" : "Start Pipeline"}
           </button>
         </div>
       </div>
