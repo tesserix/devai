@@ -9,7 +9,6 @@
           <mxGeometry x="200" y="30" width="1000" height="40" as="geometry"/>
         </mxCell>
 
-        <!-- Three agent columns -->
         <mxCell id="em" value="Engineering&#10;Manager" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2d3a8c;strokeColor=#1a2658;fontColor=#fff;fontSize=14;fontStyle=1" vertex="1" parent="1">
           <mxGeometry x="100" y="120" width="180" height="80" as="geometry"/>
         </mxCell>
@@ -20,43 +19,90 @@
           <mxGeometry x="900" y="120" width="180" height="80" as="geometry"/>
         </mxCell>
 
-        <!-- lifelines -->
-        <mxCell id="ll1" style="endArrow=none;dashed=1;strokeWidth=2;strokeColor=#aaa" edge="1" parent="1"><mxGeometry><mxPoint x="190" y="200" as="sourcePoint"/><mxPoint x="190" y="700" as="targetPoint"/></mxGeometry></mxCell>
-        <mxCell id="ll2" style="endArrow=none;dashed=1;strokeWidth=2;strokeColor=#aaa" edge="1" parent="1"><mxGeometry><mxPoint x="590" y="200" as="sourcePoint"/><mxPoint x="590" y="700" as="targetPoint"/></mxGeometry></mxCell>
-        <mxCell id="ll3" style="endArrow=none;dashed=1;strokeWidth=2;strokeColor=#aaa" edge="1" parent="1"><mxGeometry><mxPoint x="990" y="200" as="sourcePoint"/><mxPoint x="990" y="700" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ll1" value="" style="endArrow=none;dashed=1;strokeWidth=2;strokeColor=#aaaaaa" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="190" y="200" as="sourcePoint"/>
+            <mxPoint x="190" y="700" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ll2" value="" style="endArrow=none;dashed=1;strokeWidth=2;strokeColor=#aaaaaa" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="590" y="200" as="sourcePoint"/>
+            <mxPoint x="590" y="700" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ll3" value="" style="endArrow=none;dashed=1;strokeWidth=2;strokeColor=#aaaaaa" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="990" y="200" as="sourcePoint"/>
+            <mxPoint x="990" y="700" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
 
-        <!-- arrows + messages -->
-        <mxCell id="msg1" value="handoff   &quot;implement story&quot;" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1"><mxGeometry><mxPoint x="190" y="260" as="sourcePoint"/><mxPoint x="590" y="260" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="msg1" value="handoff: implement story" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="190" y="260" as="sourcePoint"/>
+            <mxPoint x="590" y="260" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="msg2" value="notification: branch created" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="590" y="320" as="sourcePoint"/>
+            <mxPoint x="190" y="320" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="msg3" value="handoff: PR #42 ready for review" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="590" y="380" as="sourcePoint"/>
+            <mxPoint x="990" y="380" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="msg4" value="response: rename FooClient" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="990" y="440" as="sourcePoint"/>
+            <mxPoint x="590" y="440" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="msg5" value="response: renamed in commit abc" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="590" y="500" as="sourcePoint"/>
+            <mxPoint x="990" y="500" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="msg6" value="response: approved" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="990" y="560" as="sourcePoint"/>
+            <mxPoint x="590" y="560" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
 
-        <mxCell id="msg2" value="notification   &quot;branch created&quot;" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1"><mxGeometry><mxPoint x="590" y="320" as="sourcePoint"/><mxPoint x="190" y="320" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="redis" value="All messages persisted to Redis at&#10;devai:run:{run_id}:a2a_messages&#10;(30-day TTL → audit replay)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#666666;fontSize=12;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="100" y="630" width="500" height="60" as="geometry"/>
+        </mxCell>
 
-        <mxCell id="msg3" value="handoff   &quot;PR #42 ready for review&quot;" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1"><mxGeometry><mxPoint x="590" y="380" as="sourcePoint"/><mxPoint x="990" y="380" as="targetPoint"/></mxGeometry></mxCell>
-
-        <mxCell id="msg4" value="response   &quot;rename FooClient&quot;" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1"><mxGeometry><mxPoint x="990" y="440" as="sourcePoint"/><mxPoint x="590" y="440" as="targetPoint"/></mxGeometry></mxCell>
-
-        <mxCell id="msg5" value="response   &quot;renamed in commit abc&quot;" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1"><mxGeometry><mxPoint x="590" y="500" as="sourcePoint"/><mxPoint x="990" y="500" as="targetPoint"/></mxGeometry></mxCell>
-
-        <mxCell id="msg6" value="response   &quot;approved&quot;" style="endArrow=classic;html=1;fontSize=13;fontStyle=1;strokeWidth=2" edge="1" parent="1"><mxGeometry><mxPoint x="990" y="560" as="sourcePoint"/><mxPoint x="590" y="560" as="targetPoint"/></mxGeometry></mxCell>
-
-        <!-- Message types panel -->
         <mxCell id="types-title" value="Six A2A message types" style="text;align=center;fontSize=15;fontStyle=1" vertex="1" parent="1">
           <mxGeometry x="100" y="730" width="500" height="20" as="geometry"/>
         </mxCell>
-        <mxCell id="t1" value="request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2ff;strokeColor=#0d6efd;fontSize=12" vertex="1" parent="1"><mxGeometry x="100" y="760" width="100" height="40" as="geometry"/></mxCell>
-        <mxCell id="t2" value="response" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d1e7dd;strokeColor=#198754;fontSize=12" vertex="1" parent="1"><mxGeometry x="210" y="760" width="100" height="40" as="geometry"/></mxCell>
-        <mxCell id="t3" value="handoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e2e3ff;strokeColor=#6f42c1;fontSize=12" vertex="1" parent="1"><mxGeometry x="320" y="760" width="100" height="40" as="geometry"/></mxCell>
-        <mxCell id="t4" value="notification" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f3f5;strokeColor=#6c757d;fontSize=12" vertex="1" parent="1"><mxGeometry x="430" y="760" width="100" height="40" as="geometry"/></mxCell>
-        <mxCell id="t5" value="escalation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8d7da;strokeColor=#dc3545;fontSize=12" vertex="1" parent="1"><mxGeometry x="540" y="760" width="100" height="40" as="geometry"/></mxCell>
-        <mxCell id="t6" value="broadcast" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3cd;strokeColor=#ffc107;fontSize=12" vertex="1" parent="1"><mxGeometry x="650" y="760" width="100" height="40" as="geometry"/></mxCell>
-
-        <!-- Identity panel -->
-        <mxCell id="ident" value="Every message carries:&#10;&#10;triggered_by = alice@x.com&#10;trace_id     = trace-abc&#10;&#10;Stamped automatically by the A2A bus —&#10;agents do not need to remember." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7d6;strokeColor=#c89c00;fontSize=13;fontStyle=2;align=left;spacingLeft=20" vertex="1" parent="1">
-          <mxGeometry x="850" y="730" width="380" height="170" as="geometry"/>
+        <mxCell id="t1" value="request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2ff;strokeColor=#0d6efd;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="100" y="760" width="100" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t2" value="response" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d1e7dd;strokeColor=#198754;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="210" y="760" width="100" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t3" value="handoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e2e3ff;strokeColor=#6f42c1;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="320" y="760" width="100" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t4" value="notification" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f3f5;strokeColor=#6c757d;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="430" y="760" width="100" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t5" value="escalation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8d7da;strokeColor=#dc3545;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="540" y="760" width="100" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t6" value="broadcast" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3cd;strokeColor=#ffc107;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="650" y="760" width="100" height="40" as="geometry"/>
         </mxCell>
 
-        <!-- Redis persistence -->
-        <mxCell id="redis" value="All messages persisted to Redis at&#10;devai:run:{run_id}:a2a_messages&#10;(30-day TTL → audit replay)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#666;fontSize=12;fontStyle=2" vertex="1" parent="1">
-          <mxGeometry x="100" y="630" width="500" height="60" as="geometry"/>
+        <mxCell id="ident" value="Every message carries:&#10;&#10;triggered_by = alice@x.com&#10;trace_id = trace-abc&#10;&#10;Stamped automatically by the A2A bus —&#10;agents do not need to remember." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7d6;strokeColor=#c89c00;fontSize=13;fontStyle=2;align=left;spacingLeft=20" vertex="1" parent="1">
+          <mxGeometry x="850" y="730" width="380" height="170" as="geometry"/>
         </mxCell>
       </root>
     </mxGraphModel>

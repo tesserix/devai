@@ -1,65 +1,58 @@
-<mxfile host="docs.drawio" agent="devai" version="24.7.17">
-  <diagram id="spinup" name="Agent spin-up flow">
-    <mxGraphModel dx="1422" dy="900" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="800" math="0" shadow="0">
-      <root>
-        <mxCell id="0"/>
-        <mxCell id="1" parent="0"/>
-
-        <mxCell id="title" value="Spin-up flow — four clean steps" style="text;align=center;verticalAlign=middle;fontSize=20;fontStyle=1" vertex="1" parent="1">
-          <mxGeometry x="400" y="30" width="800" height="40" as="geometry"/>
-        </mxCell>
-
-        <!-- Step 1 -->
-        <mxCell id="s1" value="STEP 1" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#2d3a8c" vertex="1" parent="1">
-          <mxGeometry x="80" y="120" width="200" height="20" as="geometry"/>
-        </mxCell>
-        <mxCell id="s1b" value="Dashboard sends&#10;trigger to DevAI&#10;&#10;identity = alice@x.com&#10;trace = trace-abc" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2d3a8c;strokeColor=#1a2658;fontColor=#fff;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="80" y="150" width="200" height="160" as="geometry"/>
-        </mxCell>
-
-        <!-- Step 2 -->
-        <mxCell id="s2" value="STEP 2" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#7a3d8c" vertex="1" parent="1">
-          <mxGeometry x="380" y="120" width="200" height="20" as="geometry"/>
-        </mxCell>
-        <mxCell id="s2b" value="DevAI asks aregistry&#10;for the agent profile&#10;&#10;GET /v0/agents/&#10;senior_developer&#10;&#10;→ {image, skills, prompts,&#10;mcp_servers, model}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#7a3d8c;strokeColor=#5a2a68;fontColor=#fff;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="380" y="150" width="220" height="200" as="geometry"/>
-        </mxCell>
-
-        <!-- Step 3 -->
-        <mxCell id="s3" value="STEP 3" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#3d5a3d" vertex="1" parent="1">
-          <mxGeometry x="700" y="120" width="200" height="20" as="geometry"/>
-        </mxCell>
-        <mxCell id="s3b" value="DevAI creates K8s Job&#10;profile baked into env:&#10;&#10;DEVAI_AGENT_PROFILE&#10;DEVAI_TRIGGERED_BY&#10;DEVAI_TRACE_ID&#10;DEVAI_AGENTGATEWAY_URL&#10;&#10;Runner pod boots with&#10;everything it needs." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3d5a3d;strokeColor=#2a4030;fontColor=#fff;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="700" y="150" width="240" height="230" as="geometry"/>
-        </mxCell>
-
-        <!-- Step 4 -->
-        <mxCell id="s4" value="STEP 4" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#8c5a2d" vertex="1" parent="1">
-          <mxGeometry x="1020" y="120" width="200" height="20" as="geometry"/>
-        </mxCell>
-        <mxCell id="s4b" value="Runner executes&#10;&#10;LLM → ai-gateway&#10;MCP → agentgateway&#10;Git → GitHub&#10;&#10;writes RESULT:: to stdout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8c5a2d;strokeColor=#683f1a;fontColor=#fff;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="1020" y="150" width="220" height="180" as="geometry"/>
-        </mxCell>
-
-        <!-- Step 5 -->
-        <mxCell id="s5" value="STEP 5" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#5a5a5a" vertex="1" parent="1">
-          <mxGeometry x="1320" y="120" width="200" height="20" as="geometry"/>
-        </mxCell>
-        <mxCell id="s5b" value="DevAI parses RESULT,&#10;persists A2A messages,&#10;dashboard renders.&#10;&#10;Timeline / Repo / Preview&#10;tabs show live progress." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#5a5a5a;strokeColor=#3a3a3a;fontColor=#fff;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="1320" y="150" width="220" height="170" as="geometry"/>
-        </mxCell>
-
-        <!-- arrows between steps -->
-        <mxCell id="ar1" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" edge="1" parent="1" source="s1b" target="s2b"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="ar2" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" edge="1" parent="1" source="s2b" target="s3b"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="ar3" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" edge="1" parent="1" source="s3b" target="s4b"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="ar4" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" edge="1" parent="1" source="s4b" target="s5b"><mxGeometry relative="1" as="geometry"/></mxCell>
-
-        <!-- Key insight box -->
-        <mxCell id="key" value="Key insight: the aregistry call happens ONCE per dispatch.&#10;The runner reads its profile from env vars baked into the Job by DevAI —&#10;it does NOT re-query aregistry on boot." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7d6;strokeColor=#c89c00;fontSize=14;fontStyle=2" vertex="1" parent="1">
-          <mxGeometry x="380" y="500" width="860" height="80" as="geometry"/>
-        </mxCell>
-      </root>
-    </mxGraphModel>
-  </diagram>
+<mxfile host="65bd71144e">
+    <diagram id="spinup" name="Agent spin-up flow">
+        <mxGraphModel dx="674" dy="604" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="800" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" value="Spin-up flow — four clean steps" style="text;align=center;verticalAlign=middle;fontSize=20;fontStyle=1" parent="1" vertex="1">
+                    <mxGeometry x="400" y="30" width="800" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="s1" value="STEP 1" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#2d3a8c" parent="1" vertex="1">
+                    <mxGeometry x="71" y="155" width="200" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="s1b" value="Dashboard sends&#xa;trigger to DevAI&#xa;&#xa;identity = alice@x.com&#xa;trace = trace-abc" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2d3a8c;strokeColor=#1a2658;fontColor=#fff;fontSize=13" parent="1" vertex="1">
+                    <mxGeometry x="71" y="185" width="200" height="160" as="geometry"/>
+                </mxCell>
+                <mxCell id="s2" value="STEP 2" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#7a3d8c" parent="1" vertex="1">
+                    <mxGeometry x="380" y="135" width="200" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="s2b" value="DevAI asks aregistry&#xa;for the agent profile&#xa;&#xa;GET /v0/agents/&#xa;senior_developer&#xa;&#xa;→ {image, skills, prompts,&#xa;mcp_servers, model}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#7a3d8c;strokeColor=#5a2a68;fontColor=#fff;fontSize=13" parent="1" vertex="1">
+                    <mxGeometry x="380" y="165" width="220" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="s3" value="STEP 3" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#3d5a3d" parent="1" vertex="1">
+                    <mxGeometry x="700" y="120" width="200" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="s3b" value="DevAI creates K8s Job&#xa;profile baked into env:&#xa;&#xa;DEVAI_AGENT_PROFILE&#xa;DEVAI_TRIGGERED_BY&#xa;DEVAI_TRACE_ID&#xa;DEVAI_AGENTGATEWAY_URL&#xa;&#xa;Runner pod boots with&#xa;everything it needs." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3d5a3d;strokeColor=#2a4030;fontColor=#fff;fontSize=13" parent="1" vertex="1">
+                    <mxGeometry x="700" y="150" width="240" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="s4" value="STEP 4" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#8c5a2d" parent="1" vertex="1">
+                    <mxGeometry x="1020" y="145" width="200" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="s4b" value="Runner executes&#xa;&#xa;LLM → ai-gateway&#xa;MCP → agentgateway&#xa;Git → GitHub&#xa;&#xa;writes RESULT:: to stdout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8c5a2d;strokeColor=#683f1a;fontColor=#fff;fontSize=13" parent="1" vertex="1">
+                    <mxGeometry x="1020" y="175" width="220" height="180" as="geometry"/>
+                </mxCell>
+                <mxCell id="s5" value="STEP 5" style="text;align=center;fontSize=14;fontStyle=1;fontColor=#5a5a5a" parent="1" vertex="1">
+                    <mxGeometry x="1320" y="150" width="200" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="s5b" value="DevAI parses RESULT,&#xa;persists A2A messages,&#xa;dashboard renders.&#xa;&#xa;Timeline / Repo / Preview&#xa;tabs show live progress." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#5a5a5a;strokeColor=#3a3a3a;fontColor=#fff;fontSize=13" parent="1" vertex="1">
+                    <mxGeometry x="1320" y="180" width="220" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="ar1" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" parent="1" source="s1b" target="s2b" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ar2" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" parent="1" source="s2b" target="s3b" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ar3" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" parent="1" source="s3b" target="s4b" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ar4" value="" style="endArrow=classic;html=1;strokeWidth=3;exitX=1;exitY=0.5;entryX=0;entryY=0.5" parent="1" source="s4b" target="s5b" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="key" value="Key insight: the aregistry call happens ONCE per dispatch.&#xa;The runner reads its profile from env vars baked into the Job by DevAI —&#xa;it does NOT re-query aregistry on boot." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7d6;strokeColor=#c89c00;fontSize=14;fontStyle=2" parent="1" vertex="1">
+                    <mxGeometry x="380" y="500" width="860" height="80" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
 </mxfile>
