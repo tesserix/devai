@@ -1,0 +1,65 @@
+<mxfile host="docs.drawio" agent="devai" version="24.7.17">
+  <diagram id="identity" name="Identity propagation">
+    <mxGraphModel dx="1422" dy="900" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="How alice@x.com's identity reaches every agent action" style="text;align=center;verticalAlign=middle;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="100" y="30" width="900" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step boxes top to bottom -->
+        <mxCell id="i1" value="1.  alice@x.com signs in&#10;Google or Keycloak OAuth&#10;→ ID token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cccccc;strokeColor=#666;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="380" y="100" width="340" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i2" value="2.  auth-bff verifies token&#10;mints AES-GCM session cookie:&#10;{uid, email, tenant, pool}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#5a5a5a;strokeColor=#3a3a3a;fontColor=#fff;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="380" y="220" width="340" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i3" value="3.  Every DevAI request gets&#10;X-Forwarded-User: alice@x.com&#10;stamped by auth-bff proxy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#5a5a5a;strokeColor=#3a3a3a;fontColor=#fff;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="380" y="340" width="340" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i4" value="4.  DevAI extract_principal()&#10;builds Principal&#10;stamps onto ALMState + DevAITask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2d3a8c;strokeColor=#1a2658;fontColor=#fff;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="380" y="460" width="340" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i5" value="5.  K8s Job env carries:&#10;DEVAI_TRIGGERED_BY = alice@x.com&#10;DEVAI_TRACE_ID = trace-abc" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3d5a3d;strokeColor=#2a4030;fontColor=#fff;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="380" y="580" width="340" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i6" value="6.  Runner BaseAgent.run reads env,&#10;constructs A2ABus with identity.&#10;Every outbound message inherits it." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3d5a3d;strokeColor=#2a4030;fontColor=#fff;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="380" y="700" width="340" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Three sinks -->
+        <mxCell id="sink1" value="A2A message&#10;triggered_by = alice@x.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e2e3ff;strokeColor=#6f42c1;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="120" y="850" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sink2" value="SCM commit_file&#10;repo event attributed&#10;to alice@x.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d1e7dd;strokeColor=#198754;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="440" y="850" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sink3" value="Logs + LangSmith trace&#10;correlated by trace_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3cd;strokeColor=#ffc107;fontSize=12" vertex="1" parent="1">
+          <mxGeometry x="760" y="850" width="220" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- arrows -->
+        <mxCell id="ai1" style="endArrow=classic;html=1;strokeWidth=3" edge="1" parent="1" source="i1" target="i2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ai2" style="endArrow=classic;html=1;strokeWidth=3" edge="1" parent="1" source="i2" target="i3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ai3" style="endArrow=classic;html=1;strokeWidth=3" edge="1" parent="1" source="i3" target="i4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ai4" style="endArrow=classic;html=1;strokeWidth=3" edge="1" parent="1" source="i4" target="i5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ai5" style="endArrow=classic;html=1;strokeWidth=3" edge="1" parent="1" source="i5" target="i6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ai6" style="endArrow=classic;html=1;strokeWidth=2" edge="1" parent="1" source="i6" target="sink1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ai7" style="endArrow=classic;html=1;strokeWidth=2" edge="1" parent="1" source="i6" target="sink2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ai8" style="endArrow=classic;html=1;strokeWidth=2" edge="1" parent="1" source="i6" target="sink3"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- key insight -->
+        <mxCell id="keyi" value="Result: every agent action and every A2A message is attributable to the originating user.&#10;Audit replay by triggered_by or trace_id works end-to-end." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7d6;strokeColor=#c89c00;fontSize=13;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="120" y="960" width="860" height="60" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
