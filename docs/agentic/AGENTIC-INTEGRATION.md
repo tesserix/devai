@@ -105,6 +105,123 @@ flowchart LR
 
 ---
 
+## 2a. How DevAI knows which agent and which MCP to use — in plain English
+
+There are three questions to answer, and **three different things answer them**.
+Each one has a single owner; they never overlap.
+
+### Question 1 — "Which agent should run at this step?"
+
+**Answered by the blueprint.** A blueprint is a YAML file in `blueprints/` that
+lists the steps of a workflow in order. Each step names the agent that should
+run there.
+
+```yaml
+# blueprints/app-scaffold.yaml
+- name: scaffold_app
+  stage: run_as_job
+  config:
+    agent: senior_developer    # ← the blueprint picks the agent
+```
+
+When DevAI walks the blueprint and reaches `scaffold_app`, it just reads
+`config.agent` and gets the string `"senior_developer"`. That's it. The
+blueprint author decides this at design time — DevAI doesn't choose, it obeys.
+
+### Question 2 — "What does that agent need to do its job?"
+
+**Answered by the Agent Registry (aregistry).** Aregistry is a catalog. For
+every agent, it stores a record like a business card:
+
+| Field | Example |
+|---|---|
+| name | senior-developer-agent |
+| image | `ghcr.io/tesserix/devai/devai-runner:main` |
+| model | anthropic / claude-sonnet-4 |
+| skills | code_review, git_workflow, testing |
+| prompts | implement_story, refactor |
+| **mcp_servers** | **scm-mcp, devai-mcp** |
+
+DevAI calls aregistry once per dispatch:
+
+```
+DevAI → aregistry: "what's on senior_developer's card?"
+aregistry → DevAI: { …the whole business card… }
+```
+
+DevAI takes the whole card, **JSON-encodes it**, and writes it into a single
+environment variable on the K8s Job: `DEVAI_AGENT_PROFILE`. That way the
+runner pod gets everything it needs the moment it boots, without having to
+phone aregistry again.
+
+### Question 3 — "Where do those MCP servers actually live?"
+
+**Answered by aregistry again.** The agent's card lists MCP server *names*,
+not URLs. The runner asks aregistry for each name:
+
+```
+runner → aregistry: "where is scm-mcp?"
+aregistry → runner: "http://devai-api.devai.svc.cluster.local:8080/mcp/scm"
+```
+
+Then there's one last twist: if `DEVAI_AGENTGATEWAY_URL` is set in the
+runner's environment, the runner *replaces* the URL aregistry handed back
+with one that goes through the Agent Gateway instead:
+
+```
+http://agentgateway.agentgateway-system.svc.cluster.local:9092/mcp/scm-mcp
+```
+
+That way traffic policy, retries, and tracing live on the gateway — but the
+**discovery** is still aregistry's job.
+
+### One-paragraph summary
+
+> The blueprint picks **which agent** runs at each step.
+> The agent's card in aregistry says **what skills, prompts, MCP servers, and
+> model** that agent needs.
+> Aregistry also tells the runner **where each MCP server actually lives**.
+> The Agent Gateway just *reroutes* MCP traffic when it's enabled — it doesn't
+> pick anything.
+
+So:
+
+> **Blueprint = which agent.
+> Aregistry = what that agent needs and where to find it.
+> Agent Gateway = how the traffic flows once decided.**
+
+### Worked example — `senior_developer` on a Next.js scaffold
+
+1. Blueprint `app-scaffold.yaml` says step `scaffold_app` runs
+   `agent: senior_developer`.
+2. DevAI asks aregistry for senior_developer's card → gets back model + skills
+   + prompts + `mcp_servers: [scm-mcp, devai-mcp]`.
+3. DevAI picks a runner image — for this step, the per-stack default
+   (`devai-runner-nextjs:main`) wins over what's on the card.
+4. DevAI creates a K8s Job. The Job's env carries the full card as JSON, plus
+   the gateway URL.
+5. The runner pod boots, reads the card from env (no aregistry call), and
+   asks aregistry for each MCP server's address.
+6. If a gateway URL is set, the runner rewrites those addresses to go through
+   the Agent Gateway.
+7. The agent runs: LLM calls flow through the AI Gateway, MCP calls through
+   the Agent Gateway (or direct if the gateway URL is empty), Git commits go
+   straight to GitHub.
+8. The pod prints `RESULT::{...}` and exits. DevAI picks up the result and
+   moves to the next blueprint step.
+
+### Who changes what?
+
+| If you want to… | Edit… |
+|---|---|
+| Add a new step to a workflow | a blueprint YAML in `blueprints/` |
+| Swap which agent runs at a step | the `config.agent` field of that blueprint step |
+| Give an agent access to a new MCP server | the agent's seed in `architecture/registry-seeds/agents/` |
+| Add a new MCP server entirely | drop a YAML in `architecture/registry-seeds/mcp-servers/` |
+| Route all MCP traffic through the gateway | set `DEVAI_AGENTGATEWAY_URL` in `tesserix-k8s` |
+
+---
+
 ## 3. A2A protocol — agent-to-agent handover
 
 DevAI agents collaborate via a small typed protocol. Six message types
