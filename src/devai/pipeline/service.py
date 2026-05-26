@@ -65,12 +65,17 @@ class PipelineService:
         event_bus: EventBus | None = None,
         event_bus_adapter: EventBusAdapter | None = None,
         blueprint_dir: str | Path | None = None,
+        registry_client: Any = None,
     ) -> None:
         self.config = config
         self.scm = scm
         self.state_manager = state_manager
         self.event_bus = event_bus
         self.event_bus_adapter = event_bus_adapter
+        # aregistry client — handed to JobRunnerStage via StageDeps.extra
+        # so dispatch can resolve agent profiles before submitting Jobs.
+        # None is normal (DEVAI_REGISTRY_URL unset) — stages tolerate it.
+        self.registry_client = registry_client
         self.blueprint_dir = Path(blueprint_dir or config.pipeline_blueprint_dir)
 
         self._pipeline: Pipeline | None = None

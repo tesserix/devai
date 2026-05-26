@@ -93,10 +93,20 @@ class JobRunnerStage(PipelineStage):
             )
 
         agent_name = str(self.config.get("agent", self._stage_name))
-        image = self._resolve_image(runtime, agent_name)
+        # Single round-trip to aregistry: pick the image AND capture the
+        # full profile so we can pass it through the Job env. Avoids the
+        # previous pattern where the dispatcher resolved the image and
+        # the runner did a second lookup that it then threw away.
+        agent_profile = self._fetch_agent_profile(agent_name)
+        image = self._resolve_image(runtime, agent_name, agent_profile)
         blueprint = task.blueprint or ""
 
         from devai.runtime import RunnerJobInputs, build_job_spec
+
+        # Agent control-plane URLs are read off settings so deployments
+        # can flip them per environment. Empty = "no gateway, talk direct".
+        agentgateway_url = str(getattr(self.deps.config, "agentgateway_url", "") or "")
+        kagent_url = str(getattr(self.deps.config, "kagent_url", "") or "")
 
         inputs = RunnerJobInputs(
             task_id=task.id,
@@ -109,6 +119,11 @@ class JobRunnerStage(PipelineStage):
             extra_env={
                 k: str(v) for k, v in self.config.items() if not k.startswith("__")
             },
+            triggered_by=task.triggered_by or "",
+            trace_id=task.trace_id or "",
+            agent_profile=agent_profile,
+            agentgateway_url=agentgateway_url,
+            kagent_url=kagent_url,
         )
         job_spec = build_job_spec(runtime.config, inputs)
         job_name = job_spec["metadata"]["name"]
@@ -180,8 +195,54 @@ class JobRunnerStage(PipelineStage):
         extra = self.deps.extra or {}
         return extra.get("job_watcher")
 
-    def _resolve_image(self, runtime: "K8sJobRuntime", agent_name: str) -> str:
-        """Pick the runner image — per-stack override, agent override, or base."""
+    def _fetch_agent_profile(self, agent_name: str) -> dict[str, Any] | None:
+        """Pull the canonical aregistry record for this agent.
+
+        Returns ``{image, skills, prompts, mcp_servers, model_provider,
+        model_name}`` or None if aregistry isn't configured or doesn't
+        know the agent. Bounded by RegistryClient's 30 s TTL cache, so
+        the dispatcher path stays sub-millisecond on warm cache.
+
+        Defensive — never raises. A registry miss must not block a
+        pipeline run; the runner falls back to local YAML in that case.
+        """
+        registry = (self.deps.extra or {}).get("registry_client") if self.deps.extra else None
+        if registry is None:
+            return None
+        try:
+            agent_meta = registry.get_agent(agent_name)
+        except Exception:  # noqa: BLE001
+            logger.debug("registry.get_agent(%s) failed", agent_name, exc_info=True)
+            return None
+        if agent_meta is None:
+            return None
+        return {
+            "name": getattr(agent_meta, "name", agent_name),
+            "image": getattr(agent_meta, "image", "") or "",
+            "description": getattr(agent_meta, "description", "") or "",
+            "version": getattr(agent_meta, "version", "") or "",
+            "framework": getattr(agent_meta, "framework", "") or "",
+            "language": getattr(agent_meta, "language", "") or "",
+            "model_provider": getattr(agent_meta, "model_provider", "") or "",
+            "model_name": getattr(agent_meta, "model_name", "") or "",
+            "skills": list(getattr(agent_meta, "skills", []) or []),
+            "prompts": list(getattr(agent_meta, "prompts", []) or []),
+            "mcp_servers": list(getattr(agent_meta, "mcp_servers", []) or []),
+        }
+
+    def _resolve_image(
+        self,
+        runtime: "K8sJobRuntime",
+        agent_name: str,
+        profile: dict[str, Any] | None = None,
+    ) -> str:
+        """Pick the runner image — per-stack override, profile override, or base.
+
+        Authority order: explicit ``stage.config.image`` (1) → per-stack
+        runtime image (2) → aregistry agent profile's ``image`` (3) →
+        runtime default (4). The aregistry hit was already paid by
+        ``_fetch_agent_profile``; this is a pure dict lookup.
+        """
         override = self.config.get("image")
         if override:
             return str(override)
@@ -190,16 +251,8 @@ class JobRunnerStage(PipelineStage):
         if stack in per_stack:
             return per_stack[stack]
 
-        # As a secondary lookup, query the registry for an Agent record
-        # carrying a custom image. Don't crash on registry miss.
-        registry = (self.deps.extra or {}).get("registry_client") if self.deps.extra else None
-        if registry is not None:
-            try:
-                agent_meta = registry.get_agent(agent_name)
-                if agent_meta and getattr(agent_meta, "image", None):
-                    return str(agent_meta.image)
-            except Exception:  # noqa: BLE001
-                logger.debug("registry lookup for agent image %s failed", agent_name)
+        if profile and profile.get("image"):
+            return str(profile["image"])
 
         return runtime.config.runner_image
 

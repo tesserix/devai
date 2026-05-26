@@ -53,11 +53,20 @@ def _dns_safe(value: str, *, max_len: int = 63) -> str:
 
 @dataclass(slots=True)
 class RunnerJobInputs:
-    """Everything `build_job_spec` needs to render a Job.
+    """Everything ``build_job_spec`` needs to render a Job.
 
     Kept as a dataclass so callers can construct it from any source
     (PipelineService, REST endpoint, CLI) without remembering positional
     order.
+
+    The ``agent_profile`` field is the structured aregistry record for
+    the agent that's about to run — ``{image, skills, prompts,
+    mcp_servers, model_provider, model_name}``. It's serialized as JSON
+    into ``DEVAI_AGENT_PROFILE`` so the runner pod gets the canonical
+    answer without re-querying aregistry on boot (and so the dispatch
+    decision is auditable in the Job's env block). None when aregistry
+    is disabled or the agent isn't catalogued — the runner falls back to
+    local YAML in that case.
     """
 
     task_id: str
@@ -68,6 +77,15 @@ class RunnerJobInputs:
     intent: str  # user prompt
     blueprint: str  # which blueprint is driving the run
     extra_env: dict[str, str]  # stage.config carried straight through
+    # Caller identity — flows from the boundary all the way into the Job.
+    triggered_by: str = ""
+    trace_id: str = ""
+    # aregistry profile — see class docstring.
+    agent_profile: dict[str, Any] | None = None
+    # Agent-control-plane URLs — runner reads these to route MCP traffic
+    # via agentgateway (if set) and to call kagent for A2A handoffs.
+    agentgateway_url: str = ""
+    kagent_url: str = ""
 
 
 def build_job_spec(
@@ -104,6 +122,21 @@ def build_job_spec(
         # Stage handlers pass their YAML `config:` block as a JSON blob so
         # the runner sees the exact values without re-parsing YAML.
         {"name": "DEVAI_STAGE_CONFIG", "value": json.dumps(inputs.extra_env or {})},
+        # Caller identity — propagates the originating user end-to-end.
+        # The runner stamps these onto its A2A messages and structured logs.
+        {"name": "DEVAI_TRIGGERED_BY", "value": inputs.triggered_by or ""},
+        {"name": "DEVAI_TRACE_ID", "value": inputs.trace_id or ""},
+        # Canonical aregistry record for this agent. Pre-resolved by the
+        # dispatcher so the runner doesn't have to round-trip aregistry on
+        # boot (and so the env block is the source of truth for what was
+        # actually dispatched). JSON or empty string.
+        {
+            "name": "DEVAI_AGENT_PROFILE",
+            "value": json.dumps(inputs.agent_profile) if inputs.agent_profile else "",
+        },
+        # Agent control-plane URLs. Empty means "no gateway, talk direct".
+        {"name": "DEVAI_AGENTGATEWAY_URL", "value": inputs.agentgateway_url or ""},
+        {"name": "DEVAI_KAGENT_URL", "value": inputs.kagent_url or ""},
     ]
     # Secrets reused from devai-api-secrets so the runner can talk to the
     # same LLM gateways without holding a separate copy.

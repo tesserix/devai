@@ -42,6 +42,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Build the aregistry client FIRST so every downstream service —
+        # PipelineService stages, SpecializationService, dashboard
+        # routes — shares the same instance (and the same 30 s cache).
+        # Previously PipelineService started before the registry client
+        # existed, which silently dropped registry-based image / profile
+        # lookups in the JobRunnerStage path.
+        try:
+            from devai.registry import create_registry_client
+
+            _registry_client = create_registry_client(config)
+        except Exception:
+            logger.exception("registry client construction failed — running in pure-local mode")
+            _registry_client = None
+        app.state.registry_client = _registry_client
+
         # Start the Fiber-style pipeline runtime when enabled. SCM is
         # constructed lazily so this doesn't trip start-up when the SCM
         # provider isn't configured yet.
@@ -63,6 +78,7 @@ def create_app(
                     state_manager=state,
                     event_bus=event_bus,
                     event_bus_adapter=event_bus_adapter,
+                    registry_client=_registry_client,
                 )
                 await pipeline_service.start()
                 app.state.pipeline_service = pipeline_service
@@ -75,20 +91,12 @@ def create_app(
 
         # SpecializationService — independent of the pipeline runtime so
         # the dashboard can browse the YAML catalog even when the
-        # blueprint executor is disabled. When a registry client is
-        # configured (DEVAI_REGISTRY_URL), the service consults
-        # aregistry first and falls back to local YAML on miss/error.
+        # blueprint executor is disabled.
         spec_service = None
         if getattr(config, "specializations_enabled", True):
             try:
-                from devai.registry import create_registry_client
                 from devai.specializations.service import SpecializationService
 
-                # Construct the registry client up front so both the
-                # SpecializationService AND the /api/registry/* routes
-                # share the same instance (and therefore the same cache).
-                _registry_client = create_registry_client(config)
-                app.state.registry_client = _registry_client
                 spec_service = SpecializationService(
                     config, registry_client=_registry_client
                 )

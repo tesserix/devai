@@ -60,6 +60,8 @@ async def _run() -> int:
     blueprint = os.environ.get("DEVAI_RUNNER_BLUEPRINT", "")
     repo = os.environ.get("DEVAI_RUNNER_REPO", "")
     intent = os.environ.get("DEVAI_RUNNER_INTENT", "")
+    triggered_by = os.environ.get("DEVAI_TRIGGERED_BY", "")
+    trace_id = os.environ.get("DEVAI_TRACE_ID", "")
     stage_config = _decode_stage_config()
 
     if not task_id or not stage:
@@ -67,13 +69,30 @@ async def _run() -> int:
         return 2
 
     logger.info(
-        "runner: task=%s stage=%s agent=%s repo=%s blueprint=%s",
-        task_id, stage, agent_name, repo, blueprint,
+        "runner: task=%s stage=%s agent=%s repo=%s blueprint=%s triggered_by=%s trace=%s",
+        task_id, stage, agent_name, repo, blueprint, triggered_by or "-", trace_id or "-",
     )
 
     # Build the minimum config + adapters the agent needs.
     config = _load_settings()
-    agent_meta = await _resolve_agent(agent_name, config)
+    # Prefer the dispatcher-baked profile (DEVAI_AGENT_PROFILE env). The
+    # JobRunnerStage already paid the aregistry round-trip; re-fetching
+    # would be redundant and breaks if aregistry's network policy denies
+    # the runner pod. Fall through to a live aregistry call when the env
+    # is empty (older dispatchers, manual `kubectl run` for debugging).
+    agent_meta = _decode_agent_profile_from_env()
+    if agent_meta is None:
+        agent_meta = await _resolve_agent(agent_name, config)
+    if agent_meta:
+        logger.info(
+            "runner: agent profile resolved name=%s model=%s/%s skills=%d prompts=%d mcp_servers=%d",
+            agent_meta.get("name"),
+            agent_meta.get("model_provider") or "-",
+            agent_meta.get("model_name") or "-",
+            len(agent_meta.get("skills") or []),
+            len(agent_meta.get("prompts") or []),
+            len(agent_meta.get("mcp_servers") or []),
+        )
 
     # Stage handlers fall into a few buckets. Most run a Specialization
     # (YAML) or a legacy Python agent. A small set of stages have
@@ -94,6 +113,8 @@ async def _run() -> int:
             agent_meta=agent_meta,
             stage_config=stage_config,
             config=config,
+            triggered_by=triggered_by,
+            trace_id=trace_id,
         )
     except Exception:  # noqa: BLE001
         logger.exception("runner: handler %s raised", stage)
@@ -123,19 +144,22 @@ async def _run_agent(
     agent_meta: dict[str, Any] | None,
     stage_config: dict[str, Any],
     config: Any,
+    triggered_by: str = "",
+    trace_id: str = "",
 ) -> dict[str, Any]:
     """Generic agent runner — invokes a Specialization or legacy agent.
 
     The execution boils down to:
 
         from devai.specializations.service import SpecializationService
-        service = SpecializationService(config)
+        service = SpecializationService(config, registry_client=...)
         await service.start()
         return await service.invoke(agent_name, ALMState slice)
 
-    We avoid importing SpecializationService at module top-level so this
-    file remains importable even in environments where the full devai
-    package isn't fully wired (early CI tests, slim images, etc.).
+    The aregistry profile (``agent_meta``) is folded into the state
+    slice so the specialization sees the canonical skills / prompts /
+    MCP server list / model override, instead of just whatever local
+    YAML defaults the runner image was built with.
     """
     try:
         from devai.specializations.service import SpecializationService
@@ -146,20 +170,56 @@ async def _run_agent(
             "stage": stage,
         }
 
-    service = SpecializationService(config)
+    # The runner constructs its own registry client so the
+    # SpecializationService can still hit aregistry for skill / prompt
+    # bodies (the env-baked profile only carries names). Construction is
+    # cheap and the client is bounded by a 30 s TTL cache.
+    registry_client = None
+    try:
+        from devai.registry import create_registry_client
+
+        registry_client = create_registry_client(config)
+    except Exception:
+        logger.debug("runner: registry client unavailable — local YAML only", exc_info=True)
+
+    service = SpecializationService(config, registry_client=registry_client)
     try:
         await service.start()
     except Exception:  # noqa: BLE001
         logger.exception("SpecializationService.start failed")
 
-    state_slice = {
+    state_slice: dict[str, Any] = {
         "run_id": task_id,
         "repo_full_name": repo,
         "requirements": intent,
         "stage": stage,
         "blueprint": blueprint,
+        # Identity rides with the state so the agent's A2A messages and
+        # SCM commits carry the originating user.
+        "trigger_actor": triggered_by,
+        "trace_id": trace_id,
         **stage_config,
     }
+
+    # Fold the aregistry profile into the state. The specialization
+    # reads these keys to override its built-in defaults — registry
+    # is authority for skills / prompts / MCP servers / model choice.
+    if agent_meta:
+        state_slice.setdefault("agent_profile", agent_meta)
+        if agent_meta.get("model_provider"):
+            state_slice.setdefault("model_provider", agent_meta["model_provider"])
+        if agent_meta.get("model_name"):
+            state_slice.setdefault("model_name", agent_meta["model_name"])
+        if agent_meta.get("skills"):
+            state_slice.setdefault("allowed_skills", list(agent_meta["skills"]))
+        if agent_meta.get("prompts"):
+            state_slice.setdefault("allowed_prompts", list(agent_meta["prompts"]))
+        if agent_meta.get("mcp_servers"):
+            # Resolve MCP server names → endpoint URLs, honoring the
+            # agentgateway routing override when set.
+            state_slice["mcp_endpoints"] = _resolve_mcp_endpoints(
+                agent_meta["mcp_servers"], registry_client, config
+            )
 
     try:
         patch = await service.invoke(agent_name, state_slice)
@@ -285,6 +345,92 @@ def _decode_stage_config() -> dict[str, Any]:
         return json.loads(raw)
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _decode_agent_profile_from_env() -> dict[str, Any] | None:
+    """Read the dispatcher-baked aregistry profile out of the Job env.
+
+    The JobRunnerStage JSON-encodes the profile into DEVAI_AGENT_PROFILE
+    so the runner doesn't have to re-query aregistry on boot. Returns
+    None when the env is empty (back-compat with older dispatchers) so
+    the caller can fall back to a live registry lookup.
+    """
+    raw = os.environ.get("DEVAI_AGENT_PROFILE", "")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        logger.warning("runner: DEVAI_AGENT_PROFILE not valid JSON — ignoring")
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _resolve_mcp_endpoints(
+    mcp_server_names: list[Any],
+    registry_client: Any,
+    config: Any,
+) -> list[dict[str, str]]:
+    """Resolve each MCP server name to an endpoint the agent can dial.
+
+    For each name we ask aregistry for the canonical record (carrying
+    its in-cluster URL). When ``DEVAI_AGENTGATEWAY_URL`` is set, we
+    rewrite the destination so traffic flows through agentgateway
+    (solo.io) instead of the MCP server's Service IP directly. That
+    hands traffic policy + tracing to the gateway, which is the whole
+    point of having it in the topology.
+
+    Defensive — a missing server name produces a record with
+    ``endpoint`` set to the empty string rather than raising. The
+    agent decides what to do with an unreachable MCP server.
+    """
+    if not mcp_server_names:
+        return []
+
+    gateway_url = os.environ.get("DEVAI_AGENTGATEWAY_URL", "") or (
+        getattr(config, "agentgateway_url", "") or "" if config else ""
+    )
+    gateway_url = gateway_url.rstrip("/")
+
+    resolved: list[dict[str, str]] = []
+    for raw_name in mcp_server_names:
+        name = str(raw_name).strip()
+        if not name:
+            continue
+
+        direct_endpoint = ""
+        record_type = ""
+        if registry_client is not None:
+            try:
+                rec = registry_client.get_mcp_server(name)
+            except Exception:  # noqa: BLE001
+                rec = None
+            if rec is not None:
+                direct_endpoint = (getattr(rec, "url", "") or "").rstrip("/")
+                record_type = getattr(rec, "type", "") or ""
+
+        # Route preference:
+        #   - agentgateway set  → /mcp/<name> on the gateway
+        #   - else direct       → the URL aregistry handed back
+        if gateway_url:
+            endpoint = f"{gateway_url}/mcp/{name}"
+            via = "agentgateway"
+        else:
+            endpoint = direct_endpoint
+            via = "direct"
+
+        resolved.append(
+            {
+                "name": name,
+                "endpoint": endpoint,
+                "direct_endpoint": direct_endpoint,
+                "type": record_type,
+                "routed_via": via,
+            }
+        )
+    return resolved
 
 
 def _load_settings() -> Any:

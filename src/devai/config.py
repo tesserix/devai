@@ -213,6 +213,19 @@ class Settings(BaseSettings):
     registry_timeout_seconds: float = 5.0
     registry_cache_ttl_seconds: float = 30.0
 
+    # --- Agent control plane (agentgateway + kagent) ---
+    # When set, the runner routes MCP traffic through agentgateway
+    # (solo.io) instead of dialing each MCP server's Service directly.
+    # That hands traffic policy + observability to the gateway. Empty
+    # means "no gateway, talk direct" — useful in dev clusters that
+    # haven't installed agentgateway yet.
+    #
+    # kagent_url is reserved for the future A2A handoff path; setting
+    # it today is harmless (the runner only reads it when an agent
+    # explicitly tries to hand off to another runner pod).
+    agentgateway_url: str = ""
+    kagent_url: str = ""
+
     # --- LLM adapter ---
     # Single switch picks the default LLM backend; specialization YAMLs
     # override per-role via their `llm_provider:` field. Missing SDKs /
