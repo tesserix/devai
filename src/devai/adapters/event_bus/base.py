@@ -90,7 +90,7 @@ class Subscription:
     durable_name: str
     queue_group: str | None = None
     _native: Any = None
-    _adapter: "EventBusAdapter | None" = None
+    _adapter: EventBusAdapter | None = None
     closed: bool = False
 
     async def unsubscribe(self) -> None:

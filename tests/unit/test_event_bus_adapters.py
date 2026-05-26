@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
 
 import pytest
 
@@ -26,12 +25,10 @@ from devai.adapters.event_bus import (
     KNOWN_PROVIDERS,
     EventBusAdapter,
     EventMessage,
-    Subscription,
     create_event_bus_adapter,
     event_bus_registry,
 )
 from devai.adapters.event_bus.noop import NoopEventBusAdapter, _matches
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers

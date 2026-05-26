@@ -277,7 +277,7 @@ class NatsEventBusAdapter(EventBusAdapter):
     def _wrap_handler(self, handler: MessageHandler) -> Any:
         """Translate a NATS Msg into our EventMessage on dispatch."""
 
-        async def _cb(msg: "Msg") -> None:  # noqa: F821
+        async def _cb(msg: Msg) -> None:  # noqa: F821
             envelope = EventMessage(
                 subject=msg.subject,
                 data=msg.data or b"",
