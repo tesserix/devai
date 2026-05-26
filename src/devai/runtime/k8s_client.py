@@ -161,6 +161,9 @@ class K8sJobRuntime:
         self._apps_v1 = client.AppsV1Api(self._api_client)
         self._core_v1 = client.CoreV1Api(self._api_client)
         self._networking_v1 = client.NetworkingV1Api(self._api_client)
+        # CustomObjectsApi is what Istio's networking.istio.io VirtualService
+        # lives under — the typed NetworkingV1Api only covers core resources.
+        self._custom_objects = client.CustomObjectsApi(self._api_client)
         self._connected = True
 
     async def close(self) -> None:
@@ -248,6 +251,135 @@ class K8sJobRuntime:
         except Exception as e:  # noqa: BLE001
             logger.warning("k8s runtime: pod_logs(%s) failed: %s", pod_name, e)
             return ""
+
+    # ── Preview pod (Deployment + Service + Istio VirtualService) ────
+    #
+    # These three are applied together by ``apply_preview`` and torn down
+    # together by ``delete_preview``. They're keyed by the Deployment name
+    # the build_preview_manifests() helper emits, which the preview_spinner
+    # agent persists on the DevAITask so a later cleanup stage can find it.
+
+    async def apply_preview(self, manifests: dict[str, Any]) -> dict[str, str]:
+        """Apply the {deployment, service, virtualservice} bundle.
+
+        ``manifests`` is the dict returned by
+        :func:`devai.runtime.job_spec.build_preview_manifests`. Returns
+        ``{deployment_name, service_name, virtualservice_name,
+        preview_host, editor_host}`` so the caller can stash it on the
+        DevAITask and later resolve cleanup targets.
+
+        Idempotent — if the resources already exist (re-run, retry), we
+        patch in place rather than raising AlreadyExists. That keeps the
+        preview_spinner agent safely re-entrant.
+        """
+        from devai.runtime.errors import JobDispatchFailed
+
+        dep = manifests["deployment"]
+        svc = manifests["service"]
+        vs = manifests["virtualservice"]
+        ns = self._config.namespace
+
+        try:
+            await self._apps_v1.create_namespaced_deployment(namespace=ns, body=dep)
+        except Exception as e:
+            # AlreadyExists → patch. We don't import the SDK exception type
+            # to keep the import surface narrow; the string check is the
+            # documented kubernetes_asyncio escape hatch.
+            if "AlreadyExists" in str(e) or " 409 " in str(e):
+                try:
+                    await self._apps_v1.patch_namespaced_deployment(
+                        name=dep["metadata"]["name"], namespace=ns, body=dep
+                    )
+                except Exception as patch_err:
+                    raise JobDispatchFailed(f"patch deployment: {patch_err}") from patch_err
+            else:
+                raise JobDispatchFailed(f"create deployment: {e}") from e
+
+        try:
+            await self._core_v1.create_namespaced_service(namespace=ns, body=svc)
+        except Exception as e:
+            if "AlreadyExists" in str(e) or " 409 " in str(e):
+                try:
+                    await self._core_v1.patch_namespaced_service(
+                        name=svc["metadata"]["name"], namespace=ns, body=svc
+                    )
+                except Exception as patch_err:
+                    raise JobDispatchFailed(f"patch service: {patch_err}") from patch_err
+            else:
+                raise JobDispatchFailed(f"create service: {e}") from e
+
+        try:
+            await self._custom_objects.create_namespaced_custom_object(
+                group="networking.istio.io",
+                version="v1beta1",
+                namespace=ns,
+                plural="virtualservices",
+                body=vs,
+            )
+        except Exception as e:
+            if "AlreadyExists" in str(e) or " 409 " in str(e):
+                try:
+                    await self._custom_objects.patch_namespaced_custom_object(
+                        group="networking.istio.io",
+                        version="v1beta1",
+                        namespace=ns,
+                        plural="virtualservices",
+                        name=vs["metadata"]["name"],
+                        body=vs,
+                    )
+                except Exception as patch_err:
+                    raise JobDispatchFailed(f"patch virtualservice: {patch_err}") from patch_err
+            else:
+                # Istio might not be installed in dev clusters — surface a
+                # warning but don't fail the whole preview. The Service
+                # still lets a port-forward work for local testing.
+                logger.warning("k8s runtime: virtualservice create failed (%s) — preview reachable only by Service", e)
+
+        name = dep["metadata"]["name"]
+        logger.info(
+            "k8s runtime: applied preview %s/%s (preview_host=%s editor_host=%s)",
+            ns,
+            name,
+            manifests.get("preview_host"),
+            manifests.get("editor_host"),
+        )
+        return {
+            "deployment_name": name,
+            "service_name": svc["metadata"]["name"],
+            "virtualservice_name": vs["metadata"]["name"],
+            "preview_host": manifests.get("preview_host", ""),
+            "editor_host": manifests.get("editor_host", ""),
+        }
+
+    async def delete_preview(self, name: str) -> None:
+        """Tear down a preview pod and its routing. Best-effort.
+
+        Used by the run-cleanup stage when a run completes or is cancelled.
+        Each leg is wrapped because deleting one resource shouldn't block
+        deleting the others — a half-cleaned preview is worse than no
+        cleanup attempt.
+        """
+        ns = self._config.namespace
+        # VirtualService first so traffic stops flowing before the pod dies.
+        try:
+            await self._custom_objects.delete_namespaced_custom_object(
+                group="networking.istio.io",
+                version="v1beta1",
+                namespace=ns,
+                plural="virtualservices",
+                name=name,
+            )
+        except Exception:
+            logger.debug("delete virtualservice %s skipped/failed", name, exc_info=True)
+        try:
+            await self._core_v1.delete_namespaced_service(name=name, namespace=ns)
+        except Exception:
+            logger.debug("delete service %s skipped/failed", name, exc_info=True)
+        try:
+            await self._apps_v1.delete_namespaced_deployment(name=name, namespace=ns)
+        except Exception:
+            logger.debug("delete deployment %s skipped/failed", name, exc_info=True)
+        logger.info("k8s runtime: deleted preview %s/%s", ns, name)
 
     async def find_pod_for_job(self, job_name: str) -> str | None:
         """First pod matching `job-name=<job_name>`. None if the Job hasn't

@@ -98,9 +98,11 @@ stages:
   # at preview-<run_id>.devai.tesserix.app. The editor-bridge sidecar
   # exposes Claude Code at editor-<run_id>.devai.tesserix.app.
   - name: spin_preview_pod
-    stage: run_as_job
+    stage: spin_preview_pod       # inline — applies Deployment + Service +
+                                  # Istio VirtualService directly via the
+                                  # orchestrator pod's K8s creds. See
+                                  # pipeline/stages/preview.py.
     config:
-      agent: preview_spinner      # owns the Deployment / VS create logic
       runner_required: true
     depends_on: [open_branch_pr]
     timeout: 600

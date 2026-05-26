@@ -72,6 +72,7 @@ def register_defaults(registry: StageRegistry) -> None:
     from devai.pipeline.stages import alm as _alm
     from devai.pipeline.stages import job_runner as _job_runner
     from devai.pipeline.stages import lifecycle as _lifecycle
+    from devai.pipeline.stages import preview as _preview
     from devai.pipeline.stages import specialization as _specialization
     from devai.pipeline.stages import sre as _sre
 
@@ -110,6 +111,12 @@ def register_defaults(registry: StageRegistry) -> None:
     # execute an agent in a dedicated Pod. The Pod resolves its skills
     # and prompts from aregistry at boot. See pipeline/stages/job_runner.py.
     registry.register("run_as_job", _job_runner.job_runner_stage)
+
+    # ─── Preview pod (Deployment + Service + Istio VirtualService) ───
+    # The ``spin_preview_pod`` stage applies the manifests built by
+    # ``build_preview_manifests`` directly from the orchestrator pod.
+    # Runs inline, not as a Job — see preview.py for the rationale.
+    registry.register("spin_preview_pod", _preview.spin_preview_pod_stage)
 
     # ─── SRE agent adapters ──────────────────────────────────────────
     registry.register("sre_discover", _sre.discover_stage)

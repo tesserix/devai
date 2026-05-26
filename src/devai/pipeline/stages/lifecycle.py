@@ -348,8 +348,21 @@ class _PostReportStage(PipelineStage):
 
     async def execute(self, task: DevAITask) -> StageResult:
         report = self._render(task)
+        # Pull preview URLs off the handover bag so the StageResult.data
+        # surfaces them to subscribers (dashboard SSE, task event payload).
+        preview_url = str(task.agent_context.get("preview_url") or "")
+        editor_url = str(task.agent_context.get("editor_url") or "")
+        triggered_by = task.triggered_by or task.agent_context.get("trigger_actor") or ""
+
+        result_data = {
+            "report_markdown": report,
+            "preview_url": preview_url,
+            "editor_url": editor_url,
+            "triggered_by": triggered_by,
+        }
+
         if self.target == "none" or self.deps.scm is None:
-            return StageResult(message="rendered report (not posted)", data={"report_markdown": report})
+            return StageResult(message="rendered report (not posted)", data=result_data)
 
         try:
             if self.target == "pr" and task.pr_number is not None:
@@ -358,12 +371,29 @@ class _PostReportStage(PipelineStage):
                 await self.deps.scm.post_issue_comment(task.repo, task.issue_number, report)  # type: ignore[union-attr]
         except Exception as e:  # noqa: BLE001
             logger.exception("post_report: failed to post comment")
-            return StageResult(message=f"render ok, post failed: {e}", data={"report_markdown": report})
+            return StageResult(message=f"render ok, post failed: {e}", data=result_data)
 
-        return StageResult(message="report posted", data={"report_markdown": report})
+        return StageResult(message="report posted", data=result_data)
 
     def _render(self, task: DevAITask) -> str:
-        lines = [f"## {self.title}", "", f"**Run:** `{task.id}`", f"**Blueprint:** `{task.blueprint}`", ""]
+        lines = [f"## {self.title}", "", f"**Run:** `{task.id}`", f"**Blueprint:** `{task.blueprint}`"]
+        if task.triggered_by:
+            lines.append(f"**Triggered by:** `{task.triggered_by}`")
+        lines.append("")
+
+        # Preview links — the whole reason post_report exists for the
+        # app-scaffold blueprint. Render them at the top so reviewers
+        # see them without scrolling past the stage list.
+        preview_url = task.agent_context.get("preview_url")
+        editor_url = task.agent_context.get("editor_url")
+        if preview_url or editor_url:
+            lines.append("### Live preview")
+            if preview_url:
+                lines.append(f"- App: <{preview_url}>")
+            if editor_url:
+                lines.append(f"- Editor: <{editor_url}>")
+            lines.append("")
+
         if task.stages_completed:
             lines.append("### Stages completed")
             for s in task.stages_completed:
