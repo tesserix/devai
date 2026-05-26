@@ -107,13 +107,17 @@ def fetch_agentic_status(
     )
 
     # --- kagent (agent runtime controller) ----
+    # /healthz returns 404 on kagent 0.9.x — the binary exposes /version
+    # instead, which serves a small JSON ({kagent_version, git_commit,
+    # build_date}). It's cheap, always-on, and a reliable signal that
+    # the controller process is up and serving its HTTP API.
     kagent = _probe_http(
         name="kagent",
         role="controller",
         namespace="kagent-system",
         url=kagent_url or "http://kagent-controller.kagent-system.svc.cluster.local:8083",
-        path="/healthz",
-        success_code_range=(200, 400),  # kagent serves /healthz sometimes as 401 when auth is on
+        path="/version",
+        success_code_range=(200, 300),
     )
 
     return AgenticStatus(
