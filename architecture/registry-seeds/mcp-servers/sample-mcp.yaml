@@ -1,0 +1,20 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: sample-mcp
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sample
+    devai.io/lifecycle: test
+spec:
+  displayName: Sample MCP (test fixture)
+  description: >-
+    Test fixture used to verify the registry-seed CronJob, the aregistry
+    /v0/servers endpoint, and the dashboard's MCP Servers tile. Safe to
+    delete once verified — no real backend; the endpoint is a placeholder.
+  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/sample
+  authMode: none
+  tools:
+    - sample_ping
+    - sample_echo
