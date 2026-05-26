@@ -47,6 +47,27 @@ export const api = {
 
   getRun: (runId: string) => apiFetch<PipelineRun>(`/pipeline/runs/${runId}`),
 
+  // Per-run Repo viewer (powers the REPO tab on the run detail page).
+  // Read-only — the dashboard cannot write to the repo from here.
+  getRepoTree: (runId: string, path = "") =>
+    apiFetch<{
+      repo: string;
+      branch: string;
+      path: string;
+      entries: Array<{ name: string; type: "file" | "dir"; size: number; path: string }>;
+    }>(`/runs/${runId}/repo/tree?path=${encodeURIComponent(path)}`),
+
+  getRepoFile: (runId: string, path: string) =>
+    apiFetch<{
+      repo: string;
+      branch: string;
+      path: string;
+      encoding: "utf-8" | "base64";
+      content: string;
+      size: number;
+      truncated: boolean;
+    }>(`/runs/${runId}/repo/file?path=${encodeURIComponent(path)}`),
+
   triggerPipeline: (repo: string, requirements: string, issueNumber?: number) =>
     apiFetch<{ run_id: string; stage: string }>("/pipeline/trigger", {
       method: "POST",

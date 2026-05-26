@@ -27,7 +27,7 @@ def create_app(
     state: StateManager,
     config: Settings,
     *,
-    event_bus_adapter: "EventBusAdapter | None" = None,
+    event_bus_adapter: EventBusAdapter | None = None,
 ) -> FastAPI:
     """Create the FastAPI app with shared resources injected.
 
@@ -153,6 +153,21 @@ def create_app(
     from devai.webhook.routes import router as webhook_router
 
     app.include_router(webhook_router)
+
+    # Per-run Repo viewer routes (/api/runs/{run_id}/repo/*) — powers
+    # the dashboard's REPO tab. Read-only file tree, file contents, and
+    # an SSE stream of live file-change events emitted by the agents.
+    from devai.webhook.repo_routes import router as repo_router
+
+    app.include_router(repo_router)
+
+    # Local catalog routes (/api/catalog/*) — exposes the things that
+    # don't live in aregistry: built-in tools, blueprints,
+    # specializations, registered stages. Augments the upstream registry
+    # so the dashboard can render a unified catalog page.
+    from devai.tools.routes import router as catalog_router
+
+    app.include_router(catalog_router)
 
     # Agent Registry catalog routes (/api/registry/*).
     from devai.registry.routes import router as registry_router

@@ -313,6 +313,24 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                 className="absolute z-10 w-full mt-1 rounded-md max-h-56 overflow-y-auto"
                 style={dropdownContainerStyle}
               >
+                {/* Pinned to the top so the create action stays reachable
+                    no matter how many repos are in the list. */}
+                <button
+                  onClick={() => {
+                    setShowCreate(true);
+                    setDropdownOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2.5 text-sm font-medium transition-colors sticky top-0 z-10"
+                  style={{
+                    color: "var(--accent)",
+                    background: "var(--surface-raised)",
+                    borderBottom: "1px solid var(--border-subtle)",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft-bg)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "var(--surface-raised)")}
+                >
+                  + Create new repository
+                </button>
                 {filteredRepos.length > 0 ? (
                   filteredRepos.map((r) => (
                     <button
@@ -359,21 +377,6 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                     {loadingRepos ? "Loading..." : "No repositories found"}
                   </div>
                 )}
-                <button
-                  onClick={() => {
-                    setShowCreate(true);
-                    setDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2.5 text-sm font-medium transition-colors"
-                  style={{
-                    color: "var(--accent)",
-                    borderTop: "1px solid var(--border-subtle)",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft-bg)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                >
-                  + Create new repository
-                </button>
               </div>
             )}
           </div>
@@ -498,6 +501,22 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                 className="absolute z-10 w-full mt-1 rounded-md max-h-56 overflow-y-auto"
                 style={dropdownContainerStyle}
               >
+                <button
+                  onClick={() => {
+                    setShowCreateProject(true);
+                    setProjectDropdownOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2.5 text-sm font-medium transition-colors sticky top-0 z-10"
+                  style={{
+                    color: "var(--accent)",
+                    background: "var(--surface-raised)",
+                    borderBottom: "1px solid var(--border-subtle)",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft-bg)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "var(--surface-raised)")}
+                >
+                  + Create new project board
+                </button>
                 {filteredProjects.length > 0 ? (
                   filteredProjects.map((p) => (
                     <button
@@ -528,21 +547,6 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                     {loadingProjects ? "Loading..." : "No projects found"}
                   </div>
                 )}
-                <button
-                  onClick={() => {
-                    setShowCreateProject(true);
-                    setProjectDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2.5 text-sm font-medium transition-colors"
-                  style={{
-                    color: "var(--accent)",
-                    borderTop: "1px solid var(--border-subtle)",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft-bg)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                >
-                  + Create new project board
-                </button>
               </div>
             )}
           </div>
