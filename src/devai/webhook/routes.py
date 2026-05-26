@@ -18,8 +18,41 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from devai.identity import Principal, new_trace_id
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _principal_from_webhook(provider: str, payload: dict[str, Any]) -> Principal:
+    """Build a Principal from a GitHub/GitLab/ADO webhook payload.
+
+    All three providers surface a ``sender`` block with a login. Email
+    is rarely populated on private accounts, so we synthesize one — the
+    important thing is that downstream audit code can answer "who pushed
+    this?" with a stable handle.
+    """
+    sender = payload.get("sender") or payload.get("user") or {}
+    login = (
+        sender.get("login")
+        or sender.get("username")
+        or sender.get("name")
+        or payload.get("uniqueName")  # ADO
+        or "unknown"
+    )
+    email = sender.get("email") or ""
+    return Principal.webhook(provider=provider, sender_login=login, sender_email=email)
+
+
+def _provider_from_path(path: str) -> str:
+    """Map a webhook URL path to its SCM provider name."""
+    if "github" in path:
+        return "github"
+    if "gitlab" in path:
+        return "gitlab"
+    if "ado" in path:
+        return "azure_devops"
+    return "scm"
 
 
 @router.post("/webhook/github")
@@ -58,6 +91,12 @@ async def scm_webhook(request: Request) -> dict[str, str]:
 
     payload = await request.json()
 
+    # Identity: stamp the SCM sender onto the trigger so downstream
+    # agents know which human pushed the issue / opened the PR.
+    provider = _provider_from_path(str(request.url.path))
+    principal = _principal_from_webhook(provider, payload)
+    trace_id = new_trace_id()
+
     # Use SCM abstraction to normalize the event
     normalized = scm.parse_webhook_event(event_type, payload)
     await scm.close()
@@ -75,16 +114,21 @@ async def scm_webhook(request: Request) -> dict[str, str]:
         )
 
         if should_trigger:
-            await _trigger_from_normalized_event(request, normalized)
+            await _trigger_from_normalized_event(request, normalized, principal, trace_id)
     else:
         # Fall back to legacy GitHub-specific routing for projects v2
         if event_type == "projects_v2_item":
-            await _route_event(request, event_type, payload)
+            await _route_event(request, event_type, payload, principal, trace_id)
 
     return {"status": "accepted"}
 
 
-async def _trigger_from_normalized_event(request: Request, event: dict[str, Any]) -> None:
+async def _trigger_from_normalized_event(
+    request: Request,
+    event: dict[str, Any],
+    principal: Principal,
+    trace_id: str,
+) -> None:
     """Trigger the pipeline from a normalized SCM event."""
     repo = event["repo"]
     issue_number = event["issue_number"]
@@ -135,10 +179,20 @@ async def _trigger_from_normalized_event(request: Request, event: dict[str, Any]
     except Exception as e:
         logger.warning("Failed to post trigger comment: %s", e)
 
-    asyncio.create_task(_run_pipeline(request, repo, requirements, event.get("trigger_type", "scm"), str(issue_number)))
+    asyncio.create_task(
+        _run_pipeline(
+            request, repo, requirements, event.get("trigger_type", "scm"), str(issue_number), principal, trace_id
+        )
+    )
 
 
-async def _route_event(request: Request, event_type: str, payload: dict[str, Any]) -> None:
+async def _route_event(
+    request: Request,
+    event_type: str,
+    payload: dict[str, Any],
+    principal: Principal,
+    trace_id: str,
+) -> None:
     """Route GitHub events to the LangGraph ALM pipeline."""
     config = request.app.state.config
 
@@ -148,34 +202,39 @@ async def _route_event(request: Request, event_type: str, payload: dict[str, Any
 
         # Trigger on the pipeline label OR on "requirement" label
         if label_name in (config.pipeline_label, "requirement", "devai:requirement"):
-            await _trigger_from_issue(request, payload)
+            await _trigger_from_issue(request, payload, principal, trace_id)
             return
 
     # --- 2. Issue opened with requirement label already on it ---
     if event_type == "issues" and payload.get("action") == "opened":
         labels = [lbl.get("name", "") for lbl in payload.get("issue", {}).get("labels", [])]
         if any(name in (config.pipeline_label, "requirement", "devai:requirement") for name in labels):
-            await _trigger_from_issue(request, payload)
+            await _trigger_from_issue(request, payload, principal, trace_id)
             return
 
     # --- 3. Issue comment with /devai command ---
     if event_type == "issue_comment" and payload.get("action") == "created":
         comment_body = payload.get("comment", {}).get("body", "").strip()
         if comment_body.startswith("/devai run") or comment_body.startswith("/devai build"):
-            await _trigger_from_issue_comment(request, payload)
+            await _trigger_from_issue_comment(request, payload, principal, trace_id)
             return
 
     # --- 4. Projects v2 item moved to ready column ---
     if event_type == "projects_v2_item":
         action = payload.get("action", "")
         if action in ("edited", "created"):
-            await _trigger_from_project_card(request, payload)
+            await _trigger_from_project_card(request, payload, principal, trace_id)
             return
 
     logger.debug("Ignoring event: %s/%s", event_type, payload.get("action", ""))
 
 
-async def _trigger_from_issue(request: Request, payload: dict[str, Any]) -> None:
+async def _trigger_from_issue(
+    request: Request,
+    payload: dict[str, Any],
+    principal: Principal,
+    trace_id: str,
+) -> None:
     """Trigger the ALM pipeline from a GitHub issue."""
     issue = payload["issue"]
     repo = payload["repository"]["full_name"]
@@ -185,18 +244,26 @@ async def _trigger_from_issue(request: Request, payload: dict[str, Any]) -> None
     requirements = _build_requirements_from_issue(issue)
 
     logger.info(
-        "Pipeline triggered from issue #%d on %s: %s",
+        "Pipeline triggered from issue #%d on %s: %s (by %s)",
         issue_number,
         repo,
         issue_title,
+        principal.email,
     )
 
     await _post_trigger_comment(request, repo, issue_number)
 
-    asyncio.create_task(_run_pipeline(request, repo, requirements, "github_issue", str(issue_number)))
+    asyncio.create_task(
+        _run_pipeline(request, repo, requirements, "github_issue", str(issue_number), principal, trace_id)
+    )
 
 
-async def _trigger_from_issue_comment(request: Request, payload: dict[str, Any]) -> None:
+async def _trigger_from_issue_comment(
+    request: Request,
+    payload: dict[str, Any],
+    principal: Principal,
+    trace_id: str,
+) -> None:
     """Trigger pipeline from a /devai command in an issue comment."""
     issue = payload["issue"]
     repo = payload["repository"]["full_name"]
@@ -208,13 +275,20 @@ async def _trigger_from_issue_comment(request: Request, payload: dict[str, Any])
 
     requirements = override_reqs or _build_requirements_from_issue(issue)
 
-    logger.info("Pipeline triggered from comment on #%d on %s", issue_number, repo)
+    logger.info("Pipeline triggered from comment on #%d on %s (by %s)", issue_number, repo, principal.email)
 
     await _post_trigger_comment(request, repo, issue_number)
-    asyncio.create_task(_run_pipeline(request, repo, requirements, "github_issue", str(issue_number)))
+    asyncio.create_task(
+        _run_pipeline(request, repo, requirements, "github_issue", str(issue_number), principal, trace_id)
+    )
 
 
-async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) -> None:
+async def _trigger_from_project_card(
+    request: Request,
+    payload: dict[str, Any],
+    principal: Principal,
+    trace_id: str,
+) -> None:
     """Trigger pipeline when a project card is moved to the ready column."""
     config = request.app.state.config
     changes = payload.get("changes", {})
@@ -268,7 +342,9 @@ async def _trigger_from_project_card(request: Request, payload: dict[str, Any]) 
         )
 
         await _post_trigger_comment(request, repo, issue_number)
-        asyncio.create_task(_run_pipeline(request, repo, requirements, "project_card", str(issue_number)))
+        asyncio.create_task(
+            _run_pipeline(request, repo, requirements, "project_card", str(issue_number), principal, trace_id)
+        )
 
     except Exception as e:
         logger.error("Failed to process project card event: %s", e)
@@ -374,6 +450,8 @@ async def _run_pipeline(
     requirements: str,
     trigger_type: str,
     trigger_ref: str,
+    principal: Principal,
+    trace_id: str,
 ) -> None:
     """Run the ALM pipeline as a background task.
 
@@ -404,6 +482,8 @@ async def _run_pipeline(
                 trigger_type=trigger_type,
                 label=f"{trigger_type}:{trigger_ref}"[:80],
                 agent_context={"trigger_ref": trigger_ref, "requirements": requirements},
+                principal=principal.to_dict(),
+                trace_id=trace_id,
             )
             logger.info(
                 "Dispatched pipeline task %s blueprint=%s repo=%s trigger=%s",
@@ -431,6 +511,8 @@ async def _run_pipeline(
             requirements=requirements,
             trigger_type=trigger_type,
             trigger_ref=trigger_ref,
+            principal=principal,
+            trace_id=trace_id,
         )
 
         # Post completion comment on the originating issue

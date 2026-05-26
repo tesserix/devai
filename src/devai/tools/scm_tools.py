@@ -230,9 +230,26 @@ class SCMToolExecutor:
     All operations pass through guardrails for authorization and audit.
     """
 
-    def __init__(self, scm: SCMClient, agent_name: str = "") -> None:
+    def __init__(
+        self,
+        scm: SCMClient,
+        agent_name: str = "",
+        *,
+        run_id: str = "",
+        redis: Any = None,
+        triggered_by: str = "",
+        trace_id: str = "",
+    ) -> None:
         self.scm = scm
         self._agent_name = agent_name
+        # When set, file-write tools push entries to
+        # ``devai:run:<run_id>:repo_events`` so the dashboard's REPO tab
+        # sees changes in real time. All four are optional — passing
+        # nothing degrades to the legacy no-event behavior.
+        self._run_id = run_id
+        self._redis = redis
+        self._triggered_by = triggered_by
+        self._trace_id = trace_id
 
     async def execute(self, tool_name: str, tool_input: dict[str, Any]) -> str:
         """Execute an SCM tool and return the result as a string."""
@@ -323,13 +340,31 @@ class SCMToolExecutor:
         return f"Branch '{inp['branch_name']}' created at {sha}"
 
     async def _handle_scm_commit_file(self, inp: dict[str, Any]) -> dict[str, Any]:
-        return await self.scm.create_or_update_file(
+        result = await self.scm.create_or_update_file(
             inp["repo"],
             inp["path"],
             inp["content"],
             inp["message"],
             inp["branch"],
         )
+        # Fan out to the dashboard's REPO tab. The "kind" is best-effort:
+        # GitHub returns a "type" field on create vs update, but most
+        # providers don't — we treat every commit as a "modified" event
+        # since the dashboard cares about *what changed*, not whether
+        # the path existed before.
+        if self._run_id and self._redis is not None:
+            from devai.webhook.repo_routes import emit_repo_event
+
+            await emit_repo_event(
+                self._redis,
+                self._run_id,
+                kind="modified",
+                path=inp.get("path", ""),
+                agent=self._agent_name,
+                triggered_by=self._triggered_by,
+                trace_id=self._trace_id,
+            )
+        return result
 
     async def _handle_scm_create_pull_request(self, inp: dict[str, Any]) -> dict[str, Any]:
         return await self.scm.create_pull_request(

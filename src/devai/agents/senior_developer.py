@@ -157,7 +157,17 @@ class SeniorDeveloperAgent(BaseAgent):
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Implement the active story on its own feature branch."""
         claude = ClaudeProvider(self.config)
-        github_tools = GitHubToolExecutor(self.github)
+        # Pre-wire the executor with run_id + redis + identity so every
+        # scm_commit_file call shows up in the dashboard's REPO tab in
+        # real time, attributed to this agent + the originating user.
+        github_tools = GitHubToolExecutor(
+            self.github,
+            agent_name=self.name,
+            run_id=state.get("run_id", ""),
+            redis=getattr(self.state, "redis", None),
+            triggered_by=state.get("trigger_actor", "") or "",
+            trace_id=state.get("trace_id", "") or "",
+        )
         validation_tools = ValidationToolExecutor(self.github)
         observed_pr_number = state.get("pr_number")
 

@@ -35,8 +35,17 @@ class A2ABus:
     completes.
     """
 
-    def __init__(self, agent_name: str, messages: list[A2AMessageDict] | None = None) -> None:
+    def __init__(
+        self,
+        agent_name: str,
+        messages: list[A2AMessageDict] | None = None,
+        *,
+        triggered_by: str = "",
+        trace_id: str = "",
+    ) -> None:
         self.agent_name = agent_name
+        self.triggered_by = triggered_by
+        self.trace_id = trace_id
         self._inbox: list[A2AMessageDict] = []
         self._outbox: list[A2AMessageDict] = []
 
@@ -55,7 +64,13 @@ class A2ABus:
         payload: dict[str, Any] | None = None,
         in_reply_to: str | None = None,
     ) -> A2AMessageDict:
-        """Send a message to another agent."""
+        """Send a message to another agent.
+
+        Identity (``triggered_by`` + ``trace_id``) is stamped from the bus
+        constructor so every message in a run carries the same user
+        attribution and trace correlation. The audit trail can be replayed
+        by filtering on either field without joining against ALMState.
+        """
         msg: A2AMessageDict = {
             "id": str(ULID()),
             "from_agent": self.agent_name,
@@ -67,8 +82,20 @@ class A2ABus:
             "in_reply_to": in_reply_to,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+        if self.triggered_by:
+            msg["triggered_by"] = self.triggered_by
+        if self.trace_id:
+            msg["trace_id"] = self.trace_id
         self._outbox.append(msg)
-        logger.debug("A2A [%s -> %s] %s: %s", self.agent_name, to_agent, message_type, subject)
+        logger.debug(
+            "A2A [%s -> %s] %s: %s (triggered_by=%s trace=%s)",
+            self.agent_name,
+            to_agent,
+            message_type,
+            subject,
+            self.triggered_by or "-",
+            self.trace_id or "-",
+        )
         return msg
 
     def request(self, to_agent: str, subject: str, body: str, **kwargs: Any) -> A2AMessageDict:

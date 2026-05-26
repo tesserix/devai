@@ -10,7 +10,12 @@ from typing import Any, TypedDict
 
 
 class A2AMessageDict(TypedDict, total=False):
-    """Serialized A2A message for graph state."""
+    """Serialized A2A message for graph state.
+
+    Identity fields (``triggered_by`` + ``trace_id``) let the dashboard
+    timeline answer "who asked for this work?" — every message in a run
+    carries the originating user's email, even after a dozen handoffs.
+    """
 
     id: str
     from_agent: str
@@ -21,6 +26,9 @@ class A2AMessageDict(TypedDict, total=False):
     payload: dict[str, Any]
     in_reply_to: str | None
     timestamp: str
+    # Identity provenance — set by A2ABus from the agent's state.
+    triggered_by: str  # principal.email of whoever started this run
+    trace_id: str  # correlates this message back to a single user action
 
 
 class StoryBranchDict(TypedDict, total=False):
@@ -57,6 +65,15 @@ class ALMState(TypedDict, total=False):
     trigger_ref: str
     requirements: str
     stage: str
+
+    # --- Caller Identity ---
+    # principal is the serialized devai.identity.Principal of whoever
+    # kicked this run off (dashboard user, webhook sender, cron). Carried
+    # forward through every agent so audit and A2A messages can attribute
+    # work to a real human, not just an opaque run_id.
+    principal: dict[str, Any] | None
+    trace_id: str  # cross-agent correlation id — propagates to LangSmith / OTEL
+    trigger_actor: str  # shorthand for principal.email — keeps state callers terse
 
     # --- Requirements Analysis ---
     analyzed_requirements: list[dict[str, Any]]

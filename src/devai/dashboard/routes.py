@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from devai.dashboard.auth import GitHubOAuth
 from devai.dashboard.keycloak_auth import KeycloakOIDC
 from devai.dashboard.templates import INDEX_HTML
+from devai.identity import Principal, extract_principal, trace_id_from_request
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -719,6 +720,13 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     if not requirements:
         raise HTTPException(status_code=400, detail="Requirements text or issue number required")
 
+    # Identity: who clicked Start Pipeline. extract_principal honors
+    # auth-bff X-Forwarded headers first, then falls back to the
+    # devai_session cookie. We never trigger a run anonymously when
+    # we *do* have a logged-in user.
+    principal = await extract_principal(request) or Principal.system()
+    trace_id = trace_id_from_request(request)
+
     # Create a run ID immediately for the response
     from ulid import ULID
 
@@ -739,6 +747,8 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
                 requirements=requirements,
                 trigger_type=trigger_type,
                 trigger_ref=trigger_ref,
+                principal=principal,
+                trace_id=trace_id,
             )
         except Exception:
             logger.exception("Background pipeline failed for %s", repo)
@@ -751,6 +761,8 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
         "run_id": run_id,
         "stage": "triggered",
         "repo": repo,
+        "triggered_by": principal.email,
+        "trace_id": trace_id,
     }
 
 
@@ -804,6 +816,13 @@ async def retrigger_pipeline(run_id: str, request: Request) -> dict[str, Any]:
 
     new_run_id = str(ULID())
 
+    # Re-stamp identity at retry time — the user clicking Retry may not
+    # be the same person who triggered the original run. The audit trail
+    # records both lineages: triggered_by on the new run = current user,
+    # trigger_ref = "...#retry-of-<original>".
+    principal = await extract_principal(request) or Principal.system()
+    trace_id = trace_id_from_request(request)
+
     async def _run_bg() -> None:
         from devai.graph.orchestrator import ALMOrchestrator
         from devai.scm import create_scm_client
@@ -816,6 +835,8 @@ async def retrigger_pipeline(run_id: str, request: Request) -> dict[str, Any]:
                 requirements=requirements,
                 trigger_type=trigger_type,
                 trigger_ref=f"{trigger_ref}#retry-of-{run_id}",
+                principal=principal,
+                trace_id=trace_id,
             )
         except Exception:
             logger.exception("Background pipeline retry failed for %s", repo)

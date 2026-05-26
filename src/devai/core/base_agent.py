@@ -22,7 +22,7 @@ from devai.graph.state import ALMState
 from devai.services.tracing import is_tracing_enabled
 
 if TYPE_CHECKING:
-    from devai.adapters.event_bus.base import EventBusAdapter, EventMessage
+    from devai.adapters.event_bus.base import EventBusAdapter
     from devai.config import Settings
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
@@ -57,7 +57,7 @@ class BaseAgent(ABC):
         scm: SCMClient,
         state_manager: StateManager,
         config: Settings,
-        event_bus: "EventBus | EventBusAdapter | None" = None,
+        event_bus: EventBus | EventBusAdapter | None = None,
     ) -> None:
         # Self-heal the SCM client at construction time. The webhook
         # path always passes a proper SCMClient subclass (created via
@@ -122,8 +122,36 @@ class BaseAgent(ABC):
         # Run pre-execution guardrail checks
         await self._guardrail_pre_check(state)
 
-        # Create A2A bus scoped to this agent
-        a2a = A2ABus(self.name, state.get("a2a_messages", []))
+        # Pull caller identity off the state (stamped at the boundary
+        # by webhook / chat / dashboard handlers). Falls back to empty
+        # strings — the bus tolerates that and just omits the fields
+        # on outbound messages.
+        principal = state.get("principal") or {}
+        triggered_by = (
+            state.get("trigger_actor")
+            or (principal.get("email") if isinstance(principal, dict) else "")
+            or ""
+        )
+        trace_id = state.get("trace_id", "") or ""
+
+        # Create A2A bus scoped to this agent, with identity threaded
+        # through so every outbound message carries the originating user
+        # and trace id without each agent having to remember to set them.
+        a2a = A2ABus(
+            self.name,
+            state.get("a2a_messages", []),
+            triggered_by=triggered_by,
+            trace_id=trace_id,
+        )
+
+        if triggered_by or trace_id:
+            logger.info(
+                "agent.run start: name=%s run_id=%s triggered_by=%s trace_id=%s",
+                self.name,
+                state.get("run_id", ""),
+                triggered_by or "-",
+                trace_id or "-",
+            )
 
         # Execute the agent with tracing
         _run_fn = self._execute_graph

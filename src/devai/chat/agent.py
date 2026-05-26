@@ -49,6 +49,7 @@ from devai.services.tracing import traceable_if_enabled
 if TYPE_CHECKING:
     from devai.config import Settings
     from devai.core.state import StateManager
+    from devai.identity import Principal
     from devai.services.database import Database
 
 logger = logging.getLogger(__name__)
@@ -117,12 +118,18 @@ class DevAIChatAgent:
         )
         self._tools = self._build_tools()
         self._conversations: dict[str, list] = {}  # session_id -> message history
+        # Per-call identity context, set by chat() / stream_chat(). Tools
+        # that mutate platform state read these so the resulting A2A
+        # messages are attributed to the human, not the chat agent.
+        self._principal: Principal | None = None
+        self._trace_id: str | None = None
 
     def _build_tools(self) -> list:
         """Build LangChain tools that query platform data."""
         state = self.state
         db = self.db
         config = self.config
+        agent_self = self  # closure capture so tools can read current principal
 
         @tool
         async def query_pipeline_runs(
@@ -546,19 +553,33 @@ class DevAIChatAgent:
             await state.redis.rpush(f"devai:run:{run_id}:injections", injection)
             await state.redis.expire(f"devai:run:{run_id}:injections", 86400 * 7)
 
-            # Also post as A2A message
-            a2a_msg = json.dumps(
-                {
-                    "id": str(ULID()),
-                    "from_agent": "human",
-                    "to_agent": "supervisor",
-                    "message_type": "request",
-                    "subject": "Additional Requirements from User",
-                    "body": message,
-                    "payload": {"source": "chat_agent", "run_id": run_id},
-                    "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
-                }
-            )
+            # Also post as A2A message. Attribution goes to the real
+            # human (via the principal that the chat route stashed on
+            # the agent) instead of the literal string "human" so the
+            # audit trail can answer "who said this?" not just "a human
+            # said this".
+            principal = getattr(agent_self, "_principal", None)
+            trace_id_v = getattr(agent_self, "_trace_id", None)
+            principal_email = principal.email if principal else "human"
+            a2a_payload = {
+                "id": str(ULID()),
+                "from_agent": principal_email,
+                "to_agent": "supervisor",
+                "message_type": "request",
+                "subject": "Additional Requirements from User",
+                "body": message,
+                "payload": {
+                    "source": "chat_agent",
+                    "run_id": run_id,
+                    "principal": principal.to_dict() if principal else None,
+                },
+                "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            }
+            if principal_email:
+                a2a_payload["triggered_by"] = principal_email
+            if trace_id_v:
+                a2a_payload["trace_id"] = trace_id_v
+            a2a_msg = json.dumps(a2a_payload)
             await state.redis.rpush(f"devai:run:{run_id}:a2a_messages", a2a_msg)
 
             stage = run_data.get("stage", "unknown")
@@ -670,13 +691,28 @@ class DevAIChatAgent:
         self,
         message: str,
         session_id: str = "default",
+        *,
+        principal: Principal | None = None,
+        trace_id: str | None = None,
     ) -> str:
         """Process a user message and return a response.
 
         Maintains conversation history per session. Uses LangChain's
         tool-calling with Claude to query platform data and synthesize
         natural language responses.
+
+        ``principal`` (resolved by the chat route from auth-bff headers
+        or the dashboard session cookie) is stashed on the agent so any
+        tool that mutates platform state — e.g. ``inject_pipeline_requirements``
+        — can attribute the action to the real human, not the literal
+        string ``"human"``.
         """
+        # Stash identity for tools that need it (injection, pipeline triggers).
+        # Per-call assignment because chat agents are shared across sessions
+        # on ``request.app.state`` — we can't bind identity at construction.
+        self._principal = principal
+        self._trace_id = trace_id
+
         # Get or create conversation history
         if session_id not in self._conversations:
             self._conversations[session_id] = [
@@ -744,12 +780,18 @@ class DevAIChatAgent:
         self,
         message: str,
         session_id: str = "default",
+        *,
+        principal: Principal | None = None,
+        trace_id: str | None = None,
     ):
         """Stream a response token by token.
 
         Yields text chunks as they arrive from Claude.
         For tool calls, yields a status update then continues.
         """
+        self._principal = principal
+        self._trace_id = trace_id
+
         if session_id not in self._conversations:
             self._conversations[session_id] = [
                 SystemMessage(content=SYSTEM_PROMPT),

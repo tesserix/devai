@@ -58,12 +58,12 @@ class PipelineService:
 
     def __init__(
         self,
-        config: "Settings",
+        config: Settings,
         *,
-        scm: "SCMClient | None" = None,
-        state_manager: "StateManager | None" = None,
-        event_bus: "EventBus | None" = None,
-        event_bus_adapter: "EventBusAdapter | None" = None,
+        scm: SCMClient | None = None,
+        state_manager: StateManager | None = None,
+        event_bus: EventBus | None = None,
+        event_bus_adapter: EventBusAdapter | None = None,
         blueprint_dir: str | Path | None = None,
     ) -> None:
         self.config = config
@@ -278,11 +278,18 @@ class PipelineService:
         trigger_type: str = "manual",
         label: str = "",
         agent_context: dict[str, Any] | None = None,
+        principal: dict[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> str:
         """Enqueue a new task. Returns its id.
 
         Returns the task id even if the blueprint is unknown — but in that
         case raises PipelineError. Callers should treat this as create+enqueue.
+
+        ``principal`` / ``trace_id`` are stamped onto the DevAITask so the
+        executor, every stage, and the persisted record all know which
+        human triggered the work. Both are optional — passing None is the
+        same as system-triggered (e.g. SRE cron).
         """
         self._ensure_started()
         assert self._pipeline is not None  # for type-checker
@@ -294,9 +301,19 @@ class PipelineService:
             repo=repo,
             trigger_type=trigger_type,
             label=label,
+            principal=dict(principal) if principal else None,
+            trace_id=trace_id,
+            triggered_by=(principal.get("email") if principal else None),
         )
         if agent_context:
             task.agent_context.update(agent_context)
+        # Also stash identity into agent_context so stages that don't
+        # know about the new task fields can still read it from the
+        # handover bag (which is the documented stage contract).
+        if principal:
+            task.agent_context.setdefault("principal", dict(principal))
+        if trace_id:
+            task.agent_context.setdefault("trace_id", trace_id)
         await self._pipeline.submit(task)
         await self._publish_task_event("created", task)
         return task.id
@@ -309,6 +326,8 @@ class PipelineService:
         repo: str = "",
         trigger_type: str = "manual",
         agent_context: dict[str, Any] | None = None,
+        principal: dict[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> DevAITask:
         """Synchronous dispatch — submit, wait, return the final task.
 
@@ -318,9 +337,21 @@ class PipelineService:
         assert self._pipeline is not None
 
         bp = blueprint or self.config.pipeline_default_blueprint
-        task = DevAITask(intent=intent, blueprint=bp, repo=repo, trigger_type=trigger_type)
+        task = DevAITask(
+            intent=intent,
+            blueprint=bp,
+            repo=repo,
+            trigger_type=trigger_type,
+            principal=dict(principal) if principal else None,
+            trace_id=trace_id,
+            triggered_by=(principal.get("email") if principal else None),
+        )
         if agent_context:
             task.agent_context.update(agent_context)
+        if principal:
+            task.agent_context.setdefault("principal", dict(principal))
+        if trace_id:
+            task.agent_context.setdefault("trace_id", trace_id)
         await self._publish_task_event("created", task)
         result = await self._pipeline.run_once(task)
         # run_once is synchronous from the caller's POV, so emit a terminal
@@ -511,6 +542,10 @@ class PipelineService:
             "pr_number": task.pr_number,
             "issue_number": task.issue_number,
             "branch_name": task.branch_name,
+            "triggered_by": task.triggered_by,
+            "trace_id": task.trace_id,
+            "preview_url": task.agent_context.get("preview_url"),
+            "editor_url": task.agent_context.get("editor_url"),
             "timestamp": time.time(),
         }
 

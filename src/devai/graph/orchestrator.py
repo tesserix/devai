@@ -77,6 +77,7 @@ from devai.services.tracing import traceable_if_enabled
 if TYPE_CHECKING:
     from devai.config import Settings
     from devai.core.state import StateManager
+    from devai.identity import Principal
     from devai.scm.base import SCMClient
 
 logger = logging.getLogger(__name__)
@@ -1046,6 +1047,9 @@ class ALMOrchestrator:
         trigger_ref: str = "cli",
         on_progress: Any = None,
         resume_from: str | None = None,
+        *,
+        principal: Principal | None = None,
+        trace_id: str | None = None,
     ) -> ALMState:
         """Run the full ALM pipeline with story-level parallel execution.
 
@@ -1056,8 +1060,20 @@ class ALMOrchestrator:
             trigger_ref: Reference to the trigger source.
             on_progress: Optional callback(step, status, detail).
             resume_from: Optional run_id to resume from last checkpoint.
+            principal: Caller identity (dashboard user / webhook sender).
+                Stamped onto the initial ALMState so every agent and
+                every A2A message carries the originating user.
+            trace_id: Cross-agent correlation id. Auto-minted if omitted.
         """
         from ulid import ULID
+
+        from devai.identity import Principal as _Principal
+        from devai.identity import new_trace_id
+
+        if principal is None:
+            principal = _Principal.system()
+        if not trace_id:
+            trace_id = new_trace_id()
 
         # Resume from checkpoint if requested
         if resume_from:
@@ -1084,6 +1100,11 @@ class ALMOrchestrator:
             "story_branches": [],
             "active_story_index": 0,
             "story_plans": [],
+            # Caller identity — flows through every agent's A2A bus, and
+            # is included on every persisted A2A message for audit.
+            "principal": principal.to_dict(),
+            "trace_id": trace_id,
+            "trigger_actor": principal.email,
         }
 
         # Load governance (CLAUDE.md)

@@ -223,6 +223,14 @@ class DevAITask:
     # Optional human-readable label that the dashboard shows
     label: str = ""
 
+    # ── Caller identity (filled in at the boundary by webhook / chat /
+    # dashboard trigger). principal is the serialized devai.identity.Principal;
+    # trace_id correlates with LangSmith / OTEL spans; triggered_by is the
+    # convenience handle the dashboard renders alongside the task row.
+    principal: dict[str, Any] | None = None
+    trace_id: str | None = None
+    triggered_by: str | None = None
+
     # ────── Conditional helpers ──────
     # The blueprint executor uses these for `condition:` expressions.
     # Keep them as @property so they always reflect current state.
@@ -316,4 +324,7 @@ class DevAITask:
             "error": self.error,
             "failed_stage": self.failed_stage,
             "label": self.label,
+            "principal": dict(self.principal) if self.principal else None,
+            "trace_id": self.trace_id,
+            "triggered_by": self.triggered_by,
         }
