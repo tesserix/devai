@@ -1,0 +1,109 @@
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "devai.postgresHost" . }}
+  labels:
+    {{- include "devai.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.postgres.storage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "devai.postgresHost" . }}
+  labels:
+    {{- include "devai.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "devai.postgresHost" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "devai.postgresHost" . }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - { name: pg, containerPort: {{ .Values.postgres.port }} }
+          env:
+            - { name: POSTGRES_DB, value: {{ .Values.postgres.database | quote }} }
+            - { name: POSTGRES_USER, value: {{ .Values.postgres.user | quote }} }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secretName }}, key: POSTGRES_PASSWORD }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "{{ .Values.postgres.user }}", "-d", "{{ .Values.postgres.database }}"] }
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "devai.postgresHost" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "devai.postgresHost" . }}
+  labels:
+    {{- include "devai.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: pg, port: {{ .Values.postgres.port }}, targetPort: pg }
+  selector:
+    app.kubernetes.io/name: {{ include "devai.postgresHost" . }}
+{{- end }}
+{{- if .Values.redis.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "devai.redisHost" . }}
+  labels:
+    {{- include "devai.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "devai.redisHost" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "devai.redisHost" . }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          command:
+            - sh
+            - -c
+            - exec redis-server --requirepass "$REDIS_PASSWORD"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secretName }}, key: REDIS_PASSWORD }
+          ports:
+            - { name: redis, containerPort: {{ .Values.redis.port }} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "devai.redisHost" . }}
+  labels:
+    {{- include "devai.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: redis, port: {{ .Values.redis.port }}, targetPort: redis }
+  selector:
+    app.kubernetes.io/name: {{ include "devai.redisHost" . }}
+{{- end }}

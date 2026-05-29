@@ -1,0 +1,12 @@
+apiVersion: v2
+name: devai
+description: |
+  DevAI — LOCAL (kind / sandboxctl) chart. Self-contained: the devai-api
+  backend plus a bundled Postgres (pgvector) and Redis so a single
+  `sandboxctl deploy` brings the whole stack up on kind. This is the local
+  twin of the prod chart at tesserix-k8s/charts/apps/devai-api (which uses
+  CNPG + ExternalSecrets + Istio); here everything is in-cluster and reads
+  one plain Secret. Not for production.
+type: application
+version: 0.1.0
+appVersion: "0.3.0"

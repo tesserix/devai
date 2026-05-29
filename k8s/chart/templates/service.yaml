@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "devai.fullname" . }}
+  labels:
+    {{- include "devai.labels" . | nindent 4 }}
+  {{- if .Values.service.primaryAnnotation }}
+  annotations:
+    # Tells sandboxctl this is the Service to route <chart>.sandbox.app to.
+    sandboxctl.io/primary: "true"
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+  selector:
+    {{- include "devai.selectorLabels" . | nindent 4 }}

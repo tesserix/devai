@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "devai.fullname" . }}
+  labels:
+    {{- include "devai.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "devai.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "devai.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "devai.serviceAccountName" . }}
+      containers:
+        - name: devai-api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if .Values.postgres.enabled }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secretName }}, key: POSTGRES_PASSWORD }
+            - name: DEVAI_DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@{{ include "devai.postgresHost" . }}:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}?sslmode=disable"
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secretName }}, key: REDIS_PASSWORD }
+            - name: DEVAI_REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@{{ include "devai.redisHost" . }}:{{ .Values.redis.port }}"
+            {{- end }}
+            # ── Credentials from the local Secret (devai-secrets) ──
+            # optional: true so a REPLACEME-only secret still lets the pod
+            # boot — the app degrades when a key is absent.
+            {{- range $key := list
+                "DEVAI_ANTHROPIC_API_KEY" "DEVAI_OPENAI_API_KEY" "DEVAI_GROQ_API_KEY"
+                "DEVAI_GEMINI_API_KEY" "DEVAI_SCM_TOKEN" "DEVAI_GITHUB_APP_ID"
+                "DEVAI_GITHUB_APP_PRIVATE_KEY" "DEVAI_GITHUB_APP_INSTALLATION_ID"
+                "DEVAI_GITHUB_WEBHOOK_SECRET" "DEVAI_GITHUB_OAUTH_CLIENT_ID"
+                "DEVAI_GITHUB_OAUTH_CLIENT_SECRET" "DEVAI_KEYCLOAK_CLIENT_SECRET"
+                "DEVAI_LANGCHAIN_API_KEY" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ $key }}
+                  optional: true
+            {{- end }}
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

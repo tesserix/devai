@@ -20,3 +20,6 @@ htmlcov/
 .coverage
 *.log
 .DS_Store
+
+# Local sandbox secrets — never commit real values
+k8s/secrets.yaml
