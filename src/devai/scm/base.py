@@ -356,9 +356,25 @@ class SCMClient(ABC):
         body: str,
         head: str,
         base: str | None = None,
+        draft: bool = False,
     ) -> dict[str, Any]:
-        """Create a pull request (GitHub), merge request (GitLab), or PR (ADO)."""
+        """Create a pull request (GitHub), merge request (GitLab), or PR (ADO).
+
+        When ``draft`` is true the PR is opened in draft / work-in-progress
+        state and must be marked ready (``mark_pull_request_ready``) before
+        it can be merged.
+        """
         ...
+
+    async def mark_pull_request_ready(self, repo: str, pr_id: int) -> dict[str, Any]:
+        """Promote a draft PR to ready-for-review (a real PR).
+
+        Default raises so non-GitHub backends degrade clearly; GitHub
+        overrides it. Returns provider-specific PR data on success.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support marking PRs ready for review"
+        )
 
     @abstractmethod
     async def get_pull_request(self, repo: str, pr_id: int) -> dict[str, Any]:
@@ -492,6 +508,42 @@ class SCMClient(ABC):
         Default returns empty string — override in provider.
         """
         return ""
+
+    # --- Repo onboarding (Repos page) ---
+
+    async def list_installation_repos(self, per_page: int = 100) -> list[dict[str, Any]]:
+        """List every repo this credential can see (GitHub App installation
+        or token scope). Default empty — override in provider."""
+        return []
+
+    async def probe_markers(
+        self, repos: list[tuple[str, str, str]], marker_path: str
+    ) -> dict[str, bool]:
+        """Return {``owner/name``: marker_present} for the given repos.
+
+        ``repos`` is a list of ``(owner, name, ref)`` tuples. The default
+        implementation probes each repo's file contents one-by-one — a
+        provider with a batch API (e.g. GitHub GraphQL) should override
+        to fold it into a single round trip.
+        """
+        out: dict[str, bool] = {}
+        for owner, name, ref in repos:
+            full = f"{owner}/{name}"
+            try:
+                await self.get_file_content(repo=full, path=marker_path, ref=ref)
+                out[full] = True
+            except Exception:  # noqa: BLE001
+                out[full] = False
+        return out
+
+    async def request_reviewers(
+        self, repo: str, pr_id: int, reviewers: list[str]
+    ) -> dict[str, Any]:
+        """Request reviewers on a pull request (assign-to-approve flow).
+
+        Default no-op — override in provider.
+        """
+        return {"requested": []}
 
     # --- Lifecycle ---
 

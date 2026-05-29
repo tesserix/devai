@@ -44,13 +44,19 @@ type Config struct {
 	// Authorization
 	AdminAllowedEmails string // comma-separated
 
-	// Reverse-proxy targets (kagent + aregistry)
-	KagentUpstreamURL    string // http://kagent-ui.kagent-system.svc.cluster.local:8080
-	AregistryUpstreamURL string // http://agentregistry.agentregistry-system.svc.cluster.local:12121
+	// Reverse-proxy targets (kagent + aregistry).
+	//
+	// kagent and aregistry are internal-only services today — devai-api
+	// talks to them over cluster DNS, and there is no public hostname
+	// pointing at the BFF for either. The proxy wiring stays in place
+	// so a future deployment can opt-in by setting the four env vars
+	// below; with the defaults blank, the proxy never matches anything.
+	KagentUpstreamURL    string // e.g. http://kagent-ui.kagent-system.svc.cluster.local:8080
+	AregistryUpstreamURL string // e.g. http://agentregistry.agentregistry-system.svc.cluster.local:12121
 
-	// Trusted-host enforcement on the proxy paths
-	KagentHost    string // kagent.tesserix.app
-	AregistryHost string // aregistry.tesserix.app
+	// Trusted-host enforcement on the proxy paths. Blank = disabled.
+	KagentHost    string // e.g. kagent.tesserix.app
+	AregistryHost string // e.g. aregistry.tesserix.app
 }
 
 // Load reads env vars into a Config. Returns an error listing every missing
@@ -70,18 +76,23 @@ func Load() (*Config, error) {
 		SessionSecure:        getEnv("DEVAI_BFF_SESSION_SECURE", "true") == "true",
 		SessionEncryptKey:    os.Getenv("DEVAI_BFF_SESSION_ENCRYPT_KEY"),
 		AdminAllowedEmails:   os.Getenv("DEVAI_BFF_ADMIN_ALLOWED_EMAILS"),
-		KagentUpstreamURL:    getEnv("DEVAI_BFF_KAGENT_UPSTREAM_URL", "http://kagent-ui.kagent-system.svc.cluster.local:8080"),
-		AregistryUpstreamURL: getEnv("DEVAI_BFF_AREGISTRY_UPSTREAM_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121"),
-		KagentHost:           getEnv("DEVAI_BFF_KAGENT_HOST", "kagent.tesserix.app"),
-		AregistryHost:        getEnv("DEVAI_BFF_AREGISTRY_HOST", "aregistry.tesserix.app"),
+		KagentUpstreamURL:    os.Getenv("DEVAI_BFF_KAGENT_UPSTREAM_URL"),
+		AregistryUpstreamURL: os.Getenv("DEVAI_BFF_AREGISTRY_UPSTREAM_URL"),
+		KagentHost:           os.Getenv("DEVAI_BFF_KAGENT_HOST"),
+		AregistryHost:        os.Getenv("DEVAI_BFF_AREGISTRY_HOST"),
 	}
-	// Hostname → pool routing. ALM pool covers the ALM dashboard plus the
-	// agentic reverse-proxy hostnames (single sign-on across all of them).
-	// SRE pool is its own tenant for the SRE dashboard.
+	// Hostname → pool routing. ALM pool always covers the ALM dashboard.
+	// The kagent / aregistry reverse-proxy hostnames are opt-in via the
+	// DEVAI_BFF_*_HOST env vars and only join ALMHosts when set — the
+	// services are otherwise internal-only and never reach the BFF.
 	cfg.ALMHosts = []string{
 		getEnv("DEVAI_BFF_ALM_HOST", "devai.tesserix.app"),
-		cfg.KagentHost,
-		cfg.AregistryHost,
+	}
+	if cfg.KagentHost != "" {
+		cfg.ALMHosts = append(cfg.ALMHosts, cfg.KagentHost)
+	}
+	if cfg.AregistryHost != "" {
+		cfg.ALMHosts = append(cfg.ALMHosts, cfg.AregistryHost)
 	}
 	cfg.SREHosts = []string{
 		getEnv("DEVAI_BFF_SRE_HOST", "sre.tesserix.app"),

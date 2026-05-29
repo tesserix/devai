@@ -9,18 +9,23 @@ metadata:
   domain: sre
   replaces: devai.sre.graph.orchestrator
   cadence: every 5 minutes
+  # Render hints for the dashboard flow view (ignored by the executor).
+  title: SRE Monitoring Sweep
+  lanes: [discovery, monitor, respond]
 
 stages:
   # ─── Discovery ─────────────────────────────────────────────────────
   - name: discover
     type: agentic
     stage: sre_discover
+    lane: discovery
     timeout: 5m
 
   # ─── Parallel monitoring fan-out ───────────────────────────────────
   - name: monitor-infra
     type: agentic
     stage: sre_monitor_infra
+    lane: monitor
     depends_on: [discover]
     parallel: true
     timeout: 10m
@@ -29,6 +34,7 @@ stages:
   - name: monitor-perf
     type: agentic
     stage: sre_monitor_perf
+    lane: monitor
     depends_on: [discover]
     parallel: true
     timeout: 10m
@@ -37,6 +43,7 @@ stages:
   - name: monitor-logs
     type: agentic
     stage: sre_monitor_logs
+    lane: monitor
     depends_on: [discover]
     parallel: true
     timeout: 10m
@@ -45,6 +52,7 @@ stages:
   - name: monitor-cost
     type: agentic
     stage: sre_monitor_cost
+    lane: monitor
     depends_on: [discover]
     parallel: true
     timeout: 10m
@@ -53,6 +61,7 @@ stages:
   - name: monitor-capacity
     type: agentic
     stage: sre_monitor_capacity
+    lane: monitor
     depends_on: [discover]
     parallel: true
     timeout: 10m
@@ -62,6 +71,7 @@ stages:
   - name: correlate
     type: analyst
     stage: sre_correlate
+    lane: respond
     depends_on:
       - monitor-infra
       - monitor-perf
@@ -73,6 +83,7 @@ stages:
   - name: respond
     type: agentic
     stage: sre_respond
+    lane: respond
     depends_on: [correlate]
     timeout: 10m
     on_failure: continue
@@ -80,6 +91,7 @@ stages:
   - name: learn
     type: deterministic
     stage: sre_learn
+    lane: respond
     depends_on: [respond]
     timeout: 2m
     on_failure: continue

@@ -21,13 +21,12 @@ import hashlib
 import hmac
 import json
 import logging
-import time
 from typing import Any
 
 import httpx
-import jwt
 
 from devai.scm.base import AuthMethod, SCMClient, SCMProvider
+from devai.scm.github_transport import GitHubTransport
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +51,18 @@ class GitHubSCMClient(SCMClient):
         self._base_url = base_url.rstrip("/")
         self._auth_method = auth_method
         self._token = token
-        self._app_id = app_id
-        self._app_private_key = app_private_key
-        self._installation_id = installation_id
-        self._installation_token: str | None = None
-        self._token_expires_at: float = 0
-        self._http = httpx.AsyncClient(
-            base_url=self._base_url,
-            timeout=30.0,
-            headers={"Accept": "application/vnd.github+json"},
+        # Transport adapter: owns auth (PAT / OAuth / GitHub App installation
+        # token) + the REST and GraphQL endpoint URLs. PAT and GitHub App are
+        # interchangeable from here on — see github_transport.py.
+        self._transport = GitHubTransport(
+            self._base_url,
+            use_github_app=(auth_method == AuthMethod.GITHUB_APP),
+            token=token,
+            app_id=app_id,
+            private_key=app_private_key,
+            installation_id=installation_id,
         )
+        self._http = self._transport.client
         # Per-repo label cache so we don't keep POSTing labels that
         # already exist (every issue creation in a run was triggering
         # 422 already_exists for every shared label, flooding the logs).
@@ -69,37 +70,16 @@ class GitHubSCMClient(SCMClient):
         # set of label names known to exist on each repo.
         self._known_labels: dict[str, set[str]] = {}
 
-    # --- Auth ---
-
-    def _generate_jwt(self) -> str:
-        now = int(time.time())
-        payload = {"iat": now - 60, "exp": now + (10 * 60), "iss": str(self._app_id)}
-        return jwt.encode(payload, self._app_private_key, algorithm="RS256")
+    # --- Auth (delegated to the transport adapter) ---
 
     async def _get_token(self) -> str:
-        """Get the appropriate auth token based on auth method."""
-        if self._auth_method == AuthMethod.PAT or self._auth_method == AuthMethod.OAUTH:
-            return self._token
-
-        if self._auth_method == AuthMethod.GITHUB_APP:
-            if self._installation_token and time.time() < self._token_expires_at - 60:
-                return self._installation_token
-            app_jwt = self._generate_jwt()
-            resp = await self._http.post(
-                f"/app/installations/{self._installation_id}/access_tokens",
-                headers={"Authorization": f"Bearer {app_jwt}"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            self._installation_token = data["token"]
-            self._token_expires_at = time.time() + 3600
-            return self._installation_token  # type: ignore[return-value]
-
-        return self._token
+        """Resolve the current bearer token (PAT verbatim, or a cached
+        GitHub App installation token)."""
+        return await self._transport.token()
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        token = await self._get_token()
-        headers = {"Authorization": f"token {token}"} if token else {}
+        headers = await self._transport.auth_headers("token")
+        headers.update(kwargs.pop("headers", {}))
         resp = await self._http.request(method, path, headers=headers, **kwargs)
         if resp.is_client_error or resp.is_server_error:
             logger.error("GitHub API %s %s → %s: %s", method, path, resp.status_code, self._error_detail(resp))
@@ -435,23 +415,63 @@ class GitHubSCMClient(SCMClient):
         body: str,
         head: str,
         base: str | None = None,
+        draft: bool = False,
     ) -> dict[str, Any]:
         if base is None:
             base = await self.get_default_branch(repo)
         resp = await self._request(
-            "POST", f"/repos/{repo}/pulls", json={"title": title, "body": body, "head": head, "base": base}
+            "POST",
+            f"/repos/{repo}/pulls",
+            json={"title": title, "body": body, "head": head, "base": base, "draft": draft},
         )
         return resp.json()
+
+    async def mark_pull_request_ready(self, repo: str, pr_id: int) -> dict[str, Any]:
+        """Promote a draft PR to ready-for-review.
+
+        GitHub's REST API can't flip draft → ready, so this resolves the
+        PR's GraphQL node id and runs the ``markPullRequestReadyForReview``
+        mutation. Idempotent on the server side — a non-draft PR is left
+        unchanged. Returns the PR's id/number/isDraft post-state.
+        """
+        owner, name = repo.split("/", 1)
+        node = await self._graphql(
+            """
+            query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) { id }
+                }
+            }
+            """,
+            {"owner": owner, "name": name, "number": pr_id},
+        )
+        pr_node_id = (
+            node.get("repository", {}).get("pullRequest", {}) or {}
+        ).get("id", "")
+        if not pr_node_id:
+            raise ValueError(f"PR #{pr_id} not found in {repo}")
+        result = await self._graphql(
+            """
+            mutation($id: ID!) {
+                markPullRequestReadyForReview(input: {pullRequestId: $id}) {
+                    pullRequest { number isDraft }
+                }
+            }
+            """,
+            {"id": pr_node_id},
+        )
+        pr = (
+            result.get("markPullRequestReadyForReview", {}).get("pullRequest", {}) or {}
+        )
+        return {"number": pr.get("number", pr_id), "is_draft": pr.get("isDraft", False)}
 
     async def get_pull_request(self, repo: str, pr_id: int) -> dict[str, Any]:
         resp = await self._request("GET", f"/repos/{repo}/pulls/{pr_id}")
         return resp.json()
 
     async def get_pr_diff(self, repo: str, pr_id: int) -> str:
-        token = await self._get_token()
-        headers = {"Accept": "application/vnd.github.diff"}
-        if token:
-            headers["Authorization"] = f"token {token}"
+        headers = await self._transport.auth_headers("token")
+        headers["Accept"] = "application/vnd.github.diff"
         resp = await self._http.get(f"/repos/{repo}/pulls/{pr_id}", headers=headers)
         resp.raise_for_status()
         return resp.text
@@ -473,6 +493,32 @@ class GitHubSCMClient(SCMClient):
     async def merge_pull_request(self, repo: str, pr_id: int, method: str = "squash") -> dict[str, Any]:
         resp = await self._request("PUT", f"/repos/{repo}/pulls/{pr_id}/merge", json={"merge_method": method})
         return resp.json()
+
+    async def request_reviewers(
+        self, repo: str, pr_id: int, reviewers: list[str]
+    ) -> dict[str, Any]:
+        """Request reviewers on a PR. Splits team handles (``org/team``)
+        from individual logins, matching GitHub's two-list payload."""
+        users: list[str] = []
+        teams: list[str] = []
+        for r in reviewers:
+            r = (r or "").strip().lstrip("@")
+            if not r:
+                continue
+            if "/" in r:
+                teams.append(r.split("/", 1)[1])
+            else:
+                users.append(r)
+        payload: dict[str, Any] = {}
+        if users:
+            payload["reviewers"] = users
+        if teams:
+            payload["team_reviewers"] = teams
+        resp = await self._request(
+            "POST", f"/repos/{repo}/pulls/{pr_id}/requested_reviewers", json=payload
+        )
+        data = resp.json()
+        return {"requested": [u.get("login") for u in data.get("requested_reviewers", [])]}
 
     # --- CI/CD ---
 
@@ -565,11 +611,16 @@ class GitHubSCMClient(SCMClient):
     # --- Projects v2 (GraphQL) ---
 
     async def _graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Execute a GitHub GraphQL query."""
-        token = await self._get_token()
+        """Execute a GitHub GraphQL query.
+
+        Endpoint is derived from the configured base URL (github.com or
+        Enterprise) and auth comes from the same credential as REST — so
+        GraphQL works under both PAT and GitHub App.
+        """
+        headers = await self._transport.auth_headers("bearer")
         resp = await self._http.post(
-            "https://api.github.com/graphql",
-            headers={"Authorization": f"bearer {token}"},
+            self._transport.graphql_url,
+            headers=headers,
             json={"query": query, "variables": variables or {}},
         )
         resp.raise_for_status()
@@ -577,6 +628,52 @@ class GitHubSCMClient(SCMClient):
         if "errors" in data:
             raise RuntimeError(f"GraphQL error: {data['errors']}")
         return data.get("data", {})
+
+    async def probe_markers(
+        self, repos: list[tuple[str, str, str]], marker_path: str
+    ) -> dict[str, bool]:
+        """Batch-probe marker presence across many repos in one GraphQL call.
+
+        Aliases each repo as ``r0, r1, …`` and asks for
+        ``object(expression: "<ref>:<marker_path>")`` — a non-null object
+        means the file exists on that ref. Folds what would be N REST
+        ``GET /contents`` calls into a single round trip (chunked at 50 to
+        stay well under GraphQL node limits). This is what keeps the Repos
+        page's onboarding-status column fast enough to cache.
+        """
+        out: dict[str, bool] = {}
+        chunk = 50
+        for start in range(0, len(repos), chunk):
+            batch = repos[start : start + chunk]
+            alias_map: dict[str, str] = {}
+            fields: list[str] = []
+            variables: dict[str, Any] = {}
+            for i, (owner, name, ref) in enumerate(batch):
+                alias = f"r{i}"
+                alias_map[alias] = f"{owner}/{name}"
+                ov, nv, ev = f"o{i}", f"n{i}", f"e{i}"
+                variables[ov] = owner
+                variables[nv] = name
+                variables[ev] = f"{ref or 'HEAD'}:{marker_path}"
+                fields.append(
+                    f'{alias}: repository(owner: ${ov}, name: ${nv}) '
+                    f'{{ object(expression: ${ev}) {{ __typename }} }}'
+                )
+            var_decls = ", ".join(
+                f"${k}: String!" for k in variables
+            )
+            query = f"query({var_decls}) {{ {' '.join(fields)} }}"
+            try:
+                data = await self._graphql(query, variables)
+            except Exception as e:  # noqa: BLE001 — one bad batch shouldn't blank the page
+                logger.warning("probe_markers GraphQL batch failed: %s", e)
+                for full in alias_map.values():
+                    out.setdefault(full, False)
+                continue
+            for alias, full in alias_map.items():
+                node = data.get(alias) or {}
+                out[full] = bool(node.get("object"))
+        return out
 
     async def list_org_projects(self, org: str) -> list[dict[str, Any]]:
         """List open GitHub Projects v2 for an organization."""

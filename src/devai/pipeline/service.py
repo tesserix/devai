@@ -390,6 +390,23 @@ class PipelineService:
             )
         return out
 
+    def get_blueprint_graph(self, name: str) -> dict[str, Any] | None:
+        """Return a render-ready graph (`{nodes, edges, lanes, ...}`) for one
+        blueprint, or None if it isn't loaded.
+
+        This is what the dashboards fetch to draw the pipeline flow without
+        hardcoding nodes — the blueprint YAML becomes the source of truth.
+        """
+        if self._pipeline is None:
+            return None
+        try:
+            bp = self._pipeline.get_blueprint(name)
+        except Exception:  # noqa: BLE001 — unknown blueprint → 404 at the route
+            return None
+        from devai.blueprint.graph import build_blueprint_graph
+
+        return build_blueprint_graph(bp)
+
     def list_stage_keys(self) -> list[str]:
         if self._pipeline is None:
             return []

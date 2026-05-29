@@ -1,14 +1,17 @@
 // Command devai-auth-bff is the GIP-backed auth + reverse-proxy BFF for
 // the DevAI platform.
 //
-// Serves three audiences:
+// Serves up to three audiences:
 //
 //   - devai.tesserix.app (ALM dashboard) → mints a session against the
 //     DEVAI_BFF_ALM_TENANT_ID GIP tenant pool.
 //   - sre.tesserix.app (SRE dashboard) → mints a session against the
 //     DEVAI_BFF_SRE_TENANT_ID GIP tenant pool.
-//   - kagent.tesserix.app + aregistry.tesserix.app → reverse-proxies to
-//     the matching upstream service after the session cookie is verified.
+//   - kagent + aregistry (opt-in) → reverse-proxies to the matching
+//     upstream service after the session cookie is verified. Disabled
+//     by default: both services are internal-only and devai-api dials
+//     them over cluster DNS. Enable by setting all four of
+//     DEVAI_BFF_{KAGENT,AREGISTRY}_{HOST,UPSTREAM_URL}.
 //
 // Configuration via DEVAI_BFF_* env vars (see internal/config).
 package main
@@ -83,6 +86,17 @@ func main() {
 	})
 	if err != nil {
 		logger.Fatalf("proxy: %v", err)
+	}
+	// Surface the reverse-proxy state at boot so the disabled-by-default
+	// posture is obvious in pod logs (no public exposure of kagent /
+	// aregistry unless an operator explicitly opts in).
+	switch {
+	case cfg.KagentHost == "" && cfg.AregistryHost == "":
+		logger.Printf("agentic reverse-proxy: disabled (kagent + aregistry are internal-only)")
+	case cfg.KagentHost != "" && cfg.AregistryHost != "":
+		logger.Printf("agentic reverse-proxy: enabled (kagent=%s, aregistry=%s)", cfg.KagentHost, cfg.AregistryHost)
+	default:
+		logger.Printf("agentic reverse-proxy: partial (kagent=%q, aregistry=%q)", cfg.KagentHost, cfg.AregistryHost)
 	}
 
 	// One mux. Auth + health routes for everything; everything else falls

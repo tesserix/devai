@@ -18,6 +18,43 @@ export interface A2AMessage {
   timestamp: string;
 }
 
+// ── Blueprint graph (render-ready, served by GET /api/pipeline/blueprints/{name}) ──
+// This is the source the pipeline-flow view renders from — a new (or UI-created)
+// blueprint shows up with no UI code change.
+export interface BlueprintGraphNode {
+  name: string;
+  stage: string;
+  type: string;
+  title: string;
+  lane: string;
+  color: string;
+  agent: string;
+  gate: boolean;
+  depends_on: string[];
+  condition: string | null;
+  timeout_seconds: number | null;
+  on_failure: string;
+  parallel: boolean;
+  parallel_group: string | null;
+}
+
+export interface BlueprintGraphEdge {
+  from: string;
+  to: string;
+  kind: "sequence" | "conditional";
+  label: string;
+}
+
+export interface BlueprintGraph {
+  name: string;
+  title: string;
+  description: string;
+  lanes: string[];
+  nodes: BlueprintGraphNode[];
+  edges: BlueprintGraphEdge[];
+  levels: string[][];
+}
+
 export interface PipelineConfig {
   auto_mode: boolean;
   gates: Record<string, boolean>;
@@ -46,6 +83,10 @@ export const api = {
     apiFetch<PipelineRun[]>(`/pipeline/runs?limit=${limit}${repo ? `&repo=${repo}` : ""}`),
 
   getRun: (runId: string) => apiFetch<PipelineRun>(`/pipeline/runs/${runId}`),
+
+  // Render-ready blueprint graph — the pipeline-flow view draws this directly.
+  getBlueprintGraph: (name = "alm-pipeline") =>
+    apiFetch<BlueprintGraph>(`/pipeline/blueprints/${encodeURIComponent(name)}`),
 
   // Per-run Repo viewer (powers the REPO tab on the run detail page).
   // Read-only — the dashboard cannot write to the repo from here.
@@ -158,4 +199,120 @@ export const api = {
         body: JSON.stringify({ repo, project_title: projectTitle, tech_stack: techStack }),
       }
     ),
+
+  // ── Repos onboarding ──────────────────────────────────────────────
+  // Org catalog with onboarding status overlay (GH App access list +
+  // .platform/devai.yaml marker probe), the onboard action (gated PR),
+  // and merge / assign-reviewer from inside DevAI.
+  listOrgRepos: (opts: { q?: string; page?: number; per_page?: number; refresh?: boolean; probe?: boolean } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.q) p.set("q", opts.q);
+    p.set("page", String(opts.page ?? 1));
+    p.set("per_page", String(opts.per_page ?? 30));
+    if (opts.refresh) p.set("refresh", "1");
+    p.set("probe", opts.probe === false ? "0" : "1");
+    return apiFetch<RepoCatalogPage>(`/scm/org/repos?${p.toString()}`);
+  },
+
+  listOnboarded: (state?: string) =>
+    apiFetch<OnboardedRepo[]>(`/scm/onboarded${state ? `?state=${encodeURIComponent(state)}` : ""}`),
+
+  getOnboarded: (owner: string, name: string) =>
+    apiFetch<OnboardedRepo>(`/scm/onboarded/${owner}/${name}`),
+
+  onboardRepos: (
+    repos: Array<{ owner: string; name: string }>,
+    opts: { base_branch?: string; description?: string; dry_run?: boolean } = {}
+  ) =>
+    apiFetch<OnboardResult>("/scm/onboarded", {
+      method: "POST",
+      body: JSON.stringify({ repos, ...opts }),
+    }),
+
+  markOnboardingPRReady: (owner: string, name: string) =>
+    apiFetch<OnboardedRepo>(`/scm/onboarded/${owner}/${name}/ready`, {
+      method: "POST",
+    }),
+
+  mergeOnboardingPR: (owner: string, name: string, method = "squash") =>
+    apiFetch<OnboardedRepo>(`/scm/onboarded/${owner}/${name}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ method }),
+    }),
+
+  assignReviewer: (owner: string, name: string, reviewers: string[]) =>
+    apiFetch<{ repo: string; pr_number: number; reviewers: string[] }>(
+      `/scm/onboarded/${owner}/${name}/assign`,
+      { method: "POST", body: JSON.stringify({ reviewers }) }
+    ),
+
+  archiveOnboarded: (owner: string, name: string) =>
+    apiFetch<OnboardedRepo>(`/scm/onboarded/${owner}/${name}`, { method: "DELETE" }),
+
+  reconcileRepos: (org?: string) =>
+    apiFetch<{ scanned: number; reconciled: number; skipped: number; errors: string[] }>(
+      `/scm/onboarded/reconcile${org ? `?org=${encodeURIComponent(org)}` : ""}`,
+      { method: "POST" }
+    ),
 };
+
+export type OnboardingStateValue =
+  | "discovered"
+  | "pending_pr"
+  | "onboarded"
+  | "archived"
+  | "dormant";
+
+export interface CatalogRepo {
+  owner: string;
+  name: string;
+  full_name: string;
+  default_branch: string;
+  description: string;
+  language: string;
+  private: boolean;
+  archived: boolean;
+  html_url: string;
+  pushed_at: string;
+  has_marker: boolean | null;
+  state: OnboardingStateValue;
+  onboarded: boolean;
+  pr_number: number | null;
+  pr_url: string;
+  draft?: boolean;
+}
+
+export interface RepoCatalogPage {
+  repos: CatalogRepo[];
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  has_prev: boolean;
+  has_next: boolean;
+  onboarded_count: number;
+  cache_hit: boolean;
+  org: string;
+}
+
+export interface OnboardedRepo {
+  owner: string;
+  name: string;
+  full_name: string;
+  state: OnboardingStateValue;
+  onboarded: boolean;
+  pr_number: number | null;
+  pr_url: string;
+  draft?: boolean;
+  default_base_branch: string;
+  description: string;
+  onboarded_at: string | null;
+  onboarded_by: string;
+  tags: string[];
+}
+
+export interface OnboardResult {
+  succeeded: Array<{ repo: string; status: string; state?: string; pr_number?: number; pr_url?: string }>;
+  failed: Array<{ repo: string; error: string }>;
+  dry_run: boolean;
+}

@@ -1,0 +1,13 @@
+# sandboxctl build manifest — declares the image(s) sandboxctl builds and
+# pushes to the in-cluster registry (localhost:5050) before deploying.
+#
+# `sandboxctl deploy` (run from this repo root) will:
+#   1. build localhost:5050/devai:latest from ./Dockerfile
+#   2. apply k8s/secrets.yaml into the devai namespace
+#   3. push k8s/chart to in-cluster Gitea + create an Argo Application
+#      (image.repository/tag injected automatically)
+#   4. route https://devai.sandbox.app:8443 to the devai Service
+images:
+  - name: devai
+    context: "."
+    dockerfile: Dockerfile

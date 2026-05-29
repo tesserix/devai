@@ -42,6 +42,18 @@ async def list_blueprints(request: Request) -> list[dict[str, Any]]:
     return _service(request).list_blueprints()
 
 
+@router.get("/blueprints/{name}")
+async def get_blueprint_graph(request: Request, name: str) -> dict[str, Any]:
+    """Render-ready graph for one blueprint — `{name, title, description,
+    lanes, nodes, edges, levels}`. The dashboards render the pipeline flow
+    directly from this, so a new (or UI-created) blueprint shows up with no
+    UI code change."""
+    graph = _service(request).get_blueprint_graph(name)
+    if graph is None:
+        raise HTTPException(status_code=404, detail=f"blueprint {name!r} not found")
+    return graph
+
+
 @router.get("/stages")
 async def list_stages(request: Request) -> list[str]:
     return _service(request).list_stage_keys()

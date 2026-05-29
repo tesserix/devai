@@ -245,6 +245,7 @@ class AzureDevOpsSCMClient(SCMClient):
         body: str,
         head: str,
         base: str | None = None,
+        draft: bool = False,
     ) -> dict[str, Any]:
         org, project, repo_name = self._parse_repo(repo)
         if base is None:
@@ -258,10 +259,19 @@ class AzureDevOpsSCMClient(SCMClient):
                 "description": body,
                 "sourceRefName": f"refs/heads/{head}",
                 "targetRefName": f"refs/heads/{base}",
+                "isDraft": draft,
             },
         )
         data = resp.json()
         return {"number": data["pullRequestId"], **data}
+
+    async def mark_pull_request_ready(self, repo: str, pr_id: int) -> dict[str, Any]:
+        """Clear ``isDraft`` on an ADO pull request so it becomes a real PR."""
+        org, project, repo_name = self._parse_repo(repo)
+        url = self._git_url(org, project, repo_name, f"pullrequests/{pr_id}")
+        resp = await self._request("PATCH", url, json={"isDraft": False})
+        data = resp.json()
+        return {"number": data.get("pullRequestId", pr_id), "is_draft": bool(data.get("isDraft", False))}
 
     async def get_pull_request(self, repo: str, pr_id: int) -> dict[str, Any]:
         org, project, repo_name = self._parse_repo(repo)

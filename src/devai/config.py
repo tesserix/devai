@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     github_webhook_secret: str = ""
     github_org: str = "tesserix"
 
+    # --- Repo onboarding (Repos page) ---
+    # When true, the API runs a one-shot reconcile ~30s after boot so the
+    # onboarding cache self-heals from the `.platform/devai.yaml` markers
+    # (source of truth) after a DB wipe or a fresh deploy. Endpoint-driven
+    # reconcile is always available regardless of this flag.
+    onboarding_reconcile_on_boot: bool = True
+
     # --- GitHub OAuth (for dashboard) ---
     github_oauth_client_id: str = ""
     github_oauth_client_secret: str = ""
@@ -212,6 +219,30 @@ class Settings(BaseSettings):
     registry_token: str = ""
     registry_timeout_seconds: float = 5.0
     registry_cache_ttl_seconds: float = 30.0
+
+    # --- registry adapter ---
+    # Which registry backend the adapter family talks to. The registry itself
+    # never depends on DevAI; swap backend with one env var.
+    #   tesserix        → our open-source agentic-registry (/v0/* API)  [default]
+    #   solo_aregistry  → upstream solo.io aregistry (/v0/* API)
+    #   mcp_registry    → official MCP Registry / any /v0.1-compatible registry
+    #   portkey         → Portkey prompt control plane
+    #   noop            → empty catalogs (fall back to in-tree YAML seeds)
+    # See src/devai/adapters/registry/.
+    registry_provider: str = "tesserix"
+    solo_registry_url: str = ""  # base URL when registry_provider=solo_aregistry
+    mcp_registry_url: str = ""  # base URL when registry_provider=mcp_registry
+    portkey_api_key: str = ""  # when registry_provider=portkey (ref only; vault-backed)
+
+    # Secure registry connection (OAuth 2.1 client-credentials, preferred over
+    # a static registry_token). DevAI authenticates as an OIDC client and gets a
+    # short-lived scoped JWT the registry verifies via JWKS. The client secret
+    # is sourced from GCP Secret Manager — never stored in the registry.
+    registry_oidc_token_url: str = ""  # IdP token endpoint
+    registry_client_id: str = ""
+    registry_client_secret: str = ""  # from GCP Secret Manager / External Secret
+    registry_scopes: str = "registry:read registry:write"
+    registry_audience: str = ""
 
     # --- Agent control plane (agentgateway + kagent) ---
     # When set, the runner routes MCP traffic through agentgateway

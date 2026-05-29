@@ -1,20 +1,9 @@
-export const PIPELINE_STAGES = [
-  { key: "triggered", label: "Triggered", color: "text-gray-500" },
-  { key: "plan_approved", label: "Supervisor", color: "text-indigo-600" },
-  { key: "requirements_analyzed", label: "Requirements", color: "text-slate-600" },
-  { key: "epic_created", label: "Epic", color: "text-indigo-600" },
-  { key: "stories_created", label: "Stories", color: "text-blue-600" },
-  { key: "plan_created", label: "Plan", color: "text-indigo-600" },
-  { key: "code_implemented", label: "Code", color: "text-amber-600" },
-  { key: "code_reviewed", label: "Review", color: "text-orange-600" },
-  { key: "security_cleared", label: "Security", color: "text-red-600" },
-  { key: "build_monitoring", label: "Build", color: "text-yellow-600" },
-  { key: "tests_complete", label: "Tests", color: "text-green-600" },
-  { key: "deploying", label: "Deploy", color: "text-teal-600" },
-  { key: "deployed", label: "Live", color: "text-green-700" },
-  { key: "done", label: "Done", color: "text-green-700" },
-  { key: "failed", label: "Failed", color: "text-red-600" },
-] as const;
+// NOTE: the pipeline flow is no longer hardcoded here. PipelineFlow renders
+// from the blueprint-graph endpoint (GET /api/pipeline/blueprints/{name}), so
+// the blueprint YAML is the single source of truth and a new/UI-authored
+// blueprint shows up with no UI change. The former PIPELINE_STAGES and
+// STAGE_TO_AGENT constants were removed; AGENT_INFO below stays — it's the
+// agent-metadata catalog used by agent-card / a2a-feed / hierarchy views.
 
 export const AGENT_INFO: Record<
   string,
@@ -139,23 +128,6 @@ export const AGENT_INFO: Record<
     color: "#047857",
     role: "specialist",
   },
-};
-
-export const STAGE_TO_AGENT: Record<string, string> = {
-  triggered: "supervisor",
-  plan_approved: "supervisor",
-  requirements_analyzed: "requirements_analyst",
-  epic_created: "product_director",
-  stories_created: "engineering_manager",
-  plan_created: "senior_developer",
-  code_implemented: "senior_developer",
-  db_migrated: "db_engineer",
-  code_reviewed: "staff_reviewer",
-  security_cleared: "security_expert",
-  build_monitoring: "senior_developer",
-  tests_complete: "qa_tester",
-  deploying: "release_manager",
-  deployed: "release_manager",
 };
 
 /** Agent hierarchy for the delegation visualization */

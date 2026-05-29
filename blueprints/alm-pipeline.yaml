@@ -9,12 +9,16 @@ description: >-
 metadata:
   domain: alm
   replaces: devai.graph.orchestrator.ALMOrchestrator
+  # Render hints for the dashboard flow view (ignored by the executor).
+  title: Application Lifecycle
+  lanes: [plan, build, review, deploy]
 
 stages:
   # ─── Intake ────────────────────────────────────────────────────────
   - name: create-issue
     type: deterministic
     stage: create_issue
+    lane: plan
     timeout: 60s
     config:
       title_template: "[devai] {intent}"
@@ -22,12 +26,14 @@ stages:
   - name: hydrate-context
     type: context
     stage: context_hydration
+    lane: plan
     depends_on: [create-issue]
     timeout: 30s
 
   - name: inject-memory
     type: context
     stage: memory_injection
+    lane: plan
     depends_on: [create-issue]
     timeout: 30s
     config:
@@ -37,30 +43,35 @@ stages:
   - name: ingest-documents
     type: agentic
     stage: ingest_documents
+    lane: plan
     depends_on: [hydrate-context, inject-memory]
     timeout: 15m
 
   - name: detect-tech-stack
     type: agentic
     stage: detect_tech_stack
+    lane: plan
     depends_on: [ingest-documents]
     timeout: 5m
 
   - name: analyze-requirements
     type: agentic
     stage: analyze_requirements
+    lane: plan
     depends_on: [detect-tech-stack]
     timeout: 10m
 
   - name: create-epic
     type: agentic
     stage: create_epic
+    lane: plan
     depends_on: [analyze-requirements]
     timeout: 10m
 
   - name: create-stories
     type: agentic
     stage: create_stories
+    lane: plan
     depends_on: [create-epic]
     timeout: 5m
     on_failure: continue
@@ -68,6 +79,7 @@ stages:
   - name: create-plan
     type: agentic
     stage: create_plan
+    lane: plan
     depends_on: [create-stories]
     timeout: 15m
 
@@ -75,12 +87,15 @@ stages:
   - name: implement-code
     type: agentic
     stage: implement_code
+    lane: build
     depends_on: [create-plan]
     timeout: 30m
 
   - name: db-engineering
     type: agentic
     stage: db_engineering
+    lane: build
+    title: DB Engineering
     depends_on: [implement-code]
     timeout: 10m
     on_failure: continue
@@ -89,24 +104,29 @@ stages:
   - name: review-code
     type: review
     stage: review_code
+    lane: review
     depends_on: [implement-code, db-engineering]
     timeout: 15m
 
   - name: security-scan
     type: review
     stage: security_scan
+    lane: review
     depends_on: [review-code]
     timeout: 10m
 
   - name: monitor-build
     type: deterministic
     stage: monitor_build
+    lane: review
+    title: CI Build
     depends_on: [security-scan]
     timeout: 20m
 
   - name: run-tests
     type: review
     stage: run_tests
+    lane: review
     depends_on: [monitor-build]
     timeout: 20m
 
@@ -114,18 +134,23 @@ stages:
   - name: staff-review
     type: review
     stage: staff_review
+    lane: review
+    gate: true
     depends_on: [run-tests]
     timeout: 15m
 
   - name: provision-infra
     type: deploy
     stage: provision_infra
+    lane: deploy
     depends_on: [staff-review]
     timeout: 15m
 
   - name: deploy-release
     type: deploy
     stage: deploy_release
+    lane: deploy
+    gate: true
     depends_on: [provision-infra]
     timeout: 20m
 
@@ -133,6 +158,7 @@ stages:
   - name: post-report
     type: deterministic
     stage: post_report
+    lane: deploy
     depends_on: [deploy-release]
     on_failure: continue
     config:
@@ -142,5 +168,6 @@ stages:
   - name: cleanup
     type: deterministic
     stage: cleanup
+    lane: deploy
     depends_on: [post-report]
     on_failure: continue

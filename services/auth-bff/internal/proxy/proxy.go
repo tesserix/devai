@@ -1,8 +1,15 @@
 // Package proxy reverse-proxies kagent + aregistry traffic.
 //
-// Pattern: requests to kagent.tesserix.app and aregistry.tesserix.app land
-// on the BFF; this handler inspects the session cookie, redirects to the
-// login page on miss, and otherwise proxies to the upstream UI service
+// Both services are internal-only by default — devai-api dials them over
+// cluster DNS and no public hostname routes here. The proxy stays
+// available so a future deployment can opt-in by setting all four of
+// DEVAI_BFF_{KAGENT,AREGISTRY}_{HOST,UPSTREAM_URL}. When the host envs
+// are blank (the default), ServeHTTP refuses to match — empty Host
+// headers cannot fall through to either proxy.
+//
+// When opted in: requests to KagentHost / AregistryHost land on the BFF;
+// this handler inspects the session cookie, redirects to the login page
+// on miss, and otherwise proxies to the upstream UI service
 // (kagent-ui:8080 or agentregistry:12121).
 //
 // The login page is served by devai-dashboard at /login?return_to=... and
@@ -38,10 +45,10 @@ type Handler struct {
 // Config holds Handler dependencies.
 type Config struct {
 	Session        *session.Manager
-	KagentUpstream string // http://kagent-ui.kagent-system.svc.cluster.local:8080
-	AregistryUpstream string // http://agentregistry.agentregistry-system.svc.cluster.local:12121
-	KagentHost     string // kagent.tesserix.app
-	AregistryHost  string // aregistry.tesserix.app
+	KagentUpstream string // e.g. http://kagent-ui.kagent-system.svc.cluster.local:8080 (blank = disabled)
+	AregistryUpstream string // e.g. http://agentregistry.agentregistry-system.svc.cluster.local:12121 (blank = disabled)
+	KagentHost     string // e.g. kagent.tesserix.app (blank = no public exposure)
+	AregistryHost  string // e.g. aregistry.tesserix.app (blank = no public exposure)
 }
 
 // New constructs a Handler.
@@ -66,14 +73,19 @@ func New(cfg Config) (*Handler, error) {
 // ServeHTTP routes by Host header to the right upstream. Any host that
 // doesn't match falls through to a 404 — the auth-bff isn't a catch-all
 // proxy. We expect Istio to only deliver kagent / aregistry traffic here.
+//
+// Empty configured hostnames are never matchable. When the operator
+// hasn't set DEVAI_BFF_KAGENT_HOST / DEVAI_BFF_AREGISTRY_HOST, the
+// corresponding case is skipped so a request with a blank Host header
+// can't accidentally land on the empty branch.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := strings.ToLower(stripPort(r.Host))
 
 	var target *httputil.ReverseProxy
-	switch host {
-	case h.kagentHost:
+	switch {
+	case h.kagentHost != "" && host == h.kagentHost:
 		target = h.kagentProxy
-	case h.aregistryHost:
+	case h.aregistryHost != "" && host == h.aregistryHost:
 		target = h.aregistryProxy
 	default:
 		http.NotFound(w, r)

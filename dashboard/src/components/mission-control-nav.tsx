@@ -10,6 +10,7 @@ import {
   BrainCog,
   ChevronsLeftRight,
   Database,
+  FolderGit2,
   GitBranch,
   Layers,
   LineChart,
@@ -79,6 +80,7 @@ const TOP: NavItem[] = [
 ];
 
 const MID: NavItem[] = [
+  { href: "/repos", label: "Repos", Icon: FolderGit2, description: "Onboard org repositories" },
   { href: "/registry", label: "Registry", Icon: PackageOpen, description: "Skills · Prompts · MCP · Agents" },
   { href: "/gateway", label: "Gateway", Icon: Radio, description: "Agent Gateway + LLM proxy health" },
   { href: "/catalog", label: "Catalog", Icon: Database, description: "Resolved capability map" },

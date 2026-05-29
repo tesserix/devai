@@ -336,7 +336,7 @@ The integration is healthy when **every one** of these holds:
 
 | # | Check | How to verify |
 |---|---|---|
-| 1 | aregistry reachable | `curl https://aregistry.tesserix.app/v0/health` returns `{ok:true}` |
+| 1 | aregistry reachable | `kubectl exec -n agentregistry-system deploy/agentregistry -- curl -s http://localhost:8080/v0/health` returns `{ok:true}` (aregistry is internal-only — no public hostname) |
 | 2 | dashboard shows correct counts | `/dashboard/registry` shows 8 tiles populated |
 | 3 | trigger a run as alice@x.com | `POST /api/pipeline/trigger` returns `triggered_by:"alice@x.com"` |
 | 4 | dispatch fetches profile | API logs: `registry.get_agent(senior_developer)` returns full record |

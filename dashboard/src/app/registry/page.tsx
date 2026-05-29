@@ -3,7 +3,8 @@
 /**
  * Unified catalog page.
  *
- * aregistry (the upstream open-source service at aregistry.tesserix.app)
+ * aregistry (the upstream open-source agent registry, reached over
+ * cluster DNS at agentregistry.agentregistry-system.svc.cluster.local)
  * only ships three tiles in its own UI — Servers / Skills / Agents — and
  * its API additionally exposes Prompts. We surface ALL of those here,
  * plus the four catalogs that DevAI owns locally (Tools, Blueprints,

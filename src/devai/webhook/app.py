@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -108,9 +109,78 @@ def create_app(
         else:
             app.state.specialization_service = None
 
+        # Repo onboarding service (Repos page). Independent of the
+        # pipeline runtime: build an SCM client (reuse the pipeline's if
+        # one exists) + a best-effort Postgres pool, and fall back to the
+        # in-memory store when the DB is unreachable. The reconciler can
+        # rebuild the cache from the `.platform/devai.yaml` markers, so an
+        # in-memory store loses nothing permanent.
+        onboarding_db = None
+        app.state.onboarding_service = None
+        try:
+            from devai.onboarding import create_onboarding_service
+            from devai.scm import create_scm_client
+
+            onboarding_scm = getattr(app.state, "scm_client", None)
+            if onboarding_scm is None:
+                onboarding_scm = create_scm_client(config)
+                app.state.scm_client = onboarding_scm
+
+            pool = None
+            try:
+                from devai.services.database import Database
+
+                onboarding_db = Database(config.database_url)
+                await onboarding_db.connect()
+                pool = onboarding_db.pool
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Onboarding: DB pool unavailable (%s) — using in-memory store", e)
+                onboarding_db = None
+
+            app.state.onboarding_service = create_onboarding_service(
+                config, scm=onboarding_scm, pool=pool
+            )
+            logger.info("Onboarding service ready (store=%s)", "postgres" if pool else "in-memory")
+        except Exception:
+            logger.exception("Onboarding service failed to start — Repos page will 503")
+            app.state.onboarding_service = None
+
+        # One-shot boot reconcile: rebuild/refresh the onboarding cache from
+        # the `.platform/devai.yaml` markers (the source of truth) so the
+        # Repos page survives a DB wipe or fresh deploy. DB-first inside
+        # reconcile() keeps this cheap on a populated store; the 30s delay
+        # lets the SCM client + pool settle first. Endpoint reconcile stays
+        # available regardless.
+        onboarding_reconcile_task = None
+        if app.state.onboarding_service is not None and getattr(
+            config, "onboarding_reconcile_on_boot", True
+        ):
+            async def _boot_reconcile(svc: object) -> None:
+                try:
+                    await asyncio.sleep(30)
+                    report = await svc.reconcile()  # type: ignore[attr-defined]
+                    logger.info("Onboarding boot reconcile: %s", report)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001
+                    logger.exception("Onboarding boot reconcile failed (non-fatal)")
+
+            onboarding_reconcile_task = asyncio.create_task(
+                _boot_reconcile(app.state.onboarding_service)
+            )
+
         try:
             yield
         finally:
+            if onboarding_reconcile_task is not None and not onboarding_reconcile_task.done():
+                onboarding_reconcile_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await onboarding_reconcile_task
+            if onboarding_db is not None:
+                try:
+                    await onboarding_db.close()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Onboarding DB close failed")
             if pipeline_service is not None:
                 try:
                     await pipeline_service.stop()
@@ -195,6 +265,14 @@ def create_app(
     from devai.scm.routes import router as scm_router
 
     app.include_router(scm_router)
+
+    # Repo onboarding routes (/api/scm/org/repos + /api/scm/onboarded/*) —
+    # backs the Repos page: org catalog with onboarding status, onboard
+    # (gated PR), merge/assign-reviewer from inside DevAI, and reconcile
+    # from the `.platform/devai.yaml` markers.
+    from devai.onboarding.routes import router as onboarding_router
+
+    app.include_router(onboarding_router)
 
     # Pipeline runtime routes (/api/pipeline/*) — only useful when
     # PipelineService is started, but the routes themselves return a

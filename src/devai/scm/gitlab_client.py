@@ -157,9 +157,13 @@ class GitLabSCMClient(SCMClient):
         body: str,
         head: str,
         base: str | None = None,
+        draft: bool = False,
     ) -> dict[str, Any]:
         if base is None:
             base = await self.get_default_branch(repo)
+        # GitLab marks an MR as draft via a "Draft:" title prefix.
+        if draft and not title.lower().startswith(("draft:", "wip:")):
+            title = f"Draft: {title}"
         resp = await self._request(
             "POST",
             f"/projects/{self._project_id(repo)}/merge_requests",
@@ -172,6 +176,22 @@ class GitLabSCMClient(SCMClient):
         )
         data = resp.json()
         return {"number": data["iid"], "html_url": data["web_url"], **data}
+
+    async def mark_pull_request_ready(self, repo: str, pr_id: int) -> dict[str, Any]:
+        """Strip the ``Draft:``/``WIP:`` prefix so the MR is ready to merge."""
+        mr = await self.get_pull_request(repo, pr_id)
+        title = str(mr.get("title", ""))
+        for prefix in ("Draft:", "draft:", "WIP:", "wip:"):
+            if title.startswith(prefix):
+                title = title[len(prefix):].strip()
+                break
+        resp = await self._request(
+            "PUT",
+            f"/projects/{self._project_id(repo)}/merge_requests/{pr_id}",
+            json={"title": title},
+        )
+        data = resp.json()
+        return {"number": data.get("iid", pr_id), "is_draft": bool(data.get("draft", False))}
 
     async def get_pull_request(self, repo: str, pr_id: int) -> dict[str, Any]:
         resp = await self._request("GET", f"/projects/{self._project_id(repo)}/merge_requests/{pr_id}")

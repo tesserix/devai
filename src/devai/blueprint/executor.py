@@ -165,7 +165,16 @@ class BlueprintExecutor:
         # Run it.
         task.current_stage = spec.name
         start = time.monotonic()
-        self._emit(task, StageEvent(spec.name, StageEventPhase.STARTED, message=spec.stage))
+        self._emit(
+            task,
+            StageEvent(
+                spec.name,
+                StageEventPhase.STARTED,
+                message=spec.stage,
+                stage_type=spec.type,
+                gate=spec.gate,
+            ),
+        )
 
         timeout = spec.timeout_seconds or self._default_timeout
         try:
@@ -203,6 +212,8 @@ class BlueprintExecutor:
                 StageEventPhase.COMPLETED,
                 duration_ms=duration_ms,
                 message=result.message,
+                stage_type=spec.type,
+                gate=spec.gate,
             ),
         )
 
@@ -223,6 +234,8 @@ class BlueprintExecutor:
                 StageEventPhase.FAILED,
                 duration_ms=duration_ms,
                 error=error,
+                stage_type=spec.type,
+                gate=spec.gate,
             ),
         )
 

@@ -182,9 +182,10 @@ func (h *AuthHandler) autoLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	case "agentic":
 		// agentic UIs reuse the alm tenant pool — a single login covers
-		// devai.tesserix.app, sre.tesserix.app, kagent.tesserix.app, and
-		// aregistry.tesserix.app. Pool just tags which surface initiated
-		// the login for audit.
+		// the ALM dashboard plus any opt-in kagent / aregistry public
+		// hostnames (disabled by default — both services are
+		// internal-only). Pool just tags which surface initiated the
+		// login for audit.
 	default:
 		writeJSON(w, http.StatusBadRequest, errorResp("invalid_request", "pool must be alm, sre, or agentic"))
 		return

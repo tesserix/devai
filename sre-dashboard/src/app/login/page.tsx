@@ -21,11 +21,11 @@ function LoginPageInner() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Where to send the browser after a successful sign-in. The agentic
-  // hostnames (kagent.tesserix.app, aregistry.tesserix.app) redirect
-  // here with ?return_to=… when their cookie is missing — we send the
-  // browser back to that origin once the session is minted (the cookie
-  // is on .tesserix.app so it travels).
+  // Where to send the browser after a successful sign-in. The
+  // ?return_to=… param is honoured for any *.tesserix.app origin that
+  // chooses to bounce off the dashboard login (the agentic services
+  // are internal-only today, so this is opt-in for future public
+  // hostnames — the session cookie is on .tesserix.app so it travels).
   const returnTo = params.get("return_to") ?? "/";
 
   async function handleGoogleSignIn() {

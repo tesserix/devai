@@ -82,6 +82,16 @@ class StageSpec:
     config: dict[str, str] = field(default_factory=dict)
     parallel: bool = False  # marks this stage as part of a parallel level
 
+    # ── Render metadata (all optional; powers the data-driven UI flow view) ──
+    # These never affect execution — they only feed the blueprint-graph
+    # endpoint so the dashboards can draw any blueprint without hardcoding
+    # nodes. Sensible fallbacks mean existing blueprints render unchanged.
+    title: str = ""  # display name; empty → humanized `name`
+    lane: str = ""  # visual column/group (e.g. plan | build | review | deploy)
+    color: str = ""  # UI color token; empty → UI default
+    agent: str = ""  # specialization key this node runs; empty → config["agent"]
+    gate: bool = False  # human-approval gate node
+
     def __post_init__(self) -> None:
         if self.on_failure not in {"stop", "rollback", "continue"}:
             raise BlueprintLoadError(
@@ -91,6 +101,37 @@ class StageSpec:
             # We don't restrict the type strictly — it's informational for
             # the dashboard — but we still want to catch typos.
             logger.debug("stage %s has uncommon type %r", self.name, self.type)
+
+    def display_title(self) -> str:
+        """Render-friendly title — falls back to a humanized stage name."""
+        if self.title:
+            return self.title
+        return self.name.replace("-", " ").replace("_", " ").strip().title()
+
+    def resolved_agent(self) -> str:
+        """Specialization key for this node. Explicit `agent:` wins; otherwise
+        fall back to `config.agent` (how job-runner stages already name their
+        agent), so nodes light up with the right agent without duplication."""
+        return self.agent or self.config.get("agent", "")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Flat, render-ready dict. Used by the blueprint-graph endpoint."""
+        return {
+            "name": self.name,
+            "stage": self.stage,
+            "type": self.type,
+            "title": self.display_title(),
+            "lane": self.lane,
+            "color": self.color,
+            "agent": self.resolved_agent(),
+            "gate": self.gate,
+            "depends_on": list(self.depends_on),
+            "condition": self.condition,
+            "timeout_seconds": self.timeout_seconds,
+            "on_failure": self.on_failure,
+            "parallel": self.parallel,
+            "config": dict(self.config),
+        }
 
 
 @dataclass(slots=True)
@@ -127,6 +168,12 @@ _ALLOWED_STAGE_KEYS = {
     "on_failure",
     "config",
     "parallel",
+    # ── render metadata (optional) ──
+    "title",
+    "lane",
+    "color",
+    "agent",
+    "gate",
 }
 
 
@@ -201,6 +248,11 @@ def load_blueprint_from_string(text: str, *, source: str = "<inline>") -> Bluepr
                 on_failure=str(entry.get("on_failure", "stop")),
                 config=config,
                 parallel=bool(entry.get("parallel", False)),
+                title=str(entry.get("title", "")),
+                lane=str(entry.get("lane", "")),
+                color=str(entry.get("color", "")),
+                agent=str(entry.get("agent", "")),
+                gate=bool(entry.get("gate", False)),
             )
         )
 

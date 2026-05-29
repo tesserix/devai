@@ -141,6 +141,10 @@ class StageEvent:
     duration_ms: float = 0.0
     message: str = ""
     error: str | None = None
+    # Stage render hints, copied from the StageSpec. Let SSE / NATS consumers
+    # label a node (gate? what kind of stage?) without re-reading the blueprint.
+    stage_type: str = ""
+    gate: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,6 +154,8 @@ class StageEvent:
             "duration_ms": self.duration_ms,
             "message": self.message,
             "error": self.error,
+            "type": self.stage_type,
+            "gate": self.gate,
         }
 
 
