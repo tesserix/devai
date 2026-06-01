@@ -254,7 +254,79 @@ export const api = {
       `/scm/onboarded/reconcile${org ? `?org=${encodeURIComponent(org)}` : ""}`,
       { method: "POST" }
     ),
+
+  // ── Catalog (tools available to pick when authoring an agent) ──────
+  listCatalogTools: (category?: string) =>
+    apiFetch<CatalogTool[]>(`/catalog/tools${category ? `?category=${encodeURIComponent(category)}` : ""}`),
+
+  // ── Authoring: custom agents (specializations) ────────────────────
+  listAuthoredAgents: () => apiFetch<AuthoredDefinition[]>("/authoring/specializations"),
+
+  createAgent: (input: CreateAgentInput) =>
+    apiFetch<{ name: string; display_name?: string; category?: string }>(
+      "/authoring/specializations",
+      { method: "POST", body: JSON.stringify(input) }
+    ),
+
+  deleteAgent: (name: string) =>
+    apiFetch<{ deleted: string }>(`/authoring/specializations/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+
+  // ── Authoring: custom blueprints (workflows) ──────────────────────
+  listAuthoredBlueprints: () => apiFetch<AuthoredDefinition[]>("/authoring/blueprints"),
+
+  createBlueprint: (yaml: string) =>
+    apiFetch<{ name: string; stages: number }>("/authoring/blueprints", {
+      method: "POST",
+      body: JSON.stringify({ yaml }),
+    }),
+
+  deleteBlueprint: (name: string) =>
+    apiFetch<{ deleted: string }>(`/authoring/blueprints/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
 };
+
+// ── Authoring types ───────────────────────────────────────────────
+export interface CatalogTool {
+  name: string;
+  description: string;
+  category: string;
+  required: string[];
+  parameters: string[];
+  schema: Record<string, unknown>;
+}
+
+export interface HandoverFieldInput {
+  type: string;
+  required: boolean;
+  description?: string;
+}
+
+export interface CreateAgentInput {
+  name: string;
+  display_name?: string;
+  description?: string;
+  category?: string;
+  llm_provider?: string;
+  llm_model?: string;
+  temperature?: number | null;
+  system_prompt?: string;
+  allowed_tools?: string[];
+  handover_schema?: Record<string, HandoverFieldInput>;
+  risk_level?: string;
+  output_key?: string;
+}
+
+export interface AuthoredDefinition {
+  kind: string;
+  name: string;
+  yaml: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export type OnboardingStateValue =
   | "discovered"

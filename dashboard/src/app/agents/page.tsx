@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users } from "lucide-react";
+import Link from "next/link";
+import { Plus, Users } from "lucide-react";
 
 type Agent = {
   name: string;
@@ -48,12 +49,20 @@ export default function AgentsPage() {
             Agents catalogued in aregistry. Each card shows the model + framework binding the runtime will instantiate.
           </p>
         </div>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by name…"
-          className="px-3 py-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] text-sm text-[var(--ink-100)] placeholder-[var(--ink-500)] focus:outline-none focus:border-indigo-500/50"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter by name…"
+            className="px-3 py-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] text-sm text-[var(--ink-100)] placeholder-[var(--ink-500)] focus:outline-none focus:border-indigo-500/50"
+          />
+          <Link
+            href="/agents/new"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" /> Create Agent
+          </Link>
+        </div>
       </header>
 
       {error && (
