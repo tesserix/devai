@@ -56,7 +56,10 @@ class DatadogAdapter(ObservabilityAdapter):
             points = [(float(p[0]) / 1000.0, float(p[1])) for p in s.get("pointlist", []) if p[1] is not None]
             out.append(
                 MetricSeries(
-                    name=s.get("metric", query), provider="datadog", points=points, unit=(s.get("unit") or [{}])[0].get("name", "") if s.get("unit") else ""
+                    name=s.get("metric", query),
+                    provider="datadog",
+                    points=points,
+                    unit=(s.get("unit") or [{}])[0].get("name", "") if s.get("unit") else "",
                 )
             )
         return out

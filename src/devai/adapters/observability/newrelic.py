@@ -33,9 +33,9 @@ class NewRelicAdapter(ObservabilityAdapter):
     async def _nrql(self, nrql: str) -> list[dict[str, Any]]:
         import httpx
 
-        gql = (
-            '{ actor { account(id: %s) { nrql(query: "%s") { results } } } }'
-            % (self._account_id, nrql.replace('"', '\\"'))
+        gql = '{ actor { account(id: %s) { nrql(query: "%s") { results } } } }' % (
+            self._account_id,
+            nrql.replace('"', '\\"'),
         )
         async with httpx.AsyncClient(timeout=20.0) as client:
             r = await client.post(
@@ -59,7 +59,9 @@ class NewRelicAdapter(ObservabilityAdapter):
         points: list[tuple[float, float]] = []
         for row in results:
             ts = float(row.get("beginTimeSeconds", row.get("timestamp", 0)) or 0)
-            val = next((float(v) for k, v in row.items() if isinstance(v, (int, float)) and k != "beginTimeSeconds"), None)
+            val = next(
+                (float(v) for k, v in row.items() if isinstance(v, (int, float)) and k != "beginTimeSeconds"), None
+            )
             if val is not None:
                 points.append((ts, val))
         return [MetricSeries(name=query[:60], provider="newrelic", points=points)] if points else []
@@ -88,7 +90,7 @@ class NewRelicAdapter(ObservabilityAdapter):
         if not self._ready():
             return []
         gql = (
-            '{ actor { account(id: %s) { aiIssues { issues(filter: {states: ACTIVATED}) '
+            "{ actor { account(id: %s) { aiIssues { issues(filter: {states: ACTIVATED}) "
             "{ issues { title priority state } } } } } }" % self._account_id
         )
         try:
@@ -102,14 +104,22 @@ class NewRelicAdapter(ObservabilityAdapter):
                 )
                 r.raise_for_status()
                 issues = (
-                    r.json().get("data", {}).get("actor", {}).get("account", {}).get("aiIssues", {}).get("issues", {}).get("issues", [])
+                    r.json()
+                    .get("data", {})
+                    .get("actor", {})
+                    .get("account", {})
+                    .get("aiIssues", {})
+                    .get("issues", {})
+                    .get("issues", [])
                 )
         except Exception:  # noqa: BLE001
             logger.warning("newrelic get_alerts failed", exc_info=True)
             return []
         return [
             Alert(
-                title=(i.get("title") or ["issue"])[0] if isinstance(i.get("title"), list) else str(i.get("title", "issue")),
+                title=(i.get("title") or ["issue"])[0]
+                if isinstance(i.get("title"), list)
+                else str(i.get("title", "issue")),
                 provider="newrelic",
                 severity=str(i.get("priority", "")).lower(),
                 state="firing",

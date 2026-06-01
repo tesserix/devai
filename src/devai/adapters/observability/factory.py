@@ -73,17 +73,36 @@ def _config_from_env(provider: str) -> dict[str, Any]:
             "token": g("DEVAI_PROMETHEUS_TOKEN", ""),
         }
     if provider == "datadog":
-        return {"api_key": g("DEVAI_DATADOG_API_KEY", ""), "app_key": g("DEVAI_DATADOG_APP_KEY", ""), "site": g("DEVAI_DATADOG_SITE", "datadoghq.com")}
+        return {
+            "api_key": g("DEVAI_DATADOG_API_KEY", ""),
+            "app_key": g("DEVAI_DATADOG_APP_KEY", ""),
+            "site": g("DEVAI_DATADOG_SITE", "datadoghq.com"),
+        }
     if provider == "newrelic":
         return {"api_key": g("DEVAI_NEWRELIC_API_KEY", ""), "account_id": g("DEVAI_NEWRELIC_ACCOUNT_ID", "")}
     if provider == "cloudwatch":
-        return {"region": g("DEVAI_AWS_REGION", ""), "access_key_id": g("AWS_ACCESS_KEY_ID", ""), "secret_access_key": g("AWS_SECRET_ACCESS_KEY", ""), "log_group": g("DEVAI_CLOUDWATCH_LOG_GROUP", "")}
+        return {
+            "region": g("DEVAI_AWS_REGION", ""),
+            "access_key_id": g("AWS_ACCESS_KEY_ID", ""),
+            "secret_access_key": g("AWS_SECRET_ACCESS_KEY", ""),
+            "log_group": g("DEVAI_CLOUDWATCH_LOG_GROUP", ""),
+        }
     if provider == "azure_monitor":
         return {"workspace_id": g("DEVAI_AZURE_WORKSPACE_ID", ""), "resource_id": g("DEVAI_AZURE_RESOURCE_ID", "")}
     if provider == "elasticsearch":
-        return {"url": g("DEVAI_ELASTICSEARCH_URL", ""), "api_key": g("DEVAI_ELASTICSEARCH_API_KEY", ""), "username": g("DEVAI_ELASTICSEARCH_USERNAME", ""), "password": g("DEVAI_ELASTICSEARCH_PASSWORD", ""), "index": g("DEVAI_ELASTICSEARCH_INDEX", "logs-*")}
+        return {
+            "url": g("DEVAI_ELASTICSEARCH_URL", ""),
+            "api_key": g("DEVAI_ELASTICSEARCH_API_KEY", ""),
+            "username": g("DEVAI_ELASTICSEARCH_USERNAME", ""),
+            "password": g("DEVAI_ELASTICSEARCH_PASSWORD", ""),
+            "index": g("DEVAI_ELASTICSEARCH_INDEX", "logs-*"),
+        }
     if provider == "grafana":
-        return {"url": g("DEVAI_GRAFANA_URL", ""), "token": g("DEVAI_GRAFANA_TOKEN", ""), "datasource_uid": g("DEVAI_GRAFANA_DATASOURCE_UID", "")}
+        return {
+            "url": g("DEVAI_GRAFANA_URL", ""),
+            "token": g("DEVAI_GRAFANA_TOKEN", ""),
+            "datasource_uid": g("DEVAI_GRAFANA_DATASOURCE_UID", ""),
+        }
     return {}
 
 

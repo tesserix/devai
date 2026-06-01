@@ -57,7 +57,13 @@ class CloudWatchAdapter(ObservabilityAdapter):
             out: list[MetricSeries] = []
             for res in resp.get("MetricDataResults", []):
                 pts = list(zip((t.timestamp() for t in res.get("Timestamps", [])), res.get("Values", []), strict=False))
-                out.append(MetricSeries(name=res.get("Label", query), provider="cloudwatch", points=[(float(a), float(b)) for a, b in pts]))
+                out.append(
+                    MetricSeries(
+                        name=res.get("Label", query),
+                        provider="cloudwatch",
+                        points=[(float(a), float(b)) for a, b in pts],
+                    )
+                )
             return out
 
         try:

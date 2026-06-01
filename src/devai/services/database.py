@@ -661,9 +661,7 @@ class Database:
 
     async def list_schedules(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         if enabled_only:
-            rows = await self.pool.fetch(
-                "SELECT * FROM sre_schedules WHERE enabled = true ORDER BY created_at DESC"
-            )
+            rows = await self.pool.fetch("SELECT * FROM sre_schedules WHERE enabled = true ORDER BY created_at DESC")
         else:
             rows = await self.pool.fetch("SELECT * FROM sre_schedules ORDER BY created_at DESC")
         return [dict(r) for r in rows]

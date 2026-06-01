@@ -75,7 +75,11 @@ class AzureMonitorAdapter(ObservabilityAdapter):
 
             client = LogsQueryClient(self._credential())
             # `query` may be raw KQL; otherwise wrap a trace search.
-            kql = query if " " in query and "|" in query else f'traces | where message contains "{query}" | take {min(limit, 1000)}'
+            kql = (
+                query
+                if " " in query and "|" in query
+                else f'traces | where message contains "{query}" | take {min(limit, 1000)}'
+            )
             resp = client.query_workspace(self._workspace_id, kql, timespan=timedelta(seconds=window_seconds))
             out: list[LogEntry] = []
             for table in getattr(resp, "tables", []) or []:

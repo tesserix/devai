@@ -343,7 +343,18 @@ def test_registry_resolve_unknown_raises():
 def test_registry_by_category_groups():
     reg = SpecializationRegistry.from_directory(SPECS_DIR)
     sre_specs = reg.by_category("sre")
-    assert len(sre_specs) == 7
+    # The original monitors plus the SRE Studio specialists. Assert membership
+    # rather than a brittle exact count so new specializations don't break CI.
+    sre_names = {s.name for s in sre_specs}
+    assert {
+        "discovery",
+        "infra_monitor",
+        "incident_responder",
+        "root_cause_analyst",
+        "observability_analyst",
+        "code_remediator",
+    } <= sre_names
+    assert len(sre_specs) >= 7
     coding_specs = reg.by_category("coding")
     assert {s.name for s in coding_specs} >= {"senior_developer", "db_engineer"}
 

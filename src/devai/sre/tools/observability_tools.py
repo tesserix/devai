@@ -139,7 +139,13 @@ class ObservabilityToolExecutor:
                 {
                     "queried_providers": multi.providers,
                     "logs": [
-                        {"ts": e.timestamp, "level": e.level, "service": e.service, "message": e.message, "provider": e.provider}
+                        {
+                            "ts": e.timestamp,
+                            "level": e.level,
+                            "service": e.service,
+                            "message": e.message,
+                            "provider": e.provider,
+                        }
                         for e in logs
                     ],
                 },

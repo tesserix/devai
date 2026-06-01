@@ -542,9 +542,7 @@ def create_sre_app() -> FastAPI:
     @app.patch("/api/schedules/{schedule_id}")
     async def update_schedule(schedule_id: str, request: Request):
         body = await request.json()
-        await app.state.db.update_schedule(
-            schedule_id, cron=body.get("cron"), enabled=body.get("enabled")
-        )
+        await app.state.db.update_schedule(schedule_id, cron=body.get("cron"), enabled=body.get("enabled"))
         return {"updated": schedule_id}
 
     @app.delete("/api/schedules/{schedule_id}")

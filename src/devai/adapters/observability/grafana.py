@@ -43,7 +43,13 @@ class GrafanaAdapter(ObservabilityAdapter):
             now_ms = int(time.time() * 1000)
             body = {
                 "queries": [
-                    {"refId": "A", "expr": query, "datasource": {"uid": self._ds}, "intervalMs": 60000, "maxDataPoints": 200}
+                    {
+                        "refId": "A",
+                        "expr": query,
+                        "datasource": {"uid": self._ds},
+                        "intervalMs": 60000,
+                        "maxDataPoints": 200,
+                    }
                 ],
                 "from": str(now_ms - window_seconds * 1000),
                 "to": str(now_ms),
@@ -60,7 +66,9 @@ class GrafanaAdapter(ObservabilityAdapter):
         for fr in frames:
             values = fr.get("data", {}).get("values", [])
             if len(values) >= 2:
-                points = [(float(t) / 1000.0, float(v)) for t, v in zip(values[0], values[1], strict=False) if v is not None]
+                points = [
+                    (float(t) / 1000.0, float(v)) for t, v in zip(values[0], values[1], strict=False) if v is not None
+                ]
                 out.append(MetricSeries(name=query[:60], provider="grafana", points=points))
         return out
 
