@@ -160,6 +160,41 @@ async def onboard_repos(request: Request, body: OnboardRequest) -> dict[str, Any
         raise HTTPException(status_code=502, detail=f"onboard: {e}") from e
 
 
+class CreateRepoRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field("", max_length=1000)
+    private: bool = True
+    tech_stack: str = Field("", max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not _valid_segment(v):
+            raise ValueError("must be a valid GitHub repo name (alnum, '.', '-', '_'; no path traversal)")
+        return v
+
+
+@router.post("/onboarded/create", status_code=201)
+async def create_and_onboard_repo(request: Request, body: CreateRepoRequest) -> dict[str, Any]:
+    """Create a brand-new repo from scratch, scaffold the default project
+    files + quality gates (README, .github/workflows ci/pr/release, Dependabot,
+    CODEOWNERS, .gitignore), commit the `.platform/devai.yaml` marker, and
+    record it as ONBOARDED in one shot — no PR needed for a repo we just made."""
+    svc = _service(request)
+    try:
+        return await svc.create_and_onboard(
+            body.name,
+            description=body.description,
+            private=body.private,
+            tech_stack=body.tech_stack,
+            onboarded_by=await _principal(request),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"create: {e}") from e
+
+
 @router.get("/onboarded/{owner}/{name}")
 async def get_onboarded(request: Request, owner: str, name: str) -> dict[str, Any]:
     _check_repo(owner, name)

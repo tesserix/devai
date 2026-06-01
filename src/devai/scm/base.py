@@ -511,6 +511,14 @@ class SCMClient(ABC):
 
     # --- Repo onboarding (Repos page) ---
 
+    async def set_branch_protection(
+        self, repo: str, branch: str, *, required_approvals: int = 1
+    ) -> dict[str, Any]:
+        """Enable a baseline branch-protection gate on ``branch``.
+
+        Default no-op — override in providers that support it."""
+        return {}
+
     async def list_installation_repos(
         self, per_page: int = 100, org: str = ""
     ) -> list[dict[str, Any]]:

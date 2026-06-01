@@ -5,6 +5,7 @@ import {
   ExternalLink,
   FolderGit2,
   GitPullRequestArrow,
+  Plus,
   RefreshCw,
   UserPlus,
 } from "lucide-react";
@@ -43,6 +44,7 @@ export default function ReposPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [assignTarget, setAssignTarget] = useState<CatalogRepo | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(
     async (opts: { refresh?: boolean } = {}) => {
@@ -82,7 +84,12 @@ export default function ReposPage() {
     const repos = data?.repos ?? [];
     if (tab === "onboarded") return repos.filter((r) => r.state === "onboarded");
     if (tab === "available") return repos.filter((r) => r.state !== "onboarded");
-    return repos;
+    // "All" view: when any repo is onboarded, float onboarded to the top (then
+    // pending-PR), preserving the server's recency order within each group. So
+    // a workspace with onboarded repos always opens with them first; one with
+    // none just shows the plain recency list. Array.sort is stable in modern JS.
+    const rank = (s: OnboardingStateValue) => (s === "onboarded" ? 0 : s === "pending_pr" ? 1 : 2);
+    return [...repos].sort((a, b) => rank(a.state) - rank(b.state));
   }, [data, tab]);
 
   const selectable = visible.filter((r) => r.state === "discovered");
@@ -202,6 +209,15 @@ export default function ReposPage() {
             disabled={loading || busy}
           >
             <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            className="btn-ghost !py-1.5"
+            title="Create a brand-new repo, scaffold defaults + CI/PR/release gates, and auto-onboard it"
+            onClick={() => setCreating(true)}
+            disabled={busy}
+          >
+            <Plus className="w-4 h-4" /> New repo
           </button>
           <button
             type="button"
@@ -413,6 +429,134 @@ export default function ReposPage() {
           }}
         />
       )}
+
+      {creating && (
+        <NewRepoModal
+          onClose={() => setCreating(false)}
+          onCreated={(msg) => {
+            setNotice(msg);
+            setCreating(false);
+            void load({ refresh: true });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function NewRepoModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (msg: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [techStack, setTechStack] = useState("");
+  const [isPrivate, setIsPrivate] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const validName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name.trim());
+
+  async function submit() {
+    if (!validName) {
+      setErr("Enter a valid repo name (letters, digits, '.', '-', '_').");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.createAndOnboardRepo({
+        name: name.trim(),
+        description: description.trim(),
+        private: isPrivate,
+        tech_stack: techStack.trim(),
+      });
+      onCreated(
+        `Created ${res.repo} — scaffolded ${res.files_created.length} files and onboarded` +
+          (res.branch_protected ? " (branch protection on)." : ".")
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "var(--surface-overlay)" }}
+      onClick={onClose}
+    >
+      <div className="panel-raised p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-serif text-lg" style={{ color: "var(--ink-strong)" }}>
+          New repository
+        </h2>
+        <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
+          Creates the repo, scaffolds <span className="font-mono">README</span>,{" "}
+          <span className="font-mono">.github/workflows</span> (CI / PR / release gates),
+          Dependabot &amp; CODEOWNERS, then drops the{" "}
+          <span className="font-mono">.platform/devai.yaml</span> marker so it onboards
+          automatically.
+        </p>
+
+        <label className="block text-xs mt-4 mb-1" style={{ color: "var(--ink-muted)" }}>
+          Name
+        </label>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="my-service"
+          className="field w-full"
+        />
+
+        <label className="block text-xs mt-3 mb-1" style={{ color: "var(--ink-muted)" }}>
+          Description <span style={{ opacity: 0.6 }}>(optional)</span>
+        </label>
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="One-line summary"
+          className="field w-full"
+        />
+
+        <label className="block text-xs mt-3 mb-1" style={{ color: "var(--ink-muted)" }}>
+          Tech stack hint <span style={{ opacity: 0.6 }}>(optional)</span>
+        </label>
+        <input
+          value={techStack}
+          onChange={(e) => setTechStack(e.target.value)}
+          placeholder="e.g. Go service, Next.js app…"
+          className="field w-full"
+        />
+
+        <label className="flex items-center gap-2 mt-3 text-sm" style={{ color: "var(--ink-soft)" }}>
+          <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
+          Private repository
+        </label>
+
+        {err && (
+          <div className="text-xs font-mono mt-3" style={{ color: "var(--error-ink)" }}>{err}</div>
+        )}
+        <div className="flex justify-end gap-2 mt-4">
+          <button type="button" className="btn-ghost !py-1.5" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-primary !py-1.5"
+            onClick={submit}
+            disabled={busy || !name.trim()}
+          >
+            {busy ? "Creating…" : "Create & onboard"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

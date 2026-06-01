@@ -239,12 +239,24 @@ class GitHubSCMClient(SCMClient):
                 break
         return repos
 
-    async def create_repo(self, org: str, name: str, description: str = "", private: bool = True) -> dict[str, Any]:
-        """Create a new repository in an organization."""
+    async def create_repo(
+        self,
+        org: str,
+        name: str,
+        description: str = "",
+        private: bool = True,
+        auto_init: bool = True,
+    ) -> dict[str, Any]:
+        """Create a new repository in an organization.
+
+        ``auto_init=False`` creates an empty repo (no initial commit); the
+        first contents write then creates the default branch. The scaffold
+        flow uses that so it can seed its own README without colliding with an
+        auto-generated one."""
         resp = await self._request(
             "POST",
             f"/orgs/{org}/repos",
-            json={"name": name, "description": description, "private": private, "auto_init": True},
+            json={"name": name, "description": description, "private": private, "auto_init": auto_init},
         )
         data = resp.json()
         return {
@@ -254,6 +266,35 @@ class GitHubSCMClient(SCMClient):
             "html_url": data["html_url"],
             "default_branch": data.get("default_branch", "main"),
         }
+
+    async def set_branch_protection(
+        self,
+        repo: str,
+        branch: str,
+        *,
+        required_approvals: int = 1,
+    ) -> dict[str, Any]:
+        """Enable a baseline branch-protection quality gate on ``branch``.
+
+        Requires a PR with the given number of approvals, dismisses stale
+        approvals, requires conversation resolution, and blocks force-pushes
+        and deletions. Callers should treat this as best-effort — the GitHub
+        App needs admin on the repo, and protection can't be set on every plan
+        (e.g. private repos on a free org)."""
+        body = {
+            "required_status_checks": None,
+            "enforce_admins": False,
+            "required_pull_request_reviews": {
+                "dismiss_stale_reviews": True,
+                "required_approving_review_count": max(0, required_approvals),
+            },
+            "restrictions": None,
+            "allow_force_pushes": False,
+            "allow_deletions": False,
+            "required_conversation_resolution": True,
+        }
+        resp = await self._request("PUT", f"/repos/{repo}/branches/{branch}/protection", json=body)
+        return resp.json()
 
     # --- Issues ---
 

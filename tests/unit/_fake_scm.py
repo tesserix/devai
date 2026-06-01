@@ -29,6 +29,23 @@ class FakeSCM:
         self._record("list_installation_repos", per_page=per_page, org=org)
         return self.repos
 
+    async def create_repo(
+        self, org: str, name: str, description: str = "", private: bool = True, auto_init: bool = True
+    ) -> dict[str, Any]:
+        self._record("create_repo", org=org, repo_name=name, private=private, auto_init=auto_init)
+        full = f"{org}/{name}"
+        return {
+            "full_name": full,
+            "name": name,
+            "description": description,
+            "html_url": f"https://github.com/{full}",
+            "default_branch": self.default_branch,
+        }
+
+    async def set_branch_protection(self, repo: str, branch: str, *, required_approvals: int = 1) -> dict[str, Any]:
+        self._record("set_branch_protection", repo=repo, branch=branch, required_approvals=required_approvals)
+        return {"url": f"https://api.github.com/repos/{repo}/branches/{branch}/protection"}
+
     async def probe_markers(self, repos, marker_path):
         self._record("probe_markers", repos, marker_path)
         return {f"{o}/{n}": f"{o}/{n}" in self.markers for o, n, _ref in repos}

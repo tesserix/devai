@@ -28,6 +28,7 @@ from devai.onboarding.models import (
     OnboardingState,
     RepoSnapshot,
 )
+from devai.onboarding.scaffold import default_scaffold_files
 
 if TYPE_CHECKING:
     from devai.onboarding.store import OnboardingStore
@@ -317,6 +318,86 @@ class OnboardingService:
             "pr_number": row.pr_number,
             "pr_url": row.pr_url,
             "draft": row.draft,
+        }
+
+    async def create_and_onboard(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        private: bool = True,
+        tech_stack: str = "",
+        onboarded_by: str = "operator",
+        protect_branch: bool = True,
+    ) -> dict[str, Any]:
+        """Create a brand-new repo from scratch and onboard it in one shot.
+
+        Unlike onboarding an existing repo (which opens a gated PR), a repo we
+        just created is ours to seed directly: we scaffold the default project
+        files + quality gates and commit the `.platform/devai.yaml` marker
+        straight to the default branch, so the repo is immediately ONBOARDED —
+        no PR/merge step. The marker on the default branch remains the source
+        of truth, so the reconciler keeps it onboarded.
+        """
+        owner = self._org
+        full = f"{owner}/{name}"
+
+        existing = await self._store.get(owner, name)
+        if existing and existing.state in (OnboardingState.ONBOARDED, OnboardingState.PENDING_PR):
+            raise ValueError(f"{full} is already onboarded ({existing.state})")
+
+        # Create empty (auto_init=False) so the scaffold owns every file,
+        # including the README — no collision with an auto-generated one.
+        repo = await self._scm.create_repo(owner, name, description, private, auto_init=False)
+        default_branch = repo.get("default_branch", "main") or "main"
+        html_url = repo.get("html_url", "")
+
+        # Seed the default files + quality gates. The first contents write
+        # creates the default branch on the empty repo; the rest append to it.
+        created: list[str] = []
+        for f in default_scaffold_files(full, description=description, tech_stack=tech_stack):
+            await self._scm.create_or_update_file(full, f.path, f.content, f.message, default_branch)
+            created.append(f.path)
+
+        # The onboarding marker — presence on the default branch == onboarded.
+        metadata = OnboardingMetadata(
+            onboarded_at=datetime.now(UTC).isoformat(),
+            onboarded_by=onboarded_by,
+            default_base_branch=default_branch,
+            description=description,
+        )
+        await self._scm.create_or_update_file(
+            full,
+            self._marker,
+            synthesize_marker(metadata),
+            "chore(devai): onboard repo to the DevAI platform",
+            default_branch,
+        )
+        created.append(self._marker)
+
+        # Branch-protection quality gate — best-effort (needs admin / a plan
+        # that supports protection); never fails the create.
+        branch_protected = False
+        if protect_branch:
+            try:
+                await self._scm.set_branch_protection(full, default_branch)
+                branch_protected = True
+            except Exception:  # noqa: BLE001
+                logger.warning("branch protection not set for %s (non-fatal)", full, exc_info=True)
+
+        row = await self._record_onboarded(owner, name, default_branch, description, onboarded_by)
+        self._marker_cache[full] = _CacheEntry(True, time.monotonic() + _MARKER_TTL)
+        # A new repo joined the org — drop the catalog cache so it shows up.
+        self._catalog_cache.pop(self._org, None)
+
+        return {
+            "ok": True,
+            "repo": full,
+            "html_url": html_url,
+            "default_branch": default_branch,
+            "state": str(row.state),
+            "files_created": created,
+            "branch_protected": branch_protected,
         }
 
     async def _marker_present(self, full: str, ref: str) -> bool:

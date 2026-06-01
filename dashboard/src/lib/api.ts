@@ -312,6 +312,20 @@ export const api = {
       body: JSON.stringify({ repos, ...opts }),
     }),
 
+  // Create a brand-new repo from scratch: scaffolds README, .github workflows
+  // (CI/PR/release quality gates), Dependabot/CODEOWNERS, drops the
+  // .platform/devai.yaml marker, and records it as ONBOARDED immediately.
+  createAndOnboardRepo: (input: {
+    name: string;
+    description?: string;
+    private?: boolean;
+    tech_stack?: string;
+  }) =>
+    apiFetch<CreateRepoResult>("/scm/onboarded/create", {
+      method: "POST",
+      body: JSON.stringify({ private: true, ...input }),
+    }),
+
   markOnboardingPRReady: (owner: string, name: string) =>
     apiFetch<OnboardedRepo>(`/scm/onboarded/${owner}/${name}/ready`, {
       method: "POST",
@@ -616,6 +630,16 @@ export interface OnboardResult {
   succeeded: Array<{ repo: string; status: string; state?: string; pr_number?: number; pr_url?: string }>;
   failed: Array<{ repo: string; error: string }>;
   dry_run: boolean;
+}
+
+export interface CreateRepoResult {
+  ok: boolean;
+  repo: string;
+  html_url: string;
+  default_branch: string;
+  state: OnboardingStateValue;
+  files_created: string[];
+  branch_protected: boolean;
 }
 
 // ── Settings types ─────────────────────────────────────────────────────
