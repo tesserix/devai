@@ -13,6 +13,7 @@ Repo format: "group/project" or numeric project ID
 from __future__ import annotations
 
 import base64
+import hmac
 import logging
 from typing import Any
 from urllib.parse import quote_plus
@@ -247,8 +248,12 @@ class GitLabSCMClient(SCMClient):
     # --- Webhooks ---
 
     def verify_webhook_signature(self, body: bytes, signature: str, secret: str) -> bool:
-        # GitLab uses X-Gitlab-Token header (exact match, not HMAC)
-        return signature == secret
+        # GitLab uses X-Gitlab-Token header (exact match, not HMAC). Compare
+        # in constant time so a missing/empty secret can't be bypassed and a
+        # valid token can't be recovered byte-by-byte via response timing.
+        if not signature or not secret:
+            return False
+        return hmac.compare_digest(signature, secret)
 
     def parse_webhook_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         obj_kind = payload.get("object_kind", "")

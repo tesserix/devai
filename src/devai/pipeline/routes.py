@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -62,7 +62,7 @@ async def list_stages(request: Request) -> list[str]:
 @router.get("/runs")
 async def list_runs(
     request: Request,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=500),
     blueprint: str | None = None,
     repo: str | None = None,
     source: str = "auto",
@@ -96,7 +96,9 @@ async def get_run(request: Request, task_id: str) -> dict[str, Any]:
 
 
 @router.get("/events/recent")
-async def recent_events(request: Request, limit: int = 100) -> list[dict[str, Any]]:
+async def recent_events(
+    request: Request, limit: int = Query(100, ge=1, le=1000)
+) -> list[dict[str, Any]]:
     """Return the last `limit` stage events from the ring buffer."""
     return _service(request).recent_events(limit=limit)
 
@@ -152,7 +154,7 @@ async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse
 
 
 @router.get("/events/stream")
-async def stream_events(request: Request, replay: int = 0):
+async def stream_events(request: Request, replay: int = Query(0, ge=0, le=1000)):
     """Server-Sent Events feed of stage events.
 
     Each event is JSON-encoded under the `data:` field. Reconnecting

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -371,7 +371,7 @@ def create_app(
         agent: str = "",
         repo: str = "",
         memory_type: str = "",
-        limit: int = 20,
+        limit: int = Query(20, ge=1, le=500),
     ) -> list:
         """List agent memories."""
         from devai.services.memory import AgentMemory
@@ -388,7 +388,7 @@ def create_app(
     # --- Audit Trail API ---
 
     @app.get("/dashboard/api/audit/{run_id}")
-    async def get_audit_trail(run_id: str, limit: int = 100) -> list:
+    async def get_audit_trail(run_id: str, limit: int = Query(100, ge=1, le=1000)) -> list:
         """Get the guardrail audit trail for a pipeline run."""
         from devai.services.guardrails import AuditLog
 

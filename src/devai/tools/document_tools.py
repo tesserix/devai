@@ -200,14 +200,35 @@ class DocumentToolExecutor:
         }
 
     async def _handle_doc_read_url(self, inp: dict[str, Any]) -> dict[str, Any]:
-        """Fetch and extract text from URL."""
+        """Fetch and extract text from URL.
+
+        URLs can originate from prompt-injected requirement text, so each
+        hop is validated against the SSRF guard before the request goes
+        out. Redirects are followed manually (max 5) so a public URL can't
+        302 the fetch onto an internal address.
+        """
         import httpx
+
+        from devai.tools.url_guard import assert_public_url
 
         url = inp["url"]
 
         try:
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                resp = await client.get(url)
+            async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+                resp = None
+                for _ in range(6):  # initial request + up to 5 redirects
+                    assert_public_url(url)
+                    resp = await client.get(url)
+                    if resp.has_redirect_location:
+                        # Resolve relative Location headers against the
+                        # current URL, then re-validate before following.
+                        url = str(httpx.URL(url).join(resp.headers["location"]))
+                        continue
+                    break
+                if resp is None:
+                    return {"error": "no response"}
+                if resp.has_redirect_location:
+                    return {"error": "too many redirects"}
                 resp.raise_for_status()
                 content_type = resp.headers.get("content-type", "")
 
