@@ -21,9 +21,11 @@ import {
   Search,
   Settings,
   ShieldHalf,
+  Sparkles,
   Sun,
   Users,
   Wrench,
+  X,
 } from "lucide-react";
 
 /**
@@ -72,6 +74,7 @@ type NavItem = {
 };
 
 const TOP: NavItem[] = [
+  { href: "/compose", label: "Compose", Icon: Sparkles, description: "Cursor-style agent composer" },
   { href: "/", label: "Fleet", Icon: Boxes, description: "Active pipeline runs" },
   { href: "/workflows", label: "Workflows", Icon: GitBranch, description: "Cross-functional gates" },
   { href: "/blueprint", label: "Blueprint", Icon: Layers, description: "DAG of stages" },
@@ -98,7 +101,13 @@ function isActive(href: string, pathname: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export function MissionControlNav() {
+export function MissionControlNav({
+  open = false,
+  onClose,
+}: {
+  open?: boolean;
+  onClose?: () => void;
+} = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const [dark, setDark] = useState(false);
@@ -110,6 +119,12 @@ export function MissionControlNav() {
     if (typeof window === "undefined") return;
     setDark(document.documentElement.classList.contains("dark"));
   }, []);
+
+  // Close the mobile drawer on navigation.
+  useEffect(() => {
+    onClose?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   function toggleDark() {
     const next = !dark;
@@ -124,7 +139,12 @@ export function MissionControlNav() {
 
   return (
     <aside
-      className="w-60 shrink-0 flex flex-col border-r"
+      className={clsx(
+        // Below md: a fixed slide-in drawer over the content. md+: a static
+        // in-flow rail (translate reset, no z-index).
+        "w-60 shrink-0 flex flex-col border-r fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0",
+        open ? "translate-x-0" : "-translate-x-full",
+      )}
       style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
     >
       {/* Logo + tag. Logomark is ink (near-black) on paper — same
@@ -133,12 +153,12 @@ export function MissionControlNav() {
        * a tool. */}
       <div className="px-4 pt-4 pb-2 flex items-center gap-2.5">
         <span
-          className="inline-flex w-8 h-8 rounded-md items-center justify-center shadow-sm"
+          className="inline-flex w-8 h-8 rounded-md items-center justify-center shadow-sm shrink-0"
           style={{ background: "var(--primary)", color: "var(--primary-ink)" }}
         >
           <ShieldHalf className="w-4 h-4" />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div
             className="font-serif text-[15px] leading-none"
             style={{ color: "var(--ink-strong)" }}
@@ -147,6 +167,15 @@ export function MissionControlNav() {
           </div>
           <div className="label-eyebrow mt-1.5">Mission control</div>
         </div>
+        {/* Close (mobile drawer only). */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="btn-ghost md:hidden -mr-1.5 p-2"
+          aria-label="Close menu"
+        >
+          <X className="w-[18px] h-[18px]" />
+        </button>
       </div>
 
       {/* ⌘K palette trigger */}
