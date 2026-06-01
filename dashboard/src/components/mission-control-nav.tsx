@@ -15,6 +15,7 @@ import {
   Layers,
   Lightbulb,
   LineChart,
+  MessageSquareText,
   Moon,
   PackageOpen,
   Plus,
@@ -78,20 +79,27 @@ const TOP: NavItem[] = [
   { href: "/compose", label: "Compose", Icon: Sparkles, description: "Cursor-style agent composer" },
   { href: "/", label: "Fleet", Icon: Boxes, description: "Active pipeline runs" },
   { href: "/workflows", label: "Workflows", Icon: GitBranch, description: "Cross-functional gates" },
-  { href: "/blueprint", label: "Blueprint", Icon: Layers, description: "DAG of stages" },
-  { href: "/agents", label: "Agents", Icon: Users, description: "Catalogued agents" },
-  { href: "/skills", label: "Skills", Icon: Lightbulb, description: "Reusable capabilities" },
   { href: "/memory", label: "Memory", Icon: BrainCog, description: "Episodic + semantic" },
+];
+
+// REGISTRY — every artifact kind in the shared registry, browse + author.
+// Each page reads/writes the registry over the mesh-gated /api/registry +
+// /api/authoring routes (writes are restricted to the devai-api SA).
+const REGISTRY: NavItem[] = [
+  { href: "/agents", label: "Agents", Icon: Users, description: "Compose + publish agents" },
+  { href: "/skills", label: "Skills", Icon: Lightbulb, description: "Reusable capabilities" },
+  { href: "/tools", label: "Tools", Icon: Wrench, description: "Custom MCP tool servers" },
+  { href: "/prompts", label: "Prompts", Icon: MessageSquareText, description: "Reusable prompts" },
+  { href: "/blueprint", label: "Blueprints", Icon: Layers, description: "Build + publish DAGs" },
+  { href: "/registry", label: "Browse", Icon: PackageOpen, description: "Full catalog explorer" },
 ];
 
 const MID: NavItem[] = [
   { href: "/repos", label: "Repos", Icon: FolderGit2, description: "Onboard org repositories" },
-  { href: "/registry", label: "Registry", Icon: PackageOpen, description: "Skills · Prompts · MCP · Agents" },
   { href: "/gateway", label: "Gateway", Icon: Radio, description: "Agent Gateway + LLM proxy health" },
   { href: "/catalog", label: "Catalog", Icon: Database, description: "Resolved capability map" },
   { href: "/control", label: "Control", Icon: ChevronsLeftRight, description: "Manual pause / takeover" },
   { href: "/analytics", label: "Analytics", Icon: LineChart, description: "Cost + duration trends" },
-  { href: "/tools", label: "Tools", Icon: Wrench, description: "Custom MCP tools" },
 ];
 
 const BOTTOM: NavItem[] = [
@@ -219,6 +227,7 @@ export function MissionControlNav({
       {/* Nav groups */}
       <div className="px-2 mt-4 flex-1 overflow-y-auto">
         <NavSection items={TOP} pathname={pathname} label="Fleet" />
+        <NavSection items={REGISTRY} pathname={pathname} label="Registry" />
         <NavSection items={MID} pathname={pathname} label="Platform" />
       </div>
 
