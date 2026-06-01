@@ -177,33 +177,143 @@ attachment** you asked for. Responsibilities:
 
 This keeps the Hub dumb: it reads resolved `.status`, it doesn't compute bindings.
 
-## 6. The DevAI MCP Hub (multiplexer)
+## 5.5 Tool resolution & pull-through cache (the core loop)
 
-A new service (`devai-mcp-hub`, or a mode of `devai-api`) that is the single MCP
-surface. It is an **MCP server to clients** and an **MCP client to each downstream**.
+The declarative promise: **an MCP is just a YAML list of tools/capabilities +
+labels/tags — you never hand-author tool schemas.** When the operator binds an
+MCP, every referenced tool is *resolved* through a three-tier chain, and anything
+fetched from the internet is **cached back into the registry** so the next resolve
+is instant. This is a **pull-through cache for capabilities** — the same shape as
+the `ghcr-remote` image cache this platform already runs, and the formalization of
+how the 1,103 community skills were imported from officialskills.sh (now automatic).
 
-- **Discovery**: on startup + on registry watch, list `kind:MCPServer` (RBAC-scoped)
-  from the registry; for each `ready` server, open a downstream MCP client to its
-  `endpoint` over its `transport`.
-- **Federation + namespacing**: union the downstream tools, renaming each to
-  `<server-shortname>__<wire-name>` (e.g. `analyst__security_scan_sast`) so two
-  servers can both expose `validate_lint` without collision. Keep a routing map
-  `namespaced → (server, wire-name)`.
-- **Surface budgeting (the ~40 ceiling)**: never expose the raw union. The Hub
-  resolves a **profile** per caller (from JWT scope / a `?profile=` / an Agent's
-  `allowed_tools`) and serves only that subset. Profiles are themselves registry
-  objects (label selectors over Tools), e.g. `profile: reviewer` → `domain in
-  (security, quality)`. Default profile is `core` tier only.
-- **Auth**: terminate the **caller's** JWT at the Hub (validated via the gateway /
-  Keycloak `agentic` pool). Inject the **downstream's** auth per
-  `MCPServer.spec.authMode` (`jwt` → mint/forward a service token; `none` → nothing;
-  `header`/`mtls` → per config). Callers never hold downstream creds.
-- **Live reconfig**: a registry change (new server, new tool, health flip) triggers
-  a re-list; `tools/list_changed` is emitted to connected clients.
-- **Degradation**: an unreachable downstream is dropped from the surface (logged),
-  not fatal — the rest keep working.
-- **Transport**: Streamable HTTP for clients (mounted at `/mcp`, same as today's
-  FastMCP mount in `webhook/app.py`); the Hub replaces the single FastMCP app.
+### Declarative MCP (what the user writes)
+```yaml
+kind: MCPServer
+metadata:
+  name: secops-mcp
+  labels: { devai.io/category: security }
+spec:
+  displayName: SecOps MCP
+  # Tools by explicit ref AND/OR by selector — no schemas inline.
+  tools: [ security_scan_sast, trivy_scan, semgrep_scan ]
+  toolSelector: { matchLabels: { devai.io/domain: security } }
+  capabilities: [ sast, sca, secrets ]      # coarse discovery tags
+  sources: [ registry, officialskills, mcp-registry, github ]  # optional override
+```
+
+### Resolution chain (per tool ref) — run by the operator
+```
+resolve(ref):
+  1. REGISTRY  store.Get(kind=Tool, ref | selector)              hit → bind, done
+  2. UPSTREAM  for src in sources (ordered, internet):           hit → step 3
+                 officialskills.sh | mcp-registry | npm | github |
+                 smithery | generic-http   → map to a Tool envelope
+  3. CACHE     store.Apply(Tool{labels:{source:cache},           write-through
+                 annotations:{cached-from:<url>, cached-at:<ts>, etag:<…>}})
+               → bind the now-local Tool
+  4. NOTIFY    miss everywhere → MCPServer.status.conditions:
+                 Resolved=False reason=Unresolved
+                 message="tool 'X' not in registry or any upstream — publish it
+                          or add a source"  (+ event + dashboard banner)
+               → the MCP STILL serves whatever resolved; never silently drop
+```
+
+### Source adapters (pluggable, per the CLAUDE.md adapter rule)
+`internal/resolve/source.go`: `Source interface { Name() string; Resolve(ctx,
+ref) (*Tool, error) }`. An ordered chain from config; `registry` (local store) is
+always first, `noop` last. Each upstream maps an external tool/skill into a
+`kind: Tool` envelope (schema + labels). Adding an upstream = one adapter + one
+config entry — never a core change. This is the *exact* pattern used to pull the
+community skills; it becomes a standing capability instead of a one-off script.
+
+### Caching semantics
+- **Write-through** on every upstream hit (`source: cache`, `cached-from`,
+  `cached-at`, `etag`). Idempotent — registry upserts on (kind, ns, name), so
+  concurrent resolves are safe.
+- **Revalidate**: the operator periodically re-checks cached tools against upstream
+  (TTL/etag); refresh on change, flag entries that vanished upstream.
+- **Warm cache**: the first miss pulls from the internet and persists; every later
+  MCP gets it immediately from the registry — no repeat fetch.
+
+## 6. The DevAI MCP Hub — multiplexing done properly
+
+The Hub (the **Agentic MCP**) is **one** MCP server to clients and an MCP **client**
+to each downstream. Multiplexing here is NOT just merging tool-name lists — it's a
+**stateful, protocol-complete 1↔N proxy**: one client session fans out to N
+downstream sessions, *every* MCP primitive is aggregated, and server→client traffic
+(notifications, sampling) is routed back. Getting this right is the whole point, so
+it's specified in full.
+
+### 6.1 What gets multiplexed (all MCP primitives — not just tools)
+A correct mux federates the entire surface, each namespaced to avoid collisions:
+
+| Primitive | client→server (forward) | name/uri rewrite |
+|---|---|---|
+| **Tools** | `tools/list`, `tools/call` | `analyst__security_scan_sast` |
+| **Prompts** | `prompts/list`, `prompts/get` | `analyst__review_prompt` |
+| **Resources** | `resources/list`, `resources/templates/list`, `resources/read`, `resources/subscribe` | URI prefixed `mcp+analyst://…` |
+| **Completion** | `completion/complete` (arg autocomplete) | routed by ref's namespace |
+| **Logging** | `logging/setLevel` | fan-out to all (or scoped) |
+
+Merging only `tools` is the common, wrong shortcut — agents that use prompts/
+resources would silently lose them.
+
+### 6.2 Session & capability negotiation (`initialize`)
+- The Hub runs its **own `initialize`** with each downstream (capability discovery)
+  and a **single `initialize`** with the client. It advertises the **union** of
+  downstream capabilities it can proxy (tools/prompts/resources/logging/completion).
+- One **client session** (`Mcp-Session-Id`) maps to a **set of downstream sessions**
+  (one per server). The Hub owns this fan-out table for the session's lifetime;
+  downstream reconnects are transparent to the client.
+
+### 6.3 Routing & correlation (the hard part)
+- **Forward routing**: a namespaced request (`analyst__X`) → strip prefix → the
+  `analyst` downstream session, via a `namespaced → (server, wire-name)` map per
+  primitive.
+- **JSON-RPC id mapping**: client and each downstream have independent id spaces;
+  the Hub rewrites request ids and keeps a `clientId ↔ (server, downstreamId)` table
+  to route responses back.
+- **Progress + cancellation**: `progressToken`s are rewritten and correlated so
+  `notifications/progress` from a downstream reaches the right client call;
+  `notifications/cancelled` is forwarded to the owning downstream.
+
+### 6.4 Reverse path (server→client fan-in) — must not be dropped
+- **List-changed**: `notifications/{tools,prompts,resources}/list_changed` and
+  `resources/updated` from any downstream → the Hub re-aggregates and emits a single
+  `list_changed` to the client. (Also fired on registry/cache changes — §5.5.)
+- **Sampling**: a downstream's **`sampling/createMessage`** (server asks the client's
+  LLM to complete) is routed **up** to the client and the result back down. Skipping
+  this breaks agentic downstream servers — it's the most-missed piece.
+- **Elicitation / roots**: `elicitation/create` and `roots/list` are likewise
+  proxied client↔downstream.
+- **Logging**: `notifications/message` forwarded (tagged with the source server).
+
+### 6.5 Scoping, budgeting, auth, degradation
+- **Per-caller surface budgeting (the ~40-tool ceiling):** never expose the raw
+  union. The Hub resolves a **`ToolProfile`** for the caller (from JWT scope /
+  `?profile=` / an Agent's `allowed_tools`) — a label selector over Tools — and
+  serves only that subset across all primitives. Default = `tier: core`.
+- **Auth**: terminate the **caller's** JWT at the Hub (gateway/Keycloak `agentic`
+  pool); inject each **downstream's** auth per `MCPServer.spec.authMode` (`jwt` →
+  service token, `none`, `header`, `mtls`). Callers never hold downstream creds.
+- **Degradation**: an unreachable/`degraded` downstream is dropped from the
+  aggregate (its primitives disappear, a `list_changed` fires, in-flight calls to it
+  error cleanly) — the rest keep serving. Never fail the whole Hub for one bad mux leg.
+- **Concurrency**: bounded connection pool per downstream; `tools/list` fan-out runs
+  in parallel with per-leg timeouts; slow/blocked legs can't stall the aggregate.
+
+### 6.6 Transport & placement
+- Streamable HTTP to clients, mounted at `/mcp` (replacing today's single FastMCP
+  mount in `webhook/app.py`); downstream transport per `MCPServer.spec.transport`
+  (streamable-http now; stdio via a runner adapter in Phase 4).
+- Dedicated `devai-mcp-hub` Deployment (decision §9.2), discovery-driven by the
+  registry (§4) — it never hardcodes a downstream.
+
+**In one line:** the Agentic MCP is a registry-driven, capability-complete MCP
+multiplexer — one endpoint, one auth, one negotiated session, fanning out to many
+small MCPs and faithfully proxying every primitive in both directions, scoped per
+caller.
 
 ## 7. Registry + gateway integration
 
@@ -223,9 +333,10 @@ surface. It is an **MCP server to clients** and an **MCP client to each downstre
 | Phase | Deliverable | Acceptance |
 |---|---|---|
 | **1 — Tools first-class ✅ DONE** | `kind:Tool` artifacts generated from each MCPServer's tool list + devai `ToolSpec` schemas, labelled `mcp.devai.io/server`; `toolSelector` added to all 5 MCPServers. Generator: `_import/generate_tools.py`. | **Met:** `/v0/tools` → 53 (UI Tools tab populated); `labelSelector=devai.io/domain=security` → 6; each Tool has inputSchema + server label + wire-name annotation. |
-| **2 — Selector + operator** | Add `spec.toolSelector` to the 5 MCPServers; build the reconciler (validate + resolve selector → `.status`, health probe). | Adding a labelled Tool auto-appears in its server's `.status.tools`; invalid specs are rejected/surfaced. |
-| **3 — The Hub** | `devai-mcp-hub`: registry discovery, downstream federation, namespacing, profile budgeting, auth termination/injection. Replace the single `/mcp` FastMCP mount. | One `/mcp` lists a scoped, namespaced tool set; `tools/call` routes to the right downstream with correct auth; a downstream outage degrades gracefully. |
-| **4 — Gateway + scale** | Route `…/mcp` → Hub via agentgateway; onboard ≥2 new external MCPs via registry only; `tools/list_changed` on registry change. | New MCP onboarded with zero Hub code change; surface stays within the per-caller budget. |
+| **2 — Selector + operator + resolver (registry tier)** | `spec.toolSelector` on the 5 MCPServers (done); reconciler validates, resolves selector → `.status.tools`, health-probes, and runs the resolution chain's **registry tier** with **NOTIFY** on miss (status condition + event). | Adding a labelled Tool auto-appears in its server's `.status.tools`; an unresolved tool surfaces a clear `Resolved=False` message; invalid specs warned in `.status`. |
+| **3 — Upstream sources + pull-through cache** | `internal/resolve` Source adapters (`officialskills`, `mcp-registry`, `github`, `generic-http`); upstream hit → **write-through** `kind:Tool` (cache labels) → bind; periodic revalidate (etag/TTL). | A tool absent locally but present upstream is fetched, **persisted to the registry**, and served; second resolve is a registry hit; vanished-upstream entries flagged. |
+| **4 — The Hub** | `devai-mcp-hub`: registry discovery, downstream federation, namespacing, profile budgeting, auth termination/injection. Replace the single `/mcp` FastMCP mount. | One `/mcp` lists a scoped, namespaced tool set; `tools/call` routes to the right downstream with correct auth; a downstream outage degrades gracefully. |
+| **5 — Gateway + scale** | Route `…/mcp` → Hub via agentgateway; onboard ≥2 new external MCPs via registry only; `tools/list_changed` on registry/cache change. | New MCP onboarded with zero Hub code change; declaring a tool not yet in the registry auto-pulls + caches it; surface stays within the per-caller budget. |
 
 ## 9. Decisions (locked)
 
@@ -247,13 +358,22 @@ round-trips; revisit only if a phase surfaces a concrete reason.
 5. **stdio downstream MCPs → subprocess/Job adapter, deferred to Phase 4.** HTTP
    (Streamable) first; stdio servers wrapped as a runner Job the Hub awaits.
 
-**Standard we're setting (for others to follow):** *the registry is the single
-source of truth; capabilities (tools) are first-class, labelled artifacts;
-composition (server→tools, profile→tools, hub→servers) is expressed as
-**label selectors**, reconciled by an operator into `.status`; the runtime (Hub)
-reads resolved status and never hardcodes topology; identity is terminated once at
-the edge and injected downstream.* Add a capability by publishing an artifact with
-the right labels — never by editing code.
+**Standard we're setting (for others to follow):**
+1. **Registry is the single source of truth.** Capabilities (tools) are
+   first-class, labelled artifacts.
+2. **Composition is label selectors**, not hardcoded lists (server→tools,
+   profile→tools, hub→servers), reconciled by an operator into `.status`.
+3. **Declarative + resolved + cached.** You declare an MCP as a YAML list of
+   tools/labels; the operator *resolves* each through **registry → internet →
+   notify**, and **pull-through-caches** any internet hit back into the registry —
+   the registry becomes a warm cache, never a hand-maintained list.
+4. **Runtime reads resolved status, never hardcodes topology** (the Hub federates
+   what the registry says exists).
+5. **Identity terminated once at the edge, injected downstream.**
+6. **Degrade, never silently drop** — an unresolved tool or a dead downstream is a
+   clear, actionable status message, not an empty result.
+
+Add a capability by publishing (or merely *referencing*) it — never by editing code.
 
 ## 10. Why this is the right shape
 
