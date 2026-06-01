@@ -13,6 +13,7 @@ import {
   FolderGit2,
   GitBranch,
   Layers,
+  Lightbulb,
   LineChart,
   Moon,
   PackageOpen,
@@ -79,6 +80,7 @@ const TOP: NavItem[] = [
   { href: "/workflows", label: "Workflows", Icon: GitBranch, description: "Cross-functional gates" },
   { href: "/blueprint", label: "Blueprint", Icon: Layers, description: "DAG of stages" },
   { href: "/agents", label: "Agents", Icon: Users, description: "Catalogued agents" },
+  { href: "/skills", label: "Skills", Icon: Lightbulb, description: "Reusable capabilities" },
   { href: "/memory", label: "Memory", Icon: BrainCog, description: "Episodic + semantic" },
 ];
 
@@ -89,7 +91,7 @@ const MID: NavItem[] = [
   { href: "/catalog", label: "Catalog", Icon: Database, description: "Resolved capability map" },
   { href: "/control", label: "Control", Icon: ChevronsLeftRight, description: "Manual pause / takeover" },
   { href: "/analytics", label: "Analytics", Icon: LineChart, description: "Cost + duration trends" },
-  { href: "/tools", label: "Tools", Icon: Wrench, description: "MCP allow-lists" },
+  { href: "/tools", label: "Tools", Icon: Wrench, description: "Custom MCP tools" },
 ];
 
 const BOTTOM: NavItem[] = [
