@@ -121,11 +121,16 @@ class RegistryClient:
         timeout_seconds: float = 5.0,
         ttl_seconds: float = 30.0,
         namespace: str = "",
+        list_limit: int = 10000,
     ) -> None:
         if not base_url:
             raise RegistryError("registry: base_url is required")
         self._base_url = base_url.rstrip("/")
         self._token = token
+        # aregistry caps list endpoints at 50 and only honors ``?limit=``
+        # (offset/page are ignored), so a generous limit is needed to return
+        # the whole catalog (the community import alone is ~1.1k skills).
+        self._list_limit = max(1, list_limit)
         # The tenant the platform's artifacts live under. aregistry scopes
         # list endpoints by ``?namespace=`` and returns an EMPTY list when it's
         # omitted, so the catalog (seeded under this namespace by the bootstrap)
@@ -163,13 +168,16 @@ class RegistryClient:
             return {"reachable": False, "error": str(e)}
 
     def _ns(self, path: str) -> str:
-        """Append the configured tenant namespace to a list path. aregistry
-        returns an empty list for an unscoped list call, so every catalog read
-        must carry ``?namespace=``."""
-        if not self._namespace:
-            return path
+        """Scope a list path to the tenant namespace AND raise the page limit.
+        aregistry returns an empty list when ``namespace`` is omitted and caps
+        lists at 50 by default (only ``?limit=`` is honored), so both are needed
+        to return the whole seeded catalog."""
+        params = []
+        if self._namespace:
+            params.append(f"namespace={self._namespace}")
+        params.append(f"limit={self._list_limit}")
         sep = "&" if "?" in path else "?"
-        return f"{path}{sep}namespace={self._namespace}"
+        return f"{path}{sep}{'&'.join(params)}"
 
     def list_skills(self) -> list[Skill]:
         raw = self._get_collection(self._ns("/v0/skills"), "skills")
