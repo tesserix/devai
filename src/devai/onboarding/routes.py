@@ -176,6 +176,8 @@ async def create_and_onboard_repo(request: Request, body: CreateRepoRequest) -> 
     files + quality gates (README, .github/workflows ci/pr/release, Dependabot,
     CODEOWNERS, .gitignore), commit the `.platform/devai.yaml` marker, and
     record it as ONBOARDED in one shot — no PR needed for a repo we just made."""
+    import httpx
+
     svc = _service(request)
     try:
         return await svc.create_and_onboard(
@@ -187,6 +189,24 @@ async def create_and_onboard_repo(request: Request, body: CreateRepoRequest) -> 
         )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        # The configured SCM token can read repos but isn't allowed to create
+        # them — surface the real, actionable cause instead of a generic 502.
+        if status in (401, 403):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "The configured GitHub token can't create repositories in this org. "
+                    "A fine-grained PAT needs 'Administration: Read and write' repository "
+                    "permission and access to all repositories (or a classic PAT with the "
+                    "'repo' scope and org repo-creation rights). Update the SCM token and retry."
+                ),
+            ) from e
+        if status == 422:
+            # GitHub 422 on create usually means the name already exists.
+            raise HTTPException(status_code=409, detail=f"repository '{body.name}' already exists") from e
+        raise HTTPException(status_code=502, detail=f"create: {status} {e}") from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"create: {e}") from e
 
