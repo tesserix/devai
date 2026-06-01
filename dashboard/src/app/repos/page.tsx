@@ -474,9 +474,13 @@ function NewRepoModal({
         private: isPrivate,
         tech_stack: techStack.trim(),
       });
+      const skipped = res.files_skipped?.length ?? 0;
       onCreated(
-        `Created ${res.repo} — scaffolded ${res.files_created.length} files and onboarded` +
-          (res.branch_protected ? " (branch protection on)." : ".")
+        `Created ${res.repo} — scaffolded ${res.files_created.length} files and onboarded.` +
+          (res.branch_protected ? " Branch protection on." : "") +
+          (skipped
+            ? ` ${skipped} workflow file(s) skipped — the GitHub token needs the 'Workflows' permission.`
+            : "")
       );
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));

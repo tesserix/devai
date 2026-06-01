@@ -350,10 +350,23 @@ class OnboardingService:
 
         # Seed the default files + quality gates. The first contents write
         # creates the default branch on the empty repo; the rest append to it.
+        # Workflow files under .github/workflows/ need the token's "Workflows"
+        # permission — if that's missing, skip them (best-effort) instead of
+        # failing the whole onboard; the repo still gets README + marker.
+        import httpx
+
         created: list[str] = []
+        skipped: list[dict[str, str]] = []
         for f in default_scaffold_files(full, description=description, tech_stack=tech_stack):
-            await self._scm.create_or_update_file(full, f.path, f.content, f.message, default_branch)
-            created.append(f.path)
+            try:
+                await self._scm.create_or_update_file(full, f.path, f.content, f.message, default_branch)
+                created.append(f.path)
+            except httpx.HTTPStatusError as e:
+                if f.path.startswith(".github/workflows/") and e.response.status_code in (403, 422):
+                    skipped.append({"path": f.path, "reason": "GitHub token lacks the 'Workflows' permission"})
+                    logger.warning("scaffold skipped %s for %s (Workflows permission): %s", f.path, full, e)
+                else:
+                    raise
 
         # The onboarding marker — presence on the default branch == onboarded.
         metadata = OnboardingMetadata(
@@ -393,6 +406,7 @@ class OnboardingService:
             "default_branch": default_branch,
             "state": str(row.state),
             "files_created": created,
+            "files_skipped": skipped,
             "branch_protected": branch_protected,
         }
 

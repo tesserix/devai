@@ -639,6 +639,7 @@ export interface CreateRepoResult {
   default_branch: string;
   state: OnboardingStateValue;
   files_created: string[];
+  files_skipped: Array<{ path: string; reason: string }>;
   branch_protected: boolean;
 }
 
