@@ -28,6 +28,7 @@ def create_authoring_service(
     spec_registry: SpecializationRegistry | None = None,
     registry_client: RegistryClient | None = None,
     settings: Settings | None = None,
+    pipeline: Any | None = None,
 ) -> AuthoringService:
     """Build the service with a Redis-backed store, falling back to in-memory.
 
@@ -44,6 +45,7 @@ def create_authoring_service(
         spec_registry=spec_registry,
         registry_client=registry_client,
         settings=settings,
+        pipeline=pipeline,
     )
 
 

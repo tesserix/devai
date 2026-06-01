@@ -179,6 +179,7 @@ def create_app(
                 spec_registry=spec_registry,
                 registry_client=_registry_client,
                 settings=config,
+                pipeline=pipeline_service,
             )
             await authoring_service.load_into_registry()
             if getattr(config, "registry_publish_on_boot", False):

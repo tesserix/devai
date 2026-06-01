@@ -113,7 +113,16 @@ class Pipeline:
         logger.info("loaded %d blueprints: %s", len(bps), sorted(bps))
 
     def add_blueprint(self, path: str | Path) -> Blueprint:
-        bp = load_blueprint(path)
+        return self.register_blueprint(load_blueprint(path))
+
+    def register_blueprint(self, bp: Blueprint) -> Blueprint:
+        """Register an already-loaded Blueprint into the live set.
+
+        Used by the authoring service to make a user-authored blueprint
+        runnable the instant it's created (no reload), mirroring how
+        authored specializations hot-register. Validates that every stage
+        the blueprint references is a known factory.
+        """
         for spec in bp.stages:
             if not self._registry.has(spec.stage):
                 raise PipelineError(f"blueprint {bp.name!r} references unknown stage {spec.stage!r}")

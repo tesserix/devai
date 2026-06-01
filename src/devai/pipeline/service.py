@@ -330,6 +330,20 @@ class PipelineService:
 
     # ── Read surface ─────────────────────────────────────────────────
 
+    def register_blueprint(self, bp: Any) -> bool:
+        """Hot-register an already-loaded Blueprint so it's immediately
+        runnable. Used by the authoring service when a user publishes a
+        blueprint built in the visual builder. Returns False (never raises)
+        if the runtime isn't up or a stage is unknown."""
+        if self._pipeline is None:
+            return False
+        try:
+            self._pipeline.register_blueprint(bp)
+            return True
+        except Exception:  # noqa: BLE001
+            logger.warning("register_blueprint(%s) failed", getattr(bp, "name", "?"), exc_info=True)
+            return False
+
     def list_blueprints(self) -> list[dict[str, Any]]:
         if self._pipeline is None:
             return []

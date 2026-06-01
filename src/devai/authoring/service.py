@@ -40,11 +40,15 @@ class AuthoringService:
         spec_registry: SpecializationRegistry | None = None,
         registry_client: RegistryClient | None = None,
         settings: Settings | None = None,
+        pipeline: Any | None = None,
     ) -> None:
         self._store = store
         self._spec_registry = spec_registry
         self._registry = registry_client
         self._settings = settings
+        # Duck-typed PipelineService (has register_blueprint(bp)); when set,
+        # authored blueprints become runnable the instant they're created.
+        self._pipeline = pipeline
 
     # ── Publish helpers (best-effort; never break the local 201) ──────
 
@@ -121,6 +125,9 @@ class AuthoringService:
         await self._store.upsert(
             AuthoredDefinition(kind="blueprint", name=bp.name, yaml=yaml_text, created_by=created_by)
         )
+        # Hot-register into the live pipeline so it's runnable immediately.
+        if self._pipeline is not None:
+            self._pipeline.register_blueprint(bp)
         logger.info("authored blueprint %s (by %s)", bp.name, created_by)
 
         if self._publish_enabled:
@@ -232,18 +239,25 @@ class AuthoringService:
         Skips any that no longer validate (e.g. a tool was removed) rather
         than failing startup. Returns the number registered.
         """
-        if self._spec_registry is None:
-            return 0
         count = 0
-        for defn in await self._store.list("specialization"):
-            try:
-                spec = load_specialization_from_string(defn.yaml, source=f"<authored:{defn.name}>")
-                self._spec_registry.register_or_replace(spec)
-                count += 1
-            except Exception:  # noqa: BLE001
-                logger.warning("authored spec %s failed to reload — skipping", defn.name, exc_info=True)
+        if self._spec_registry is not None:
+            for defn in await self._store.list("specialization"):
+                try:
+                    spec = load_specialization_from_string(defn.yaml, source=f"<authored:{defn.name}>")
+                    self._spec_registry.register_or_replace(spec)
+                    count += 1
+                except Exception:  # noqa: BLE001
+                    logger.warning("authored spec %s failed to reload — skipping", defn.name, exc_info=True)
+        if self._pipeline is not None:
+            for defn in await self._store.list("blueprint"):
+                try:
+                    bp = load_blueprint_from_string(defn.yaml, source=f"<authored:{defn.name}>")
+                    if self._pipeline.register_blueprint(bp):
+                        count += 1
+                except Exception:  # noqa: BLE001
+                    logger.warning("authored blueprint %s failed to reload — skipping", defn.name, exc_info=True)
         if count:
-            logger.info("authoring: re-registered %d stored agent(s) into the live registry", count)
+            logger.info("authoring: re-registered %d stored artifact(s) into the live runtime", count)
         return count
 
 

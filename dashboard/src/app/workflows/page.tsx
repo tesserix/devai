@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
@@ -183,6 +184,12 @@ export default function WorkflowsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/workflows/new"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium whitespace-nowrap"
+          >
+            <GitBranch className="w-3.5 h-3.5" /> Build blueprint
+          </Link>
           <button
             onClick={() => activeRepo && fetchLanes(activeRepo)}
             disabled={!activeRepo || lanesLoading}
