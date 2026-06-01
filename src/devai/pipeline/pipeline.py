@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from devai.adapters.workflow import create_workflow_adapter
 from devai.blueprint.executor import BlueprintExecutor
 from devai.blueprint.loader import Blueprint, discover_blueprints, load_blueprint
 from devai.blueprint.registry import StageRegistry, register_defaults
@@ -82,6 +83,14 @@ class Pipeline:
             deps,
             event_callback=self._fanout_event,
             default_stage_timeout=default_stage_timeout,
+        )
+
+        # Durable-execution seam. With workflow_provider=inproc (default) this
+        # wraps the executor above and behaves identically; with =temporal it
+        # routes runs through the generic BlueprintWorkflow. Blueprints/agents
+        # are unaware of which backend is active.
+        self._workflow_adapter = create_workflow_adapter(
+            deps.config, executor=self._executor
         )
 
     # ── Public API ──────────────────────────────────────────────────
@@ -206,7 +215,7 @@ class Pipeline:
         blueprint = self._blueprints[task.blueprint]
         task.transition(TaskState.QUEUED)
         try:
-            await self._executor.execute(blueprint, task)
+            await self._workflow_adapter.run_blueprint(blueprint, task)
         finally:
             await self._persist(task)
             evt = self._task_done.get(task.id)

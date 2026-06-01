@@ -31,6 +31,28 @@ class Settings(BaseSettings):
     # never crashes on a transient broker outage.
     event_bus_provider: str = "nats"  # noop | nats
 
+    # --- Messaging / remote conversational channels ---
+    # DevAI can be talked to from outside the dashboard: Slack, a remote
+    # URL/thread, or any MCP client. All three are thin transports over one
+    # ConversationGateway (devai.chat.gateway) — no duplicated chat logic.
+    # Each channel is independently togglable; a disabled channel is simply
+    # not mounted (degrades to the Noop messaging channel). Secrets come from
+    # GCP Secret Manager in prod, never the DB or git.
+    remote_chat_enabled: bool = True  # POST /threads/{id}/messages + SSE stream
+    mcp_server_enabled: bool = True  # mount DevAI as an MCP server at /mcp
+    slack_enabled: bool = False  # POST /webhook/slack (Events API)
+    # Shared static bearer token guarding the remote URL + MCP endpoints.
+    # Empty disables token auth (local/dev only); set in prod via Secret Manager.
+    remote_chat_api_token: str = ""
+    # When true, the turn runs on a NATS worker (ack-fast, reply-later) instead
+    # of inline — required for Slack's 3s ack budget; also smooths slow turns.
+    messaging_use_worker: bool = True
+    messaging_turn_subject: str = "devai.chat.turn"  # NATS subject for handoff
+    # Slack credentials (GCP Secret Manager in prod).
+    slack_bot_token: str = ""  # xoxb-...
+    slack_signing_secret: str = ""  # request-signature verification
+    slack_allowed_channels: str = ""  # csv of channel IDs; empty = all
+
     # --- Redis ---
     redis_url: str = "redis://localhost:6379"
     redis_result_ttl: int = 86400 * 30  # 30 days
@@ -51,11 +73,31 @@ class Settings(BaseSettings):
     github_org: str = "tesserix"
 
     # --- Repo onboarding (Repos page) ---
-    # When true, the API runs a one-shot reconcile ~30s after boot so the
-    # onboarding cache self-heals from the `.platform/devai.yaml` markers
-    # (source of truth) after a DB wipe or a fresh deploy. Endpoint-driven
-    # reconcile is always available regardless of this flag.
+    # When true, the API runs a reconcile ~30s after boot so the onboarding
+    # cache self-heals from the `.platform/devai.yaml` markers (the source of
+    # truth) after a DB wipe or a fresh deploy. Endpoint-driven reconcile is
+    # always available regardless of this flag.
     onboarding_reconcile_on_boot: bool = True
+    # Periodic reconcile interval (seconds). After the boot reconcile, the
+    # poller re-runs a batched GraphQL marker probe every N seconds so repos
+    # that gained a marker show ONBOARDED and repos that lost one are offloaded
+    # to DORMANT automatically — no manual trigger. Set 0 to disable the loop
+    # (boot reconcile still runs once when onboarding_reconcile_on_boot=True).
+    onboarding_reconcile_interval_seconds: int = 300
+
+    # --- A2A (Agent2Agent) consumer security ---
+    # When true (default), before the orchestrator calls a peer agent it
+    # verifies the agent card's registry Ed25519 signature (over the artifact
+    # digest) AND checks the card's service URL against the host allowlist —
+    # defending against a tampered card that redirects agent traffic. Set false
+    # ONLY for trusted local/anonymous dev where the registry isn't signing.
+    a2a_secure: bool = True
+    # Host suffixes a verified card's service URL may target. Defaults to
+    # in-cluster service DNS; add public A2A agent hosts explicitly. A single
+    # "*" entry disables the allowlist (still blocks private/link-local IPs).
+    a2a_allowed_url_suffixes: list[str] = Field(
+        default_factory=lambda: [".svc.cluster.local", ".svc"]
+    )
 
     # --- GitHub OAuth (for dashboard) ---
     github_oauth_client_id: str = ""
@@ -69,7 +111,16 @@ class Settings(BaseSettings):
     keycloak_realm: str = "tesserix-internal"
     keycloak_client_id: str = "devai-dashboard"
     keycloak_client_secret: str = ""
-    auth_provider: str = "keycloak"  # "keycloak" or "github"
+    # "keycloak" | "github" | "local_db". local_db is a LOCAL/kind-only
+    # username+password mode for team logins (no GIP/Keycloak in the sandbox).
+    # NEVER set local_db in prod — prod auth is terminated by the auth-bff.
+    auth_provider: str = "keycloak"
+
+    # --- Local DB auth (DEVAI_AUTH_PROVIDER=local_db, LOCAL ONLY) ---
+    # JSON list of team logins, e.g. [{"username":"admin","password":"…",
+    # "email":"admin@devai.local","name":"Admin","roles":["admin"]}, …].
+    # Empty by default so no local users exist in prod.
+    local_auth_users: list[dict] = Field(default_factory=list)
 
     # --- OpenAI / Codex ---
     openai_api_key: str = ""
@@ -164,6 +215,21 @@ class Settings(BaseSettings):
     pipeline_event_ring_size: int = 1000  # SSE replay buffer
     pipeline_task_ttl: int = 86400 * 30  # 30 days — keep parity with redis_result_ttl
 
+    # --- workflow adapter (durable orchestration backbone) ---
+    # Selects HOW blueprints execute. `inproc` (default) runs them in this
+    # process via BlueprintExecutor — identical to the pre-adapter behaviour.
+    # `temporal` runs the one generic BlueprintWorkflow on a Temporal cluster
+    # (crash-safe resume, declarative retries/timeouts, durable approvals).
+    # `noop` disables execution. The choice is invisible to blueprints and
+    # agents — any blueprint runs on any backend with no code change.
+    workflow_provider: str = "inproc"  # inproc | temporal | noop
+    temporal_host: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "devai"
+    temporal_tls_enabled: bool = False
+    temporal_max_concurrent_activities: int = 50
+    temporal_max_stage_attempts: int = 3  # per-stage Activity RetryPolicy
+
     # --- LangSmith ---
     langchain_tracing_v2: str = ""  # Set to "true" to enable
     langchain_api_key: str = ""  # LangSmith API key (lsv2_pt_xxx)
@@ -230,6 +296,28 @@ class Settings(BaseSettings):
     # --- Specializations (Fiber-style YAML role catalog) ---
     specializations_enabled: bool = True
     specializations_dir: str = "specializations"
+
+    # --- Crews (AI agent teams; seed catalog) ---
+    crews_dir: str = "crews"
+
+    # --- Teams (human teams that own crews) ---
+    teams_enabled: bool = True
+
+    # --- Web search adapter (grounded search + fetch for agents) ---
+    # provider: noop | tavily. Key lives in GCP Secret Manager in prod.
+    web_search_provider: str = "noop"
+    web_search_api_key: str = ""
+    web_search_max_results: int = 5
+
+    # --- Object store adapter (composer image/attachment blobs) ---
+    # provider: noop | gcs. Uses Workload Identity (ADC) — no key in config.
+    object_store_provider: str = "noop"
+    object_store_bucket: str = ""
+    object_store_prefix: str = "devai"
+
+    # --- Terminal sandbox (runner pod git worktree + line-protocol) ---
+    terminal_sandbox_enabled: bool = False
+    terminal_sandbox_timeout_seconds: int = 3600
 
     # --- Agent Registry (aregistry HTTP client) ---
     # The shared catalog of skills + prompts + MCP servers + agents.

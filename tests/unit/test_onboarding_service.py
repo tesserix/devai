@@ -248,3 +248,77 @@ async def test_reconcile_cold_start_seeds_from_markers() -> None:
     b = await svc.get("tesserix", "b")
     assert b is not None and b.state == OnboardingState.ONBOARDED
     assert await svc.get("tesserix", "a") is None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_db_first_uses_one_batched_probe() -> None:
+    # The DB-first path must fold the whole org into a single batched GraphQL
+    # probe — no per-repo get_default_branch / get_file_content round trips.
+    scm = FakeSCM(
+        repos=[_repo("tesserix", "a"), _repo("tesserix", "b")],
+        markers={"tesserix/a", "tesserix/b"},
+    )
+    svc = _service(scm)
+    await svc.onboard([("tesserix", "a"), ("tesserix", "b")])  # adopted → onboarded
+    scm.calls.clear()
+    await svc.reconcile()
+    assert scm.count("probe_markers") == 1
+    assert scm.count("get_default_branch") == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_does_not_false_offload_on_unknown_probe() -> None:
+    # When the probe omits a repo (e.g. a GraphQL batch errored), an onboarded
+    # repo must stay ONBOARDED — an unknown verdict is never "marker gone".
+    class FlakyProbeSCM(FakeSCM):
+        async def probe_markers(self, repos, marker_path):
+            self._record("probe_markers", repos, marker_path)
+            return {}  # nothing came back this round
+
+    scm = FlakyProbeSCM(repos=[_repo("tesserix", "a")], markers={"tesserix/a"})
+    svc = _service(scm)
+    await svc.onboard([("tesserix", "a")])  # onboarded
+    report = await svc.reconcile()
+    assert report["scanned"] == 0  # nothing probed → nothing touched
+    row = await svc.get("tesserix", "a")
+    assert row is not None and row.state == OnboardingState.ONBOARDED
+
+
+# --------------------------------------------------------------------- #
+# Catalog self-healing cache
+# --------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_catalog_persists_discovered_marker_to_db() -> None:
+    # Viewing the catalog adopts a repo that already carries the marker, so
+    # the DB cache stays true to the marker files without a manual reconcile.
+    scm = FakeSCM(repos=[_repo("tesserix", "a")], markers={"tesserix/a"})
+    svc = _service(scm)
+    assert await svc.get("tesserix", "a") is None
+    await svc.list_catalog(per_page=10, probe=True)
+    row = await svc.get("tesserix", "a")
+    assert row is not None and row.state == OnboardingState.ONBOARDED
+
+
+@pytest.mark.asyncio
+async def test_catalog_offloads_removed_marker_to_dormant() -> None:
+    scm = FakeSCM(repos=[_repo("tesserix", "a")], markers={"tesserix/a"})
+    svc = _service(scm)
+    await svc.onboard([("tesserix", "a")])  # adopted → onboarded
+    scm.markers.discard("tesserix/a")  # deleted out-of-band
+    page = await svc.list_catalog(per_page=10, probe=True, refresh=True)
+    by_name = {r["name"]: r for r in page["repos"]}
+    assert by_name["a"]["state"] == "dormant"
+    row = await svc.get("tesserix", "a")
+    assert row is not None and row.state == OnboardingState.DORMANT
+
+
+@pytest.mark.asyncio
+async def test_catalog_keeps_onboarded_repo_onboarded() -> None:
+    # An already-onboarded repo always renders ONBOARDED and is not rewritten.
+    scm = FakeSCM(repos=[_repo("tesserix", "a")], markers={"tesserix/a"})
+    svc = _service(scm)
+    await svc.onboard([("tesserix", "a")])
+    page = await svc.list_catalog(per_page=10, probe=True, refresh=True)
+    assert {r["name"]: r["state"] for r in page["repos"]}["a"] == "onboarded"

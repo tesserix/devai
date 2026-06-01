@@ -51,7 +51,7 @@ def run(
     requirements: str = typer.Option(None, "--requirements", "-m", help="Requirements text"),
     from_issue: int = typer.Option(None, "--from-issue", "-i", help="GitHub issue number to use as input"),
 ) -> None:
-    """Trigger a new DevAI ALM pipeline run (LangGraph)."""
+    """Trigger a new DevAI ALM pipeline run (durable blueprint runtime)."""
     if not requirements and not from_issue:
         console.print("[red]Error:[/red] Provide --requirements or --from-issue")
         raise typer.Exit(1)
@@ -60,9 +60,11 @@ def run(
 
 
 async def _trigger_pipeline(repo: str, requirements: str | None, from_issue: int | None) -> None:
-    from devai.core.github_client import GitHubClient
     from devai.core.state import StateManager
-    from devai.graph.orchestrator import ALMOrchestrator
+    from devai.pipeline.bootstrap import build_runtime
+    from devai.pipeline.pipeline import Pipeline
+    from devai.pipeline.types import DevAITask
+    from devai.scm import create_scm_client
     from devai.services.tracing import init_langsmith
 
     # Initialize LangSmith tracing
@@ -70,77 +72,108 @@ async def _trigger_pipeline(repo: str, requirements: str | None, from_issue: int
     init_langsmith()
 
     state = StateManager(settings.redis_url)
-    github = GitHubClient(settings)
+    scm = None
+    try:
+        scm = create_scm_client(settings)
+    except Exception:  # noqa: BLE001
+        console.print("[yellow]warning:[/yellow] SCM client unavailable — stages run without SCM")
 
+    bundle = None
     try:
         # If from-issue, fetch the issue body as requirements
         trigger_type = "cli"
         trigger_ref = "cli"
-        if from_issue and not requirements:
-            issue = await github.get_issue(repo, from_issue)
-            requirements = f"Issue #{from_issue}: {issue['title']}\n\n{issue['body']}"
+        if from_issue and not requirements and scm is not None:
+            issue = await scm.get_issue(repo, from_issue)
+            requirements = f"Issue #{from_issue}: {issue['title']}\n\n{issue.get('body', '')}"
             trigger_type = "github_issue"
             trigger_ref = str(from_issue)
 
-        # Progress callback for CLI output
-        def on_progress(step: str, status: str, detail: str) -> None:
-            icon = {"running": "[yellow]...[/yellow]", "completed": "[green]OK[/green]"}.get(status, status)
-            console.print(f"  {icon} {step}: {detail}")
+        # Build the same StageDeps + registry the API/worker use, then run the
+        # blueprint inline through the durable pipeline (Temporal when
+        # DEVAI_WORKFLOW_PROVIDER=temporal, else in-process).
+        bundle = await build_runtime(settings, scm=scm, state_manager=state)
+        pipeline = Pipeline(
+            bundle.deps,
+            registry=bundle.registry,
+            blueprint_dir=getattr(settings, "pipeline_blueprint_dir", "blueprints"),
+            default_stage_timeout=float(getattr(settings, "pipeline_default_stage_timeout", 900)),
+        )
+        pipeline.load_blueprints()
 
-        # Run the LangGraph pipeline
-        orchestrator = ALMOrchestrator(github, state, settings)
+        def on_event(task, event) -> None:  # noqa: ANN001
+            icon = {
+                "started": "[yellow]...[/yellow]",
+                "completed": "[green]OK[/green]",
+                "failed": "[red]x[/red]",
+                "skipped": "[dim]skip[/dim]",
+            }.get(event.phase.value, event.phase.value)
+            console.print(f"  {icon} {event.stage}: {event.message or event.error or ''}")
+
+        pipeline.add_event_callback(on_event)
+
+        blueprint = getattr(settings, "pipeline_default_blueprint", "alm-pipeline")
+        task = DevAITask(
+            intent=requirements or "",
+            blueprint=blueprint,
+            repo=repo,
+            trigger_type=trigger_type,
+            agent_context={"requirements": requirements or "", "trigger_ref": trigger_ref},
+        )
 
         console.print(
             Panel(
-                f"[bold]DevAI ALM Pipeline[/bold]\nRepo: {repo}\nMode: LangGraph + LangSmith",
+                f"[bold]DevAI ALM Pipeline[/bold]\nRepo: {repo}\nBlueprint: {blueprint}\n"
+                f"Mode: durable pipeline ({getattr(settings, 'workflow_provider', 'inproc')})",
                 title="Starting Pipeline",
                 border_style="green",
             )
         )
 
-        final_state = await orchestrator.run(
-            repo_full_name=repo,
-            requirements=requirements or "",
-            trigger_type=trigger_type,
-            trigger_ref=trigger_ref,
-            on_progress=on_progress,
-        )
+        result = await pipeline.run_once(task)
 
         # Display results
         console.print("\n")
-        _display_results(final_state)
+        _display_results(result.to_dict())
 
     finally:
+        if bundle is not None:
+            await bundle.aclose()
         await state.close()
-        await github.close()
+        if scm is not None:
+            await scm.close()
 
 
 def _display_results(state: dict) -> None:
-    """Display pipeline results in a rich table."""
+    """Display pipeline results in a rich table (DevAITask.to_dict() shape)."""
+    task_state = state.get("state", "unknown")
+    ok = task_state == "completed"
     console.print(
         Panel(
-            f"[bold]Run ID:[/bold] {state.get('run_id', 'unknown')}\n"
-            f"[bold]Stage:[/bold] {state.get('stage', 'unknown')}\n"
-            f"[bold]Build:[/bold] {state.get('build_status', 'n/a')}\n"
-            f"[bold]Deploy:[/bold] {state.get('deploy_status', 'n/a')}",
+            f"[bold]Run ID:[/bold] {state.get('id', 'unknown')}\n"
+            f"[bold]State:[/bold] {task_state}\n"
+            f"[bold]Stages:[/bold] {len(state.get('stages_completed', []))} done, "
+            f"{len(state.get('stages_failed', []))} failed\n"
+            f"[bold]PR:[/bold] {state.get('pr_number') or 'n/a'}   "
+            f"[bold]Branch:[/bold] {state.get('branch_name') or 'n/a'}"
+            + (f"\n[bold red]Error:[/bold red] {state.get('error')}" if state.get("error") else ""),
             title="Pipeline Complete",
-            border_style="green" if state.get("stage") == "deployed" else "red",
+            border_style="green" if ok else "red",
         )
     )
 
-    # Agent timings
-    timings = state.get("agent_timings", {})
-    if timings:
-        table = Table(title="Agent Timings")
-        table.add_column("Agent", style="cyan")
+    # Per-stage timings from the stage-event timeline.
+    events = [e for e in state.get("stage_events", []) if e.get("phase") == "completed"]
+    if events:
+        table = Table(title="Stage Timings")
+        table.add_column("Stage", style="cyan")
         table.add_column("Duration", style="yellow")
-
-        for agent, duration in timings.items():
-            table.add_row(agent, f"{duration:.1f}s")
+        for e in events:
+            table.add_row(e.get("stage", ""), f"{e.get('duration_ms', 0) / 1000:.1f}s")
         console.print(table)
 
-    # A2A Messages
-    messages = state.get("a2a_messages", [])
+    # A2A Messages (when an agent recorded them onto the handover bag)
+    messages = (state.get("agent_context") or {}).get("a2a_messages", [])
     if messages:
         table = Table(title=f"A2A Messages ({len(messages)} total)")
         table.add_column("From", style="cyan")

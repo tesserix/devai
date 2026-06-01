@@ -1,0 +1,67 @@
+name: crew-task
+description: >-
+  Hand a task to an AI agent crew. The crew's lead plans the work and its
+  members (each an autonomous agent with its own skills) implement it inside a
+  sandbox worktree; the existing review + security gates then validate the
+  result before a PR is opened. This is the composer's default blueprint when
+  a crew is selected — the human team owns the crew, the crew does the work.
+
+metadata:
+  domain: alm
+  title: Crew Task
+  lanes: [plan, build, review]
+
+stages:
+  - name: create-issue
+    type: deterministic
+    stage: create_issue
+    on_failure: continue
+    timeout: 1m
+    config:
+      title: "DevAI Crew Task"
+
+  - name: hydrate-context
+    type: context
+    stage: context_hydration
+    depends_on: [create-issue]
+    timeout: 30s
+
+  - name: inject-memory
+    type: context
+    stage: memory_injection
+    depends_on: [hydrate-context]
+    timeout: 30s
+
+  - name: run-crew
+    type: agentic
+    stage: run_crew
+    lane: build
+    depends_on: [hydrate-context, inject-memory]
+    timeout: 60m
+    # crew is chosen from the task (crew_id → DB) or agent_context["crew"];
+    # set `config.crew: frontend_crew` here to pin a seed crew for this blueprint.
+
+  - name: review-code
+    type: review
+    stage: review_code
+    lane: review
+    depends_on: [run-crew]
+    on_failure: continue
+    timeout: 15m
+
+  - name: security-scan
+    type: review
+    stage: security_scan
+    lane: review
+    depends_on: [run-crew]
+    on_failure: continue
+    timeout: 10m
+
+  - name: post-report
+    type: deterministic
+    stage: post_report
+    depends_on: [review-code, security-scan]
+    on_failure: continue
+    config:
+      title: "DevAI Crew Result"
+      target: pr

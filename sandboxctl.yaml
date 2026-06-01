@@ -1,13 +1,32 @@
 # sandboxctl build manifest — declares the image(s) sandboxctl builds and
 # pushes to the in-cluster registry (localhost:5050) before deploying.
 #
-# `sandboxctl deploy` (run from this repo root) will:
-#   1. build localhost:5050/devai:latest from ./Dockerfile
-#   2. apply k8s/secrets.yaml into the devai namespace
-#   3. push k8s/chart to in-cluster Gitea + create an Argo Application
-#      (image.repository/tag injected automatically)
-#   4. route https://devai.sandbox.app:8443 to the devai Service
+# `sandboxctl deploy` (run from this repo root) builds every image below,
+# pushes it as localhost:5050/<name>:latest, applies k8s/secrets.yaml, then
+# deploys the requested chart(s).
+#
+# These images back BOTH local flows:
+#   • the all-in-one k8s/chart  (uses `devai`)
+#   • the per-chart tesserix-k8s charts + the devai-stack umbrella
+#     (reference localhost:5050/<name> in their values-local.yaml)
+#
+# `devai` is the Python API/SRE codebase: ENTRYPOINT `python -m devai`, default
+# CMD `serve` (the API). The SRE server is a different entrypoint, so it needs
+# its own image (Dockerfile.sre) — the devai-sre chart runs the image's default
+# command. The two dashboards and the auth-bff are separate images.
 images:
-  - name: devai
+  - name: devai            # ALM API server (devai serve) — also used as devai-api
     context: "."
     dockerfile: Dockerfile
+  - name: devai-sre        # SRE server (python -m devai.sre.server)
+    context: "."
+    dockerfile: Dockerfile.sre
+  - name: devai-dashboard  # ALM dashboard (Next.js)
+    context: "dashboard"
+    dockerfile: dashboard/Dockerfile
+  - name: devai-sre-dashboard  # SRE dashboard (Next.js)
+    context: "sre-dashboard"
+    dockerfile: sre-dashboard/Dockerfile
+  - name: devai-auth-bff   # Go GIP session BFF (optional locally)
+    context: "services/auth-bff"
+    dockerfile: services/auth-bff/Dockerfile

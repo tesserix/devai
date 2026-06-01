@@ -23,10 +23,10 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterable
-from typing import Any
 
 from devai.blueprint.conditions import evaluate as eval_condition
 from devai.blueprint.loader import Blueprint, StageSpec
+from devai.blueprint.planner import topological_levels
 from devai.blueprint.registry import StageRegistry, StageRegistryError
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.types import (
@@ -89,6 +89,12 @@ class BlueprintExecutor:
         )
 
         for level_idx, level in enumerate(levels):
+            # Honor user run-control (pause / stop) at each stage boundary.
+            # Returns False when the run was stopped (task already CANCELLED).
+            if not await self._check_run_control(task):
+                logger.info("blueprint %s stopped by user at level %d", blueprint.name, level_idx)
+                break
+
             # Group stages within a level: parallel-marked stages all run
             # together, sequential stages run one at a time. In practice we
             # keep this simple — if every stage in a level has parallel=True
@@ -115,6 +121,43 @@ class BlueprintExecutor:
         if not task.is_failed and not task.is_terminal:
             task.transition(TaskState.COMPLETED)
         return task
+
+    # ──────────────────────────────────────────────────────────────────
+    # Internal: run control (pause / stop)
+    # ──────────────────────────────────────────────────────────────────
+
+    _CONTROL_POLL_SECONDS = 2.0
+    _CONTROL_MAX_PAUSE_SECONDS = 3600.0
+
+    async def _check_run_control(self, task: DevAITask) -> bool:
+        """Poll the durable run-control flag at a stage boundary.
+
+        Returns False if the run was stopped (and transitions the task to
+        CANCELLED); blocks while paused (up to a max), then resumes. A no-op
+        returning True when no StateManager exposes the control surface, so
+        tests and minimal deps are unaffected. The Temporal workflow uses
+        Signals instead — this drives the in-process path only.
+        """
+        sm = self._deps.state_manager
+        getter = getattr(sm, "get_pipeline_control", None)
+        if sm is None or getter is None:
+            return True
+        waited = 0.0
+        while True:
+            try:
+                ctrl = await getter(task.id)
+            except Exception:  # noqa: BLE001 — control is best-effort, never fatal
+                return True
+            if ctrl == "stopped":
+                task.error = "stopped by user"
+                task.failed_stage = task.current_stage or ""
+                task.transition(TaskState.CANCELLED)
+                return False
+            if ctrl == "paused" and waited < self._CONTROL_MAX_PAUSE_SECONDS:
+                await asyncio.sleep(self._CONTROL_POLL_SECONDS)
+                waited += self._CONTROL_POLL_SECONDS
+                continue
+            return True
 
     # ──────────────────────────────────────────────────────────────────
     # Internal: stage execution
@@ -179,7 +222,7 @@ class BlueprintExecutor:
         timeout = spec.timeout_seconds or self._default_timeout
         try:
             result = await asyncio.wait_for(stage.execute(task), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration_ms = (time.monotonic() - start) * 1000.0
             err = f"timed out after {timeout}s"
             logger.error("stage %s: %s", spec.name, err)
@@ -269,37 +312,14 @@ class BlueprintExecutor:
 def _topo_sort(stages: Iterable[StageSpec]) -> list[list[StageSpec]]:
     """Kahn's algorithm → levels of stages with no inter-level dependencies.
 
-    Stages in level N may run in any order or in parallel as long as
-    they don't depend on each other (they don't, by construction).
-
-    Raises on cycles.
+    Delegates to :func:`devai.blueprint.planner.topological_levels` so the
+    in-process executor and the Temporal workflow share one ordering routine.
+    Re-raises cycle errors as :class:`BlueprintExecutionError`.
     """
-    stages = list(stages)
-    by_name = {s.name: s for s in stages}
-    in_deg: dict[str, int] = {s.name: len(s.depends_on) for s in stages}
-    levels: list[list[StageSpec]] = []
-    remaining = set(by_name.keys())
-
-    while remaining:
-        ready = [name for name in remaining if in_deg[name] == 0]
-        if not ready:
-            raise BlueprintExecutionError(
-                f"cycle in blueprint — stuck on stages: {sorted(remaining)}"
-            )
-
-        # Stable ordering — match YAML declaration order within the level.
-        ready_sorted = sorted(ready, key=lambda n: [s.name for s in stages].index(n))
-        levels.append([by_name[n] for n in ready_sorted])
-
-        for name in ready:
-            remaining.discard(name)
-
-        # Decrement deps for the next round
-        for name in remaining:
-            spec = by_name[name]
-            in_deg[name] = sum(1 for dep in spec.depends_on if dep in remaining)
-
-    return levels
+    try:
+        return topological_levels(list(stages))
+    except ValueError as e:
+        raise BlueprintExecutionError(str(e)) from e
 
 
 __all__ = ["BlueprintExecutor", "BlueprintExecutionError"]

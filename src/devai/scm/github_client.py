@@ -666,9 +666,12 @@ class GitHubSCMClient(SCMClient):
             try:
                 data = await self._graphql(query, variables)
             except Exception as e:  # noqa: BLE001 — one bad batch shouldn't blank the page
+                # Leave failed repos OUT of the result (don't assert False):
+                # an "unknown" verdict must never be read as "marker gone",
+                # or a transient GraphQL error would offload onboarded repos
+                # to DORMANT on the next reconcile. Callers treat a missing
+                # key as "no change".
                 logger.warning("probe_markers GraphQL batch failed: %s", e)
-                for full in alias_map.values():
-                    out.setdefault(full, False)
                 continue
             for alias, full in alias_map.items():
                 node = data.get(alias) or {}

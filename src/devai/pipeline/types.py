@@ -145,6 +145,10 @@ class StageEvent:
     # label a node (gate? what kind of stage?) without re-reading the blueprint.
     stage_type: str = ""
     gate: bool = False
+    # When this event marks a git checkpoint (an agent step the user can roll
+    # back to), `checkpoint` carries the commit SHA. The dashboard renders
+    # these as entries on the right-rail checkpoint timeline.
+    checkpoint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,6 +160,7 @@ class StageEvent:
             "error": self.error,
             "type": self.stage_type,
             "gate": self.gate,
+            "checkpoint": self.checkpoint,
         }
 
 
@@ -229,6 +234,11 @@ class DevAITask:
     # Optional human-readable label that the dashboard shows
     label: str = ""
 
+    # Git checkpoints captured during the run (the Cursor "roll back to a
+    # previous snapshot" timeline). Each entry: {sha, label, stage, ts}. The
+    # runner pod emits CHECKPOINT:: lines; job_watcher parses them onto here.
+    checkpoints: list[dict[str, Any]] = field(default_factory=list)
+
     # ── Caller identity (filled in at the boundary by webhook / chat /
     # dashboard trigger). principal is the serialized devai.identity.Principal;
     # trace_id correlates with LangSmith / OTEL spans; triggered_by is the
@@ -236,6 +246,12 @@ class DevAITask:
     principal: dict[str, Any] | None = None
     trace_id: str | None = None
     triggered_by: str | None = None
+
+    # ── Teams (Phase 2/3). team_id = the human team that owns this run;
+    # crew_id = the AI agent crew assigned to it. Both default empty so
+    # every pre-teams trigger path keeps working unscoped.
+    team_id: str = ""
+    crew_id: str = ""
 
     # ────── Conditional helpers ──────
     # The blueprint executor uses these for `condition:` expressions.
@@ -301,6 +317,13 @@ class DevAITask:
         self.stage_events.append(event)
         self.updated_at = time.time()
 
+    def record_checkpoint(self, sha: str, label: str = "", stage: str = "") -> dict[str, Any]:
+        """Append a git checkpoint (rollback point) to the timeline."""
+        entry = {"sha": sha, "label": label, "stage": stage or self.current_stage, "ts": time.time()}
+        self.checkpoints.append(entry)
+        self.updated_at = time.time()
+        return entry
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for persistence / SSE transmission."""
         return {
@@ -330,7 +353,10 @@ class DevAITask:
             "error": self.error,
             "failed_stage": self.failed_stage,
             "label": self.label,
+            "checkpoints": list(self.checkpoints),
             "principal": dict(self.principal) if self.principal else None,
             "trace_id": self.trace_id,
             "triggered_by": self.triggered_by,
+            "team_id": self.team_id,
+            "crew_id": self.crew_id,
         }

@@ -180,6 +180,32 @@ class RegistryClient:
                 return a
         return None
 
+    def get_agent_card(
+        self, name: str, *, namespace: str = "", tag: str = ""
+    ) -> dict[str, Any]:
+        """Fetch the A2A (Agent2Agent) Agent Card for an agent.
+
+        The registry renders the card from the Agent object + its linked
+        registry Skills and returns a standards-compliant A2A descriptor —
+        capabilities, the agent's own service ``url``, and ``skills``. The
+        registry never proxies the agent; a consumer reads ``url`` from the
+        card and talks A2A directly to it. ``tag`` pins a specific version;
+        omitted resolves the latest. ``namespace`` scopes to an org/team.
+        """
+        path = f"/v0/agents/{name}/{tag}/card" if tag else f"/v0/agents/{name}/card"
+        if namespace:
+            path += f"?namespace={namespace}"
+        return self._get(path)
+
+    def get_signing_key(self) -> dict[str, Any]:
+        """Fetch the registry's published Ed25519 signing public key.
+
+        Returns ``{enabled, algorithm, keyId, publicKey, encoding, signs}``.
+        ``enabled=false`` means the registry isn't attesting artifacts, so a
+        consumer cannot verify card authenticity. Cached like other reads.
+        """
+        return self._get("/v0/signing-key")
+
     def refresh(self, *keys: str) -> None:
         """Drop cached entries. With no args, drops everything."""
         if not keys:

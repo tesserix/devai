@@ -66,6 +66,10 @@ class Principal:
     auth_provider: str = "unknown"  # google | keycloak | github | webhook | system
     roles: list[str] = field(default_factory=list)
     display_name: str = ""
+    # Human teams this principal belongs to (resolved from the team_members
+    # table at request time). Empty = no team scoping; the user sees the
+    # global/unscoped view (back-compat with every pre-teams trigger path).
+    team_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +80,7 @@ class Principal:
             "auth_provider": self.auth_provider,
             "roles": list(self.roles),
             "display_name": self.display_name,
+            "team_ids": list(self.team_ids),
         }
 
     @classmethod
@@ -90,7 +95,13 @@ class Principal:
             auth_provider=data.get("auth_provider", "unknown"),
             roles=list(data.get("roles") or []),
             display_name=data.get("display_name", ""),
+            team_ids=list(data.get("team_ids") or []),
         )
+
+    @property
+    def primary_team_id(self) -> str:
+        """The team a new task is attributed to when the caller didn't pick one."""
+        return self.team_ids[0] if self.team_ids else ""
 
     @classmethod
     def system(cls) -> Principal:
@@ -159,7 +170,7 @@ async def extract_principal(request: Request) -> Principal | None:
     #    through, so a direct caller can't spoof identity by setting headers.
     fwd_email = request.headers.get("x-forwarded-user") or request.headers.get("x-forwarded-email")
     if fwd_email and _forward_trusted(request):
-        return Principal(
+        principal = Principal(
             email=fwd_email,
             uid=request.headers.get("x-forwarded-uid", ""),
             tenant_id=request.headers.get("x-forwarded-tenant", ""),
@@ -167,6 +178,8 @@ async def extract_principal(request: Request) -> Principal | None:
             auth_provider="auth-bff",
             display_name=request.headers.get("x-forwarded-name", "") or fwd_email,
         )
+        await _enrich_teams(principal, request)
+        return principal
 
     # 2. dashboard session cookie → Redis lookup
     session_id = request.cookies.get("devai_session")
@@ -177,18 +190,36 @@ async def extract_principal(request: Request) -> Principal | None:
                 raw = await state_manager.redis.get(f"devai:session:{session_id}")
                 if raw:
                     data = json.loads(raw)
-                    return Principal(
+                    principal = Principal(
                         email=data.get("user_email", "") or data.get("user_login", ""),
                         uid=data.get("user_login", ""),
                         auth_provider=data.get("auth_provider", "unknown"),
                         roles=list(data.get("roles") or []),
                         display_name=data.get("user_name", "") or data.get("user_login", ""),
                     )
+                    await _enrich_teams(principal, request)
+                    return principal
         except Exception:
             # Session lookup must never block a request — degrade to None.
             logger.debug("session lookup failed for cookie", exc_info=True)
 
     return None
+
+
+async def _enrich_teams(principal: Principal, request: Request) -> None:
+    """Best-effort: attach the principal's team_ids from a TeamService.
+
+    The service is optional (`request.app.state.team_service`). If it's
+    absent or errors, the principal simply has no teams — the unscoped
+    view — so teams are purely additive and never break auth.
+    """
+    team_service = getattr(request.app.state, "team_service", None)
+    if team_service is None:
+        return
+    try:
+        principal.team_ids = await team_service.teams_for(principal.uid or principal.email)
+    except Exception:  # noqa: BLE001
+        logger.debug("team enrichment failed for %s", principal.email, exc_info=True)
 
 
 def trace_id_from_request(request: Request) -> str:

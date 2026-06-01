@@ -27,7 +27,15 @@ const API_INTERNAL_URL =
 const nextConfig: NextConfig = {
   output: "standalone",
   async rewrites() {
+    // LOCAL ONLY: when DEVAI_AUTH_MODE=local_db, proxy /auth/* to devai-api's
+    // username/password endpoints. In prod this env is unset, so /auth/* is
+    // left for the auth-bff (GIP) to handle as before.
+    const localAuthProxy =
+      process.env.DEVAI_AUTH_MODE === "local_db"
+        ? [{ source: "/auth/:path*", destination: `${API_INTERNAL_URL}/auth/:path*` }]
+        : [];
     return [
+      ...localAuthProxy,
       {
         source: "/api/chat/:path*",
         destination: `${API_INTERNAL_URL}/chat/api/:path*`,

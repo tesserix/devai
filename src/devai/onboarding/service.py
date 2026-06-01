@@ -150,10 +150,28 @@ class OnboardingService:
         if probe and page_items:
             markers = await self._probe_markers(page_items, refresh)
 
-        # Overlay persisted state (store wins over a bare marker probe).
         rows = {r.full_name: r for r in await self._store.list(include_archived=True)}
+
+        # Self-healing cache: persist what this probe just learned. A newly
+        # discovered marker is adopted as ONBOARDED; a marker that vanished
+        # from an onboarded repo is offloaded to DORMANT. So simply viewing
+        # the page keeps the DB cache true to the `.platform/devai.yaml`
+        # files — onboarded repos stay onboarded, removed ones drop off on
+        # the next fetch. Best-effort: a write failure never breaks the read.
+        resolved: dict[str, OnboardedRepo] = {}
+        if markers:
+            snaps_by_full = {s.full_name: s for s in page_items}
+            try:
+                resolved = await self._refresh_states(
+                    markers, rows, snaps_by_full, adopt_new=True
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("catalog cache refresh failed (non-fatal)", exc_info=True)
+
+        # Overlay persisted state (the just-refreshed store wins over a bare
+        # marker probe).
         for s in page_items:
-            row = rows.get(s.full_name)
+            row = resolved.get(s.full_name) or rows.get(s.full_name)
             s.has_marker = markers.get(s.full_name)
             if row is not None and row.state != OnboardingState.ARCHIVED:
                 s.state = row.state
@@ -381,52 +399,108 @@ class OnboardingService:
     # Reconcile — marker files are the source of truth
     # ----------------------------------------------------------------- #
 
+    async def _refresh_states(
+        self,
+        markers: dict[str, bool],
+        rows_by_full: dict[str, OnboardedRepo],
+        snaps_by_full: dict[str, RepoSnapshot] | None = None,
+        *,
+        adopt_new: bool,
+        report: _Report | None = None,
+    ) -> dict[str, OnboardedRepo]:
+        """Single state-transition authority — drives every onboarding flip.
+
+        Given a batch of ``{owner/name: marker_present}`` probe results and
+        the known rows, it persists only the *deltas* and returns the
+        resolved row per repo (post-write):
+
+          * marker present, row missing/non-onboarded → ONBOARDED
+            (adopt when ``adopt_new``; otherwise promote an existing row)
+          * marker gone from an ONBOARDED repo        → DORMANT (offload)
+          * ARCHIVED rows                             → never touched
+          * already-correct rows                      → left as-is (no write)
+
+        Repos absent from ``markers`` (e.g. a GraphQL batch that errored and
+        returned an unknown verdict) are skipped entirely, so a transient
+        probe failure can never false-offload an onboarded repo.
+        """
+        snaps_by_full = snaps_by_full or {}
+        resolved: dict[str, OnboardedRepo] = {}
+        now = time.monotonic()
+        for full, present in markers.items():
+            if report is not None:
+                report.scanned += 1
+            row = rows_by_full.get(full)
+            self._marker_cache[full] = _CacheEntry(present, now + _MARKER_TTL)
+
+            # Operator soft-delete wins over any marker state.
+            if row is not None and row.state == OnboardingState.ARCHIVED:
+                resolved[full] = row
+                if report is not None:
+                    report.skipped += 1
+                continue
+
+            try:
+                if present:
+                    if row is not None and row.state == OnboardingState.ONBOARDED:
+                        resolved[full] = row  # already onboarded — no write
+                        if report is not None:
+                            report.skipped += 1
+                        continue
+                    if row is None and not adopt_new:
+                        if report is not None:
+                            report.skipped += 1
+                        continue
+                    owner, _, name = full.partition("/")
+                    snap = snaps_by_full.get(full)
+                    base = (row.default_base_branch if row else "") or (
+                        snap.default_branch if snap else "main"
+                    )
+                    desc = (row.description if row else "") or (
+                        snap.description if snap else ""
+                    )
+                    by = row.onboarded_by if row else ""
+                    resolved[full] = await self._record_onboarded(owner, name, base, desc, by)
+                    if report is not None:
+                        report.reconciled += 1
+                else:  # marker absent
+                    if row is not None and row.state == OnboardingState.ONBOARDED:
+                        row.state = OnboardingState.DORMANT
+                        resolved[full] = await self._store.upsert(row)
+                        if report is not None:
+                            report.reconciled += 1
+                    else:
+                        if row is not None:
+                            resolved[full] = row
+                        if report is not None:
+                            report.skipped += 1
+            except Exception as e:  # noqa: BLE001 — one repo can't fail the batch
+                if report is not None:
+                    report.errors.append(f"{full}: {e}")
+                if row is not None:
+                    resolved[full] = row
+        return resolved
+
     async def reconcile(self, org: str = "") -> dict[str, Any]:
         org = org or self._org
         report = _Report()
         rows = await self._store.list(include_archived=False)
 
-        if rows:  # DB-first: refresh known rows, zero org-walk.
-            for row in rows:
-                report.scanned += 1
-                try:
-                    default_branch = await self._scm.get_default_branch(row.full_name)
-                    present = await self._marker_present(row.full_name, default_branch)
-                except Exception as e:  # noqa: BLE001
-                    report.errors.append(f"{row.full_name}: {e}")
-                    continue
-                if present:
-                    if row.state != OnboardingState.ONBOARDED:
-                        row.state = OnboardingState.ONBOARDED
-                        await self._store.upsert(row)
-                    report.reconciled += 1
-                elif row.state == OnboardingState.ONBOARDED:
-                    row.state = OnboardingState.DORMANT
-                    await self._store.upsert(row)
-                    report.reconciled += 1
-                else:
-                    report.skipped += 1
+        if rows:  # DB-first: one batched GraphQL probe, zero org-walk.
+            rows_by_full = {r.full_name: r for r in rows}
+            # ref="" → "HEAD" resolves each repo's current default branch, so
+            # no per-repo get_default_branch round trip is needed.
+            probe = [(r.owner, r.name, "") for r in rows]
+            markers = await self._scm.probe_markers(probe, self._marker)
+            await self._refresh_states(markers, rows_by_full, adopt_new=False, report=report)
             return report.to_dict()
 
-        # Cold-start: walk the catalog with a marker probe and seed rows.
+        # Cold-start: walk the catalog once with a batched marker probe and
+        # seed rows for everything already carrying the marker.
         snaps, _ = await self._installation_snapshots(refresh=True)
         markers = await self._probe_markers(snaps, refresh=True)
-        for s in snaps:
-            report.scanned += 1
-            if markers.get(s.full_name):
-                await self._store.upsert(
-                    OnboardedRepo(
-                        owner=s.owner,
-                        name=s.name,
-                        state=OnboardingState.ONBOARDED,
-                        default_base_branch=s.default_branch,
-                        description=s.description,
-                        onboarded_at=datetime.now(UTC),
-                    )
-                )
-                report.reconciled += 1
-            else:
-                report.skipped += 1
+        snaps_by_full = {s.full_name: s for s in snaps}
+        await self._refresh_states(markers, {}, snaps_by_full, adopt_new=True, report=report)
         return report.to_dict()
 
 

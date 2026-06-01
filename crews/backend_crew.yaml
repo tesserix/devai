@@ -1,0 +1,29 @@
+name: backend_crew
+display_name: Backend Crew
+description: >
+  Builds and hardens backend services. The senior developer leads
+  implementation; the database engineer designs the schema/ORM; the security
+  expert reviews for vulnerabilities before the work ships. Members are
+  equipped with terminal, git checkpoints, and web search.
+
+lead: senior_developer
+
+members:
+  - specialization: senior_developer
+    role_label: Backend Developer
+    allowed_tools:
+      - read_file
+      - write_file
+      - shell_exec
+      - checkpoint
+      - rollback
+      - web_search
+      - web_fetch
+      - scm_create_branch
+      - scm_create_pull_request
+  - specialization: db_engineer
+    role_label: Database Engineer
+    allowed_tools: [read_file, write_file, shell_exec, checkpoint]
+  - specialization: security_expert
+    role_label: Security Reviewer
+    allowed_tools: [read_file, shell_exec, web_search, web_fetch]

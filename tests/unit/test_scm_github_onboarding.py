@@ -38,7 +38,11 @@ async def test_probe_markers_batches_into_one_graphql_call() -> None:
 
 
 @pytest.mark.asyncio
-async def test_probe_markers_bad_batch_degrades_to_false() -> None:
+async def test_probe_markers_bad_batch_omits_unknown_repos() -> None:
+    # A failed GraphQL batch must NOT report repos as marker-absent — an
+    # "unknown" verdict read as "marker gone" would false-offload onboarded
+    # repos to DORMANT on the next reconcile. Failed repos are omitted, and
+    # callers treat a missing key as "no change".
     client = GitHubSCMClient(auth_method=AuthMethod.PAT, token="t")
 
     async def boom(query: str, variables: dict | None = None):
@@ -46,7 +50,7 @@ async def test_probe_markers_bad_batch_degrades_to_false() -> None:
 
     client._graphql = boom  # type: ignore[assignment]
     out = await client.probe_markers([("tesserix", "a", "main")], ".platform/devai.yaml")
-    assert out == {"tesserix/a": False}
+    assert out == {}
     await client.close()
 
 

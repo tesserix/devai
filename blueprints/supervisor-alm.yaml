@@ -1,0 +1,190 @@
+name: supervisor-alm
+description: >-
+  Supervisor-led ALM pipeline — the durable, blueprint-native replacement for the
+  legacy LangGraph supervisor→orchestrator→story-loop graph
+  (devai.graph.orchestrator.ALMOrchestrator). A Supervisor Architect plans the run
+  first (delegation plan + tracking issue + project board), then the standard ALM
+  stages execute, gate and ship. Runs through the one generic BlueprintWorkflow, so
+  with DEVAI_WORKFLOW_PROVIDER=temporal the whole supervisor-led flow is durable —
+  no per-pipeline orchestration code, only this YAML.
+
+metadata:
+  domain: alm
+  replaces: devai.graph.orchestrator.ALMOrchestrator
+  title: Supervisor-Led ALM
+  lanes: [plan, build, review, deploy]
+
+stages:
+  # ─── Intake ────────────────────────────────────────────────────────
+  - name: create-issue
+    type: deterministic
+    stage: create_issue
+    lane: plan
+    timeout: 60s
+    config:
+      title_template: "[devai] {intent}"
+
+  - name: hydrate-context
+    type: context
+    stage: context_hydration
+    lane: plan
+    depends_on: [create-issue]
+    timeout: 30s
+
+  - name: inject-memory
+    type: context
+    stage: memory_injection
+    lane: plan
+    depends_on: [create-issue]
+    timeout: 30s
+    config:
+      k: "5"
+
+  # ─── Pre-plan context the Supervisor reasons over ──────────────────
+  - name: ingest-documents
+    type: agentic
+    stage: ingest_documents
+    lane: plan
+    depends_on: [hydrate-context, inject-memory]
+    timeout: 15m
+
+  - name: detect-tech-stack
+    type: agentic
+    stage: detect_tech_stack
+    lane: plan
+    depends_on: [ingest-documents]
+    timeout: 5m
+
+  # ─── Supervisor plans the run (the legacy `supervisor` node, now a stage) ──
+  # Bridges to devai.agents.supervisor.SupervisorAgent via the supervisor
+  # specialization. Produces `supervisor_output` (delegation_plan, tracking
+  # issue, project board) that the planning chain below builds on.
+  - name: supervise
+    type: agentic
+    stage: run_specialization
+    lane: plan
+    title: Supervisor Plan
+    agent: supervisor
+    depends_on: [detect-tech-stack, inject-memory]
+    timeout: 10m
+    config:
+      specialization: supervisor
+
+  # ─── Planning chain (delegated work) ───────────────────────────────
+  - name: analyze-requirements
+    type: agentic
+    stage: analyze_requirements
+    lane: plan
+    depends_on: [supervise]
+    timeout: 10m
+
+  - name: create-epic
+    type: agentic
+    stage: create_epic
+    lane: plan
+    depends_on: [analyze-requirements]
+    timeout: 10m
+
+  - name: create-stories
+    type: agentic
+    stage: create_stories
+    lane: plan
+    depends_on: [create-epic]
+    timeout: 5m
+    on_failure: continue
+
+  - name: create-plan
+    type: agentic
+    stage: create_plan
+    lane: plan
+    depends_on: [create-stories]
+    timeout: 15m
+
+  # ─── Implementation ─────────────────────────────────────────────────
+  - name: implement-code
+    type: agentic
+    stage: implement_code
+    lane: build
+    depends_on: [create-plan]
+    timeout: 30m
+
+  - name: db-engineering
+    type: agentic
+    stage: db_engineering
+    lane: build
+    title: DB Engineering
+    depends_on: [implement-code]
+    timeout: 10m
+    on_failure: continue
+
+  # ─── Quality gates ──────────────────────────────────────────────────
+  - name: review-code
+    type: review
+    stage: review_code
+    lane: review
+    depends_on: [implement-code, db-engineering]
+    timeout: 15m
+
+  - name: security-scan
+    type: review
+    stage: security_scan
+    lane: review
+    depends_on: [review-code]
+    timeout: 10m
+
+  - name: monitor-build
+    type: deterministic
+    stage: monitor_build
+    lane: review
+    title: CI Build
+    depends_on: [security-scan]
+    timeout: 20m
+
+  - name: run-tests
+    type: review
+    stage: run_tests
+    lane: review
+    depends_on: [monitor-build]
+    timeout: 20m
+
+  # ─── Final review + deploy ──────────────────────────────────────────
+  - name: staff-review
+    type: review
+    stage: staff_review
+    lane: review
+    gate: true
+    depends_on: [run-tests]
+    timeout: 15m
+
+  - name: provision-infra
+    type: deploy
+    stage: provision_infra
+    lane: deploy
+    depends_on: [staff-review]
+    timeout: 15m
+
+  - name: deploy-release
+    type: deploy
+    stage: deploy_release
+    lane: deploy
+    gate: true
+    depends_on: [provision-infra]
+    timeout: 20m
+
+  # ─── Reporting + cleanup ────────────────────────────────────────────
+  - name: post-report
+    type: deterministic
+    stage: post_report
+    lane: deploy
+    depends_on: [deploy-release]
+    on_failure: continue
+    config:
+      title: "DevAI Supervisor-Led ALM Report"
+      target: pr
+
+  - name: cleanup
+    type: deterministic
+    stage: cleanup
+    lane: deploy
+    depends_on: [post-report]
+    on_failure: continue

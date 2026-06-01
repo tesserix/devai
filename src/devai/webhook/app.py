@@ -58,6 +58,18 @@ def create_app(
             _registry_client = None
         app.state.registry_client = _registry_client
 
+        # A2A (Agent2Agent) runtime client — lets the orchestrator discover
+        # peer agents via the registry, fetch their capability cards, and
+        # invoke them over A2A. Purely additive: None when no registry client
+        # exists, and the orchestrator runs fine without it.
+        try:
+            from devai.a2a import create_a2a_client
+
+            app.state.a2a_client = create_a2a_client(config, _registry_client)
+        except Exception:
+            logger.exception("A2A client construction failed (non-fatal)")
+            app.state.a2a_client = None
+
         # Start the Fiber-style pipeline runtime when enabled. SCM is
         # constructed lazily so this doesn't trip start-up when the SCM
         # provider isn't configured yet.
@@ -151,6 +163,9 @@ def create_app(
                 onboarding_db = Database(config.database_url)
                 await onboarding_db.connect()
                 pool = onboarding_db.pool
+                # Shared pool reused by other features (e.g. local_db auth reads
+                # the seeded devai_local_users table from app.state.db_pool).
+                app.state.db_pool = pool
             except Exception as e:  # noqa: BLE001
                 logger.warning("Onboarding: DB pool unavailable (%s) — using in-memory store", e)
                 onboarding_db = None
@@ -159,37 +174,105 @@ def create_app(
                 config, scm=onboarding_scm, pool=pool
             )
             logger.info("Onboarding service ready (store=%s)", "postgres" if pool else "in-memory")
+
+            # Teams service shares the onboarding DB pool. When the DB is
+            # unavailable it's left None and the teams API returns 503 /
+            # principals resolve to no teams — teams stay purely additive.
+            try:
+                if onboarding_db is not None:
+                    from devai.services.teams import TeamService
+
+                    app.state.team_service = TeamService(onboarding_db)
+                    logger.info("Team service ready")
+                else:
+                    app.state.team_service = None
+            except Exception:
+                logger.exception("Team service failed to start — teams API will 503")
+                app.state.team_service = None
         except Exception:
             logger.exception("Onboarding service failed to start — Repos page will 503")
             app.state.onboarding_service = None
 
-        # One-shot boot reconcile: rebuild/refresh the onboarding cache from
-        # the `.platform/devai.yaml` markers (the source of truth) so the
-        # Repos page survives a DB wipe or fresh deploy. DB-first inside
-        # reconcile() keeps this cheap on a populated store; the 30s delay
-        # lets the SCM client + pool settle first. Endpoint reconcile stays
-        # available regardless.
+        # Onboarding reconcile poller: rebuild/refresh the cache from the
+        # `.platform/devai.yaml` markers (the source of truth) so the Repos
+        # page survives a DB wipe or fresh deploy, and so markers added or
+        # removed out-of-band are picked up automatically. The boot pass runs
+        # ~30s after start (lets the SCM client + pool settle); after that the
+        # poller re-runs every onboarding_reconcile_interval_seconds. DB-first
+        # reconcile() folds the whole org into one batched GraphQL probe, so
+        # each pass is cheap. Endpoint reconcile stays available regardless.
         onboarding_reconcile_task = None
         if app.state.onboarding_service is not None and getattr(
             config, "onboarding_reconcile_on_boot", True
         ):
-            async def _boot_reconcile(svc: object) -> None:
-                try:
-                    await asyncio.sleep(30)
-                    report = await svc.reconcile()  # type: ignore[attr-defined]
-                    logger.info("Onboarding boot reconcile: %s", report)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:  # noqa: BLE001
-                    logger.exception("Onboarding boot reconcile failed (non-fatal)")
+            reconcile_interval = max(0, int(getattr(config, "onboarding_reconcile_interval_seconds", 300)))
+
+            async def _reconcile_poller(svc: object, interval: int) -> None:
+                await asyncio.sleep(30)  # let the SCM client + pool settle
+                while True:
+                    try:
+                        report = await svc.reconcile()  # type: ignore[attr-defined]
+                        logger.info("Onboarding reconcile: %s", report)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Onboarding reconcile failed (non-fatal)")
+                    if interval <= 0:
+                        return  # one-shot mode — boot reconcile only
+                    await asyncio.sleep(interval)
 
             onboarding_reconcile_task = asyncio.create_task(
-                _boot_reconcile(app.state.onboarding_service)
+                _reconcile_poller(app.state.onboarding_service, reconcile_interval)
             )
+
+        # Messaging service — remote conversational channels (Slack, remote
+        # URL/thread, MCP server). All three are thin transports over one
+        # ConversationGateway; the service owns the channel map + the NATS turn
+        # worker. Reuses the onboarding DB for audit when available. Purely
+        # additive: if every channel is disabled it builds nothing.
+        messaging_service = None
+        app.state.messaging_service = None
+        try:
+            from devai.chat.messaging_service import MessagingService
+
+            messaging_service = MessagingService(
+                config,
+                state,
+                database=onboarding_db,
+                event_bus_adapter=event_bus_adapter,
+            )
+            await messaging_service.start()
+            app.state.messaging_service = messaging_service
+
+            # Mount the MCP server sub-app (Streamable HTTP) when enabled and
+            # the SDK is present. Shares this app's ingress + port at /mcp.
+            if "mcp" in messaging_service.channels:
+                try:
+                    from devai.adapters.messaging.mcp import build_mcp_server
+
+                    mcp_server = build_mcp_server(messaging_service)
+                    app.state.mcp_server = mcp_server
+                    app.mount("/mcp", mcp_server.streamable_http_app())
+                    # The streamable-http app needs its session manager running.
+                    app.state._mcp_session_cm = mcp_server.session_manager.run()
+                    await app.state._mcp_session_cm.__aenter__()
+                    logger.info("MCP server mounted at /mcp")
+                except Exception:
+                    logger.exception("MCP mount failed — MCP channel disabled")
+                    app.state.mcp_server = None
+        except Exception:
+            logger.exception("MessagingService failed to start — remote channels disabled")
+            app.state.messaging_service = None
 
         try:
             yield
         finally:
+            if getattr(app.state, "_mcp_session_cm", None) is not None:
+                with suppress(Exception):
+                    await app.state._mcp_session_cm.__aexit__(None, None, None)
+            if messaging_service is not None:
+                with suppress(Exception):
+                    await messaging_service.stop()
             if onboarding_reconcile_task is not None and not onboarding_reconcile_task.done():
                 onboarding_reconcile_task.cancel()
                 with suppress(asyncio.CancelledError, Exception):
@@ -321,15 +404,45 @@ def create_app(
 
     app.include_router(authoring_router)
 
+    # Teams routes (/api/teams/*) — human teams + the AI crews they own.
+    # Always mounted; returns 503 until team_service is wired (lifespan).
+    if not hasattr(app.state, "team_service"):
+        app.state.team_service = None
+    from devai.teams.routes import router as teams_router
+
+    app.include_router(teams_router)
+
     # Dashboard routes (UI + API)
     from devai.dashboard.routes import router as dashboard_router
 
     app.include_router(dashboard_router)
 
+    # Local username/password auth at /auth. The adapter decides the mode:
+    # local_db actually checks passwords (kind sandbox); every other provider
+    # resolves to Noop ({"mode":"gip"} + 401), and in prod /auth/* is routed
+    # to the auth-bff anyway — so mounting unconditionally is safe.
+    from devai.dashboard.local_auth_routes import router as local_auth_router
+
+    app.include_router(local_auth_router)
+
     # Chat routes (chatbot API + WebSocket)
     from devai.chat.routes import router as chat_router
 
     app.include_router(chat_router)
+
+    # Remote conversational routes (/remote/threads/*) — talk to DevAI from any
+    # remote app/URL over a plain HTTP/SSE thread, guarded by a static API
+    # token. Routes return 503 when the remote channel is disabled.
+    from devai.chat.remote_routes import router as remote_chat_router
+
+    app.include_router(remote_chat_router)
+
+    # Slack Events API route (/webhook/slack) — @mention or DM the DevAI bot.
+    # Verifies the Slack signature; acks fast and replies in-thread via the
+    # messaging worker. No-ops cleanly when Slack is disabled.
+    from devai.chat.slack_routes import router as slack_router
+
+    app.include_router(slack_router)
 
     # Serve dashboard static files (CSS, JS)
     static_dir = Path(__file__).parent.parent / "dashboard" / "static"

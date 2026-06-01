@@ -23,3 +23,12 @@ htmlcov/
 
 # Local sandbox secrets — never commit real values
 k8s/secrets.yaml
+**secrets.yaml
+
+# Node / Next.js build artifacts (dashboards)
+node_modules/
+.next/
+*.tsbuildinfo
+
+# AI tooling instructions — never commit
+CLAUDE.md

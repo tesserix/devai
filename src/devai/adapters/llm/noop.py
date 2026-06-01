@@ -14,7 +14,8 @@ responses to return in order via `set_responses([...])`.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from devai.adapters.llm.base import (
     LLMAdapter,

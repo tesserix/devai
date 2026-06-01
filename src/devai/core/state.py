@@ -143,6 +143,7 @@ class StateManager:
     PIPELINE_RECENT_KEY = "devai:pipeline:tasks:recent"
     PIPELINE_BY_BLUEPRINT_KEY = "devai:pipeline:tasks:by_blueprint:{blueprint}"
     PIPELINE_BY_REPO_KEY = "devai:pipeline:tasks:by_repo:{repo}"
+    PIPELINE_CONTROL_KEY = "devai:pipeline:control:{task_id}"
 
     async def persist_task(self, task_dict: dict[str, Any], *, ttl: int | None = None) -> None:
         """Write a DevAITask dict to Redis.
@@ -181,6 +182,29 @@ class StateManager:
         if raw is None:
             return None
         return json.loads(raw)
+
+    # --- Pipeline run control (pause / resume / stop) ---
+    #
+    # A single flag per task that the in-process BlueprintExecutor polls
+    # between stages: "paused" blocks at the next stage boundary, "stopped"
+    # cancels the run, anything else (or absent) runs normally. Under the
+    # Temporal backend these become workflow Signals (later phase); this
+    # Redis flag drives the default in-process path.
+
+    async def set_pipeline_control(
+        self, task_id: str, value: str, *, ttl: int = 86400
+    ) -> None:
+        """Set the run-control flag. `running`/`resume`/empty clears it."""
+        key = self.PIPELINE_CONTROL_KEY.format(task_id=task_id)
+        if value in ("", "running", "resume"):
+            await self.redis.delete(key)
+        else:
+            await self.redis.set(key, value, ex=ttl)
+
+    async def get_pipeline_control(self, task_id: str) -> str:
+        """Read the run-control flag; `running` when unset."""
+        val = await self.redis.get(self.PIPELINE_CONTROL_KEY.format(task_id=task_id))
+        return val or "running"
 
     async def list_pipeline_tasks(
         self,

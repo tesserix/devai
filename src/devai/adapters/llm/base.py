@@ -14,11 +14,11 @@ callers that don't.
 from __future__ import annotations
 
 import time
-import uuid
 from abc import abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncIterator
+from typing import Any
 
 from devai.adapters.base import Adapter
 
@@ -32,7 +32,7 @@ class LLMRole(str, Enum):
     TOOL = "tool"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "LLMRole | None" = None) -> "LLMRole":
+    def parse(cls, value: Any, *, default: LLMRole | None = None) -> LLMRole:
         if value is None or value == "":
             return default or cls.USER
         if isinstance(value, cls):
@@ -45,12 +45,24 @@ class LLMRole(str, Enum):
 
 @dataclass(slots=True)
 class LLMMessage:
-    """One turn in a chat conversation."""
+    """One turn in a chat conversation.
+
+    For an ASSISTANT turn that invoked tools, `tool_calls` carries the
+    calls the model produced. Backends MUST re-emit these as provider
+    tool_use/tool_call blocks so the following TOOL messages (which carry
+    a matching `tool_call_id`) have something to bind to — Anthropic and
+    OpenAI both reject a tool result with no preceding tool call.
+    """
 
     role: LLMRole
     content: str
     name: str = ""  # tool name for role=TOOL; sender name for others
     tool_call_id: str = ""  # links a TOOL message to the ToolCall that produced it
+    tool_calls: list[ToolCall] = field(default_factory=list)  # set on ASSISTANT turns that called tools
+    # Multimodal attachments on a USER turn (composer image uploads). Each:
+    # {"media_type": "image/png", "data": "<base64>"}. Backends that support
+    # vision render these as image content blocks; others ignore them.
+    images: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"role": self.role.value, "content": self.content}
@@ -58,6 +70,10 @@ class LLMMessage:
             out["name"] = self.name
         if self.tool_call_id:
             out["tool_call_id"] = self.tool_call_id
+        if self.tool_calls:
+            out["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
+        if self.images:
+            out["images"] = [{"media_type": img.get("media_type", "")} for img in self.images]
         return out
 
 

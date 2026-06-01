@@ -117,17 +117,43 @@ class DispatchBody(BaseModel):
     trigger_type: str = Field("manual", description="manual | webhook | cron | slack")
     label: str = Field("", description="Optional human-readable label")
     agent_context: dict[str, Any] = Field(default_factory=dict)
+    # Teams (Phase 2/3) — both optional; empty = unscoped.
+    team_id: str = Field("", description="Human team that owns this run")
+    crew_id: str = Field("", description="AI agent crew assigned to this run")
+    # Composer context (Phase 1/4) — @-mentioned files/symbols/urls + image keys.
+    context_refs: list[dict[str, Any]] = Field(default_factory=list)
+    attachments: list[str] = Field(default_factory=list, description="object_store keys for uploaded images")
 
 
 class DispatchResponse(BaseModel):
     task_id: str
     blueprint: str
     state: str
+    team_id: str = ""
 
 
 @router.post("/runs", response_model=DispatchResponse, status_code=202)
 async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse:
+    from devai.identity import extract_principal, trace_id_from_request
+
     svc = _service(request)
+    principal = await extract_principal(request)
+
+    # Resolve the owning team: explicit body wins, else the caller's primary
+    # team. Authorize the choice against the caller's memberships.
+    team_id = body.team_id or (principal.primary_team_id if principal else "")
+    team_service = getattr(request.app.state, "team_service", None)
+    if team_service is not None and not team_service.can_dispatch(principal, team_id):
+        raise HTTPException(status_code=403, detail=f"not a member of team {team_id}")
+
+    # Fold composer context into the handover bag so the AgentRunner can
+    # hydrate @-mentions + image attachments.
+    agent_context = dict(body.agent_context)
+    if body.context_refs:
+        agent_context["context_refs"] = body.context_refs
+    if body.attachments:
+        agent_context["attachments"] = body.attachments
+
     try:
         task_id = await svc.dispatch(
             intent=body.intent,
@@ -135,7 +161,11 @@ async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse
             repo=body.repo,
             trigger_type=body.trigger_type,
             label=body.label,
-            agent_context=body.agent_context,
+            agent_context=agent_context,
+            principal=principal.to_dict() if principal else None,
+            trace_id=trace_id_from_request(request),
+            team_id=team_id,
+            crew_id=body.crew_id,
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -145,7 +175,194 @@ async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse
         task_id=task_id,
         blueprint=snapshot.get("blueprint", body.blueprint or ""),
         state=snapshot.get("state", "queued"),
+        team_id=team_id,
     )
+
+
+# ────────────────────────────────────────────────────────────────────
+# Dashboard trigger / retrigger / run-control (durable, via the pipeline)
+#
+# These replace the legacy ALMOrchestrator-backed handlers at
+# /dashboard/api/pipeline/* (which the Next.js rewrite never reaches, since
+# /api/pipeline/* maps here). Implementing them on the pipeline router makes
+# the dashboard's Start / Retry / Pause / Resume / Stop buttons run through the
+# durable pipeline (Temporal when DEVAI_WORKFLOW_PROVIDER=temporal).
+# ────────────────────────────────────────────────────────────────────
+
+
+class TriggerBody(BaseModel):
+    """Dashboard "Start Pipeline" body (dashboard/src/lib/api.ts triggerPipeline)."""
+
+    repo: str = ""
+    requirements: str = ""
+    issue_number: int | None = None
+    blueprint: str | None = None
+
+
+@router.post("/trigger")
+async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
+    """Dashboard "Start Pipeline" — dispatch a durable blueprint run."""
+    from devai.identity import extract_principal, trace_id_from_request
+
+    svc = _service(request)
+    intent = (body.requirements or "").strip()
+    if not intent:
+        raise HTTPException(status_code=400, detail="requirements text is required")
+    principal = await extract_principal(request)
+    agent_context: dict[str, Any] = {"requirements": intent}
+    if body.issue_number is not None:
+        agent_context["trigger_ref"] = str(body.issue_number)
+    try:
+        task_id = await svc.dispatch(
+            intent=intent,
+            blueprint=body.blueprint,
+            repo=body.repo,
+            trigger_type="dashboard",
+            label=f"dashboard:{body.repo}"[:80],
+            agent_context=agent_context,
+            principal=principal.to_dict() if principal else None,
+            trace_id=trace_id_from_request(request),
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"run_id": task_id, "stage": "triggered", "repo": body.repo}
+
+
+@router.post("/runs/{task_id}/retrigger")
+async def retrigger(request: Request, task_id: str) -> dict[str, Any]:
+    """Re-dispatch a finished/failed run with its ORIGINAL intent + repo."""
+    from devai.identity import extract_principal, trace_id_from_request
+
+    svc = _service(request)
+    original = await svc.get_task(task_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    ctx = original.get("agent_context") or {}
+    intent = (original.get("intent") or ctx.get("requirements") or "").strip()
+    repo = original.get("repo") or ""
+    if not intent:
+        raise HTTPException(status_code=400, detail="run has no original requirements to replay")
+    principal = await extract_principal(request)
+    new_id = await svc.dispatch(
+        intent=intent,
+        blueprint=original.get("blueprint"),
+        repo=repo,
+        trigger_type="dashboard-retry",
+        label=f"retry:{task_id}"[:80],
+        agent_context={"requirements": intent, "retry_of": task_id},
+        principal=principal.to_dict() if principal else None,
+        trace_id=trace_id_from_request(request),
+    )
+    return {"run_id": new_id, "stage": "triggered", "repo": repo, "retry_of": task_id}
+
+
+async def _set_control(request: Request, task_id: str, value: str) -> dict[str, Any]:
+    svc = _service(request)
+    if await svc.get_task(task_id) is None:
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    await svc.set_run_control(task_id, value)
+    return {"run_id": task_id, "control": value}
+
+
+@router.post("/runs/{task_id}/pause")
+async def pause(request: Request, task_id: str) -> dict[str, Any]:
+    """Pause a run at the next stage boundary (in-process executor)."""
+    return await _set_control(request, task_id, "paused")
+
+
+@router.post("/runs/{task_id}/resume")
+async def resume(request: Request, task_id: str) -> dict[str, Any]:
+    """Resume a paused run."""
+    return await _set_control(request, task_id, "running")
+
+
+@router.post("/runs/{task_id}/stop")
+async def stop(request: Request, task_id: str) -> dict[str, Any]:
+    """Stop a run — it cancels (not fails) at the next stage boundary."""
+    return await _set_control(request, task_id, "stopped")
+
+
+@router.post("/runs/{task_id}/inject")
+async def inject(request: Request, task_id: str) -> dict[str, Any]:
+    """Inject an extra requirement/message into a running run.
+
+    Recorded on the task's handover bag for a re-planning stage (Supervisor /
+    crew lead) to pick up. Returns 404 if the run isn't currently in memory.
+    """
+    svc = _service(request)
+    body = await request.json()
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    if not await svc.inject_message(task_id, message):
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not in memory")
+    return {"status": "injected", "run_id": task_id}
+
+
+_DEFAULT_PIPELINE_CONFIG: dict[str, Any] = {
+    "auto_mode": False,
+    "gates": {"deployment": True, "testing": True, "review": False, "merge": True, "createPR": False},
+    "max_review_iterations": 3,
+    "branch_template": "story/{story_number}-{description}",
+}
+
+
+def _config_redis(request: Request):
+    sm = getattr(_service(request), "state_manager", None)
+    return getattr(sm, "redis", None)
+
+
+@router.get("/config")
+async def get_config(request: Request, repo: str = "default") -> dict[str, Any]:
+    """Per-repo pipeline config (gates / model settings). Engine-agnostic."""
+    redis = _config_redis(request)
+    if redis is not None:
+        raw = await redis.get(f"devai:config:{repo}")
+        if raw:
+            return json.loads(raw)
+    return dict(_DEFAULT_PIPELINE_CONFIG)
+
+
+@router.post("/config")
+async def save_config(request: Request) -> dict[str, str]:
+    """Persist per-repo pipeline config."""
+    body = await request.json()
+    repo = body.get("repo", "default")
+    redis = _config_redis(request)
+    if redis is not None:
+        await redis.set(f"devai:config:{repo}", json.dumps(body))
+        return {"status": "saved", "repo": repo}
+    return {"status": "unavailable", "repo": repo}
+
+
+# ────────────────────────────────────────────────────────────────────
+# Checkpoint rollback
+# ────────────────────────────────────────────────────────────────────
+
+
+class RollbackBody(BaseModel):
+    sha: str = Field(..., description="Checkpoint commit SHA to reset the working tree to")
+
+
+@router.post("/runs/{task_id}/rollback")
+async def rollback_run(request: Request, task_id: str, body: RollbackBody) -> dict[str, str]:
+    """Roll a task's sandbox working tree back to a prior checkpoint.
+
+    Validates the SHA against the task's recorded checkpoints, then asks the
+    pipeline to re-dispatch a `git reset --hard` in the task's worktree. The
+    actual reset runs in the runner pod (via the `rollback` tool); here we
+    just record intent + return. Returns 404 if the SHA isn't a known
+    checkpoint of this task.
+    """
+    svc = _service(request)
+    snapshot = svc.get_task_in_memory(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    known = {cp.get("sha") for cp in (snapshot.get("checkpoints") or [])}
+    if body.sha not in known:
+        raise HTTPException(status_code=404, detail="sha is not a checkpoint of this task")
+    requested = await svc.request_rollback(task_id, body.sha)
+    return {"task_id": task_id, "sha": body.sha, "status": "requested" if requested else "unavailable"}
 
 
 # ────────────────────────────────────────────────────────────────────

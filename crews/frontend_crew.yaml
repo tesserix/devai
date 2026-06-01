@@ -1,0 +1,29 @@
+name: frontend_crew
+display_name: Frontend Crew
+description: >
+  Ships user-facing features. The senior developer leads, implementing the UI
+  and coordinating; the engineering manager shapes the approach; QA validates
+  the result. Members are equipped with terminal, git checkpoints, and web
+  search so they can build, test, and snapshot their work autonomously.
+
+lead: senior_developer
+
+members:
+  - specialization: engineering_manager
+    role_label: Tech Lead
+    allowed_tools: [web_search, web_fetch, read_file]
+  - specialization: senior_developer
+    role_label: Frontend Developer
+    allowed_tools:
+      - read_file
+      - write_file
+      - shell_exec
+      - checkpoint
+      - rollback
+      - web_search
+      - web_fetch
+      - scm_create_branch
+      - scm_create_pull_request
+  - specialization: qa_tester
+    role_label: QA Engineer
+    allowed_tools: [read_file, shell_exec, web_fetch]

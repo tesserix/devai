@@ -802,6 +802,11 @@ class ALMOrchestrator:
             "devai.agents.senior_developer.SeniorDeveloperAgent",
         )
         result["stage"] = "code_implemented"
+        # Count each implementation attempt so the quality gates can terminate.
+        # The escalating budgets in _route_after_{review,security,tests}
+        # (MAX_REVIEW_ITERATIONS / +1 / +MAX_TEST_FIX_ITERATIONS) all read
+        # review_iteration; without this increment those gates loop forever.
+        result["review_iteration"] = state.get("review_iteration", 0) + 1
         return result
 
     @traceable_if_enabled(name="alm.db_engineering_story", run_type="chain")

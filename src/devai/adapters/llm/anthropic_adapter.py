@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from typing import Any
 
 from devai.adapters.base import AdapterNotConfigured, AdapterNotInstalled
@@ -84,7 +83,7 @@ class AnthropicLLMAdapter(LLMAdapter):
         started = time.monotonic()
         try:
             raw = await self._client.messages.create(**kwargs)
-        except Exception as e:  # noqa: BLE001 — preserve original error
+        except Exception:  # noqa: BLE001 — preserve original error
             logger.exception("anthropic adapter generate() failed")
             raise
 
@@ -175,7 +174,49 @@ class AnthropicLLMAdapter(LLMAdapter):
                     }
                 ],
             }
+        # An assistant turn that called tools must be re-emitted as content
+        # blocks: an optional text block followed by one tool_use block per
+        # call. Without this, the matching tool_result on the next turn has
+        # no tool_use to bind to and Anthropic returns a 400.
+        tool_calls = getattr(m, "tool_calls", None)
+        if m.role == LLMRole.ASSISTANT and tool_calls:
+            blocks: list[dict[str, Any]] = []
+            if m.content:
+                blocks.append({"type": "text", "text": m.content})
+            for tc in tool_calls:
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": dict(tc.arguments or {}),
+                    }
+                )
+            return {"role": "assistant", "content": blocks}
         wire_role = "assistant" if m.role == LLMRole.ASSISTANT else "user"
+        # A user turn carrying composer image uploads becomes a content list:
+        # the text block followed by one image block per attachment.
+        images = getattr(m, "images", None)
+        if wire_role == "user" and images:
+            content_blocks: list[dict[str, Any]] = []
+            if m.content:
+                content_blocks.append({"type": "text", "text": m.content})
+            for img in images:
+                data = img.get("data")
+                if not data:
+                    continue
+                content_blocks.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.get("media_type", "image/png"),
+                            "data": data,
+                        },
+                    }
+                )
+            if content_blocks:
+                return {"role": "user", "content": content_blocks}
         return {"role": wire_role, "content": m.content}
 
     def _normalize(self, raw: Any, latency_ms: float) -> LLMResponse:

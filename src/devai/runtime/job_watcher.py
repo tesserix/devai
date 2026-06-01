@@ -44,6 +44,9 @@ class JobOutcome:
     pod_name: str | None = None
     logs_tail: str = ""
     raw_status: dict[str, Any] = field(default_factory=dict)
+    # Parsed from the pod's LOG::/CHECKPOINT::/RESULT:: line-protocol.
+    checkpoints: list[dict[str, Any]] = field(default_factory=list)
+    result: dict[str, Any] | None = None
 
 
 class JobWatcher:
@@ -198,7 +201,13 @@ class JobWatcher:
         pod_name = await self._runtime.find_pod_for_job(job_name)
         logs = ""
         if pod_name is not None:
-            logs = await self._runtime.pod_logs(pod_name, tail_lines=400)
+            logs = await self._runtime.pod_logs(pod_name, tail_lines=2000)
+
+        # Recover the structured result + checkpoint timeline from the pod's
+        # line-protocol stdout (LOG::/CHECKPOINT::/RESULT::).
+        from devai.runtime.protocol import parse_runner_lines
+
+        parsed = parse_runner_lines(logs)
 
         outcome = JobOutcome(
             job_name=job_name,
@@ -207,6 +216,8 @@ class JobWatcher:
             pod_name=pod_name,
             logs_tail=logs,
             raw_status=status if isinstance(status, dict) else {},
+            checkpoints=parsed.checkpoints,
+            result=parsed.result,
         )
         self._outcomes[job_name] = outcome
 

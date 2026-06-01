@@ -23,7 +23,6 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from devai.pipeline.interfaces import StageDeps
 from devai.pipeline.types import (
     FAILURE_STATES,
     TERMINAL_STATES,
@@ -98,8 +97,7 @@ class PipelineService:
             return
 
         from devai.adapters.event_bus import create_event_bus_adapter
-        from devai.adapters.llm import create_llm_adapter
-        from devai.adapters.memory import create_memory_adapter
+        from devai.pipeline.bootstrap import build_runtime
         from devai.pipeline.pipeline import Pipeline  # local import to avoid cycle
 
         # Make the StateManager / Database resolvable by the memory factory
@@ -112,11 +110,6 @@ class PipelineService:
             # Pydantic Settings is frozen by default — fall through; the
             # factory will use `settings.redis_url` instead.
             pass
-
-        memory_adapter = create_memory_adapter(self.config)
-        self._memory_adapter = memory_adapter
-        llm_adapter = create_llm_adapter(self.config)
-        self._llm_adapter = llm_adapter
 
         # Event-bus adapter — built here and connected immediately so
         # `_on_event` can publish stage events to NATS without needing
@@ -145,73 +138,25 @@ class PipelineService:
                 self.event_bus_adapter = NoopEventBusAdapter()
                 await self.event_bus_adapter.connect()
 
-        # Load the YAML specialization catalog once at startup and hand
-        # the registry to stages via StageDeps.extra. The run_specialization
-        # stage uses it to resolve names like 'senior_developer' to the
-        # parsed spec without re-reading the disk on every call.
-        spec_registry = None
-        if getattr(self.config, "specializations_enabled", True):
-            try:
-                from devai.specializations.registry import SpecializationRegistry
-
-                spec_registry = SpecializationRegistry.from_directory(
-                    getattr(self.config, "specializations_dir", "specializations")
-                )
-                logger.info(
-                    "Pipeline loaded %d specializations from %s",
-                    len(spec_registry),
-                    getattr(self.config, "specializations_dir", "specializations"),
-                )
-            except Exception:
-                logger.exception("Specialization registry load failed — run_specialization will degrade to stubs")
-
-        # ── K8s Job runtime ────────────────────────────────────────────
-        # When enabled (DEVAI_K8S_RUNTIME_ENABLED=true), every stage that
-        # uses `stage: run_as_job` dispatches a Pod and waits via the
-        # JobWatcher. When disabled, the runtime is None and JobRunnerStage
-        # falls back to a stub — the pipeline keeps running, just inline.
-        k8s_runtime = None
-        job_watcher = None
-        registry_client = getattr(self, "registry_client", None)
-        try:
-            from devai.runtime import JobWatcher, create_runtime
-
-            k8s_runtime = await create_runtime(self.config)
-            if k8s_runtime is not None:
-                job_watcher = JobWatcher(k8s_runtime)
-                await job_watcher.start()
-                logger.info(
-                    "PipelineService: k8s runtime active (namespace=%s, runner=%s)",
-                    k8s_runtime.config.namespace,
-                    k8s_runtime.config.runner_image,
-                )
-        except Exception:  # noqa: BLE001
-            logger.exception("PipelineService: k8s runtime init failed — continuing without it")
-            k8s_runtime = None
-            job_watcher = None
-        self._k8s_runtime = k8s_runtime
-        self._job_watcher = job_watcher
-
-        extra: dict[str, Any] = {}
-        if spec_registry is not None:
-            extra["specialization_registry"] = spec_registry
-        if k8s_runtime is not None:
-            extra["k8s_runtime"] = k8s_runtime
-        if job_watcher is not None:
-            extra["job_watcher"] = job_watcher
-        if registry_client is not None:
-            extra["registry_client"] = registry_client
-
-        deps = StageDeps(
-            config=self.config,
+        # Build StageDeps + StageRegistry via the shared bootstrap so the
+        # in-process pipeline and the Temporal worker wire every adapter,
+        # the specialization catalog, seed crews, capability adapters and the
+        # K8s runtime identically. (Event-bus adapter is owned here and passed
+        # in already-connected.)
+        bundle = await build_runtime(
+            self.config,
             scm=self.scm,
             state_manager=self.state_manager,
             event_bus=self.event_bus,
-            memory=memory_adapter,
-            llm=llm_adapter,
             event_bus_adapter=self.event_bus_adapter,
-            extra=extra or None,
+            registry_client=getattr(self, "registry_client", None),
         )
+        self._runtime_bundle = bundle
+        self._memory_adapter = bundle.memory_adapter
+        self._llm_adapter = bundle.llm_adapter
+        self._k8s_runtime = bundle.k8s_runtime
+        self._job_watcher = bundle.job_watcher
+        deps = bundle.deps
         self._pipeline = Pipeline(
             deps,
             blueprint_dir=self.blueprint_dir,
@@ -285,6 +230,8 @@ class PipelineService:
         agent_context: dict[str, Any] | None = None,
         principal: dict[str, Any] | None = None,
         trace_id: str | None = None,
+        team_id: str = "",
+        crew_id: str = "",
     ) -> str:
         """Enqueue a new task. Returns its id.
 
@@ -294,7 +241,9 @@ class PipelineService:
         ``principal`` / ``trace_id`` are stamped onto the DevAITask so the
         executor, every stage, and the persisted record all know which
         human triggered the work. Both are optional — passing None is the
-        same as system-triggered (e.g. SRE cron).
+        same as system-triggered (e.g. SRE cron). ``team_id`` / ``crew_id``
+        scope the run to a human team and an AI crew (both optional —
+        empty means unscoped, the pre-teams behavior).
         """
         self._ensure_started()
         assert self._pipeline is not None  # for type-checker
@@ -309,6 +258,8 @@ class PipelineService:
             principal=dict(principal) if principal else None,
             trace_id=trace_id,
             triggered_by=(principal.get("email") if principal else None),
+            team_id=team_id,
+            crew_id=crew_id,
         )
         if agent_context:
             task.agent_context.update(agent_context)
@@ -425,6 +376,61 @@ class PipelineService:
             return None
         task = self._pipeline.get_task(task_id)
         return task.to_dict() if task is not None else None
+
+    async def request_rollback(self, task_id: str, sha: str) -> bool:
+        """Record a checkpoint-rollback request and publish it.
+
+        The actual `git reset --hard` runs in the task's runner pod (via the
+        `rollback` tool); this records the user's intent on the task and emits
+        an event the runner / dashboard can react to. Returns False when the
+        task isn't in memory.
+        """
+        if self._pipeline is None:
+            return False
+        task = self._pipeline.get_task(task_id)
+        if task is None:
+            return False
+        task.agent_context.setdefault("rollback_requests", []).append(sha)
+        if self.event_bus_adapter is not None:
+            try:
+                await self.event_bus_adapter.publish(
+                    f"devai.pipeline.task.{task_id}.rollback", {"task_id": task_id, "sha": sha}
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("rollback publish failed", exc_info=True)
+        return True
+
+    async def inject_message(self, task_id: str, message: str) -> bool:
+        """Record a user message onto a running task's handover bag.
+
+        Appended to ``agent_context["injections"]`` (and surfaced as an event) so
+        a re-planning stage — the Supervisor or a crew lead — can pick it up.
+        Best-effort: returns False if the task isn't currently in memory.
+        """
+        if self._pipeline is None:
+            return False
+        task = self._pipeline.get_task(task_id)
+        if task is None:
+            return False
+        task.agent_context.setdefault("injections", []).append(
+            {"message": message, "ts": time.time(), "source": "dashboard"}
+        )
+        await self._publish_task_event("injected", task)
+        return True
+
+    async def set_run_control(self, task_id: str, value: str) -> bool:
+        """Set a run's control flag (pause/resume/stop).
+
+        The in-process BlueprintExecutor polls this between stages. `running`
+        clears it (resume). Returns False if no StateManager is wired (the
+        control flag is durable, not in-memory, so it survives restarts).
+        """
+        sm = self.state_manager
+        setter = getattr(sm, "set_pipeline_control", None)
+        if sm is None or setter is None:
+            return False
+        await setter(task_id, value)
+        return True
 
     async def list_persisted_tasks(
         self, *, limit: int = 50, blueprint: str | None = None, repo: str | None = None
