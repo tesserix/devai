@@ -35,6 +35,13 @@ export default function SREDashboard() {
   const [tab, setTab] = useState<Tab>("overview");
   const [selectedIncident, setSelectedIncident] = useState<string>();
   const [loading, setLoading] = useState(true);
+  // Mobile nav drawer (the sidebar is an inline rail on md+).
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Selecting a tab closes the mobile drawer.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [tab]);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -68,8 +75,22 @@ export default function SREDashboard() {
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Sidebar */}
-      <aside className="w-64 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
+      {/* Backdrop behind the mobile drawer. */}
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/45 backdrop-blur-[2px] md:hidden"
+          onClick={() => setNavOpen(false)}
+          aria-hidden
+        />
+      )}
+      {/* Sidebar — fixed slide-in drawer below md, static rail on md+. */}
+      <aside
+        className={clsx(
+          "w-64 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col",
+          "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0",
+          navOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center">
@@ -164,8 +185,21 @@ export default function SREDashboard() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
         {/* Header */}
-        <header className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 py-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <header className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 sm:px-6 py-3.5 sm:py-4 flex items-center gap-2.5 sticky top-0 z-20">
+          {/* Hamburger opens the nav drawer (mobile only). */}
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            className="md:hidden -ml-1 p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+            aria-label="Open menu"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+          <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">
             {tab === "overview" && "Cluster Overview"}
             {tab === "incidents" && "Incidents"}
             {tab === "apps" && "Application Reliability"}
