@@ -80,7 +80,7 @@ class _RunSpecializationStage(PipelineStage):
         if spec.legacy_python_class:
             return await self._run_legacy_bridge(spec, task)
 
-        return self._yaml_only_stub(spec, task)
+        return await self._run_yaml_runner(spec, task)
 
     # ── Legacy bridge ────────────────────────────────────────────────
 
@@ -134,7 +134,7 @@ class _RunSpecializationStage(PipelineStage):
         state = self._build_alm_state(spec, task)
         try:
             patch = await agent.run(state)
-        except Exception as e:  # noqa: BLE001
+        except Exception:
             logger.exception("specialization %s: agent.run raised", spec.name)
             raise
 
@@ -176,31 +176,128 @@ class _RunSpecializationStage(PipelineStage):
             data=data,
         )
 
-    # ── YAML-only stub ───────────────────────────────────────────────
+    # ── YAML runner (no legacy class) ─────────────────────────────────
 
-    def _yaml_only_stub(self, spec: Specialization, task: DevAITask) -> StageResult:
-        """Placeholder for specs that have no Python class.
+    async def _run_yaml_runner(self, spec: Specialization, task: DevAITask) -> StageResult:
+        """Execute a pure-YAML specialization against the LLM adapter.
 
-        The future SpecializationRunner will execute these against the
-        LLM provider declared in the YAML. For now we surface a clear
-        message so blueprints that reference yaml-only roles don't
-        silently no-op.
+        Runs a tool-calling loop: the spec's ``system_prompt`` drives the
+        model, ``allowed_tools`` are offered as callable tools (resolved
+        from the built-in catalog), and the loop runs until the model
+        stops calling tools or ``max_turns`` is hit. The final text is
+        parsed for a handover object, validated against
+        ``handover_schema``, and written under ``output_key``.
+
+        Degrades to a clear stub when no LLM adapter is wired (e.g. unit
+        tests or a noop deployment) so the pipeline never hard-fails.
         """
-        logger.info(
-            "specialization %s is YAML-only — runner not yet implemented, returning stub",
-            spec.name,
-        )
+        llm = self.deps.llm
+        if llm is None:
+            logger.info("specialization %s: no LLM adapter wired — returning stub", spec.name)
+            return StageResult(
+                next_state=self._next_state(spec),
+                message=f"{spec.name}: no LLM adapter configured",
+                data={spec.output_key: {"stub": True, "reason": "no_llm_adapter", "spec_name": spec.name}},
+            )
+
+        from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+        # Allow tests to inject a fake dispatcher; otherwise build the real one.
+        dispatcher = (self.deps.extra or {}).get("tool_dispatcher")
+        if dispatcher is None:
+            from devai.tools.dispatch import ToolDispatcher
+
+            dispatcher = ToolDispatcher(self.deps.scm)
+
+        tool_specs = dispatcher.build_tool_specs(spec.allowed_tools)
+        messages = [LLMMessage(role=LLMRole.USER, content=self._build_user_prompt(spec, task))]
+
+        final_text = ""
+        turns = max(1, spec.max_turns or 8)
+        for _ in range(turns):
+            request = LLMRequest(
+                system=spec.system_prompt,
+                messages=messages,
+                tools=tool_specs,
+                model=spec.llm_model or "",
+                max_tokens=spec.max_tokens,
+                temperature=spec.temperature,
+            )
+            resp = await llm.generate(request)
+            if resp.tool_calls:
+                messages.append(LLMMessage(role=LLMRole.ASSISTANT, content=resp.text or ""))
+                for call in resp.tool_calls:
+                    result = await dispatcher.execute(call.name, call.arguments)
+                    messages.append(
+                        LLMMessage(role=LLMRole.TOOL, content=result, name=call.name, tool_call_id=call.id)
+                    )
+                continue
+            final_text = resp.text or ""
+            break
+
+        patch = self._parse_handover(final_text)
+        violations = validate_handover(spec, patch)
+        if violations:
+            msg = "; ".join(str(v) for v in violations)
+            if self.strict_handover:
+                from devai.specializations.validator import HandoverValidationError
+
+                raise HandoverValidationError(spec.name, violations)
+            logger.warning("specialization %s: handover violations: %s", spec.name, msg)
+
+        data: dict[str, Any] = {spec.output_key: patch}
+        if f"{spec.name}_text" not in data:
+            data[f"{spec.name}_text"] = final_text
         return StageResult(
             next_state=self._next_state(spec),
-            message=f"{spec.name}: YAML-only role, runner pending",
-            data={
-                spec.output_key: {
-                    "stub": True,
-                    "reason": "yaml_only_runner_not_implemented",
-                    "spec_name": spec.name,
-                },
-            },
+            message=f"{spec.name} ran via LLM ({spec.llm_provider.value if hasattr(spec.llm_provider, 'value') else spec.llm_provider})",
+            data=data,
         )
+
+    def _build_user_prompt(self, spec: Specialization, task: DevAITask) -> str:
+        """Compose the user turn from the task intent plus any context keys
+        prior stages handed over (so the role sees its declared inputs)."""
+        parts = [f"# Task\n\n{task.intent}"]
+        for key in spec.context_keys:
+            val = task.agent_context.get(key)
+            if val:
+                parts.append(f"\n## {key}\n\n{val}")
+        if spec.handover_schema:
+            fields = ", ".join(sorted(spec.handover_schema.keys()))
+            parts.append(
+                "\n## Output\n\nReturn a single JSON object with these keys: "
+                f"{fields}. Wrap it in a ```json fenced block."
+            )
+        return "\n".join(parts)
+
+    @staticmethod
+    def _parse_handover(text: str) -> dict[str, Any]:
+        """Best-effort extraction of the handover JSON object from model text.
+
+        Looks for a ```json fenced block first, then the first balanced
+        ``{...}``. Falls back to ``{"text": <raw>}`` so downstream stages
+        always get a dict.
+        """
+        import json
+        import re
+
+        if not text:
+            return {"text": ""}
+        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        candidate = fence.group(1) if fence else None
+        if candidate is None:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end > start:
+                candidate = text[start : end + 1]
+        if candidate:
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (ValueError, TypeError):
+                pass
+        return {"text": text}
 
     # ── Helpers ───────────────────────────────────────────────────────
 

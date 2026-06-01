@@ -109,6 +109,24 @@ def create_app(
         else:
             app.state.specialization_service = None
 
+        # Authoring service — lets the dashboard create custom agents +
+        # blueprints. Redis-backed (durable), registering authored agents
+        # into the live specialization registry so they're runnable at
+        # once. Degrades to an in-memory store if Redis is unreachable.
+        app.state.authoring_service = None
+        try:
+            from devai.authoring import create_authoring_service
+
+            spec_registry = getattr(spec_service, "registry", None) if spec_service else None
+            redis = getattr(state, "redis", None)
+            authoring_service = create_authoring_service(redis=redis, spec_registry=spec_registry)
+            await authoring_service.load_into_registry()
+            app.state.authoring_service = authoring_service
+            logger.info("Authoring service ready (store=%s)", "redis" if redis else "in-memory")
+        except Exception:
+            logger.exception("Authoring service failed to start — authoring API will 503")
+            app.state.authoring_service = None
+
         # Repo onboarding service (Repos page). Independent of the
         # pipeline runtime: build an SCM client (reuse the pipeline's if
         # one exists) + a best-effort Postgres pool, and fall back to the
@@ -297,6 +315,11 @@ def create_app(
     from devai.specializations.routes import router as specializations_router
 
     app.include_router(specializations_router)
+
+    # Authoring routes (/api/authoring/*) — create custom agents + blueprints.
+    from devai.authoring.routes import router as authoring_router
+
+    app.include_router(authoring_router)
 
     # Dashboard routes (UI + API)
     from devai.dashboard.routes import router as dashboard_router

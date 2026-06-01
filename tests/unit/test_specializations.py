@@ -372,7 +372,9 @@ async def test_run_specialization_stage_unknown_spec_returns_stub():
 
 
 @pytest.mark.asyncio
-async def test_run_specialization_yaml_only_returns_stub():
+async def test_run_specialization_yaml_only_degrades_without_llm():
+    # A YAML-only spec now runs via the LLM adapter; with no adapter wired
+    # it degrades to a clear stub rather than the old "not implemented".
     from devai.pipeline.interfaces import StageDeps
     from devai.pipeline.stages.specialization import run_specialization_stage
     from devai.pipeline.types import DevAITask
@@ -382,13 +384,13 @@ async def test_run_specialization_yaml_only_returns_stub():
     class _Cfg:
         specializations_dir = str(SPECS_DIR)
 
-    deps = StageDeps(config=_Cfg(), extra={"specialization_registry": reg})
+    deps = StageDeps(config=_Cfg(), extra={"specialization_registry": reg})  # llm=None
     stage = run_specialization_stage(deps, {"specialization": "intake"})  # yaml-only
     task = DevAITask(intent="add /health endpoint")
     result = await stage.execute(task)
     payload = result.data["intake_output"]
     assert payload["stub"] is True
-    assert payload["reason"] == "yaml_only_runner_not_implemented"
+    assert payload["reason"] == "no_llm_adapter"
     assert payload["spec_name"] == "intake"
 
 
