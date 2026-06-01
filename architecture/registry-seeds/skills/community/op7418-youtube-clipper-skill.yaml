@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: op7418-youtube-clipper-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: op7418
+    devai.io/risk-level: low
+spec:
+  displayName: Youtube Clipper Skill
+  description: YouTube clip generation and editing with automated workflows
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - op7418
+  - voltagent-awesome-skills
+  metadata:
+    owner: op7418
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: op7418/Youtube-clipper-skill

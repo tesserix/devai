@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: deanpeters-product-strategy-session
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: deanpeters
+    devai.io/risk-level: low
+spec:
+  displayName: Product Strategy Session
+  description: "Full strategy session: positioning \u2192 framing \u2192 exploration \u2192 roadmap (2-4\
+    \ weeks)"
+  category: product
+  version: '1'
+  tags:
+  - deanpeters
+  - github
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: deanpeters
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: deanpeters/product-strategy-session

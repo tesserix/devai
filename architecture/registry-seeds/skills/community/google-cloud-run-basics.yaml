@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: google-cloud-run-basics
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: google
+    devai.io/risk-level: low
+spec:
+  displayName: Cloud Run Basics
+  description: Manages Cloud Run services, jobs, and worker pools.
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - google
+  - voltagent-awesome-skills
+  metadata:
+    owner: google
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: google/cloud/cloud-run-basics

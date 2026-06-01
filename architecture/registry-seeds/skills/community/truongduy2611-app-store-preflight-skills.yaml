@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: truongduy2611-app-store-preflight-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: truongduy2611
+    devai.io/risk-level: low
+spec:
+  displayName: App Store Preflight Skills
+  description: Scan iOS/macOS projects to catch common mistakes that lead to App Store rejection before
+    submission
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - truongduy2611
+  - voltagent-awesome-skills
+  metadata:
+    owner: truongduy2611
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: truongduy2611/app-store-preflight-skills

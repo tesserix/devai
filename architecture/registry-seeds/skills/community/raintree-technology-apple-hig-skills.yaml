@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: raintree-technology-apple-hig-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: raintree-technology
+    devai.io/risk-level: low
+spec:
+  displayName: Apple Hig Skills
+  description: Apple Human Interface Guidelines as 14 agent skills covering platforms, foundations, components,
+    patterns, inputs, and technologies for iOS, macOS, visionOS, watchOS, and tvOS
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - raintree-technology
+  - voltagent-awesome-skills
+  metadata:
+    owner: raintree-technology
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: raintree-technology/apple-hig-skills

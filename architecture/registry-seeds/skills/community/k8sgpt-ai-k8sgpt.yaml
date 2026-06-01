@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: k8sgpt-ai-k8sgpt
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: awesome-ai-sre
+    devai.io/category: sre
+    devai.io/team: k8sgpt-ai
+    devai.io/risk-level: low
+spec:
+  displayName: K8Sgpt
+  description: CNCF project for AI-powered Kubernetes diagnostics with SRE experience codified into analyzers
+    and multiple LLM backends.
+  category: sre
+  version: '1'
+  tags:
+  - awesome-ai-sre
+  - github
+  - k8sgpt-ai
+  - sre
+  metadata:
+    owner: k8sgpt-ai
+    origin: awesome-ai-sre
+    source: github
+    upstream_id: k8sgpt-ai/k8sgpt

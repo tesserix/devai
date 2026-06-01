@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-vios
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Vios
+  description: 'Query VIOS REST APIs: sensor list, recording timelines, video clip extraction, snapshot
+    capture, add/delete sensors and streams'
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/video-search-and-summarization/vios

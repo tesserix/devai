@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: muratcankoylan-context-compression
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: muratcankoylan
+    devai.io/risk-level: low
+spec:
+  displayName: Context Compression
+  description: Design and evaluate compression strategies for long-running sessions
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - muratcankoylan
+  - voltagent-awesome-skills
+  metadata:
+    owner: muratcankoylan
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: muratcankoylan/context-compression

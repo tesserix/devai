@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-bump-base-image
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Bump Base Image
+  description: Bump the NVIDIA PyTorch base image (`nvcr.io/nvidia/pytorch:<YY.MM>-py3`) used by Megatron-LM
+    CI.
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/Megatron-Core/bump-base-image

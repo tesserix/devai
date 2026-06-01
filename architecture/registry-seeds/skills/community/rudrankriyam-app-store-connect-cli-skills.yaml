@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: rudrankriyam-app-store-connect-cli-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: rudrankriyam
+    devai.io/risk-level: low
+spec:
+  displayName: App Store Connect Cli Skills
+  description: Automate App Store deployments and management using ASC CLI
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - rudrankriyam
+  - voltagent-awesome-skills
+  metadata:
+    owner: rudrankriyam
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: rudrankriyam/app-store-connect-cli-skills

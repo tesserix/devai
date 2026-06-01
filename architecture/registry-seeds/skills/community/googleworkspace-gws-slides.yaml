@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: googleworkspace-gws-slides
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: googleworkspace
+    devai.io/risk-level: low
+spec:
+  displayName: Gws Slides
+  description: Read and write Google Slides presentations
+  category: devtools
+  version: '1'
+  tags:
+  - devtools
+  - googleworkspace
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: googleworkspace
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: googleworkspace/gws-slides

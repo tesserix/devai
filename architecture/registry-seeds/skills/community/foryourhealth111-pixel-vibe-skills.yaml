@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: foryourhealth111-pixel-vibe-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: foryourhealth111-pixel
+    devai.io/risk-level: low
+spec:
+  displayName: Vibe Skills
+  description: A skills governed plug-and-play harness for staged, test-driven skill orchestration
+  category: general
+  version: '1'
+  tags:
+  - foryourhealth111-pixel
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: foryourhealth111-pixel
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: foryourhealth111-pixel/Vibe-Skills

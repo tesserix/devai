@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: sanity-io-sanity-best-practices
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: content
+    devai.io/team: sanity-io
+    devai.io/risk-level: low
+spec:
+  displayName: Sanity Best Practices
+  description: Best practices for Sanity Studio, GROQ queries, and content workflows
+  category: content
+  version: '1'
+  tags:
+  - content
+  - officialskills.sh
+  - sanity-io
+  - voltagent-awesome-skills
+  metadata:
+    owner: sanity-io
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: sanity-io/sanity-best-practices

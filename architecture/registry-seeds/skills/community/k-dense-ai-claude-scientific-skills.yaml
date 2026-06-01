@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: k-dense-ai-claude-scientific-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: k-dense-ai
+    devai.io/risk-level: low
+spec:
+  displayName: Claude Scientific Skills
+  description: Scientific research and analysis skills
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - k-dense-ai
+  - voltagent-awesome-skills
+  metadata:
+    owner: K-Dense-AI
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: K-Dense-AI/claude-scientific-skills

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: anthropics-pdf
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: anthropics
+    devai.io/risk-level: low
+spec:
+  displayName: Pdf
+  description: Extract text, create PDFs, and handle forms
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - anthropics
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: anthropics
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: anthropics/pdf

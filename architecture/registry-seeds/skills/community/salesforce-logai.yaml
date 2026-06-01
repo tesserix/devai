@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: salesforce-logai
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: awesome-ai-sre
+    devai.io/category: sre
+    devai.io/team: salesforce
+    devai.io/risk-level: low
+spec:
+  displayName: Logai
+  description: Open source library by Salesforce for log clustering, anomaly detection, and summarization
+    with modular ML pipelines.
+  category: sre
+  version: '1'
+  tags:
+  - awesome-ai-sre
+  - github
+  - salesforce
+  - sre
+  metadata:
+    owner: salesforce
+    origin: awesome-ai-sre
+    source: github
+    upstream_id: salesforce/logai

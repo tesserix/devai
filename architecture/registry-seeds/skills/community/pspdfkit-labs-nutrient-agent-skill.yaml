@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: pspdfkit-labs-nutrient-agent-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: pspdfkit-labs
+    devai.io/risk-level: low
+spec:
+  displayName: Nutrient Agent Skill
+  description: 'Document processing with Nutrient DWS API: convert (PDF/DOCX/XLSX/PPTX/HTML/images), extract
+    text/tables, OCR (20+ languages), redact PII (pattern + AI), watermark, digital signatures, form filling.
+    [MCP server](https://www.npmjs.com/package/@nutrient-sdk/dws-mcp-server) also available.'
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - pspdfkit-labs
+  - voltagent-awesome-skills
+  metadata:
+    owner: PSPDFKit-labs
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: PSPDFKit-labs/nutrient-agent-skill

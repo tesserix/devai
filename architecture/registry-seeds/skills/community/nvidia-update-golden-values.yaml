@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-update-golden-values
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Update Golden Values
+  description: Refresh golden values from a GitHub Actions workflow run (failing-only or all jobs), score
+    the change with average normalized relative differences, and produce a PR-ready summary.
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/Megatron-Core/update-golden-values

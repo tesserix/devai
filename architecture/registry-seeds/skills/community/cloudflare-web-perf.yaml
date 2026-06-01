@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: cloudflare-web-perf
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: infra
+    devai.io/team: cloudflare
+    devai.io/risk-level: medium
+spec:
+  displayName: Web Perf
+  description: Audit Core Web Vitals and render-blocking resources
+  category: infra
+  version: '1'
+  tags:
+  - cloudflare
+  - infra
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: cloudflare
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: cloudflare/web-perf

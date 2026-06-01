@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: firebase-developing-genkit-js
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: firebase
+    devai.io/risk-level: low
+spec:
+  displayName: Developing Genkit Js
+  description: Build AI-powered apps with Firebase Genkit in Node.js
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - firebase
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: firebase
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: firebase/developing-genkit-js

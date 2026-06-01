@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-nemoclaw-contributor-update-docs
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Nemoclaw Contributor Update Docs
+  description: Scan recent git commits for changes that affect user-facing behavior, then draft or update
+    the corresponding documentation pages and refresh generated user skills for release prep.
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/NemoClaw/nemoclaw-contributor-update-docs

@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-nemoclaw-user-agent-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Nemoclaw User Agent Skills
+  description: Describes the agent skills shipped with NemoClaw and how to access them by cloning the
+    repository.
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/NemoClaw/nemoclaw-user-agent-skills

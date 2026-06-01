@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: wrsmith108-linear-claude-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: wrsmith108
+    devai.io/risk-level: low
+spec:
+  displayName: Linear Claude Skill
+  description: Manage Linear issues, projects, and teams
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voltagent-awesome-skills
+  - wrsmith108
+  metadata:
+    owner: wrsmith108
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: wrsmith108/linear-claude-skill

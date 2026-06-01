@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: ethos-link-rails-conventions
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: ethos-link
+    devai.io/risk-level: low
+spec:
+  displayName: Rails Conventions
+  description: Rails 8 conventions for consistent production code changes
+  category: general
+  version: '1'
+  tags:
+  - ethos-link
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: ethos-link
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: ethos-link/rails-conventions

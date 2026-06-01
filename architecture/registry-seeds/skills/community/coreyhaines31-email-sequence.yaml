@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: coreyhaines31-email-sequence
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: marketing
+    devai.io/team: coreyhaines31
+    devai.io/risk-level: low
+spec:
+  displayName: Email Sequence
+  description: Build email sequences, drip campaigns, and lifecycle email flows
+  category: marketing
+  version: '1'
+  tags:
+  - coreyhaines31
+  - github
+  - marketing
+  - voltagent-awesome-skills
+  metadata:
+    owner: coreyhaines31
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: coreyhaines31/email-sequence

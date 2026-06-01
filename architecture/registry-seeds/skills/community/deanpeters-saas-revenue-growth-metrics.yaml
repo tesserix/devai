@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: deanpeters-saas-revenue-growth-metrics
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: deanpeters
+    devai.io/risk-level: low
+spec:
+  displayName: Saas Revenue Growth Metrics
+  description: Track revenue, retention, and growth metrics including MRR/ARR, churn, NRR, and expansion
+  category: product
+  version: '1'
+  tags:
+  - deanpeters
+  - github
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: deanpeters
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: deanpeters/saas-revenue-growth-metrics

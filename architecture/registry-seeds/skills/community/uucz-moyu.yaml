@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: uucz-moyu
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: uucz
+    devai.io/risk-level: low
+spec:
+  displayName: Moyu
+  description: Anti-over-engineering skill with 5 variants and 10 platforms
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - uucz
+  - voltagent-awesome-skills
+  metadata:
+    owner: uucz
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: uucz/moyu

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: digidai-product-manager-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: digidai
+    devai.io/risk-level: low
+spec:
+  displayName: Product Manager Skills
+  description: Senior PM agent with 30+ frameworks and SaaS metrics
+  category: general
+  version: '1'
+  tags:
+  - digidai
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: Digidai
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Digidai/product-manager-skills

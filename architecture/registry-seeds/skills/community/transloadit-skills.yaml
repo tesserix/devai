@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: transloadit-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: transloadit
+    devai.io/risk-level: low
+spec:
+  displayName: Skills
+  description: Transloadit skill collection (6)
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - transloadit
+  - voltagent-awesome-skills
+  metadata:
+    owner: transloadit
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: transloadit/skills

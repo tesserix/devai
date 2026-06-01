@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: smixs-creative-director-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: smixs
+    devai.io/risk-level: low
+spec:
+  displayName: Creative Director Skill
+  description: 'AI creative director with recursive self-assessment: 20+ methodologies (SIT, TRIZ, Bisociation,
+    SCAMPER, Synectics), 3-axis evaluation calibrated against Cannes/D&AD/HumanKind, 5-phase process from
+    brief to presentation'
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - smixs
+  - voltagent-awesome-skills
+  metadata:
+    owner: smixs
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: smixs/creative-director-skill

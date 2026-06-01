@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: figma-figma-use
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: figma
+    devai.io/risk-level: low
+spec:
+  displayName: Figma Use
+  description: Run Figma Plugin API scripts for canvas writes, inspections, variables, and design-system
+    work
+  category: frontend
+  version: '1'
+  tags:
+  - figma
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: figma
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: figma/figma-use

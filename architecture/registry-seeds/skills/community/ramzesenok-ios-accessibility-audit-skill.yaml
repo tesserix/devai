@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: ramzesenok-ios-accessibility-audit-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: ramzesenok
+    devai.io/risk-level: low
+spec:
+  displayName: Ios Accessibility Audit Skill
+  description: Audit iOS App against Accessibility norms
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - ramzesenok
+  - voltagent-awesome-skills
+  metadata:
+    owner: ramzesenok
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: ramzesenok/iOS-Accessibility-Audit-Skill

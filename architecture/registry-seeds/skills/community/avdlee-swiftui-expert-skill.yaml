@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: avdlee-swiftui-expert-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: avdlee
+    devai.io/risk-level: low
+spec:
+  displayName: Swiftui Expert Skill
+  description: Modern SwiftUI best practices and iOS 26+ Liquid Glass adoption
+  category: general
+  version: '1'
+  tags:
+  - avdlee
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: AvdLee
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: AvdLee/swiftui-expert-skill

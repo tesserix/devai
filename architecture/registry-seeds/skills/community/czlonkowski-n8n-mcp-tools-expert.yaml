@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: czlonkowski-n8n-mcp-tools-expert
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: czlonkowski
+    devai.io/risk-level: low
+spec:
+  displayName: N8N Mcp Tools Expert
+  description: MCP tools guide with tool selection and node formats
+  category: general
+  version: '1'
+  tags:
+  - czlonkowski
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: czlonkowski
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: czlonkowski/n8n-mcp-tools-expert

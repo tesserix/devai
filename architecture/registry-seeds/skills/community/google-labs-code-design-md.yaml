@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: google-labs-code-design-md
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: google-labs-code
+    devai.io/risk-level: low
+spec:
+  displayName: Design Md
+  description: Create and manage DESIGN.md files
+  category: frontend
+  version: '1'
+  tags:
+  - frontend
+  - google-labs-code
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: google-labs-code
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: google-labs-code/design-md

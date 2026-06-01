@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: duckdb-read-memories
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: duckdb
+    devai.io/risk-level: low
+spec:
+  displayName: Read Memories
+  description: Search past Claude Code session logs to recover context from previous conversations
+  category: data
+  version: '1'
+  tags:
+  - data
+  - duckdb
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: duckdb
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: duckdb/read-memories

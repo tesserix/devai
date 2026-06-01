@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: openai-frontend-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: openai
+    devai.io/risk-level: low
+spec:
+  displayName: Frontend Skill
+  description: Create visually strong landing pages, websites, and app UIs with restrained composition
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - officialskills.sh
+  - openai
+  - voltagent-awesome-skills
+  metadata:
+    owner: openai
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: openai/frontend-skill

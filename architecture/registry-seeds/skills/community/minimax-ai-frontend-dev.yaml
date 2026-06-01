@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: minimax-ai-frontend-dev
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: minimax-ai
+    devai.io/risk-level: low
+spec:
+  displayName: Frontend Dev
+  description: Full-stack frontend with cinematic animations, AI-generated media via MiniMax API, and
+    generative art
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - minimax-ai
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: MiniMax-AI
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: MiniMax-AI/frontend-dev

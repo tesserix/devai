@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: orchestra-research-ai-research-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: orchestra-research
+    devai.io/risk-level: low
+spec:
+  displayName: Ai Research Skills
+  description: 20-module AI research skill library for model architecture, training, and ML paper writing
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - orchestra-research
+  - voltagent-awesome-skills
+  metadata:
+    owner: Orchestra-Research
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Orchestra-Research/AI-research-SKILLs

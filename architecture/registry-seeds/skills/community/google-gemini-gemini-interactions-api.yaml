@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: google-gemini-gemini-interactions-api
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: google-gemini
+    devai.io/risk-level: low
+spec:
+  displayName: Gemini Interactions Api
+  description: Building apps with the Gemini Interactions API for text, chat, streaming, and image generation
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - google-gemini
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: google-gemini
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: google-gemini/gemini-interactions-api

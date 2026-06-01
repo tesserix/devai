@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: trailofbits-sharp-edges
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: security
+    devai.io/team: trailofbits
+    devai.io/risk-level: medium
+spec:
+  displayName: Sharp Edges
+  description: Identify error-prone APIs and dangerous configurations
+  category: security
+  version: '1'
+  tags:
+  - officialskills.sh
+  - security
+  - trailofbits
+  - voltagent-awesome-skills
+  metadata:
+    owner: trailofbits
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: trailofbits/sharp-edges

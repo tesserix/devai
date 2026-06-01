@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: deanpeters-executive-onboarding-playbook
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: deanpeters
+    devai.io/risk-level: low
+spec:
+  displayName: Executive Onboarding Playbook
+  description: 30-60-90 day diagnostic playbook for VP/CPO onboarding transitions
+  category: product
+  version: '1'
+  tags:
+  - deanpeters
+  - github
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: deanpeters
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: deanpeters/executive-onboarding-playbook

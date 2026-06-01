@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: bitwize-music-studio-claude-ai-music-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: bitwize-music-studio
+    devai.io/risk-level: low
+spec:
+  displayName: Claude Ai Music Skills
+  description: Full-lifecycle AI music album production
+  category: general
+  version: '1'
+  tags:
+  - bitwize-music-studio
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: bitwize-music-studio
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: bitwize-music-studio/claude-ai-music-skills

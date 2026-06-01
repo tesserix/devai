@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: cloudflare-cloudflare-email-service
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: infra
+    devai.io/team: cloudflare
+    devai.io/risk-level: medium
+spec:
+  displayName: Cloudflare Email Service
+  description: Send transactional email and route inbound mail with Cloudflare Email Sending and Email
+    Routing
+  category: infra
+  version: '1'
+  tags:
+  - cloudflare
+  - infra
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: cloudflare
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: cloudflare/cloudflare-email-service

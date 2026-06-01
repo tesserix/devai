@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: mohamedabdallah-14-unslop
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: mohamedabdallah-14
+    devai.io/risk-level: low
+spec:
+  displayName: Unslop
+  description: Removes named AI writing tells (tricolons, em-dash pileups, hedging stacks, sycophancy
+    openers, stock vocab like "delve"/"crucial"). Split lint/rewrite modes for auditing your own text
+    without auto-rewriting. Five intensity levels, MIT
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - mohamedabdallah-14
+  - voltagent-awesome-skills
+  metadata:
+    owner: MohamedAbdallah-14
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: MohamedAbdallah-14/unslop

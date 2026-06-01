@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: deanpeters-customer-journey-map
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: deanpeters
+    devai.io/risk-level: low
+spec:
+  displayName: Customer Journey Map
+  description: Map customer experience across touchpoints using the NNGroup framework
+  category: product
+  version: '1'
+  tags:
+  - deanpeters
+  - github
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: deanpeters
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: deanpeters/customer-journey-map

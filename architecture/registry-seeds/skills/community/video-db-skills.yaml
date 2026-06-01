@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: video-db-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: video-db
+    devai.io/risk-level: low
+spec:
+  displayName: Skills
+  description: 'Realtime and batch video workflows: capture screen/audio, ingest URLs/YouTube/RTSP, transcribe,
+    index, search, generate subtitles, edit timelines, and stream HLS output'
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - video-db
+  - voltagent-awesome-skills
+  metadata:
+    owner: video-db
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: video-db/skills

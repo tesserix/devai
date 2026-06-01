@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: vercel-labs-react-best-practices
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: vercel-labs
+    devai.io/risk-level: low
+spec:
+  displayName: React Best Practices
+  description: React best practices and patterns
+  category: frontend
+  version: '1'
+  tags:
+  - frontend
+  - officialskills.sh
+  - vercel-labs
+  - voltagent-awesome-skills
+  metadata:
+    owner: vercel-labs
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: vercel-labs/react-best-practices

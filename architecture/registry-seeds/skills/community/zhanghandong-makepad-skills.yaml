@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: zhanghandong-makepad-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: zhanghandong
+    devai.io/risk-level: low
+spec:
+  displayName: Makepad Skills
+  description: 'Makepad UI development skills for Rust apps: setup, patterns, shaders, packaging, and
+    troubleshooting.'
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voltagent-awesome-skills
+  - zhanghandong
+  metadata:
+    owner: ZhangHanDong
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: ZhangHanDong/makepad-skills

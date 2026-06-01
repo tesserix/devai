@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: coinbase-trade
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: fintech
+    devai.io/team: coinbase
+    devai.io/risk-level: medium
+spec:
+  displayName: Trade
+  description: Swap and trade tokens on Base using the CDP Swap API
+  category: fintech
+  version: '1'
+  tags:
+  - coinbase
+  - fintech
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: coinbase
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: coinbase/trade

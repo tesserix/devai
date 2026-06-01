@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: kreuzberg-dev-kreuzberg
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: kreuzberg-dev
+    devai.io/risk-level: low
+spec:
+  displayName: Kreuzberg
+  description: Extract text, tables, and metadata from 62+ document formats
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - kreuzberg-dev
+  - voltagent-awesome-skills
+  metadata:
+    owner: kreuzberg-dev
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: kreuzberg-dev/kreuzberg

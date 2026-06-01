@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: binance-query-token-audit
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: fintech
+    devai.io/team: binance
+    devai.io/risk-level: medium
+spec:
+  displayName: Query Token Audit
+  description: Audit token security to detect scams, honeypots, and malicious contracts across BSC, Base,
+    Solana, and Ethereum
+  category: fintech
+  version: '1'
+  tags:
+  - binance
+  - fintech
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: binance
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: binance/query-token-audit

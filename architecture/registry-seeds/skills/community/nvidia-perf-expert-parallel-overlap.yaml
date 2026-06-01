@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-perf-expert-parallel-overlap
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Perf Expert Parallel Overlap
+  description: Validate and use MoE expert-parallel communication overlap in Megatron-Bridge, including
+    overlap_moe_expert_parallel_comm, delay_wgrad_compute, and flex dispatcher backends such as...
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/Megatron-Bridge/perf-expert-parallel-overlap

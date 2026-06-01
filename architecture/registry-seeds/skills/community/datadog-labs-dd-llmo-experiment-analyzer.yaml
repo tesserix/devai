@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: datadog-labs-dd-llmo-experiment-analyzer
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: sre
+    devai.io/team: datadog-labs
+    devai.io/risk-level: low
+spec:
+  displayName: Dd Llmo Experiment Analyzer
+  description: Analyze single or comparative LLM experiment results
+  category: sre
+  version: '1'
+  tags:
+  - datadog-labs
+  - officialskills.sh
+  - sre
+  - voltagent-awesome-skills
+  metadata:
+    owner: datadog-labs
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: datadog-labs/dd-llmo-experiment-analyzer

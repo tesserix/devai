@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: remotion-dev-remotion
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: content
+    devai.io/team: remotion-dev
+    devai.io/risk-level: low
+spec:
+  displayName: Remotion
+  description: Programmatic video creation with React
+  category: content
+  version: '1'
+  tags:
+  - content
+  - officialskills.sh
+  - remotion-dev
+  - voltagent-awesome-skills
+  metadata:
+    owner: remotion-dev
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: remotion-dev/remotion

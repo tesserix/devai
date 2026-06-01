@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-nemo-gym-pivot-datasets
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Nemo Gym Pivot Datasets
+  description: '>- Use when creating, validating, or documenting Nemo Gym pivot datasets from rollout,
+    trajectory, chat-completion, Responses API, or tool-call artifacts.'
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/NeMo-Gym/nemo-gym-pivot-datasets

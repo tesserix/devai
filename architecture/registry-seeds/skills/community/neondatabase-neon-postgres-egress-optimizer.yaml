@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: neondatabase-neon-postgres-egress-optimizer
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: neondatabase
+    devai.io/risk-level: low
+spec:
+  displayName: Neon Postgres Egress Optimizer
+  description: Optimize Neon Postgres egress and data transfer
+  category: data
+  version: '1'
+  tags:
+  - data
+  - neondatabase
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: neondatabase
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: neondatabase/neon-postgres-egress-optimizer

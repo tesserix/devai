@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: testdino-hq-playwright-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: testdino-hq
+    devai.io/risk-level: low
+spec:
+  displayName: Playwright Skill
+  description: '70+ production-tested Playwright automation testing patterns: E2E, POM, CI/CD, migrations,
+    CLI'
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - testdino-hq
+  - voltagent-awesome-skills
+  metadata:
+    owner: testdino-hq
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: testdino-hq/playwright-skill

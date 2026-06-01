@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: greensock-gsap-plugins
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: greensock
+    devai.io/risk-level: low
+spec:
+  displayName: Gsap Plugins
+  description: Plugins including ScrollToPlugin, Flip, Draggable, SplitText, SVG, and physics
+  category: general
+  version: '1'
+  tags:
+  - general
+  - greensock
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: greensock
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: greensock/gsap-plugins

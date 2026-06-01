@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: flutter-flutter-handling-http-and-json
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: flutter
+    devai.io/risk-level: low
+spec:
+  displayName: Flutter Handling Http And Json
+  description: Handle HTTP requests and JSON serialization
+  category: frontend
+  version: '1'
+  tags:
+  - flutter
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: flutter
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: flutter/flutter-handling-http-and-json

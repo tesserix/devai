@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: zechenzhangagi-ai-research-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: zechenzhangagi
+    devai.io/risk-level: low
+spec:
+  displayName: Ai Research Skills
+  description: 77 AI research skills for model training, inference, and MLOps
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voltagent-awesome-skills
+  - zechenzhangagi
+  metadata:
+    owner: zechenzhangAGI
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: zechenzhangAGI/AI-research-SKILLs

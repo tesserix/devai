@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: notmyself-claude-win11-speckit-update-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: notmyself
+    devai.io/risk-level: low
+spec:
+  displayName: Claude Win11 Speckit Update Skill
+  description: Windows 11 system management
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - notmyself
+  - voltagent-awesome-skills
+  metadata:
+    owner: NotMyself
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NotMyself/claude-win11-speckit-update-skill

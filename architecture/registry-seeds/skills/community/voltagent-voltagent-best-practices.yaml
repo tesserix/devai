@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: voltagent-voltagent-best-practices
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: agents
+    devai.io/team: voltagent
+    devai.io/risk-level: low
+spec:
+  displayName: Voltagent Best Practices
+  description: Architecture and usage patterns for agents, workflows, memory, and servers
+  category: agents
+  version: '1'
+  tags:
+  - agents
+  - officialskills.sh
+  - voltagent
+  - voltagent-awesome-skills
+  metadata:
+    owner: voltagent
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: voltagent/voltagent-best-practices

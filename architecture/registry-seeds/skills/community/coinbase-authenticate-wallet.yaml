@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: coinbase-authenticate-wallet
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: fintech
+    devai.io/team: coinbase
+    devai.io/risk-level: medium
+spec:
+  displayName: Authenticate Wallet
+  description: Handle sign-in for the Coinbase payments wallet via email OTP
+  category: fintech
+  version: '1'
+  tags:
+  - coinbase
+  - fintech
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: coinbase
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: coinbase/authenticate-wallet

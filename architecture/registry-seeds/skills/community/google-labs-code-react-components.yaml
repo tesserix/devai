@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: google-labs-code-react-components
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: google-labs-code
+    devai.io/risk-level: low
+spec:
+  displayName: React Components
+  description: Stitch to React components conversion
+  category: frontend
+  version: '1'
+  tags:
+  - frontend
+  - google-labs-code
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: google-labs-code
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: google-labs-code/react-components

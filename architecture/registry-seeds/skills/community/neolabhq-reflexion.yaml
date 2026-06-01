@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: neolabhq-reflexion
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: neolabhq
+    devai.io/risk-level: low
+spec:
+  displayName: Reflexion
+  description: Self-refinement loop that forces the LLM to reflect on previous output and correct itself.
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - neolabhq
+  - voltagent-awesome-skills
+  metadata:
+    owner: NeoLabHQ
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NeoLabHQ/reflexion

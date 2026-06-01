@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: openai-winui-app
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: openai
+    devai.io/risk-level: low
+spec:
+  displayName: Winui App
+  description: Bootstrap and develop modern WinUI 3 desktop apps with C# and Windows App SDK
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - officialskills.sh
+  - openai
+  - voltagent-awesome-skills
+  metadata:
+    owner: openai
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: openai/winui-app

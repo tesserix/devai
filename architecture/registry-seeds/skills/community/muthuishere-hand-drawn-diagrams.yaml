@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: muthuishere-hand-drawn-diagrams
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: muthuishere
+    devai.io/risk-level: low
+spec:
+  displayName: Hand Drawn Diagrams
+  description: "Generate hand-drawn Excalidraw diagrams from a prompt \u2014 animated SVG, hosted edit\
+    \ link, and PNG export. Works with Claude Code, Codex, Gemini CLI, and any agent supporting standard\
+    \ skill paths"
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - muthuishere
+  - voltagent-awesome-skills
+  metadata:
+    owner: muthuishere
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: muthuishere/hand-drawn-diagrams

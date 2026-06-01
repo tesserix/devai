@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: greensock-gsap-performance
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: greensock
+    devai.io/risk-level: low
+spec:
+  displayName: Gsap Performance
+  description: Performance tips for transforms, will-change, batching, and ScrollTrigger optimization
+  category: general
+  version: '1'
+  tags:
+  - general
+  - greensock
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: greensock
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: greensock/gsap-performance

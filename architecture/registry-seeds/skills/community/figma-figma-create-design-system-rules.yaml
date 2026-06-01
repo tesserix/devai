@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: figma-figma-create-design-system-rules
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: figma
+    devai.io/risk-level: low
+spec:
+  displayName: Figma Create Design System Rules
+  description: Generate project-specific design system rules for Figma-to-code workflows
+  category: frontend
+  version: '1'
+  tags:
+  - figma
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: figma
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: figma/figma-create-design-system-rules

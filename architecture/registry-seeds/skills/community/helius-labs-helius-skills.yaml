@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: helius-labs-helius-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: helius-labs
+    devai.io/risk-level: low
+spec:
+  displayName: Helius Skills
+  description: Ship Solana apps end-to-end; transaction sending, asset queries, real-time streaming, token
+    swaps, prediction markets, browser wallets, and deep research into protocol internals all powered
+    by Helius APIs, DFlow trading, and Phantom wallet integrations
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - helius-labs
+  - voltagent-awesome-skills
+  metadata:
+    owner: helius-labs
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: helius-labs/helius-skills

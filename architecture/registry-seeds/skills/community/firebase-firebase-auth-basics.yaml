@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: firebase-firebase-auth-basics
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: firebase
+    devai.io/risk-level: low
+spec:
+  displayName: Firebase Auth Basics
+  description: Set up Firebase Authentication with sign-in providers
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - firebase
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: firebase
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: firebase/firebase-auth-basics

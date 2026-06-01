@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: ibelick-ui-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: ibelick
+    devai.io/risk-level: low
+spec:
+  displayName: Ui Skills
+  description: Opinionated, evolving constraints to guide agents when building interfaces
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - ibelick
+  - voltagent-awesome-skills
+  metadata:
+    owner: ibelick
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: ibelick/ui-skills

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: gitroomhq-postiz-agent
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: gitroomhq
+    devai.io/risk-level: low
+spec:
+  displayName: Postiz Agent
+  description: Schedule social media posts across 28+ platforms programmatically
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - gitroomhq
+  - voltagent-awesome-skills
+  metadata:
+    owner: gitroomhq
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: gitroomhq/postiz-agent

@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: redis-redis-development
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: redis
+    devai.io/risk-level: low
+spec:
+  displayName: Redis Development
+  description: "Redis development best practices \u2014 data structures, query engine, vector search,\
+    \ caching, and performance optimization."
+  category: data
+  version: '1'
+  tags:
+  - data
+  - github
+  - redis
+  - voltagent-awesome-skills
+  metadata:
+    owner: redis
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: redis/redis-development

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: zscole-model-hierarchy-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: zscole
+    devai.io/risk-level: low
+spec:
+  displayName: Model Hierarchy Skill
+  description: Cost-optimized model routing based on task complexity
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voltagent-awesome-skills
+  - zscole
+  metadata:
+    owner: zscole
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: zscole/model-hierarchy-skill

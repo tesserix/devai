@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: google-cloud-sql-basics
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: google
+    devai.io/risk-level: low
+spec:
+  displayName: Cloud Sql Basics
+  description: This file generates or explains Cloud SQL resources.
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - google
+  - voltagent-awesome-skills
+  metadata:
+    owner: google
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: google/cloud/cloud-sql-basics

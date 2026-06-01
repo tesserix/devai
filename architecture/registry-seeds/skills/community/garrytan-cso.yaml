@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: garrytan-cso
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: garrytan
+    devai.io/risk-level: low
+spec:
+  displayName: Cso
+  description: 'Chief Security Officer: OWASP Top 10 + STRIDE threat model with zero false-positive exclusions'
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - garrytan
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: garrytan
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: garrytan/cso

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: fvadicamo-dev-agent-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: fvadicamo
+    devai.io/risk-level: low
+spec:
+  displayName: Dev Agent Skills
+  description: Git and GitHub workflow skills for commits, PRs, and code reviews
+  category: general
+  version: '1'
+  tags:
+  - fvadicamo
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: fvadicamo
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: fvadicamo/dev-agent-skills

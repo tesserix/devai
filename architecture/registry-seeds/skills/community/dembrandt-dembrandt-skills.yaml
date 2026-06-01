@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: dembrandt-dembrandt-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: dembrandt
+    devai.io/risk-level: low
+spec:
+  displayName: Dembrandt Skills
+  description: 'UX and design system skills: hierarchy, typography, accessibility, interactions'
+  category: general
+  version: '1'
+  tags:
+  - dembrandt
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: dembrandt
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: dembrandt/dembrandt-skills

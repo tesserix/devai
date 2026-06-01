@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: resend-agent-email-inbox
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: resend
+    devai.io/risk-level: low
+spec:
+  displayName: Agent Email Inbox
+  description: AI agent email inbox management
+  category: devtools
+  version: '1'
+  tags:
+  - devtools
+  - github
+  - resend
+  - voltagent-awesome-skills
+  metadata:
+    owner: resend
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: resend/agent-email-inbox

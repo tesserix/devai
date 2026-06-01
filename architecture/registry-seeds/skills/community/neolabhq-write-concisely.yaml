@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: neolabhq-write-concisely
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: neolabhq
+    devai.io/risk-level: low
+spec:
+  displayName: Write Concisely
+  description: Applies the famous *The Elements of Style* book principles to make documentation and writing
+    clearer and more professional by eliminating wordiness and improving structure.
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - neolabhq
+  - voltagent-awesome-skills
+  metadata:
+    owner: NeoLabHQ
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NeoLabHQ/write-concisely

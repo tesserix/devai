@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: deanpeters-prd-development
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: deanpeters
+    devai.io/risk-level: low
+spec:
+  displayName: Prd Development
+  description: "Structured PRD process: problem \u2192 personas \u2192 solution \u2192 metrics \u2192\
+    \ stories (2-4 days)"
+  category: product
+  version: '1'
+  tags:
+  - deanpeters
+  - github
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: deanpeters
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: deanpeters/prd-development

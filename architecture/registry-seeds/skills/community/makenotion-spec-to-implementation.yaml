@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: makenotion-spec-to-implementation
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: makenotion
+    devai.io/risk-level: low
+spec:
+  displayName: Spec To Implementation
+  description: Turn product/tech specs into concrete Notion tasks with acceptance criteria and progress
+    tracking
+  category: general
+  version: '1'
+  tags:
+  - general
+  - makenotion
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: makenotion
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: makenotion/spec-to-implementation

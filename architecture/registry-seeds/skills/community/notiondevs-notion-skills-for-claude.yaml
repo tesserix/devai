@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: notiondevs-notion-skills-for-claude
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: notiondevs
+    devai.io/risk-level: low
+spec:
+  displayName: Notion Skills For Claude
+  description: Skills for working with Notion
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - notiondevs
+  - voltagent-awesome-skills
+  metadata:
+    owner: notiondevs
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: notiondevs/Notion Skills for Claude

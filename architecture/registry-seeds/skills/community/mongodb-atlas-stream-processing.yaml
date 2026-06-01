@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: mongodb-atlas-stream-processing
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: mongodb
+    devai.io/risk-level: low
+spec:
+  displayName: Atlas Stream Processing
+  description: Build, operate, and debug Atlas Stream Processing pipelines with Kafka, S3, and Lambda
+    integrations
+  category: data
+  version: '1'
+  tags:
+  - data
+  - mongodb
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: mongodb
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: mongodb/atlas-stream-processing

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: garrytan-browse
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: garrytan
+    devai.io/risk-level: low
+spec:
+  displayName: Browse
+  description: 'Real Chromium browser for QA: real clicks, real screenshots, ~100ms per command'
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - garrytan
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: garrytan
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: garrytan/browse

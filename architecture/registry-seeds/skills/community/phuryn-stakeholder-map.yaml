@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: phuryn-stakeholder-map
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: phuryn
+    devai.io/risk-level: low
+spec:
+  displayName: Stakeholder Map
+  description: Build stakeholder maps with power/interest grid and comms plan
+  category: product
+  version: '1'
+  tags:
+  - github
+  - phuryn
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: phuryn
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: phuryn/stakeholder-map

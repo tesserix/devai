@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: openai-gh-fix-ci
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: openai
+    devai.io/risk-level: low
+spec:
+  displayName: Gh Fix Ci
+  description: Debug and fix failing GitHub Actions PR checks using log inspection
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - officialskills.sh
+  - openai
+  - voltagent-awesome-skills
+  metadata:
+    owner: openai
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: openai/gh-fix-ci

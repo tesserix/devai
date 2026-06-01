@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: clickhouse-chdb-sql
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: clickhouse
+    devai.io/risk-level: low
+spec:
+  displayName: Chdb Sql
+  description: "In-process ClickHouse SQL engine for Python \u2014 query files, databases, and cloud storage\
+    \ without a server"
+  category: data
+  version: '1'
+  tags:
+  - clickhouse
+  - data
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: clickhouse
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: clickhouse/chdb-sql

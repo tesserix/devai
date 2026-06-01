@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: flutter-flutter-architecting-apps
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: flutter
+    devai.io/risk-level: low
+spec:
+  displayName: Flutter Architecting Apps
+  description: Structure a Flutter app using layered architecture
+  category: frontend
+  version: '1'
+  tags:
+  - flutter
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: flutter
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: flutter/flutter-architecting-apps

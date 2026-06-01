@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: trailofbits-spec-to-code-compliance
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: security
+    devai.io/team: trailofbits
+    devai.io/risk-level: medium
+spec:
+  displayName: Spec To Code Compliance
+  description: Specification-to-code compliance checker for blockchain audits
+  category: security
+  version: '1'
+  tags:
+  - officialskills.sh
+  - security
+  - trailofbits
+  - voltagent-awesome-skills
+  metadata:
+    owner: trailofbits
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: trailofbits/spec-to-code-compliance

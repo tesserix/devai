@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: behisecc-vibesec
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: behisecc
+    devai.io/risk-level: low
+spec:
+  displayName: Vibesec
+  description: Helps write secure code by preventing common vulnerabilities including IDOR, XSS, SQL injection,
+    SSRF, and weak authentication, approaching code from a bug hunter's perspective
+  category: general
+  version: '1'
+  tags:
+  - behisecc
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: BehiSecc
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: BehiSecc/vibesec

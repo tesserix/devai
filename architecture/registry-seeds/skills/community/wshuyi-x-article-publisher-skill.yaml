@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: wshuyi-x-article-publisher-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: wshuyi
+    devai.io/risk-level: low
+spec:
+  displayName: X Article Publisher Skill
+  description: Publish articles to X/Twitter
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voltagent-awesome-skills
+  - wshuyi
+  metadata:
+    owner: wshuyi
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: wshuyi/x-article-publisher-skill

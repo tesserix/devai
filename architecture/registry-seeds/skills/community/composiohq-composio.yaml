@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: composiohq-composio
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: composiohq
+    devai.io/risk-level: low
+spec:
+  displayName: Composio
+  description: Connect AI agents to 1000+ external apps with managed authentication
+  category: devtools
+  version: '1'
+  tags:
+  - composiohq
+  - devtools
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: composiohq
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: composiohq/composio

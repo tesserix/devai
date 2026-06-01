@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: cloudflare-workers-best-practices
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: infra
+    devai.io/team: cloudflare
+    devai.io/risk-level: medium
+spec:
+  displayName: Workers Best Practices
+  description: Review and author Workers code against production best practices and wrangler.jsonc conventions
+  category: infra
+  version: '1'
+  tags:
+  - cloudflare
+  - infra
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: cloudflare
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: cloudflare/workers-best-practices

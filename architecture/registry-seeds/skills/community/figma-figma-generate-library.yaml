@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: figma-figma-generate-library
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: figma
+    devai.io/risk-level: low
+spec:
+  displayName: Figma Generate Library
+  description: Build or update a design system library in Figma from a codebase
+  category: frontend
+  version: '1'
+  tags:
+  - figma
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: figma
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: figma/figma-generate-library

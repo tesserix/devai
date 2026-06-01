@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: lum1104-understand-anything
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: lum1104
+    devai.io/risk-level: low
+spec:
+  displayName: Understand Anything
+  description: Interactive codebase knowledge graphs via multi-agent LLM analysis
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - lum1104
+  - voltagent-awesome-skills
+  metadata:
+    owner: Lum1104
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Lum1104/understand-anything

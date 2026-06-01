@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: rootly-ai-labs-rootly-incident-responder
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: rootly-ai-labs
+    devai.io/risk-level: low
+spec:
+  displayName: Rootly Incident Responder
+  description: AI-powered incident response with ML similarity matching, solution suggestions, and on-call
+    coordination. Requires [Rootly MCP Server](https://github.com/Rootly-AI-Labs/Rootly-MCP-server)
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - rootly-ai-labs
+  - voltagent-awesome-skills
+  metadata:
+    owner: Rootly-AI-Labs
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Rootly-AI-Labs/rootly-incident-responder

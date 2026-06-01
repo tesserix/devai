@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: czlonkowski-n8n-workflow-patterns
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: czlonkowski
+    devai.io/risk-level: low
+spec:
+  displayName: N8N Workflow Patterns
+  description: Workflow patterns for webhook, HTTP, database, and AI tasks
+  category: general
+  version: '1'
+  tags:
+  - czlonkowski
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: czlonkowski
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: czlonkowski/n8n-workflow-patterns

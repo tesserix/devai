@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: firebase-firebase-ai-logic-basics
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: firebase
+    devai.io/risk-level: low
+spec:
+  displayName: Firebase Ai Logic Basics
+  description: Call Gemini models from web and mobile apps via Firebase AI Logic
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - firebase
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: firebase
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: firebase/firebase-ai-logic-basics

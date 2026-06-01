@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: paramchoudhary-resumeskills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: paramchoudhary
+    devai.io/risk-level: low
+spec:
+  displayName: Resumeskills
+  description: 20 specialized skills for resume optimization, ATS analysis, interview prep, and career
+    transitions
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - paramchoudhary
+  - voltagent-awesome-skills
+  metadata:
+    owner: Paramchoudhary
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Paramchoudhary/ResumeSkills

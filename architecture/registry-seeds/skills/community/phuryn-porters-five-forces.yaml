@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: phuryn-porters-five-forces
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: phuryn
+    devai.io/risk-level: low
+spec:
+  displayName: Porters Five Forces
+  description: Porter's Five Forces competitive analysis with strategic insights
+  category: product
+  version: '1'
+  tags:
+  - github
+  - phuryn
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: phuryn
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: phuryn/porters-five-forces

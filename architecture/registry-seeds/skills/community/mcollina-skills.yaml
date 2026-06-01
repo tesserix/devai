@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: mcollina-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: mcollina
+    devai.io/risk-level: low
+spec:
+  displayName: Skills
+  description: '11 skills by Matteo Collina: Node.js, Fastify, TypeScript, OAuth, Git/GitHub, ESLint neostandard,
+    documentation (Diataxis), Node.js core internals, skill optimizer, and more'
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - mcollina
+  - voltagent-awesome-skills
+  metadata:
+    owner: mcollina
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: mcollina/skills

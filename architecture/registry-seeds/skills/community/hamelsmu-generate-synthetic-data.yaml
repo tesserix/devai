@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: hamelsmu-generate-synthetic-data
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: hamelsmu
+    devai.io/risk-level: low
+spec:
+  displayName: Generate Synthetic Data
+  description: Create diverse synthetic test inputs for LLM evals
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - hamelsmu
+  - voltagent-awesome-skills
+  metadata:
+    owner: hamelsmu
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: hamelsmu/generate-synthetic-data

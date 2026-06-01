@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: apollographql-apollo-server
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: apollographql
+    devai.io/risk-level: low
+spec:
+  displayName: Apollo Server
+  description: Build GraphQL servers using Apollo Server 5
+  category: devtools
+  version: '1'
+  tags:
+  - apollographql
+  - devtools
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: apollographql
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: apollographql/apollo-server

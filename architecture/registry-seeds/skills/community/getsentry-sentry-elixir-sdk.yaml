@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: getsentry-sentry-elixir-sdk
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: sre
+    devai.io/team: getsentry
+    devai.io/risk-level: low
+spec:
+  displayName: Sentry Elixir Sdk
+  description: Full Sentry SDK setup for Elixir, Phoenix, Plug, LiveView, Oban, and Quantum
+  category: sre
+  version: '1'
+  tags:
+  - getsentry
+  - officialskills.sh
+  - sre
+  - voltagent-awesome-skills
+  metadata:
+    owner: getsentry
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: getsentry/sentry-elixir-sdk

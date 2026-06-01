@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: obra-writing-plans
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: obra
+    devai.io/risk-level: low
+spec:
+  displayName: Writing Plans
+  description: Create strategic documentation
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - github
+  - obra
+  - voltagent-awesome-skills
+  metadata:
+    owner: obra
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: obra/writing-plans

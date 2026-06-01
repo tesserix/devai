@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: hashicorp-terraform-test
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: infra
+    devai.io/team: hashicorp
+    devai.io/risk-level: medium
+spec:
+  displayName: Terraform Test
+  description: Built-in testing framework for Terraform configurations with .tftest.hcl files
+  category: infra
+  version: '1'
+  tags:
+  - hashicorp
+  - infra
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: hashicorp
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: hashicorp/terraform-test

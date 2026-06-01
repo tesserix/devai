@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: mongodb-mongodb-search-and-ai
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: mongodb
+    devai.io/risk-level: low
+spec:
+  displayName: Mongodb Search And Ai
+  description: Implement Atlas Search and AI-powered recommendations with vector search
+  category: data
+  version: '1'
+  tags:
+  - data
+  - mongodb
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: mongodb
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: mongodb/mongodb-search-and-ai

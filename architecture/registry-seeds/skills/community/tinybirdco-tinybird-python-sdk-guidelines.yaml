@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: tinybirdco-tinybird-python-sdk-guidelines
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: tinybirdco
+    devai.io/risk-level: low
+spec:
+  displayName: Tinybird Python Sdk Guidelines
+  description: Tinybird Python SDK usage guidelines
+  category: data
+  version: '1'
+  tags:
+  - data
+  - officialskills.sh
+  - tinybirdco
+  - voltagent-awesome-skills
+  metadata:
+    owner: tinybirdco
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: tinybirdco/tinybird-python-sdk-guidelines

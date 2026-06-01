@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: openaccountants-openaccountants
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: openaccountants
+    devai.io/risk-level: low
+spec:
+  displayName: Openaccountants
+  description: 371 tax classification skills across 134 countries
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - openaccountants
+  - voltagent-awesome-skills
+  metadata:
+    owner: openaccountants
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: openaccountants/openaccountants

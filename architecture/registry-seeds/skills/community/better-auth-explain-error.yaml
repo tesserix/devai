@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: better-auth-explain-error
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: auth
+    devai.io/team: better-auth
+    devai.io/risk-level: low
+spec:
+  displayName: Explain Error
+  description: Explain Better Auth error messages
+  category: auth
+  version: '1'
+  tags:
+  - auth
+  - better-auth
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: better-auth
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: better-auth/explain-error

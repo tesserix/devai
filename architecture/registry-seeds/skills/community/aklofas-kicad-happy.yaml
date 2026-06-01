@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: aklofas-kicad-happy
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: aklofas
+    devai.io/risk-level: low
+spec:
+  displayName: Kicad Happy
+  description: AI-powered KiCad electronics design review and analysis
+  category: general
+  version: '1'
+  tags:
+  - aklofas
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: aklofas
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: aklofas/kicad-happy

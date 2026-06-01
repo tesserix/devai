@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: voidborne-d-humanize-chinese
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: voidborne-d
+    devai.io/risk-level: low
+spec:
+  displayName: Humanize Chinese
+  description: Detect and rewrite AI-generated Chinese text; rule-ensemble scoring, 7 style transforms,
+    academic AIGC reduction
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voidborne-d
+  - voltagent-awesome-skills
+  metadata:
+    owner: voidborne-d
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: voidborne-d/humanize-chinese

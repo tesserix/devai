@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: tinybirdco-tinybird-cli-guidelines
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: tinybirdco
+    devai.io/risk-level: low
+spec:
+  displayName: Tinybird Cli Guidelines
+  description: Tinybird CLI usage guidelines and commands
+  category: data
+  version: '1'
+  tags:
+  - data
+  - officialskills.sh
+  - tinybirdco
+  - voltagent-awesome-skills
+  metadata:
+    owner: tinybirdco
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: tinybirdco/tinybird-cli-guidelines

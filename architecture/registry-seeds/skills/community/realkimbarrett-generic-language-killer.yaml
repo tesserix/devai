@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: realkimbarrett-generic-language-killer
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: marketing
+    devai.io/team: realkimbarrett
+    devai.io/risk-level: low
+spec:
+  displayName: Generic Language Killer
+  description: Remove vague, corporate, or AI-sounding language and replace it with clear, specific, human
+    wording
+  category: marketing
+  version: '1'
+  tags:
+  - github
+  - marketing
+  - realkimbarrett
+  - voltagent-awesome-skills
+  metadata:
+    owner: realkimbarrett
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: realkimbarrett/generic-language-killer

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: callstackincubator-github
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: callstackincubator
+    devai.io/risk-level: low
+spec:
+  displayName: Github
+  description: GitHub workflow patterns for PRs, code review, branching
+  category: general
+  version: '1'
+  tags:
+  - callstackincubator
+  - general
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: callstackincubator
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: callstackincubator/github

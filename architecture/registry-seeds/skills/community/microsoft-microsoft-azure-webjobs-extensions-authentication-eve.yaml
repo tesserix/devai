@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: microsoft-microsoft-azure-webjobs-extensions-authentication-eve
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: microsoft
+    devai.io/risk-level: low
+spec:
+  displayName: Microsoft Azure Webjobs Extensions Authentication Events Dotnet
+  description: Entra ID custom auth events handler
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - microsoft
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: microsoft
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: microsoft/microsoft-azure-webjobs-extensions-authentication-events-dotnet

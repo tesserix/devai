@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: microsoft-azure-data-tables-py
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: microsoft
+    devai.io/risk-level: low
+spec:
+  displayName: Azure Data Tables Py
+  description: NoSQL key-value table storage
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - microsoft
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: microsoft
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: microsoft/azure-data-tables-py

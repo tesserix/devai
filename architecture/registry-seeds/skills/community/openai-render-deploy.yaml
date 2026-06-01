@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: openai-render-deploy
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: openai
+    devai.io/risk-level: low
+spec:
+  displayName: Render Deploy
+  description: Deploy applications to Render's cloud platform using Git-backed services
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - officialskills.sh
+  - openai
+  - voltagent-awesome-skills
+  metadata:
+    owner: openai
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: openai/render-deploy

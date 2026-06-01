@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: expo-expo-dev-client
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: expo
+    devai.io/risk-level: low
+spec:
+  displayName: Expo Dev Client
+  description: Build and distribute Expo dev clients locally or via TestFlight
+  category: frontend
+  version: '1'
+  tags:
+  - expo
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: expo
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: expo/expo-dev-client

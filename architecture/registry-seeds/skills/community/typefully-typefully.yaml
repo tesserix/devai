@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: typefully-typefully
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: marketing
+    devai.io/team: typefully
+    devai.io/risk-level: low
+spec:
+  displayName: Typefully
+  description: Create, schedule, and publish social media content across X, LinkedIn, Threads, Bluesky,
+    and Mastodon
+  category: marketing
+  version: '1'
+  tags:
+  - marketing
+  - officialskills.sh
+  - typefully
+  - voltagent-awesome-skills
+  metadata:
+    owner: typefully
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: typefully/typefully

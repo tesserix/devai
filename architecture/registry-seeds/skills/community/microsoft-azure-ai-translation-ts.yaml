@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: microsoft-azure-ai-translation-ts
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: microsoft
+    devai.io/risk-level: low
+spec:
+  displayName: Azure Ai Translation Ts
+  description: Text and document translation
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - microsoft
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: microsoft
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: microsoft/azure-ai-translation-ts

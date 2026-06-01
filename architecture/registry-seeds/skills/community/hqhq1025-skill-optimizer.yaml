@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: hqhq1025-skill-optimizer
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: hqhq1025
+    devai.io/risk-level: low
+spec:
+  displayName: Skill Optimizer
+  description: Diagnose and optimize Agent Skills (SKILL.md) with real session data and research-backed
+    static analysis. Works with Claude Code, Codex, and any Agent Skills-compatible agent
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - hqhq1025
+  - voltagent-awesome-skills
+  metadata:
+    owner: hqhq1025
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: hqhq1025/skill-optimizer

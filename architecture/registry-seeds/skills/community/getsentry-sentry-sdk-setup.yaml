@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: getsentry-sentry-sdk-setup
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: sre
+    devai.io/team: getsentry
+    devai.io/risk-level: low
+spec:
+  displayName: Sentry Sdk Setup
+  description: "Set up Sentry in any language or framework \u2014 detects platform and routes to the right\
+    \ SDK"
+  category: sre
+  version: '1'
+  tags:
+  - getsentry
+  - officialskills.sh
+  - sre
+  - voltagent-awesome-skills
+  metadata:
+    owner: getsentry
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: getsentry/sentry-sdk-setup

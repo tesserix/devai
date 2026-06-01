@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: k-kolomeitsev-data-structure-protocol
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: k-kolomeitsev
+    devai.io/risk-level: low
+spec:
+  displayName: Data Structure Protocol
+  description: "Graph-based long-term memory skill for AI (LLM) coding agents \u2014 faster context, fewer\
+    \ tokens, safer refactors"
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - k-kolomeitsev
+  - voltagent-awesome-skills
+  metadata:
+    owner: k-kolomeitsev
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: k-kolomeitsev/data-structure-protocol

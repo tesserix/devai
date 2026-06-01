@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: cloudai-x-threejs-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: cloudai-x
+    devai.io/risk-level: low
+spec:
+  displayName: Threejs Skills
+  description: Three.js skills for creating 3D elements and interactive experiences
+  category: general
+  version: '1'
+  tags:
+  - cloudai-x
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: CloudAI-X
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: CloudAI-X/threejs-skills

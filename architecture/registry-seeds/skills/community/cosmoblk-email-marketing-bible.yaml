@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: cosmoblk-email-marketing-bible
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: cosmoblk
+    devai.io/risk-level: low
+spec:
+  displayName: Email Marketing Bible
+  description: 55K-word email marketing guide as an AI skill
+  category: general
+  version: '1'
+  tags:
+  - cosmoblk
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: CosmoBlk
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: CosmoBlk/email-marketing-bible

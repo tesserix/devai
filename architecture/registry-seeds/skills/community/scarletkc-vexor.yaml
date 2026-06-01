@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: scarletkc-vexor
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: scarletkc
+    devai.io/risk-level: low
+spec:
+  displayName: Vexor
+  description: Vector-powered CLI for semantic file search with a Claude/Codex skill
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - scarletkc
+  - voltagent-awesome-skills
+  metadata:
+    owner: scarletkc
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: scarletkc/vexor

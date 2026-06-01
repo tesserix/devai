@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: huggingface-hugging-face-vision-trainer
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: huggingface
+    devai.io/risk-level: low
+spec:
+  displayName: Hugging Face Vision Trainer
+  description: Train vision models on HF infrastructure
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - huggingface
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: huggingface
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: huggingface/hugging-face-vision-trainer

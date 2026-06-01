@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: wanshuiyin-auto-claude-code-research-in-sleep
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: wanshuiyin
+    devai.io/risk-level: low
+spec:
+  displayName: Auto Claude Code Research In Sleep
+  description: Autonomous ML research with cross-model review loops and GPU deployment
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voltagent-awesome-skills
+  - wanshuiyin
+  metadata:
+    owner: wanshuiyin
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: wanshuiyin/Auto-claude-code-research-in-sleep

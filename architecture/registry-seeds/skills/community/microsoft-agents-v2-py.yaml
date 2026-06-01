@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: microsoft-agents-v2-py
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: microsoft
+    devai.io/risk-level: low
+spec:
+  displayName: Agents V2 Py
+  description: "Foundry Agents SDK \u2014 container-based agents with custom images"
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - microsoft
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: microsoft
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: microsoft/agents-v2-py

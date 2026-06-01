@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: omkamal-pypict-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: omkamal
+    devai.io/risk-level: low
+spec:
+  displayName: Pypict Skill
+  description: Pairwise test generation
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - omkamal
+  - voltagent-awesome-skills
+  metadata:
+    owner: omkamal
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: omkamal/pypict-skill

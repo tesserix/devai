@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: sanjay3290-deep-research
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: sanjay3290
+    devai.io/risk-level: low
+spec:
+  displayName: Deep Research
+  description: Autonomous multi-step research using Gemini Deep Research Agent
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - sanjay3290
+  - voltagent-awesome-skills
+  metadata:
+    owner: sanjay3290
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: sanjay3290/deep-research

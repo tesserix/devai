@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: minimax-ai-minimax-xlsx
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: minimax-ai
+    devai.io/risk-level: low
+spec:
+  displayName: Minimax Xlsx
+  description: Create, read, analyze, and validate Excel/spreadsheet files with zero format loss
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - minimax-ai
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: MiniMax-AI
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: MiniMax-AI/minimax-xlsx

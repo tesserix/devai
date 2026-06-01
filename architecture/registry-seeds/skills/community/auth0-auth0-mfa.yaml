@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: auth0-auth0-mfa
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: auth
+    devai.io/team: auth0
+    devai.io/risk-level: low
+spec:
+  displayName: Auth0 Mfa
+  description: Add Multi-Factor Authentication to Auth0-powered apps
+  category: auth
+  version: '1'
+  tags:
+  - auth
+  - auth0
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: auth0
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: auth0/auth0-mfa

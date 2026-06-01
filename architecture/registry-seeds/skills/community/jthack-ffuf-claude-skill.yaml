@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: jthack-ffuf-claude-skill
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: jthack
+    devai.io/risk-level: low
+spec:
+  displayName: Ffuf Claude Skill
+  description: Web fuzzing with ffuf
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - jthack
+  - voltagent-awesome-skills
+  metadata:
+    owner: jthack
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: jthack/ffuf-claude-skill

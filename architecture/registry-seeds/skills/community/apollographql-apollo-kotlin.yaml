@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: apollographql-apollo-kotlin
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: apollographql
+    devai.io/risk-level: low
+spec:
+  displayName: Apollo Kotlin
+  description: A GraphQL client for Android, JVM, and Kotlin Multiplatform projects
+  category: devtools
+  version: '1'
+  tags:
+  - apollographql
+  - devtools
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: apollographql
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: apollographql/apollo-kotlin

@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: nvidia-deepstream-import-vision-model
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: nvidia
+    devai.io/risk-level: low
+spec:
+  displayName: Deepstream Import Vision Model
+  description: '> Use this skill to bring any vision model from HuggingFace or NVIDIA NGC into an NVIDIA
+    DeepStream pipeline with end-to-end automation: ONNX download, SafeTensors export, TRT engi...'
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - nvidia
+  - voltagent-awesome-skills
+  metadata:
+    owner: NVIDIA
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NVIDIA/deepstream/deepstream-import-vision-model

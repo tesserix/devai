@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: honeydew-ai-honeydew-ai-coding-agents-plugins
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: honeydew-ai
+    devai.io/risk-level: low
+spec:
+  displayName: Honeydew Ai Coding Agents Plugins
+  description: '11 skills for the Honeydew semantic layer over Snowflake, Databricks, and BigQuery: model
+    exploration, entity/relation/attribute/metric/context/domain creation, validation, query, filtering,
+    and workspace branching'
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - honeydew-ai
+  - voltagent-awesome-skills
+  metadata:
+    owner: honeydew-ai
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: honeydew-ai/honeydew-ai-coding-agents-plugins

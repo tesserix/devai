@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: joannis-claude-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: joannis
+    devai.io/risk-level: low
+spec:
+  displayName: Claude Skills
+  description: Swift Server development guidance with linting tool for best practices
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - joannis
+  - voltagent-awesome-skills
+  metadata:
+    owner: Joannis
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Joannis/claude-skills

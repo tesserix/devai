@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: firecrawl-firecrawl-build
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: firecrawl
+    devai.io/risk-level: low
+spec:
+  displayName: Firecrawl Build
+  description: Integrate Firecrawl into application code for web search, scraping, extraction, and browser
+    interaction
+  category: devtools
+  version: '1'
+  tags:
+  - devtools
+  - firecrawl
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: firecrawl
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: firecrawl/firecrawl-build

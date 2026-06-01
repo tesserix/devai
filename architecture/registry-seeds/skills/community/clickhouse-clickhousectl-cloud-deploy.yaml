@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: clickhouse-clickhousectl-cloud-deploy
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: data
+    devai.io/team: clickhouse
+    devai.io/risk-level: low
+spec:
+  displayName: Clickhousectl Cloud Deploy
+  description: Deploy to ClickHouse Cloud and migrate from local setups with clickhousectl
+  category: data
+  version: '1'
+  tags:
+  - clickhouse
+  - data
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: clickhouse
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: clickhouse/clickhousectl-cloud-deploy

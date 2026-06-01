@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: angular-angular-new-app
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: angular
+    devai.io/risk-level: low
+spec:
+  displayName: Angular New App
+  description: Create new Angular apps using CLI with modern best practices
+  category: frontend
+  version: '1'
+  tags:
+  - angular
+  - frontend
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: angular
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: angular/angular-new-app

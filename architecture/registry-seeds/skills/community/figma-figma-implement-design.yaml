@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: figma-figma-implement-design
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: figma
+    devai.io/risk-level: low
+spec:
+  displayName: Figma Implement Design
+  description: Translate Figma designs into production-ready application code with 1:1 fidelity
+  category: frontend
+  version: '1'
+  tags:
+  - figma
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: figma
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: figma/figma-implement-design

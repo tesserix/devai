@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: google-google-cloud-waf-cost-optimization
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: google
+    devai.io/risk-level: low
+spec:
+  displayName: Google Cloud Waf Cost Optimization
+  description: Generates cost optimization guidance for Google Cloud workloads based on the Google Cloud
+    Well-Architected Framework (WAF).
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - google
+  - voltagent-awesome-skills
+  metadata:
+    owner: google
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: google/cloud/google-cloud-waf-cost-optimization

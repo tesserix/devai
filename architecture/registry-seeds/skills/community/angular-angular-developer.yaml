@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: angular-angular-developer
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: angular
+    devai.io/risk-level: low
+spec:
+  displayName: Angular Developer
+  description: Generate Angular code and architectural guidance for components, services, reactivity
+  category: frontend
+  version: '1'
+  tags:
+  - angular
+  - frontend
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: angular
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: angular/angular-developer

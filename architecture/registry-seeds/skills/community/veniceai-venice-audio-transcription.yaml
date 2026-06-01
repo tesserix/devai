@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: veniceai-venice-audio-transcription
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: veniceai
+    devai.io/risk-level: low
+spec:
+  displayName: Venice Audio Transcription
+  description: Audio transcription models and speech-to-text options
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - github
+  - veniceai
+  - voltagent-awesome-skills
+  metadata:
+    owner: veniceai
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: veniceai/venice-audio-transcription

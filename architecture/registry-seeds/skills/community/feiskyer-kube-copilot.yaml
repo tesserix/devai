@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: feiskyer-kube-copilot
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: awesome-ai-sre
+    devai.io/category: sre
+    devai.io/team: feiskyer
+    devai.io/risk-level: low
+spec:
+  displayName: Kube Copilot
+  description: Open source natural language to Kubernetes operations with manifest generation and security
+    scanning.
+  category: sre
+  version: '1'
+  tags:
+  - awesome-ai-sre
+  - feiskyer
+  - github
+  - sre
+  metadata:
+    owner: feiskyer
+    origin: awesome-ai-sre
+    source: github
+    upstream_id: feiskyer/kube-copilot

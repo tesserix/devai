@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: stripe-stripe-best-practices
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: fintech
+    devai.io/team: stripe
+    devai.io/risk-level: medium
+spec:
+  displayName: Stripe Best Practices
+  description: Best practices for building Stripe integrations
+  category: fintech
+  version: '1'
+  tags:
+  - fintech
+  - officialskills.sh
+  - stripe
+  - voltagent-awesome-skills
+  metadata:
+    owner: stripe
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: stripe/stripe-best-practices

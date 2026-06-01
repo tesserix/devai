@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: phuryn-pestle-analysis
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: phuryn
+    devai.io/risk-level: low
+spec:
+  displayName: Pestle Analysis
+  description: PESTLE analysis across Political, Economic, Social, Tech, Legal, Environmental
+  category: product
+  version: '1'
+  tags:
+  - github
+  - phuryn
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: phuryn
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: phuryn/pestle-analysis

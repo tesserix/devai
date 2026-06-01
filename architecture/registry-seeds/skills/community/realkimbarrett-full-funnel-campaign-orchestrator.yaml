@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: realkimbarrett-full-funnel-campaign-orchestrator
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: marketing
+    devai.io/team: realkimbarrett
+    devai.io/risk-level: low
+spec:
+  displayName: Full Funnel Campaign Orchestrator
+  description: Coordinate all skills to build a complete ads + funnel campaign end-to-end
+  category: marketing
+  version: '1'
+  tags:
+  - github
+  - marketing
+  - realkimbarrett
+  - voltagent-awesome-skills
+  metadata:
+    owner: realkimbarrett
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: realkimbarrett/full-funnel-campaign-orchestrator

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: hashicorp-azure-verified-modules
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: infra
+    devai.io/team: hashicorp
+    devai.io/risk-level: medium
+spec:
+  displayName: Azure Verified Modules
+  description: Azure Verified Modules (AVM) certification standards for Terraform modules
+  category: infra
+  version: '1'
+  tags:
+  - hashicorp
+  - infra
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: hashicorp
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: hashicorp/azure-verified-modules

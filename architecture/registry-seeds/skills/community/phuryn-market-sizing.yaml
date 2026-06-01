@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: phuryn-market-sizing
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: product
+    devai.io/team: phuryn
+    devai.io/risk-level: low
+spec:
+  displayName: Market Sizing
+  description: Estimate TAM, SAM, SOM with top-down and bottom-up approaches
+  category: product
+  version: '1'
+  tags:
+  - github
+  - phuryn
+  - product
+  - voltagent-awesome-skills
+  metadata:
+    owner: phuryn
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: phuryn/market-sizing

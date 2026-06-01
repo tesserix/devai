@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: brave-news-search
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: brave
+    devai.io/risk-level: low
+spec:
+  displayName: News Search
+  description: Search Brave's news index with article metadata
+  category: devtools
+  version: '1'
+  tags:
+  - brave
+  - devtools
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: brave
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: brave/news-search

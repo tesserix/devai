@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: openai-figma-use
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: openai
+    devai.io/risk-level: low
+spec:
+  displayName: Figma Use
+  description: "Prerequisite skill for every use_figma tool call \u2014 write/read actions in Figma context"
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - officialskills.sh
+  - openai
+  - voltagent-awesome-skills
+  metadata:
+    owner: openai
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: openai/figma-use

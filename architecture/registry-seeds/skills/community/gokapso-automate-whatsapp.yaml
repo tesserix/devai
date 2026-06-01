@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: gokapso-automate-whatsapp
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: gokapso
+    devai.io/risk-level: low
+spec:
+  displayName: Automate Whatsapp
+  description: Build WhatsApp automations with workflows and agents
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - gokapso
+  - voltagent-awesome-skills
+  metadata:
+    owner: gokapso
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: gokapso/automate-whatsapp

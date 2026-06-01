@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: netlify-netlify-edge-functions
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: infra
+    devai.io/team: netlify
+    devai.io/risk-level: medium
+spec:
+  displayName: Netlify Edge Functions
+  description: Low-latency edge middleware and geolocation logic
+  category: infra
+  version: '1'
+  tags:
+  - infra
+  - netlify
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: netlify
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: netlify/netlify-edge-functions

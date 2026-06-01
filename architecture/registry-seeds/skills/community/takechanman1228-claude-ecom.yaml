@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: takechanman1228-claude-ecom
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: takechanman1228
+    devai.io/risk-level: low
+spec:
+  displayName: Claude Ecom
+  description: Ecommerce CSV to business review with KPI decomposition
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - takechanman1228
+  - voltagent-awesome-skills
+  metadata:
+    owner: takechanman1228
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: takechanman1228/claude-ecom

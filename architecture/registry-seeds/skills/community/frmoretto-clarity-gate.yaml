@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: frmoretto-clarity-gate
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: frmoretto
+    devai.io/risk-level: low
+spec:
+  displayName: Clarity Gate
+  description: Epistemic quality verification for RAG systems
+  category: general
+  version: '1'
+  tags:
+  - frmoretto
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: frmoretto
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: frmoretto/clarity-gate

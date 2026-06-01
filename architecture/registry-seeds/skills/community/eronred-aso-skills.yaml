@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: eronred-aso-skills
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: eronred
+    devai.io/risk-level: low
+spec:
+  displayName: Aso Skills
+  description: 30+ App Store Optimization skills for keyword research, metadata optimization, competitor
+    analysis, creative optimization, and mobile growth strategies via Appeeky API
+  category: general
+  version: '1'
+  tags:
+  - eronred
+  - general
+  - github
+  - voltagent-awesome-skills
+  metadata:
+    owner: Eronred
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Eronred/aso-skills

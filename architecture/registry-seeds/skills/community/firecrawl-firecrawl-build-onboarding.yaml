@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: firecrawl-firecrawl-build-onboarding
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: devtools
+    devai.io/team: firecrawl
+    devai.io/risk-level: low
+spec:
+  displayName: Firecrawl Build Onboarding
+  description: Set up Firecrawl credentials and SDK in a project for the first integration
+  category: devtools
+  version: '1'
+  tags:
+  - devtools
+  - firecrawl
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: firecrawl
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: firecrawl/firecrawl-build-onboarding

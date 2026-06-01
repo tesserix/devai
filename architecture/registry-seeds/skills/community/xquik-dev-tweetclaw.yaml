@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: xquik-dev-tweetclaw
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: xquik-dev
+    devai.io/risk-level: low
+spec:
+  displayName: Tweetclaw
+  description: Post tweets, replies, DMs; search, monitor, run giveaways
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - voltagent-awesome-skills
+  - xquik-dev
+  metadata:
+    owner: Xquik-dev
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: Xquik-dev/tweetclaw

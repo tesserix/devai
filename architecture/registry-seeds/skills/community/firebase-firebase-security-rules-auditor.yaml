@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: firebase-firebase-security-rules-auditor
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: ai
+    devai.io/team: firebase
+    devai.io/risk-level: low
+spec:
+  displayName: Firebase Security Rules Auditor
+  description: Audit Firestore security rules and flag risky patterns
+  category: ai
+  version: '1'
+  tags:
+  - ai
+  - firebase
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: firebase
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: firebase/firebase-security-rules-auditor

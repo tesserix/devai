@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: obra-test-driven-development
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: coding
+    devai.io/team: obra
+    devai.io/risk-level: low
+spec:
+  displayName: Test Driven Development
+  description: Write tests before implementing code
+  category: coding
+  version: '1'
+  tags:
+  - coding
+  - github
+  - obra
+  - voltagent-awesome-skills
+  metadata:
+    owner: obra
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: obra/test-driven-development

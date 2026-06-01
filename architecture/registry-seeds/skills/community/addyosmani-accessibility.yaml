@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: addyosmani-accessibility
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: frontend
+    devai.io/team: addyosmani
+    devai.io/risk-level: low
+spec:
+  displayName: Accessibility
+  description: WCAG compliance, screen reader support, and keyboard navigation
+  category: frontend
+  version: '1'
+  tags:
+  - addyosmani
+  - frontend
+  - officialskills.sh
+  - voltagent-awesome-skills
+  metadata:
+    owner: addyosmani
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: addyosmani/accessibility

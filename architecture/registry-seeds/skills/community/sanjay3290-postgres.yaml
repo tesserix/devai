@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: sanjay3290-postgres
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: sanjay3290
+    devai.io/risk-level: low
+spec:
+  displayName: Postgres
+  description: Execute safe read-only SQL queries against PostgreSQL databases
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - sanjay3290
+  - voltagent-awesome-skills
+  metadata:
+    owner: sanjay3290
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: sanjay3290/postgres

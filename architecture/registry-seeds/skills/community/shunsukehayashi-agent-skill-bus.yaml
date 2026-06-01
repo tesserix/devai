@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: shunsukehayashi-agent-skill-bus
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: shunsukehayashi
+    devai.io/risk-level: low
+spec:
+  displayName: Agent Skill Bus
+  description: Self-improving task orchestration for AI agent systems
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - shunsukehayashi
+  - voltagent-awesome-skills
+  metadata:
+    owner: ShunsukeHayashi
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: ShunsukeHayashi/agent-skill-bus

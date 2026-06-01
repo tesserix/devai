@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: neolabhq-sdd
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: general
+    devai.io/team: neolabhq
+    devai.io/risk-level: low
+spec:
+  displayName: Sdd
+  description: Spec-driven development workflow that transforms prompts into production-ready implementations
+    through structured planning, architecture design, and LLM-as-a-Judge based quality gates.
+  category: general
+  version: '1'
+  tags:
+  - general
+  - github
+  - neolabhq
+  - voltagent-awesome-skills
+  metadata:
+    owner: NeoLabHQ
+    origin: voltagent-awesome-skills
+    source: github
+    upstream_id: NeoLabHQ/sdd

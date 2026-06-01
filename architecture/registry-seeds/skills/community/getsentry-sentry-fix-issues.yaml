@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: getsentry-sentry-fix-issues
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: sre
+    devai.io/team: getsentry
+    devai.io/risk-level: low
+spec:
+  displayName: Sentry Fix Issues
+  description: Find and fix Sentry issues with stack trace, breadcrumb, and trace context via MCP
+  category: sre
+  version: '1'
+  tags:
+  - getsentry
+  - officialskills.sh
+  - sre
+  - voltagent-awesome-skills
+  metadata:
+    owner: getsentry
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: getsentry/sentry-fix-issues

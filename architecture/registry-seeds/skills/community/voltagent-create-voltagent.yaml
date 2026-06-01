@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: voltagent-create-voltagent
+  namespace: devai
+  labels:
+    devai.io/source: community
+    devai.io/origin: voltagent-awesome-skills
+    devai.io/category: agents
+    devai.io/team: voltagent
+    devai.io/risk-level: low
+spec:
+  displayName: Create Voltagent
+  description: Project setup guide with CLI and manual steps
+  category: agents
+  version: '1'
+  tags:
+  - agents
+  - officialskills.sh
+  - voltagent
+  - voltagent-awesome-skills
+  metadata:
+    owner: voltagent
+    origin: voltagent-awesome-skills
+    source: officialskills.sh
+    upstream_id: voltagent/create-voltagent
