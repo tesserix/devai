@@ -312,6 +312,28 @@ export const api = {
     apiFetch<{ deleted: string }>(`/authoring/blueprints/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
+
+  // ── Teams + crews (the human team → AI crew model) ──────────────────
+  listTeams: () => apiFetch<Team[]>("/teams"),
+
+  listCrews: (teamId: string) => apiFetch<Crew[]>(`/teams/${encodeURIComponent(teamId)}/crews`),
+
+  // ── Composer dispatch (Cursor-style /compose) ───────────────────────
+  // Posts intent + @-context + image keys + team→crew selection to the
+  // same pipeline dispatch endpoint the webhook/Kanban paths use.
+  dispatchCompose: (body: ComposeRequest) =>
+    apiFetch<DispatchResult>("/pipeline/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // Roll the working tree back to a prior checkpoint (backend endpoint
+  // lands in Phase 5; the timeline's ↩ button calls this).
+  rollbackTo: (taskId: string, sha: string) =>
+    apiFetch<{ task_id: string; sha: string; status: string }>(
+      `/pipeline/runs/${encodeURIComponent(taskId)}/rollback`,
+      { method: "POST", body: JSON.stringify({ sha }) }
+    ),
 };
 
 // ── Authoring types ───────────────────────────────────────────────
@@ -389,6 +411,67 @@ export interface AuthoredDefinition {
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+// ── Composer / teams types ────────────────────────────────────────────
+
+export interface Team {
+  id: string;
+  name: string;
+  org_id?: string;
+  created_by?: string;
+}
+
+export interface CrewMemberRef {
+  specialization: string;
+  role_label?: string;
+  allowed_tools?: string[];
+}
+
+export interface Crew {
+  id: string;
+  team_id: string;
+  name: string;
+  display_name?: string;
+  description?: string;
+  lead: string;
+  members: CrewMemberRef[];
+}
+
+export interface ContextRef {
+  type: "file" | "symbol" | "url";
+  ref: string;
+}
+
+export interface ComposeRequest {
+  intent: string;
+  repo: string;
+  blueprint?: string;
+  trigger_type?: string;
+  label?: string;
+  team_id?: string;
+  crew_id?: string;
+  context_refs?: ContextRef[];
+  attachments?: string[];
+}
+
+export interface DispatchResult {
+  task_id: string;
+  blueprint: string;
+  state: string;
+  team_id?: string;
+}
+
+// One server-sent stage/terminal/checkpoint event off /pipeline/events/stream.
+export interface StreamEvent {
+  timestamp: number;
+  task_id: string;
+  stage?: string;
+  phase?: string;
+  message?: string;
+  error?: string | null;
+  checkpoint?: string | null;
+  type?: string;
 }
 
 export type OnboardingStateValue =
