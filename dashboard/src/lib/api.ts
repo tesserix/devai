@@ -109,6 +109,27 @@ async function errorMessage(res: Response): Promise<string> {
   return `API ${res.status}${detail ? `: ${detail}` : ""}`;
 }
 
+// Map a run from any backend shape (legacy {run_id,stage,agents} or Fiber
+// {id,state,current_stage}) into the PipelineRun the dashboard renders. Always
+// returns a string run_id/stage so downstream .slice()/.replace() are safe.
+function normalizeRun(raw: unknown): PipelineRun {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const runId = (r.run_id ?? r.id ?? r.task_id ?? "") as string;
+  const stage = (r.stage ?? r.current_stage ?? r.state ?? "unknown") as string;
+  const agents =
+    (r.agents as PipelineRun["agents"]) ??
+    (r.agent_statuses as PipelineRun["agents"]) ??
+    {};
+  return {
+    ...(r as object),
+    run_id: runId,
+    stage,
+    repo: (r.repo as string) ?? "",
+    created_at: (r.created_at as string) ?? "",
+    agents,
+  } as PipelineRun;
+}
+
 export const api = {
   // Auth
   me: () => apiFetch<{ login: string; name: string; avatar_url: string }>("/me"),
@@ -132,11 +153,19 @@ export const api = {
       { method: "DELETE" }
     ),
 
-  // Pipeline
-  listRuns: (repo?: string, limit = 20) =>
-    apiFetch<PipelineRun[]>(`/pipeline/runs?limit=${limit}${repo ? `&repo=${repo}` : ""}`),
+  // Pipeline. The Fiber pipeline serializes a task as {id, state, current_stage,
+  // …} but the dashboard's PipelineRun shape is {run_id, stage, agents}. Normalize
+  // at the boundary so a missing run_id never reaches run.run_id.slice() and
+  // white-screens the page.
+  listRuns: async (repo?: string, limit = 20) => {
+    const raw = await apiFetch<unknown[]>(
+      `/pipeline/runs?limit=${limit}${repo ? `&repo=${repo}` : ""}`
+    );
+    return (Array.isArray(raw) ? raw : []).map(normalizeRun);
+  },
 
-  getRun: (runId: string) => apiFetch<PipelineRun>(`/pipeline/runs/${runId}`),
+  getRun: async (runId: string) =>
+    normalizeRun(await apiFetch<unknown>(`/pipeline/runs/${runId}`)),
 
   // Render-ready blueprint graph — the pipeline-flow view draws this directly.
   getBlueprintGraph: (name = "alm-pipeline") =>

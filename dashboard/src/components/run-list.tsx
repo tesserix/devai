@@ -115,7 +115,7 @@ export function RunList({
               <div className="flex items-center gap-2">
                 <div className={clsx("w-1.5 h-1.5 rounded-full shrink-0", STAGE_DOT[run.stage] || "bg-gray-400")} />
                 <span className="text-xs font-mono text-gray-500 dark:text-gray-500">
-                  {run.run_id.slice(0, 8)}
+                  {(run.run_id ?? "").slice(0, 8)}
                 </span>
               </div>
               <span className="text-xs text-gray-400 dark:text-gray-500">
