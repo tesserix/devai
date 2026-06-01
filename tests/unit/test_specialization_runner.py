@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from devai.adapters.llm.base import LLMAdapter, LLMResponse, ToolCall
 from devai.config import Settings
 from devai.pipeline.interfaces import StageDeps

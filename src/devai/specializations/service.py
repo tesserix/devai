@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class SpecializationService:
     def __init__(
         self,
-        config: "Settings",
+        config: Settings,
         *,
         directory: str | Path | None = None,
         registry_client: Any | None = None,
@@ -145,7 +145,7 @@ class SpecializationService:
         except SpecializationRegistryError:
             return None
 
-    def get_full(self, name: str) -> "Specialization | None":
+    def get_full(self, name: str) -> Specialization | None:
         try:
             return self.registry.resolve(name)
         except SpecializationRegistryError:

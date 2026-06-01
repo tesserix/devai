@@ -129,7 +129,7 @@ async def list_repos(
         raise HTTPException(
             status_code=501,
             detail="list_repos is only implemented for the GitHub provider today",
-        )
+        ) from None
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"upstream: {e}") from e
 
@@ -167,7 +167,7 @@ async def list_repos(
             *(_probe_initialised(client, r["full_name"], r["default_branch"]) for r in probe_set),
             return_exceptions=True,
         )
-        for r, is_init in zip(probe_set, results):
+        for r, is_init in zip(probe_set, results, strict=False):
             r["initialised"] = bool(is_init) if not isinstance(is_init, Exception) else False
         want = init_filter == "true"
         out = [r for r in out if r["initialised"] is want]

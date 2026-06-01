@@ -11,12 +11,8 @@ Mirrors `internal/blueprint/registry.go::RegisterDefaults` in Fiber.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps, StageFactory
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

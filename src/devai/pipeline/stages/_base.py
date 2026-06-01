@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.types import DevAITask, StageResult, TaskState
@@ -77,7 +78,7 @@ class AgentAdapter(PipelineStage):
         state = self._build_state(task)
         try:
             patch = await agent.run(state)
-        except Exception as e:  # noqa: BLE001 — bubble up as a stage failure
+        except Exception:  # noqa: BLE001 — bubble up as a stage failure
             logger.exception("stage %s: agent failed", self.name())
             raise
 

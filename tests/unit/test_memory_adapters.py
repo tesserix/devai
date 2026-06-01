@@ -19,22 +19,17 @@ Three layers of coverage:
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import pytest
 
 from devai.adapters.base import AdapterError
 from devai.adapters.memory import (
     KNOWN_PROVIDERS,
-    MemoryAdapter,
     MemoryRecord,
     MemoryType,
     create_memory_adapter,
     memory_registry,
 )
 from devai.adapters.memory.noop import NoopMemoryAdapter
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Fixtures

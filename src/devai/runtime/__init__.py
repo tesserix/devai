@@ -23,13 +23,11 @@ from __future__ import annotations
 from devai.runtime.errors import (
     JobDispatchFailed,
     JobNotFound,
+    RuntimeNotAvailable,
+    RuntimeNotConfigured,
 )
 from devai.runtime.errors import (
     RuntimeError as DevaiRuntimeError,  # alias to avoid stdlib RuntimeError
-)
-from devai.runtime.errors import (
-    RuntimeNotAvailable,
-    RuntimeNotConfigured,
 )
 from devai.runtime.job_spec import (
     PreviewInputs,

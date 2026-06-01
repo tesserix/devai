@@ -23,7 +23,7 @@ monkey-patching this module.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from devai.adapters.base import (
     AdapterError,
@@ -33,9 +33,6 @@ from devai.adapters.base import (
 )
 from devai.adapters.memory.base import MemoryAdapter
 from devai.adapters.memory.noop import NoopMemoryAdapter
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

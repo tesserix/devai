@@ -210,7 +210,7 @@ class Pipeline:
             raise PipelineError(f"unknown task {task_id}")
         try:
             await asyncio.wait_for(evt.wait(), timeout=timeout)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise PipelineError(f"timeout waiting for task {task_id}") from e
         return self._tasks[task_id]
 

@@ -53,31 +53,31 @@ class Skill:
     _remotes: list[Any] = field(default_factory=list)
     _website_url: str = ""
 
-    def description(self, text: str) -> "Skill":
+    def description(self, text: str) -> Skill:
         self._description = text
         return self
 
-    def version(self, v: str) -> "Skill":
+    def version(self, v: str) -> Skill:
         self._version = str(v)
         return self
 
-    def category(self, c: str) -> "Skill":
+    def category(self, c: str) -> Skill:
         self._category = c
         return self
 
-    def title(self, t: str) -> "Skill":
+    def title(self, t: str) -> Skill:
         self._title = t
         return self
 
-    def status(self, s: str) -> "Skill":
+    def status(self, s: str) -> Skill:
         self._status = s
         return self
 
-    def repository(self, url: str, *, kind: str = "git") -> "Skill":
+    def repository(self, url: str, *, kind: str = "git") -> Skill:
         self._repository = {"url": url, "type": kind}
         return self
 
-    def website(self, url: str) -> "Skill":
+    def website(self, url: str) -> Skill:
         self._website_url = url
         return self
 
@@ -115,15 +115,15 @@ class Prompt:
     _content: str = ""
     _description: str = ""
 
-    def version(self, v: str) -> "Prompt":
+    def version(self, v: str) -> Prompt:
         self._version = str(v)
         return self
 
-    def content(self, text: str) -> "Prompt":
+    def content(self, text: str) -> Prompt:
         self._content = text
         return self
 
-    def description(self, text: str) -> "Prompt":
+    def description(self, text: str) -> Prompt:
         self._description = text
         return self
 
@@ -158,31 +158,31 @@ class McpServer:
     _env: dict[str, Any] = field(default_factory=dict)
     _headers: dict[str, Any] = field(default_factory=dict)
 
-    def description(self, text: str) -> "McpServer":
+    def description(self, text: str) -> McpServer:
         self._description = text
         return self
 
-    def version(self, v: str) -> "McpServer":
+    def version(self, v: str) -> McpServer:
         self._version = str(v)
         return self
 
-    def remote(self, url: str) -> "McpServer":
+    def remote(self, url: str) -> McpServer:
         self._type = "remote"
         self._url = url
         return self
 
-    def container(self, image: str, *, args: list[str] | None = None) -> "McpServer":
+    def container(self, image: str, *, args: list[str] | None = None) -> McpServer:
         self._type = "container"
         self._image = image
         if args:
             self._args = list(args)
         return self
 
-    def env(self, **kv: Any) -> "McpServer":
+    def env(self, **kv: Any) -> McpServer:
         self._env.update(kv)
         return self
 
-    def headers(self, **kv: Any) -> "McpServer":
+    def headers(self, **kv: Any) -> McpServer:
         self._headers.update(kv)
         return self
 
@@ -242,58 +242,58 @@ class Agent:
     _status: str = ""
     _website_url: str = ""
 
-    def description(self, text: str) -> "Agent":
+    def description(self, text: str) -> Agent:
         self._description = text
         return self
 
-    def version(self, v: str) -> "Agent":
+    def version(self, v: str) -> Agent:
         self._version = str(v)
         return self
 
-    def image(self, img: str) -> "Agent":
+    def image(self, img: str) -> Agent:
         self._image = img
         return self
 
-    def language(self, lang: str) -> "Agent":
+    def language(self, lang: str) -> Agent:
         self._language = lang
         return self
 
-    def framework(self, fw: str) -> "Agent":
+    def framework(self, fw: str) -> Agent:
         self._framework = fw
         return self
 
-    def model(self, provider: str, model: str) -> "Agent":
+    def model(self, provider: str, model: str) -> Agent:
         self._model_provider = provider
         self._model_name = model
         return self
 
-    def skill(self, *names: str) -> "Agent":
+    def skill(self, *names: str) -> Agent:
         for n in names:
             if n and n not in self._skills:
                 self._skills.append(n)
         return self
 
-    def prompt(self, *names: str) -> "Agent":
+    def prompt(self, *names: str) -> Agent:
         for n in names:
             if n and n not in self._prompts:
                 self._prompts.append(n)
         return self
 
-    def mcp_server(self, *names: str) -> "Agent":
+    def mcp_server(self, *names: str) -> Agent:
         for n in names:
             if n and n not in self._mcp_servers:
                 self._mcp_servers.append(n)
         return self
 
-    def title(self, t: str) -> "Agent":
+    def title(self, t: str) -> Agent:
         self._title = t
         return self
 
-    def status(self, s: str) -> "Agent":
+    def status(self, s: str) -> Agent:
         self._status = s
         return self
 
-    def website(self, url: str) -> "Agent":
+    def website(self, url: str) -> Agent:
         self._website_url = url
         return self
 

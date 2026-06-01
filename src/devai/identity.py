@@ -33,6 +33,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -248,12 +249,12 @@ def _principal_from_bff_cookie(cookie_value: str, request: Request) -> Principal
     exp = data.get("exp", "")
     if exp:
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             when = datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
             if when.tzinfo is None:
-                when = when.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) > when:
+                when = when.replace(tzinfo=UTC)
+            if datetime.now(UTC) > when:
                 return None  # expired
         except Exception:
             pass

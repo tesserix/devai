@@ -8,7 +8,6 @@ running Redis (see tests/integration/).
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from devai.pipeline.service import PipelineService
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BLUEPRINTS_DIR = REPO_ROOT / "blueprints"

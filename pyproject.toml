@@ -104,7 +104,19 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TCH"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # line length — handled by formatter, long strings are fine
+    "TC001",  # typing-only first-party import — acceptable here (runtime use via DI)
+    "TC003",  # typing-only stdlib import — same
+    "B008",   # function call in default arg — FastAPI idiom (Query()/Depends())
+    "N818",   # exception name w/o Error suffix — deliberate (AdapterNotConfigured, …)
+    "UP042",  # (str, Enum) -> StrEnum — cosmetic churn, both are intentional here
+    "SIM105", # contextlib.suppress over try/except/pass — style preference
+    "SIM108", # ternary over if/else — style preference
+    "SIM102", # collapsible if — style preference
+    "E701",   # multiple statements on one line — style preference
+    "UP031",  # printf-style formatting — style preference
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

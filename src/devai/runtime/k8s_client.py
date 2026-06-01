@@ -58,7 +58,7 @@ class RuntimeConfig:
     pod_security_context: dict[str, Any]
 
     @classmethod
-    def from_settings(cls, settings: "Settings") -> "RuntimeConfig":
+    def from_settings(cls, settings: Settings) -> RuntimeConfig:
         """Build a RuntimeConfig from the application-wide Settings.
 
         Reads `k8s_runtime_*` and `runner_*` fields, with conservative
@@ -128,7 +128,8 @@ class K8sJobRuntime:
         if self._connected:
             return
         try:
-            from kubernetes_asyncio import client, config as k8s_config
+            from kubernetes_asyncio import client
+            from kubernetes_asyncio import config as k8s_config
         except ImportError as e:
             raise RuntimeNotAvailable(
                 "kubernetes_asyncio not installed — add it to dependencies"
@@ -403,7 +404,7 @@ class K8sJobRuntime:
 # ─────────────────────────────────────────────────────────────────────
 
 
-async def create_runtime(settings: "Settings") -> K8sJobRuntime | None:
+async def create_runtime(settings: Settings) -> K8sJobRuntime | None:
     """Build + connect a K8sJobRuntime, or return None when impossible.
 
     None is a normal outcome — the runtime is opt-in via

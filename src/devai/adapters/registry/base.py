@@ -69,7 +69,7 @@ class RegistryAdapter(ABC):
         """Publish a single resource envelope (apiVersion/kind/metadata/spec)."""
 
     # ---- lifecycle (Adapter protocol) -------------------------------------
-    async def close(self) -> None:  # noqa: D401 - protocol method
+    async def close(self) -> None:  # noqa: B027, D401 - optional protocol hook, default no-op
         """Release resources. Idempotent; default no-op."""
 
     @abstractmethod

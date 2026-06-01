@@ -40,7 +40,7 @@ class LLMProvider(str, Enum):
     AUTO = "auto"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "LLMProvider | None" = None) -> "LLMProvider":
+    def parse(cls, value: Any, *, default: LLMProvider | None = None) -> LLMProvider:
         if value is None or value == "":
             return default if default is not None else cls.AUTO
         if isinstance(value, cls):
@@ -65,7 +65,7 @@ class RiskLevel(str, Enum):
     CRITICAL = "critical"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "RiskLevel | None" = None) -> "RiskLevel":
+    def parse(cls, value: Any, *, default: RiskLevel | None = None) -> RiskLevel:
         if value is None or value == "":
             return default if default is not None else cls.MEDIUM
         if isinstance(value, cls):

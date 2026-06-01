@@ -36,7 +36,7 @@ class PgVectorMemoryAdapter(MemoryAdapter):
 
     provider_name = "pgvector"
 
-    def __init__(self, database: "Database", *, embedder: Any = None) -> None:
+    def __init__(self, database: Database, *, embedder: Any = None) -> None:
         self._db = database
         self._embedder = embedder  # any object exposing `embed(text) -> list[float]`
 

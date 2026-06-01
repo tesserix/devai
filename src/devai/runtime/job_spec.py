@@ -89,7 +89,7 @@ class RunnerJobInputs:
 
 
 def build_job_spec(
-    cfg: "RuntimeConfig",
+    cfg: RuntimeConfig,
     inputs: RunnerJobInputs,
 ) -> dict[str, Any]:
     """Render a V1Job dict ready for `BatchV1Api.create_namespaced_job`.
@@ -233,7 +233,7 @@ class PreviewInputs:
 
 
 def build_preview_manifests(
-    cfg: "RuntimeConfig",
+    cfg: RuntimeConfig,
     inputs: PreviewInputs,
 ) -> dict[str, dict[str, Any]]:
     """Return `{deployment, service, virtualservice}` for the preview pod.

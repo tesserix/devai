@@ -18,9 +18,9 @@ from devai.blueprint.loader import (
     Blueprint,
     BlueprintLoadError,
     StageSpec,
+    discover_blueprints,
     load_blueprint,
     load_blueprint_from_string,
-    discover_blueprints,
 )
 from devai.blueprint.registry import StageRegistry, register_defaults
 

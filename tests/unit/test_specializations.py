@@ -36,7 +36,6 @@ from devai.specializations import (
 )
 from devai.specializations.validator import (
     HandoverValidationError,
-    HandoverViolation,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

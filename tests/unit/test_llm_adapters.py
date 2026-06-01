@@ -17,10 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-from devai.adapters.base import AdapterError
 from devai.adapters.llm import (
     KNOWN_PROVIDERS,
-    LLMAdapter,
     LLMMessage,
     LLMRequest,
     LLMResponse,

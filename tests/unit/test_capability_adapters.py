@@ -24,7 +24,6 @@ from devai.adapters.web_search import (
 )
 from devai.tools import registry as tool_registry
 
-
 # ── web_search family ──────────────────────────────────────────────────
 
 

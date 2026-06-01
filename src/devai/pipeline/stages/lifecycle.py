@@ -11,7 +11,6 @@ PipelineStage instance configured with the StageDeps + per-stage config.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.types import DevAITask, StageResult, TaskState

@@ -56,7 +56,7 @@ class JobWatcher:
     `asyncio.Event` and parks the `JobOutcome` for the stage to read.
     """
 
-    def __init__(self, runtime: "K8sJobRuntime") -> None:
+    def __init__(self, runtime: K8sJobRuntime) -> None:
         self._runtime = runtime
         # job_name → asyncio.Event waiting for completion
         self._waiters: dict[str, asyncio.Event] = {}
@@ -105,7 +105,7 @@ class JobWatcher:
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("job watcher: loop didn't drain in 5s — cancelling")
                 self._task.cancel()
                 try:

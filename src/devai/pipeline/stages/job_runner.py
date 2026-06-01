@@ -42,8 +42,8 @@ from devai.pipeline.types import DevAITask, StageResult, TaskState
 
 if TYPE_CHECKING:
     from devai.runtime import (  # noqa: F401  -- typing only
-        K8sJobRuntime,
         JobWatcher,
+        K8sJobRuntime,
     )
 
 logger = logging.getLogger(__name__)
@@ -186,12 +186,12 @@ class JobRunnerStage(PipelineStage):
 
     # ── internal helpers ────────────────────────────────────────────
 
-    def _runtime(self) -> "K8sJobRuntime | None":
+    def _runtime(self) -> K8sJobRuntime | None:
         extra = self.deps.extra or {}
         runtime = extra.get("k8s_runtime")
         return runtime  # may be None when the runtime is disabled
 
-    def _watcher(self) -> "JobWatcher | None":
+    def _watcher(self) -> JobWatcher | None:
         extra = self.deps.extra or {}
         return extra.get("job_watcher")
 
@@ -232,7 +232,7 @@ class JobRunnerStage(PipelineStage):
 
     def _resolve_image(
         self,
-        runtime: "K8sJobRuntime",
+        runtime: K8sJobRuntime,
         agent_name: str,
         profile: dict[str, Any] | None = None,
     ) -> str:

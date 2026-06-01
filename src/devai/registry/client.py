@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ class RegistryClient:
         *,
         base_url: str,
         token: str = "",
-        token_provider: "Callable[[], str] | None" = None,
+        token_provider: Callable[[], str] | None = None,
         timeout_seconds: float = 5.0,
         ttl_seconds: float = 30.0,
     ) -> None:

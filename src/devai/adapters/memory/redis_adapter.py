@@ -30,7 +30,7 @@ class RedisMemoryAdapter(MemoryAdapter):
 
     provider_name = "redis"
 
-    def __init__(self, redis_client: "redis.Redis") -> None:
+    def __init__(self, redis_client: redis.Redis) -> None:
         # Lazy import so the noop-config path never has to load the
         # ulid / redis dependency chain.
         from devai.services.memory import AgentMemory
@@ -122,7 +122,7 @@ class RedisMemoryAdapter(MemoryAdapter):
 
     # ── Internal ──────────────────────────────────────────────────────
 
-    def _entry_to_record(self, entry: "MemoryEntry") -> MemoryRecord:
+    def _entry_to_record(self, entry: MemoryEntry) -> MemoryRecord:
         return MemoryRecord(
             content=entry.content,
             agent=entry.agent,

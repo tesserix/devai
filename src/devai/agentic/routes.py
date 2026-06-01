@@ -54,13 +54,13 @@ async def llm_probe(request: Request) -> dict[str, Any]:
     1-token Anthropic call, return the result. Used as a smoke-test
     button in the Gateway panel."""
     try:
-        from devai.config import settings
         from devai.adapters.llm import (
             LLMMessage,
             LLMRequest,
             LLMRole,
             create_llm_adapter,
         )
+        from devai.config import settings
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"adapters unavailable: {e}") from e
 

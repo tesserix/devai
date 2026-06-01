@@ -606,7 +606,7 @@ class DevAIChatAgent:
             reg = StageRegistry()
             register_defaults(reg)
             out = []
-            for name, bp in blueprints.items():
+            for _name, bp in blueprints.items():
                 missing = [s.stage for s in bp.stages if not reg.has(s.stage)]
                 out.append(
                     {

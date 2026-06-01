@@ -35,7 +35,6 @@ from devai.identity import (
 from devai.pipeline.types import DevAITask
 from devai.webhook.routes import _principal_from_webhook
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Principal roundtrip
 # ──────────────────────────────────────────────────────────────────────

@@ -45,5 +45,5 @@ def test_rejects_missing_host():
 
 def test_allows_public_ip_literal():
     # A public IP literal needs no DNS and must pass.
-    assert_public_url("http://8.8.8.8/") is None
-    assert_public_url("https://1.1.1.1/resolve") is None
+    assert assert_public_url("http://8.8.8.8/") is None
+    assert assert_public_url("https://1.1.1.1/resolve") is None

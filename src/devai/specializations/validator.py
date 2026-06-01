@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from devai.specializations.base import HandoverField, Specialization
+from devai.specializations.base import Specialization
 
 
 class HandoverValidationError(Exception):

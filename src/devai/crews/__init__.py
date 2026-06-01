@@ -11,7 +11,7 @@ sources, unified by `resolve_crew`:
     (frontend_crew, backend_crew) so the platform is usable day one.
 """
 
-from devai.crews.models import CrewMember, CrewSpec
 from devai.crews.loader import load_seed_crews, seed_crew_registry
+from devai.crews.models import CrewMember, CrewSpec
 
 __all__ = ["CrewMember", "CrewSpec", "load_seed_crews", "seed_crew_registry"]

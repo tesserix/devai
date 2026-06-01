@@ -13,7 +13,8 @@ in the factory function.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Generic, Protocol, TypeVar, runtime_checkable
+from collections.abc import Callable
+from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
 
 logger = logging.getLogger(__name__)
 

@@ -47,8 +47,8 @@ Public surface:
     DevAIError             — base exception
 """
 
-from devai.sdk.client import DevAI, DevAIError
 from devai.registry import Agent, McpServer, Prompt, Skill
+from devai.sdk.client import DevAI, DevAIError
 
 __all__ = [
     "Agent",
