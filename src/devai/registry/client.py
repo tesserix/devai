@@ -120,11 +120,17 @@ class RegistryClient:
         token_provider: Callable[[], str] | None = None,
         timeout_seconds: float = 5.0,
         ttl_seconds: float = 30.0,
+        namespace: str = "",
     ) -> None:
         if not base_url:
             raise RegistryError("registry: base_url is required")
         self._base_url = base_url.rstrip("/")
         self._token = token
+        # The tenant the platform's artifacts live under. aregistry scopes
+        # list endpoints by ``?namespace=`` and returns an EMPTY list when it's
+        # omitted, so the catalog (seeded under this namespace by the bootstrap)
+        # is invisible unless we pass it. Empty → unscoped (registry default).
+        self._namespace = (namespace or "").strip()
         # Per-request bearer resolver (OIDC client-credentials, self-caching).
         # Falls back to the static token when unset or it returns empty.
         self._token_provider = token_provider
@@ -156,23 +162,32 @@ class RegistryClient:
         except RegistryError as e:
             return {"reachable": False, "error": str(e)}
 
+    def _ns(self, path: str) -> str:
+        """Append the configured tenant namespace to a list path. aregistry
+        returns an empty list for an unscoped list call, so every catalog read
+        must carry ``?namespace=``."""
+        if not self._namespace:
+            return path
+        sep = "&" if "?" in path else "?"
+        return f"{path}{sep}namespace={self._namespace}"
+
     def list_skills(self) -> list[Skill]:
-        raw = self._get_collection("/v0/skills", "skills")
+        raw = self._get_collection(self._ns("/v0/skills"), "skills")
         return [_parse_skill(_unwrap(d, "skill")) for d in raw]
 
     def list_prompts(self) -> list[Prompt]:
-        raw = self._get_collection("/v0/prompts", "prompts")
+        raw = self._get_collection(self._ns("/v0/prompts"), "prompts")
         return [_parse_prompt(_unwrap(d, "prompt")) for d in raw]
 
     def list_mcp_servers(self) -> list[McpServer]:
         # aregistry's endpoint is /v0/servers; Fiber/DevAI's tree calls
         # them "mcp-servers". The public client method uses the DevAI
         # name; the HTTP path is the registry's.
-        raw = self._get_collection("/v0/servers", "servers")
+        raw = self._get_collection(self._ns("/v0/servers"), "servers")
         return [_parse_mcp_server(_unwrap(d, "server")) for d in raw]
 
     def list_agents(self) -> list[Agent]:
-        raw = self._get_collection("/v0/agents", "agents")
+        raw = self._get_collection(self._ns("/v0/agents"), "agents")
         return [_parse_agent(_unwrap(d, "agent")) for d in raw]
 
     def get_skill(self, name: str) -> Skill | None:
@@ -210,8 +225,9 @@ class RegistryClient:
         omitted resolves the latest. ``namespace`` scopes to an org/team.
         """
         path = f"/v0/agents/{name}/{tag}/card" if tag else f"/v0/agents/{name}/card"
-        if namespace:
-            path += f"?namespace={namespace}"
+        ns = namespace or self._namespace
+        if ns:
+            path += f"?namespace={ns}"
         return self._get(path)
 
     def get_signing_key(self) -> dict[str, Any]:
@@ -492,12 +508,16 @@ def create_registry_client(settings: Any) -> RegistryClient | None:
             logger.warning("registry: OIDC token provider unavailable; using static token", exc_info=True)
 
     try:
+        # The tenant the catalog is seeded under (bootstrap uses `namespace:
+        # devai`). aregistry list endpoints return empty without it.
+        namespace = getattr(settings, "registry_default_tenant", "") or getattr(settings, "github_org", "") or "devai"
         return RegistryClient(
             base_url=base_url,
             token=token,
             token_provider=token_provider,
             timeout_seconds=timeout,
             ttl_seconds=ttl,
+            namespace=namespace,
         )
     except RegistryError as e:
         logger.warning("registry: client construction failed: %s", e)
