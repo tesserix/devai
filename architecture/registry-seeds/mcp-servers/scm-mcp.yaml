@@ -7,6 +7,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: scm
 spec:
+  name: scm-mcp
   displayName: DevAI SCM MCP
   description: Multi-SCM operations (GitHub / GitLab / Azure DevOps) behind a single interface. Tools
     normalize the vendor differences so agent prompts stay portable.

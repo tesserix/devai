@@ -7,6 +7,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: analyst
 spec:
+  name: analyst-mcp
   displayName: DevAI Analyst MCP
   description: Security + quality scanners. Each scanner returns a normalized Finding[] envelope {file,
     line, rule, severity, message, suggestion}. LLM-only findings live under namespaced rule prefixes

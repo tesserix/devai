@@ -8,6 +8,7 @@ metadata:
     devai.io/category: sample
     devai.io/lifecycle: test
 spec:
+  name: sample-mcp
   displayName: Sample MCP (test fixture)
   description: "Test fixture used to verify the registry-seed CronJob, the aregistry /v0/servers endpoint,\
     \ and the dashboard's MCP Servers tile. Safe to delete once verified \u2014 no real backend; the endpoint\
