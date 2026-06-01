@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from devai.adapters.event_bus.base import EventBusAdapter
     from devai.adapters.llm.base import LLMAdapter
     from devai.adapters.memory.base import MemoryAdapter
+    from devai.adapters.secrets.base import SecretsAdapter
     from devai.config import Settings
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
@@ -63,6 +64,14 @@ class StageDeps:
     memory: MemoryAdapter | None = None
     llm: LLMAdapter | None = None
     event_bus_adapter: EventBusAdapter | None = None
+    # Secrets backend (gcp_sm/env/noop) + the SettingsService. Together they
+    # let a stage resolve a per-user/per-tenant settings overlay at execution
+    # time from the principal in task.agent_context — so a run uses the
+    # triggering user's own LLM/SCM/MCP credentials. Secret VALUES are never
+    # persisted in task state; only resolved transiently here. Both are None
+    # when the Settings capability is disabled, and stages must tolerate that.
+    secrets: SecretsAdapter | None = None
+    settings_service: Any = None
 
     # Pluggable LLM providers — None means "stages use their hardcoded
     # default provider" (the way existing agents do today). Once we move

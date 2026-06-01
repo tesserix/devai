@@ -1,4 +1,4 @@
-"""The one generic blueprint workflow.
+"""The one generic blueprint workflow — durable, signal-controllable.
 
 ``BlueprintWorkflow`` interprets *any* blueprint DAG durably. It reuses the exact
 same ordering (``devai.blueprint.planner``) and condition DSL
@@ -8,12 +8,15 @@ identically on either backend — simple or complex.
 Determinism: the workflow does only pure work — ordering, condition gating,
 resumption-skip and result merging. Every side effect (the stage's real work, with
 LangGraph/AgentRunner reasoning inside it) happens in the ``run_stage`` activity.
-Concurrency within a topological level is expressed with ``asyncio.gather`` over
-activity calls, which Temporal records and replays deterministically.
 
-Level semantics mirror the executor: a level whose every runnable stage is marked
-``parallel`` is fanned out concurrently; otherwise stages run sequentially so each
-sees the previous one's handover.
+Durable control (the Temporal-native answer to the in-process Redis flag):
+  * **pause / resume / stop** — Signals flip workflow state; the loop blocks on
+    ``workflow.wait_condition`` at each stage boundary. Pause can hold for days
+    across worker restarts with no pod keeping state.
+  * **approval gates** — a stage marked ``gate: true`` blocks on an approval
+    Signal (``approve``/``reject`` carrying the gate name) before the pipeline
+    proceeds. This is the durable human-in-the-loop.
+  * **status** — a Query exposes paused/stopped/approvals for the dashboard.
 """
 
 from __future__ import annotations
@@ -43,15 +46,50 @@ _DEFAULT_MAX_ATTEMPTS = 3
 
 @workflow.defn(name="BlueprintWorkflow")
 class BlueprintWorkflow:
-    """Runs an arbitrary blueprint DAG as a durable workflow."""
+    """Runs an arbitrary blueprint DAG as a durable, signal-controllable workflow."""
 
+    def __init__(self) -> None:
+        self._paused = False
+        self._stopped = False
+        self._approvals: dict[str, str] = {}
+        self._default_timeout = _DEFAULT_STAGE_TIMEOUT
+        self._max_attempts = _DEFAULT_MAX_ATTEMPTS
+
+    # ── Signals (durable control) ──────────────────────────────────────
+    @workflow.signal
+    def pause(self) -> None:
+        self._paused = True
+
+    @workflow.signal
+    def resume(self) -> None:
+        self._paused = False
+
+    @workflow.signal
+    def stop(self) -> None:
+        self._stopped = True
+
+    @workflow.signal
+    def approve(self, gate: str) -> None:
+        self._approvals[gate] = "approved"
+
+    @workflow.signal
+    def reject(self, gate: str) -> None:
+        self._approvals[gate] = "rejected"
+
+    @workflow.query
+    def status(self) -> dict[str, Any]:
+        return {
+            "paused": self._paused,
+            "stopped": self._stopped,
+            "approvals": dict(self._approvals),
+        }
+
+    # ── Main loop ──────────────────────────────────────────────────────
     @workflow.run
     async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         blueprint = blueprint_from_dict(payload["blueprint"])
         task = task_from_dict(payload["task"])
-        self._default_timeout = int(
-            payload.get("default_stage_timeout", _DEFAULT_STAGE_TIMEOUT)
-        )
+        self._default_timeout = int(payload.get("default_stage_timeout", _DEFAULT_STAGE_TIMEOUT))
         self._max_attempts = int(payload.get("max_stage_attempts", _DEFAULT_MAX_ATTEMPTS))
 
         levels = topological_levels(blueprint.stages)
@@ -63,6 +101,12 @@ class BlueprintWorkflow:
         )
 
         for level in levels:
+            # Durable pause / stop at the stage boundary.
+            await workflow.wait_condition(lambda: not self._paused or self._stopped)
+            if self._stopped:
+                self._cancel(task, "stopped by user")
+                break
+
             runnable = []
             for spec in level:
                 if spec.name in task.stages_completed:
@@ -94,13 +138,36 @@ class BlueprintWorkflow:
                 workflow.logger.warning("blueprint %s halted at level", blueprint.name)
                 break
 
+            # Durable approval gates: a completed `gate: true` stage blocks the
+            # pipeline on an approve/reject Signal before dependents run.
+            for spec in runnable:
+                if spec.gate and spec.name in task.stages_completed:
+                    await self._await_gate(spec, task)
+            if task.is_failed or task.is_terminal:
+                break
+
         # Mirror BlueprintExecutor.execute: promote a non-failed, non-terminal
-        # task to COMPLETED. Direct assignment (no .transition) keeps the
-        # workflow deterministic — no wall-clock reads.
+        # task to COMPLETED. Direct assignment keeps the workflow deterministic.
         if not task.is_failed and not task.is_terminal:
             task.state = TaskState.COMPLETED
 
         return task_to_dict(task)
+
+    # ── Helpers ────────────────────────────────────────────────────────
+    async def _await_gate(self, spec: Any, task: Any) -> None:
+        """Block on a durable approval Signal for a gate stage."""
+        gate = spec.name
+        workflow.logger.info("gate %s: awaiting approval signal", gate)
+        await workflow.wait_condition(lambda: gate in self._approvals or self._stopped)
+        if self._stopped:
+            self._cancel(task, "stopped by user")
+            return
+        if self._approvals.get(gate) == "rejected":
+            self._cancel(task, f"gate {gate!r} rejected")
+
+    def _cancel(self, task: Any, reason: str) -> None:
+        task.state = TaskState.CANCELLED
+        task.error = reason
 
     async def _run_stage(self, spec: Any, task_snapshot: dict[str, Any]) -> dict[str, Any]:
         timeout = spec.timeout_seconds or self._default_timeout

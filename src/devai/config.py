@@ -397,6 +397,18 @@ class Settings(BaseSettings):
     openai_base_url: str = ""
     openai_organization: str = ""
 
+    # --- Secrets adapter (per-user/per-tenant secret provisioning) ---
+    # Backs the Settings capability. The Settings store keeps only secret
+    # references; the adapter writes/reads the actual values. gcp_sm
+    # auto-provisions into Google Secret Manager (needs write IAM on the
+    # devai SA); env is read-only; noop refuses writes loudly. Unknown
+    # provider / missing SDK / missing project degrades to noop.
+    secrets_provider: str = "noop"  # noop | env | gcp_sm
+    # GCP project for gcp_sm (falls back to gke_project / gcp_project).
+    secrets_gcp_project: str = ""
+    # Enable the Settings capability (per-user connectors + secrets API).
+    settings_enabled: bool = True
+
     # --- Memory adapter (Agentic AI Memory) ---
     # Single switch picks the backend; the rest of DevAI talks only to
     # `devai.adapters.memory.MemoryAdapter`. Swap providers with one env var,

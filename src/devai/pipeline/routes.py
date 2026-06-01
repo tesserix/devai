@@ -336,6 +336,31 @@ async def save_config(request: Request) -> dict[str, str]:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Approval gates (durable human-in-the-loop via Temporal Signals)
+# ────────────────────────────────────────────────────────────────────
+
+
+@router.get("/runs/{task_id}/approvals")
+async def list_approvals(request: Request, task_id: str) -> list[dict[str, Any]]:
+    """List a run's approval gates and their decision/pending status."""
+    return await _service(request).list_gates(task_id)
+
+
+@router.post("/runs/{task_id}/approvals/{gate}/approve")
+async def approve(request: Request, task_id: str, gate: str) -> dict[str, str]:
+    """Approve a gate — the durable workflow (or in-process gate) proceeds."""
+    await _service(request).approve_gate(task_id, gate, "approved")
+    return {"status": "approved", "gate": gate, "run_id": task_id}
+
+
+@router.post("/runs/{task_id}/approvals/{gate}/reject")
+async def reject(request: Request, task_id: str, gate: str) -> dict[str, str]:
+    """Reject a gate — the run is cancelled at the gate."""
+    await _service(request).approve_gate(task_id, gate, "rejected")
+    return {"status": "rejected", "gate": gate, "run_id": task_id}
+
+
+# ────────────────────────────────────────────────────────────────────
 # Checkpoint rollback
 # ────────────────────────────────────────────────────────────────────
 

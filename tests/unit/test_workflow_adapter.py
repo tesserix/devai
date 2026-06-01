@@ -352,3 +352,56 @@ async def test_executor_no_control_surface_is_noop():
     ex = BlueprintExecutor(_registry(), deps)
     out = await ex.execute(load_blueprint_from_string(_LINEAR_BP), DevAITask(blueprint="t-linear"))
     assert out.state == TaskState.COMPLETED
+
+
+# ── Temporal-mode control: durable Signals ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_inproc_and_noop_adapters_signal_unsupported():
+    # In-process backends don't deliver Signals (control = the Redis flag).
+    assert await _inproc().signal("t1", "pause") is False
+    assert await NoopWorkflowAdapter().signal("t1", "stop") is False
+
+
+class _FakeSMControl:
+    def __init__(self) -> None:
+        self.controls: list = []
+        self.redis = None
+
+    async def set_pipeline_control(self, task_id: str, value: str) -> None:
+        self.controls.append((task_id, value))
+
+
+class _FakePipelineSig:
+    def __init__(self) -> None:
+        self.signals: list = []
+
+    async def signal_run(self, task_id: str, name: str, args=None) -> bool:
+        self.signals.append((task_id, name, args))
+        return True
+
+
+@pytest.mark.asyncio
+async def test_service_set_run_control_sets_flag_and_signals():
+    from devai.pipeline.service import PipelineService
+
+    svc = PipelineService(Settings())
+    svc.state_manager = _FakeSMControl()
+    svc._pipeline = _FakePipelineSig()  # type: ignore[assignment]
+    assert await svc.set_run_control("t1", "stopped") is True
+    assert svc.state_manager.controls == [("t1", "stopped")]
+    assert svc._pipeline.signals == [("t1", "stop", None)]  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_service_approve_gate_signals_workflow():
+    from devai.pipeline.service import PipelineService
+
+    svc = PipelineService(Settings())
+    svc._pipeline = _FakePipelineSig()  # type: ignore[assignment]
+    await svc.approve_gate("t1", "deploy-release", "approved")
+    await svc.approve_gate("t1", "deploy-release", "rejected")
+    sigs = svc._pipeline.signals  # type: ignore[attr-defined]
+    assert ("t1", "approve", ["deploy-release"]) in sigs
+    assert ("t1", "reject", ["deploy-release"]) in sigs

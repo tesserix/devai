@@ -663,6 +663,7 @@ dependencies = [
     { name = "google-cloud-monitoring" },
     { name = "google-cloud-recommender" },
     { name = "google-cloud-resource-manager" },
+    { name = "google-cloud-secret-manager" },
     { name = "google-generativeai" },
     { name = "googleapis-common-protos" },
     { name = "groq" },
@@ -727,6 +728,7 @@ requires-dist = [
     { name = "google-cloud-monitoring", specifier = "==2.24.0" },
     { name = "google-cloud-recommender", specifier = "==2.16.1" },
     { name = "google-cloud-resource-manager", specifier = "==1.13.1" },
+    { name = "google-cloud-secret-manager", specifier = ">=2.20.0" },
     { name = "google-generativeai", specifier = ">=0.8.0" },
     { name = "googleapis-common-protos", specifier = "==1.74.0" },
     { name = "groq", specifier = ">=0.12.0" },
@@ -1109,6 +1111,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b0/59/34b2333a7a2419239af4b4532e3223a149562e819e00586e90056efd0200/google_cloud_resource_manager-1.13.1.tar.gz", hash = "sha256:bee9f2fb1d856731182b7cc05980d216aae848947ccdadf2848a2c64ccd6bbea", size = 404202, upload-time = "2024-11-14T16:52:03.703Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dd/cf/68ba6b60d1363a7e3193f457badc3cb4003552b11fa37152be9db2a3d0ac/google_cloud_resource_manager-1.13.1-py2.py3-none-any.whl", hash = "sha256:abdc7d443ab6c0763b8ed49ab59203e223f14c683df69e3748d5eb2237475f5f", size = 358574, upload-time = "2024-11-14T16:52:02.202Z" },
+]
+
+[[package]]
+name = "google-cloud-secret-manager"
+version = "2.24.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpc-google-iam-v1" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/7a/2fa6735ec693d822fe08a76709c4d95d9b5b4c02e83e720497355039d2ee/google_cloud_secret_manager-2.24.0.tar.gz", hash = "sha256:ce573d40ffc2fb7d01719243a94ee17aa243ea642a6ae6c337501e58fbf642b5", size = 269516, upload-time = "2025-06-05T22:22:22.965Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/af/db1217cae1809e69a4527ee6293b82a9af2a1fb2313ad110c775e8f3c820/google_cloud_secret_manager-2.24.0-py3-none-any.whl", hash = "sha256:9bea1254827ecc14874bc86c63b899489f8f50bfe1442bfb2517530b30b3a89b", size = 218050, upload-time = "2025-06-10T02:02:19.88Z" },
 ]
 
 [[package]]

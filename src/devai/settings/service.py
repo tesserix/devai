@@ -1,0 +1,227 @@
+"""SettingsService — persists connectors and provisions their secrets.
+
+Storage: PostgreSQL ``user_settings`` table when a pool is available, else an
+in-memory dict (dev/degraded). Secret *values* are written to the secrets
+backend (GCP SM) and only the returned ``SecretRef`` name is persisted.
+
+The table schema lives in the ``tesserix-k8s`` infra repo (per the project's
+SQL-in-infra rule); this service only issues idempotent DML and tolerates the
+table being absent (degrades to the in-memory store).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import TYPE_CHECKING, Any
+
+from devai.settings.models import (
+    CONNECTOR_BY_KEY,
+    Connector,
+    Scope,
+)
+
+if TYPE_CHECKING:
+    from devai.adapters.secrets.base import SecretsAdapter
+
+logger = logging.getLogger(__name__)
+
+_TABLE = "user_settings"
+
+
+class SettingsService:
+    """CRUD for connectors + secret provisioning, scoped user/team/tenant/global."""
+
+    def __init__(self, *, pool: Any = None, secrets: SecretsAdapter | None = None) -> None:
+        self._pool = pool
+        self._secrets = secrets
+        self._mem: dict[str, Connector] = {}  # fallback store, keyed by storage_key
+
+    @property
+    def has_db(self) -> bool:
+        return self._pool is not None
+
+    async def secrets_writable(self) -> bool:
+        if self._secrets is None:
+            return False
+        try:
+            return await self._secrets.can_write()
+        except Exception:  # noqa: BLE001
+            return False
+
+    # ── persistence ──────────────────────────────────────────────────────
+
+    async def _save_row(self, c: Connector) -> None:
+        if self._pool is None:
+            self._mem[c.storage_key()] = c
+            return
+        try:
+            await self._pool.execute(
+                f"""INSERT INTO {_TABLE}
+                    (scope, scope_id, connector_key, instance_id, provider,
+                     prefs, secret_refs, enabled, updated_by, updated_at)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
+                    ON CONFLICT (scope, scope_id, connector_key, instance_id)
+                    DO UPDATE SET provider=$5, prefs=$6, secret_refs=$7,
+                                  enabled=$8, updated_by=$9, updated_at=now()""",
+                c.scope.value,
+                c.scope_id,
+                c.connector_key,
+                c.instance_id,
+                c.provider,
+                json.dumps(c.prefs),
+                json.dumps(c.secret_refs),
+                c.enabled,
+                c.updated_by,
+            )
+        except Exception:
+            logger.exception("settings: DB save failed for %s — using memory", c.storage_key())
+            self._mem[c.storage_key()] = c
+
+    async def _load_rows(self, scope: Scope, scope_id: str) -> list[Connector]:
+        if self._pool is None:
+            return [
+                c
+                for c in self._mem.values()
+                if c.scope == scope and c.scope_id == scope_id
+            ]
+        try:
+            rows = await self._pool.fetch(
+                f"""SELECT scope, scope_id, connector_key, instance_id, provider,
+                           prefs, secret_refs, enabled, updated_by,
+                           to_char(updated_at,'YYYY-MM-DD\"T\"HH24:MI:SSZ') AS updated_at
+                    FROM {_TABLE} WHERE scope=$1 AND scope_id=$2""",
+                scope.value,
+                scope_id,
+            )
+            return [_row_to_connector(r) for r in rows]
+        except Exception:
+            logger.exception("settings: DB load failed (%s:%s) — using memory", scope.value, scope_id)
+            return [
+                c for c in self._mem.values() if c.scope == scope and c.scope_id == scope_id
+            ]
+
+    # ── public API ───────────────────────────────────────────────────────
+
+    async def list_connectors(self, scope: Scope, scope_id: str) -> list[Connector]:
+        return await self._load_rows(scope, scope_id)
+
+    async def upsert_connector(
+        self,
+        *,
+        scope: Scope,
+        scope_id: str,
+        connector_key: str,
+        provider: str,
+        instance_id: str = "default",
+        prefs: dict[str, Any] | None = None,
+        secret_values: dict[str, str] | None = None,
+        updated_by: str = "",
+    ) -> Connector:
+        """Create/update a connector. Secret values are written to the backend;
+        only their refs are persisted. Non-secret fields go straight to prefs.
+        """
+        spec = CONNECTOR_BY_KEY.get(connector_key)
+        if spec is None:
+            raise ValueError(f"unknown connector: {connector_key}")
+
+        secret_field_keys = {f.key for f in spec.fields if f.secret}
+
+        # Load any existing instance so we keep prior secret refs not re-supplied.
+        existing = await self._get(scope, scope_id, connector_key, instance_id)
+        secret_refs = dict(existing.secret_refs) if existing else {}
+
+        # Provision secrets that were supplied with a non-empty value.
+        for fkey, value in (secret_values or {}).items():
+            if fkey not in secret_field_keys or not value:
+                continue
+            if self._secrets is None:
+                raise RuntimeError("no secrets backend configured — cannot store secret")
+            logical = f"devai-{scope.value}-{scope_id or 'global'}-{connector_key}-{instance_id}-{fkey}"
+            ref = await self._secrets.set_secret(
+                logical,
+                value,
+                labels={"scope": scope.value, "connector": connector_key, "field": fkey},
+            )
+            secret_refs[fkey] = ref.name
+
+        # Non-secret prefs (drop any secret-keyed values that slipped in).
+        clean_prefs = {
+            k: v for k, v in (prefs or {}).items() if k not in secret_field_keys
+        }
+
+        connector = Connector(
+            scope=scope,
+            scope_id=scope_id,
+            connector_key=connector_key,
+            provider=provider,
+            instance_id=instance_id,
+            prefs=clean_prefs,
+            secret_refs=secret_refs,
+            updated_by=updated_by,
+        )
+        await self._save_row(connector)
+        return connector
+
+    async def delete_connector(
+        self, scope: Scope, scope_id: str, connector_key: str, instance_id: str = "default"
+    ) -> bool:
+        existing = await self._get(scope, scope_id, connector_key, instance_id)
+        if existing and self._secrets is not None:
+            for ref_name in existing.secret_refs.values():
+                try:
+                    await self._secrets.delete_secret(ref_name)
+                except Exception:  # noqa: BLE001
+                    logger.warning("settings: secret delete failed for %s", ref_name)
+        key = Connector(
+            scope=scope, scope_id=scope_id, connector_key=connector_key, instance_id=instance_id
+        ).storage_key()
+        if self._pool is None:
+            return self._mem.pop(key, None) is not None
+        try:
+            await self._pool.execute(
+                f"DELETE FROM {_TABLE} WHERE scope=$1 AND scope_id=$2 "
+                f"AND connector_key=$3 AND instance_id=$4",
+                scope.value,
+                scope_id,
+                connector_key,
+                instance_id,
+            )
+            return True
+        except Exception:
+            logger.exception("settings: DB delete failed")
+            return self._mem.pop(key, None) is not None
+
+    async def resolve_secret(self, ref_name: str) -> str | None:
+        """Resolve a stored secret ref name back to its value (for the overlay)."""
+        if self._secrets is None or not ref_name:
+            return None
+        return await self._secrets.get_secret(ref_name)
+
+    async def _get(
+        self, scope: Scope, scope_id: str, connector_key: str, instance_id: str
+    ) -> Connector | None:
+        for c in await self._load_rows(scope, scope_id):
+            if c.connector_key == connector_key and c.instance_id == instance_id:
+                return c
+        return None
+
+
+def _row_to_connector(r: Any) -> Connector:
+    prefs = r["prefs"]
+    refs = r["secret_refs"]
+    return Connector(
+        scope=Scope(r["scope"]),
+        scope_id=r["scope_id"],
+        connector_key=r["connector_key"],
+        instance_id=r["instance_id"],
+        provider=r["provider"] or "",
+        prefs=json.loads(prefs) if isinstance(prefs, str) else (prefs or {}),
+        secret_refs=json.loads(refs) if isinstance(refs, str) else (refs or {}),
+        enabled=r["enabled"],
+        updated_by=r["updated_by"] or "",
+        updated_at=r["updated_at"] or "",
+    )
+
+
+__all__ = ["SettingsService"]

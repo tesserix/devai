@@ -65,6 +65,7 @@ class PipelineService:
         event_bus_adapter: EventBusAdapter | None = None,
         blueprint_dir: str | Path | None = None,
         registry_client: Any = None,
+        settings_service: Any = None,
     ) -> None:
         self.config = config
         self.scm = scm
@@ -75,6 +76,9 @@ class PipelineService:
         # so dispatch can resolve agent profiles before submitting Jobs.
         # None is normal (DEVAI_REGISTRY_URL unset) — stages tolerate it.
         self.registry_client = registry_client
+        # SettingsService (optional) — threaded into StageDeps so stages can
+        # resolve a per-user settings overlay from the run's principal.
+        self.settings_service = settings_service
         self.blueprint_dir = Path(blueprint_dir or config.pipeline_blueprint_dir)
 
         self._pipeline: Pipeline | None = None
@@ -150,6 +154,7 @@ class PipelineService:
             event_bus=self.event_bus,
             event_bus_adapter=self.event_bus_adapter,
             registry_client=getattr(self, "registry_client", None),
+            settings_service=getattr(self, "settings_service", None),
         )
         self._runtime_bundle = bundle
         self._memory_adapter = bundle.memory_adapter
@@ -418,19 +423,77 @@ class PipelineService:
         await self._publish_task_event("injected", task)
         return True
 
-    async def set_run_control(self, task_id: str, value: str) -> bool:
-        """Set a run's control flag (pause/resume/stop).
+    _CONTROL_SIGNALS = {"paused": "pause", "running": "resume", "stopped": "stop"}
 
-        The in-process BlueprintExecutor polls this between stages. `running`
-        clears it (resume). Returns False if no StateManager is wired (the
-        control flag is durable, not in-memory, so it survives restarts).
+    async def set_run_control(self, task_id: str, value: str) -> bool:
+        """Set a run's control (pause/resume/stop) on BOTH backends.
+
+        Writes the Redis flag the in-process BlueprintExecutor polls between
+        stages, AND sends the matching durable Signal to the Temporal workflow
+        (a no-op when the in-process backend is active). One of the two is
+        honored depending on the active provider — so the dashboard button works
+        the same either way.
         """
+        applied = False
         sm = self.state_manager
         setter = getattr(sm, "set_pipeline_control", None)
-        if sm is None or setter is None:
-            return False
-        await setter(task_id, value)
+        if sm is not None and setter is not None:
+            await setter(task_id, value)
+            applied = True
+        sig = self._CONTROL_SIGNALS.get(value)
+        if sig and self._pipeline is not None:
+            if await self._pipeline.signal_run(task_id, sig):
+                applied = True
+        return applied
+
+    async def approve_gate(self, task_id: str, gate: str, decision: str) -> bool:
+        """Approve or reject a human-approval gate on BOTH backends.
+
+        `decision` is "approved" | "rejected". Records a Redis gate marker (for
+        the in-process gate check + the dashboard's pending list) and sends the
+        durable approve/reject Signal to the Temporal workflow.
+        """
+        sm = self.state_manager
+        redis = getattr(sm, "redis", None)
+        if redis is not None:
+            try:
+                await redis.set(
+                    f"devai:pipeline:gate:{task_id}:{gate}", decision, ex=86400
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("gate marker write failed", exc_info=True)
+        if self._pipeline is not None:
+            await self._pipeline.signal_run(
+                task_id, "approve" if decision == "approved" else "reject", [gate]
+            )
         return True
+
+    async def list_gates(self, task_id: str) -> list[dict[str, Any]]:
+        """List a run's approval gates with their decision (best-effort)."""
+        snapshot = await self.get_task(task_id)
+        if snapshot is None or self._pipeline is None:
+            return []
+        try:
+            bp = self._pipeline.get_blueprint(snapshot.get("blueprint", ""))
+        except Exception:  # noqa: BLE001
+            return []
+        redis = getattr(self.state_manager, "redis", None)
+        out: list[dict[str, Any]] = []
+        for s in bp.stages:
+            if not getattr(s, "gate", False):
+                continue
+            decision = None
+            if redis is not None:
+                decision = await redis.get(f"devai:pipeline:gate:{task_id}:{s.name}")
+            out.append(
+                {
+                    "gate": s.name,
+                    "title": s.display_title(),
+                    "decision": decision,
+                    "pending": decision is None and s.name not in snapshot.get("stages_completed", []),
+                }
+            )
+        return out
 
     async def list_persisted_tasks(
         self, *, limit: int = 50, blueprint: str | None = None, repo: str | None = None

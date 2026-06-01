@@ -53,12 +53,15 @@ class MessagingService:
         *,
         database: Database | None = None,
         event_bus_adapter: EventBusAdapter | None = None,
+        settings_service: Any = None,
     ) -> None:
         self.config = config
         self.state_manager = state_manager
         self.database = database
         self.event_bus_adapter = event_bus_adapter
-        self.gateway = ConversationGateway(config, state_manager, database=database)
+        self.gateway = ConversationGateway(
+            config, state_manager, database=database, settings_service=settings_service
+        )
         self.channels: dict[str, MessagingChannel] = {}
         self._subscription: Any = None
         self._bg_tasks: set[asyncio.Task[Any]] = set()

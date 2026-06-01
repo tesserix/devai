@@ -70,6 +70,48 @@ def create_app(
             logger.exception("A2A client construction failed (non-fatal)")
             app.state.a2a_client = None
 
+        # Settings capability — built early (before the pipeline runtime) so
+        # both the pipeline stages and the conversational gateway share ONE
+        # SettingsService and resolve the same per-user/per-tenant connectors.
+        # The secrets adapter writes values to the backend (GCP SM); the service
+        # persists only references in Postgres, with an in-memory fallback when
+        # the DB is unreachable. secrets_provider=noop → catalog + non-secret
+        # prefs still work; secret writes return a clear 409.
+        settings_service = None
+        settings_db = None
+        app.state.settings_service = None
+        app.state.secrets_adapter = None
+        if getattr(config, "settings_enabled", True):
+            try:
+                from devai.adapters.secrets import create_secrets_adapter
+                from devai.settings.service import SettingsService
+
+                secrets_adapter = create_secrets_adapter(config)
+                app.state.secrets_adapter = secrets_adapter
+
+                settings_pool = None
+                try:
+                    from devai.services.database import Database
+
+                    settings_db = Database(config.database_url)
+                    await settings_db.connect()
+                    settings_pool = settings_db.pool
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Settings: DB pool unavailable (%s) — using in-memory store", e)
+                    settings_db = None
+
+                settings_service = SettingsService(pool=settings_pool, secrets=secrets_adapter)
+                app.state.settings_service = settings_service
+                logger.info(
+                    "Settings service ready (store=%s, secrets=%s)",
+                    "postgres" if settings_pool else "in-memory",
+                    secrets_adapter.provider_name,
+                )
+            except Exception:
+                logger.exception("Settings service failed to start — settings API will 503")
+                settings_service = None
+                app.state.settings_service = None
+
         # Start the Fiber-style pipeline runtime when enabled. SCM is
         # constructed lazily so this doesn't trip start-up when the SCM
         # provider isn't configured yet.
@@ -92,6 +134,7 @@ def create_app(
                     event_bus=event_bus,
                     event_bus_adapter=event_bus_adapter,
                     registry_client=_registry_client,
+                    settings_service=settings_service,
                 )
                 await pipeline_service.start()
                 app.state.pipeline_service = pipeline_service
@@ -241,8 +284,9 @@ def create_app(
         # Messaging service — remote conversational channels (Slack, remote
         # URL/thread, MCP server). All three are thin transports over one
         # ConversationGateway; the service owns the channel map + the NATS turn
-        # worker. Reuses the onboarding DB for audit when available. Purely
-        # additive: if every channel is disabled it builds nothing.
+        # worker. Reuses the onboarding DB for audit and the settings service
+        # for per-user overlays. Purely additive: if every channel is disabled
+        # it builds nothing.
         messaging_service = None
         app.state.messaging_service = None
         try:
@@ -253,6 +297,7 @@ def create_app(
                 state,
                 database=onboarding_db,
                 event_bus_adapter=event_bus_adapter,
+                settings_service=settings_service,
             )
             await messaging_service.start()
             app.state.messaging_service = messaging_service
@@ -295,6 +340,9 @@ def create_app(
                     await onboarding_db.close()
                 except Exception:  # noqa: BLE001
                     logger.exception("Onboarding DB close failed")
+            if settings_db is not None:
+                with suppress(Exception):
+                    await settings_db.close()
             if pipeline_service is not None:
                 try:
                     await pipeline_service.stop()
@@ -456,6 +504,13 @@ def create_app(
     from devai.chat.slack_routes import router as slack_router
 
     app.include_router(slack_router)
+
+    # Settings routes (/api/settings/*) — per-user/per-tenant connectors +
+    # secret provisioning. Returns 503 until settings_service is wired
+    # (lifespan). Each endpoint is Principal-gated.
+    from devai.settings.routes import router as settings_router
+
+    app.include_router(settings_router)
 
     # Serve dashboard static files (CSS, JS)
     static_dir = Path(__file__).parent.parent / "dashboard" / "static"

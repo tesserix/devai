@@ -78,6 +78,25 @@ export const api = {
   // Auth
   me: () => apiFetch<{ login: string; name: string; avatar_url: string }>("/me"),
 
+  // ── Settings (per-user/per-tenant connectors + secrets) ─────────────
+  getSettingsCatalog: () =>
+    apiFetch<SettingsCatalog>("/settings/catalog"),
+
+  listSettings: () =>
+    apiFetch<{ connectors: SettingsConnector[]; secrets_writable: boolean }>("/settings"),
+
+  saveConnector: (body: SaveConnectorInput) =>
+    apiFetch<{ status: string; connector: SettingsConnector }>("/settings/connectors", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  deleteConnector: (scope: string, scopeId: string, connectorKey: string, instanceId = "default") =>
+    apiFetch<{ status: string }>(
+      `/settings/connectors/${scope}/${encodeURIComponent(scopeId || "-")}/${connectorKey}?instance_id=${encodeURIComponent(instanceId)}`,
+      { method: "DELETE" }
+    ),
+
   // Pipeline
   listRuns: (repo?: string, limit = 20) =>
     apiFetch<PipelineRun[]>(`/pipeline/runs?limit=${limit}${repo ? `&repo=${repo}` : ""}`),
@@ -533,4 +552,54 @@ export interface OnboardResult {
   succeeded: Array<{ repo: string; status: string; state?: string; pr_number?: number; pr_url?: string }>;
   failed: Array<{ repo: string; error: string }>;
   dry_run: boolean;
+}
+
+// ── Settings types ─────────────────────────────────────────────────────
+export interface SettingsField {
+  key: string;
+  label: string;
+  secret: boolean;
+  required: boolean;
+  placeholder: string;
+  help: string;
+}
+
+export interface SettingsConnectorSpec {
+  key: string;
+  label: string;
+  family: string;
+  provider_attr: string;
+  providers: string[];
+  description: string;
+  multi: boolean;
+  fields: SettingsField[];
+}
+
+export interface SettingsCatalog {
+  connectors: SettingsConnectorSpec[];
+  secrets_writable: boolean;
+  has_db: boolean;
+}
+
+export interface SettingsConnector {
+  scope: string;
+  scope_id: string;
+  connector_key: string;
+  provider: string;
+  instance_id: string;
+  prefs: Record<string, unknown>;
+  secrets_set: string[];
+  enabled: boolean;
+  updated_by: string;
+  updated_at: string;
+}
+
+export interface SaveConnectorInput {
+  scope: string;
+  scope_id?: string;
+  connector_key: string;
+  provider: string;
+  instance_id?: string;
+  prefs?: Record<string, unknown>;
+  secrets?: Record<string, string>;
 }

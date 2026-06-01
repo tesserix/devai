@@ -13,7 +13,7 @@ transport-neutral ``ConversationTurn`` and returns a ``ConversationReply``.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from devai.adapters.messaging.base import ConversationReply, ConversationTurn
 from devai.identity import Principal, new_trace_id
@@ -41,11 +41,20 @@ class ConversationGateway:
         config: Settings,
         state_manager: StateManager,
         database: Database | None = None,
+        *,
+        settings_service: Any = None,
     ) -> None:
         self._config = config
         self._state = state_manager
         self._db = database
+        # SettingsService (optional) resolves per-user/per-tenant connectors
+        # into a settings overlay so a user's own LLM creds drive their chat.
+        self._settings_service = settings_service
         self._agent: DevAIChatAgent | None = None
+        # Per-overlay agent cache, keyed by a fingerprint of the overridden
+        # attrs, so a user with custom creds gets their own agent without
+        # rebuilding an LLM client on every turn.
+        self._agent_cache: dict[str, DevAIChatAgent] = {}
 
     def _get_agent(self) -> DevAIChatAgent:
         # Lazy so importing the gateway doesn't construct an LLM client.
@@ -54,6 +63,36 @@ class ConversationGateway:
 
             self._agent = DevAIChatAgent(self._config, self._state, database=self._db)
         return self._agent
+
+    async def _agent_for(self, principal: Principal) -> DevAIChatAgent:
+        """Resolve the chat agent for this principal, applying their settings
+        overlay (per-user LLM creds/model). Falls back to the shared agent when
+        no Settings capability is wired or the user configured nothing."""
+        if self._settings_service is None:
+            return self._get_agent()
+        try:
+            from devai.settings.overlay import PrincipalSettingsOverlay, build_overlay
+
+            overlaid = await build_overlay(self._config, principal, self._settings_service)
+            if not isinstance(overlaid, PrincipalSettingsOverlay) or not overlaid.overlaid_attrs:
+                return self._get_agent()  # nothing user-specific → shared agent
+
+            fingerprint = "|".join(
+                f"{a}={getattr(overlaid, a)!r}" for a in overlaid.overlaid_attrs
+            )
+            cached = self._agent_cache.get(fingerprint)
+            if cached is None:
+                from devai.chat.agent import DevAIChatAgent
+
+                cached = DevAIChatAgent(overlaid, self._state, database=self._db)
+                # Bound cache so a flood of distinct users can't grow unbounded.
+                if len(self._agent_cache) > 64:
+                    self._agent_cache.clear()
+                self._agent_cache[fingerprint] = cached
+            return cached
+        except Exception:  # noqa: BLE001
+            logger.warning("overlay agent resolution failed — using shared agent", exc_info=True)
+            return self._get_agent()
 
     async def handle_turn(self, turn: ConversationTurn) -> ConversationReply:
         """Run one conversational turn. Never raises — returns a friendly error.
@@ -69,7 +108,7 @@ class ConversationGateway:
             return ConversationReply(text="Please send a message.")
 
         try:
-            agent = self._get_agent()
+            agent = await self._agent_for(principal)
             text = await agent.chat(
                 turn.text,
                 session_id=turn.conversation_id,

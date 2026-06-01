@@ -71,6 +71,7 @@ async def build_runtime(
     event_bus: EventBus | None = None,
     event_bus_adapter: EventBusAdapter | None = None,
     registry_client: Any = None,
+    settings_service: Any = None,
 ) -> RuntimeBundle:
     """Construct StageDeps + StageRegistry with every adapter/extra wired in.
 
@@ -80,6 +81,16 @@ async def build_runtime(
     """
     memory_adapter = create_memory_adapter(config)
     llm_adapter = create_llm_adapter(config)
+
+    # Secrets backend — used (with settings_service) by stages to resolve a
+    # per-user settings overlay at execution time. Degrades to Noop.
+    secrets_adapter = None
+    try:
+        from devai.adapters.secrets import create_secrets_adapter
+
+        secrets_adapter = create_secrets_adapter(config)
+    except Exception:  # noqa: BLE001
+        logger.exception("bootstrap: secrets adapter init failed")
 
     extra: dict[str, Any] = {}
 
@@ -148,6 +159,8 @@ async def build_runtime(
         memory=memory_adapter,
         llm=llm_adapter,
         event_bus_adapter=event_bus_adapter,
+        secrets=secrets_adapter,
+        settings_service=settings_service,
         extra=extra or None,
     )
 

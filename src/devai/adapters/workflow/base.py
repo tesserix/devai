@@ -40,6 +40,17 @@ class WorkflowAdapter(ABC):
     def provider_name(self) -> str:
         ...
 
+    async def signal(
+        self, task_id: str, signal_name: str, args: list | None = None
+    ) -> bool:
+        """Send a control Signal to a running run (pause/resume/stop/approve…).
+
+        Default: unsupported (returns False) — the in-process backends drive
+        control through the executor's Redis flag instead. Only the Temporal
+        backend overrides this to deliver a durable workflow Signal.
+        """
+        return False
+
     async def health_check(self) -> bool:
         return True
 

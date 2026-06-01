@@ -99,6 +99,26 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
 
         return task_from_dict(result)
 
+    async def signal(
+        self, task_id: str, signal_name: str, args: list | None = None
+    ) -> bool:
+        """Deliver a durable Signal to the run's BlueprintWorkflow.
+
+        The workflow id mirrors run_blueprint: ``devai-bp-{task_id}``. Returns
+        False (never raises) if the cluster is unreachable or the run isn't
+        found, so a control click degrades quietly.
+        """
+        try:
+            client = await self._ensure_client()
+            handle = client.get_workflow_handle(f"devai-bp-{task_id}")
+            await handle.signal(signal_name, *(args or []))
+            return True
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Temporal signal %s failed for task %s", signal_name, task_id, exc_info=True
+            )
+            return False
+
     async def health_check(self) -> bool:
         try:
             await self._ensure_client()

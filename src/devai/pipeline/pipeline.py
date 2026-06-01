@@ -183,6 +183,18 @@ class Pipeline:
     def list_tasks(self) -> list[DevAITask]:
         return list(self._tasks.values())
 
+    async def signal_run(
+        self, task_id: str, signal_name: str, args: list[Any] | None = None
+    ) -> bool:
+        """Send a control signal to a run via the workflow backend.
+
+        Returns True only when the backend delivered it (Temporal). The
+        in-process backends return False — control there is the Redis flag the
+        executor polls — so callers set the flag AND signal, and one of the two
+        is honored depending on the active provider.
+        """
+        return await self._workflow_adapter.signal(task_id, signal_name, args)
+
     async def wait_for(self, task_id: str, *, timeout: float | None = None) -> DevAITask:
         evt = self._task_done.get(task_id)
         if evt is None:
