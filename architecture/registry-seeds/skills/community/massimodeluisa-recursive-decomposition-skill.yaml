@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: massimodeluisa-recursive-decomposition-skill
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

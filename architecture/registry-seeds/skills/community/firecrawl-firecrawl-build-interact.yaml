@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: firecrawl-firecrawl-build-interact
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

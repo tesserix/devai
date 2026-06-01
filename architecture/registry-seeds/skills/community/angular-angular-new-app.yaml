@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: angular-angular-new-app
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

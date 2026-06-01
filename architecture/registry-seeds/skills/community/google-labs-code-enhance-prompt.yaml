@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: google-labs-code-enhance-prompt
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: bitwize-music-studio-claude-ai-music-skills
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

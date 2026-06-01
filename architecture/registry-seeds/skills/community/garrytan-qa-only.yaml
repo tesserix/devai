@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: garrytan-qa-only
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

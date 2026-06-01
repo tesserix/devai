@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: salesforce-logai
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: awesome-ai-sre

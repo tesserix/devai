@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: nvidia-nemo-rl-e2e-testing
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

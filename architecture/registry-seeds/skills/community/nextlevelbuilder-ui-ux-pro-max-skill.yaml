@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: nextlevelbuilder-ui-ux-pro-max-skill
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

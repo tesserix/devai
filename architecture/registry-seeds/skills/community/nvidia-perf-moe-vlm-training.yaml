@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: nvidia-perf-moe-vlm-training
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

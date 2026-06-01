@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: realkimbarrett-schwartz-awareness-mapper
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

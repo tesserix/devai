@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: coreyhaines31-copy-editing
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

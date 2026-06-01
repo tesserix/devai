@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: op7418-nanobanana-ppt-skills
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

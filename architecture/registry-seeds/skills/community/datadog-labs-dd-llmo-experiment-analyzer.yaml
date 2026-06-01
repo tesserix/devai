@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: datadog-labs-dd-llmo-experiment-analyzer
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

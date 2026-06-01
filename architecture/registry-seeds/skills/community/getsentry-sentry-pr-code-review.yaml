@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: getsentry-sentry-pr-code-review
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

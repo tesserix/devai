@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: notmyself-claude-win11-speckit-update-skill
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

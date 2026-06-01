@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: k8sgpt-ai-k8sgpt
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: awesome-ai-sre

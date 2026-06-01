@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: wanshuiyin-auto-claude-code-research-in-sleep
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: fal-ai-community-fal-kling-o3
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

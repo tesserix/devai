@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: auth0-auth0-migration
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

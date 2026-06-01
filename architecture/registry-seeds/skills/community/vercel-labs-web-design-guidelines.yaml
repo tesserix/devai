@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: vercel-labs-web-design-guidelines
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

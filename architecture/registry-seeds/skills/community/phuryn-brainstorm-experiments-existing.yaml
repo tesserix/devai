@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: phuryn-brainstorm-experiments-existing
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

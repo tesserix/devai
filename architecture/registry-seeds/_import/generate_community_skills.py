@@ -89,6 +89,11 @@ def _envelope(team: str, skill_id: str, description: str, *, category: str,
         "metadata": {
             "name": name,
             "namespace": "devai",
+            # Community catalog skills are public knowledge (sourced from public
+            # awesome-lists), so they're browsable by anyone. Tenant-private
+            # artifacts keep the registry's default 'private' visibility — that
+            # (not namespace) is the real isolation boundary.
+            "visibility": "public",
             "labels": {
                 "devai.io/source": "community",
                 "devai.io/origin": origin,

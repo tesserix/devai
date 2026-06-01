@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: honeydew-ai-honeydew-ai-coding-agents-plugins
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

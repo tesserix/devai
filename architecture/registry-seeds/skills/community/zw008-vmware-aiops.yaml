@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: zw008-vmware-aiops
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills

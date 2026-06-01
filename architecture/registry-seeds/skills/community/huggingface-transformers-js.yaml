@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: huggingface-transformers-js
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: community
     devai.io/origin: voltagent-awesome-skills
