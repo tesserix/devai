@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
+import DOMPurify from "dompurify";
 
 interface Message {
   role: "user" | "assistant";
@@ -160,7 +161,7 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
 
 /** Minimal markdown to HTML (tables, bold, code, lists). */
 function renderMarkdown(md: string): string {
-  return md
+  const html = md
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -179,4 +180,13 @@ function renderMarkdown(md: string): string {
     .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     .replace(/((<li.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
     .replace(/\n/g, "<br />");
+
+  // Defense-in-depth: even though we entity-escape first, the hand-rolled
+  // regex above can be fragile to future edits and chat tool output can echo
+  // untrusted repo/issue/PR text. Sanitize the final HTML so no event handlers
+  // or scriptable attributes can survive into the DOM.
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ["pre", "code", "strong", "em", "h1", "h2", "h3", "table", "tr", "td", "ul", "li", "br", "a", "p"],
+    ALLOWED_ATTR: ["class", "href", "target", "rel"],
+  });
 }

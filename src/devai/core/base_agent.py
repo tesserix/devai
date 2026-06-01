@@ -30,6 +30,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _delivery_count(msg: Any) -> int:
+    """Best-effort JetStream delivery count for a message, or 0 if unknown.
+
+    NATS exposes it at ``msg.metadata.num_delivered``; tolerate doubles that
+    don't carry metadata.
+    """
+    try:
+        meta = getattr(msg, "metadata", None)
+        return int(getattr(meta, "num_delivered", 0) or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 # Maps agent names to their approval gate names
 AGENT_GATE_MAP = {
     "senior_developer": "createPR",
@@ -251,6 +265,7 @@ class BaseAgent(ABC):
         await self.state.set_agent_status(run_id, self.name, "running")
         start_time = time.monotonic()
 
+        succeeded = False
         try:
             # Convert PipelineContext to ALMState for unified execution
             alm_state: ALMState = {
@@ -280,6 +295,7 @@ class BaseAgent(ABC):
                 await self.event_bus.publish(self.publish_subject, ctx.model_dump_json())
 
             logger.info("Agent %s completed run %s in %.1fs", self.name, run_id, elapsed)
+            succeeded = True
 
         except Exception:
             elapsed = time.monotonic() - start_time
@@ -290,7 +306,40 @@ class BaseAgent(ABC):
             raise
         finally:
             await self.state.release_lock(run_id, self.name, self.worker_id)
-            await msg.ack()
+            # Acknowledge ONLY on success. On failure, negative-ack so JetStream
+            # redelivers (up to max_deliver); past the delivery ceiling, term()
+            # the message so it's not redelivered forever (poison-pill). Acking
+            # a failed message here would silently drop the work and defeat the
+            # WORK_QUEUE durability + max_deliver design.
+            if succeeded:
+                await msg.ack()
+            else:
+                await self._nak_or_term(msg)
+
+    async def _nak_or_term(self, msg: Any) -> None:
+        """Negative-ack a failed message for redelivery, or terminate if the
+        delivery ceiling is reached (poison-pill). Tolerates message objects
+        that don't expose delivery metadata or nak/term (degrades to nak,
+        then to a best-effort no-op) so non-JetStream/test doubles don't break.
+        """
+        max_deliver = getattr(self.config, "nats_max_deliver", 3)
+        delivered = _delivery_count(msg)
+        try:
+            if delivered and delivered >= max_deliver and hasattr(msg, "term"):
+                logger.error(
+                    "Agent %s: message hit max_deliver=%s — terminating (poison)",
+                    self.name,
+                    max_deliver,
+                )
+                await msg.term()
+            elif hasattr(msg, "nak"):
+                await msg.nak()
+            elif hasattr(msg, "ack"):
+                # No nak available (non-JetStream double): leave it for ack_wait
+                # redelivery by NOT acking. Nothing to do.
+                return
+        except Exception:  # noqa: BLE001
+            logger.exception("Agent %s: nak/term failed", self.name)
 
     async def _check_approval_gate(self, ctx: Any) -> None:  # noqa: C901
         """Check if this agent requires user approval before proceeding."""

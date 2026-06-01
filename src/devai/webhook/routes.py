@@ -76,12 +76,17 @@ async def scm_webhook(request: Request) -> dict[str, str]:
         or request.headers.get("X-Webhook-Secret", "")  # ADO
     )
 
-    if config.github_webhook_secret and not scm.verify_webhook_signature(
-        body,
-        signature,
-        config.github_webhook_secret,
-    ):
-        raise HTTPException(status_code=401, detail="Invalid signature")
+    # Webhooks are exempt from the DEVAI_REQUIRE_AUTH gate (see devai.authz)
+    # precisely because they authenticate via HMAC signature — so when that
+    # auth posture is on, an unset webhook secret must FAIL CLOSED rather than
+    # accept unsigned requests. In dev (require_auth off) we keep the lenient
+    # behavior so local testing without a secret still works.
+    if config.github_webhook_secret:
+        if not scm.verify_webhook_signature(body, signature, config.github_webhook_secret):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+    elif getattr(config, "require_auth", False):
+        logger.warning("Rejecting webhook: DEVAI_REQUIRE_AUTH is on but no webhook secret is configured")
+        raise HTTPException(status_code=401, detail="Webhook signature verification not configured")
 
     # Determine event type from headers (provider-specific)
     event_type = (
