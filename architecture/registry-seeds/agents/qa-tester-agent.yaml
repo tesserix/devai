@@ -3,6 +3,7 @@ kind: Agent
 metadata:
   name: qa-tester-agent
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: review

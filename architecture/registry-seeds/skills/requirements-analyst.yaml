@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: requirements-analyst
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: planning

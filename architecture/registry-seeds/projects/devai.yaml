@@ -3,6 +3,7 @@ kind: Project
 metadata:
   name: devai
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
 spec:

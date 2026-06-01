@@ -3,6 +3,7 @@ kind: Prompt
 metadata:
   name: db-engineer-prompt-v1
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/skill: db-engineer

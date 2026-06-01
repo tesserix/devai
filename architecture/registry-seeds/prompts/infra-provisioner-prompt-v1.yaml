@@ -3,6 +3,7 @@ kind: Prompt
 metadata:
   name: infra-provisioner-prompt-v1
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/skill: infra-provisioner

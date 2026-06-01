@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: senior-developer
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: coding

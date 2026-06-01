@@ -3,6 +3,7 @@ kind: Skill
 metadata:
   name: cost-optimizer
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre

@@ -34,6 +34,10 @@ SEEDS_DIR = REPO_ROOT / "architecture" / "registry-seeds"
 API_VERSION = "registry.solo.io/v1alpha1"
 NAMESPACE = "devai"
 SOURCE_LABEL = "devai"
+# Seeds are public so they show in the (logged-in) aregistry marketplace, not
+# just DevAI's own authenticated reads. aregistry defaults an unset visibility
+# to "private", which CanRead hides from anyone outside the owning tenant.
+VISIBILITY = "public"
 
 
 def _kebab(name: str) -> str:
@@ -57,6 +61,7 @@ def _skill_doc(spec: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "name": name,
             "namespace": NAMESPACE,
+            "visibility": VISIBILITY,
             "labels": {
                 "devai.io/source": SOURCE_LABEL,
                 "devai.io/category": category,
@@ -85,6 +90,7 @@ def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "name": f"{name}-agent",
             "namespace": NAMESPACE,
+            "visibility": VISIBILITY,
             "labels": {
                 "devai.io/source": SOURCE_LABEL,
                 "devai.io/category": spec.get("category", "specialist"),
@@ -127,6 +133,7 @@ def _prompt_doc(spec: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "name": f"{name}-prompt-v1",
             "namespace": NAMESPACE,
+            "visibility": VISIBILITY,
             "labels": {
                 "devai.io/source": SOURCE_LABEL,
                 "devai.io/skill": name,

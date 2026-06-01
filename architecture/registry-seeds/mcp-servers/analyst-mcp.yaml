@@ -3,6 +3,7 @@ kind: MCPServer
 metadata:
   name: analyst-mcp
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: analyst

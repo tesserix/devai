@@ -3,6 +3,7 @@ kind: Prompt
 metadata:
   name: qa-tester-prompt-v1
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/skill: qa-tester

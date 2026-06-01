@@ -3,6 +3,7 @@ kind: Agent
 metadata:
   name: ci-monitor-agent
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: review

@@ -3,6 +3,7 @@ kind: Agent
 metadata:
   name: staff-reviewer-agent
   namespace: devai
+  visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: review
