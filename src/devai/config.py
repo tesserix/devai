@@ -121,6 +121,15 @@ class Settings(BaseSettings):
     port: int = 8080
     log_level: str = "info"
 
+    # --- Security ---
+    # When True, mutating requests (POST/PUT/PATCH/DELETE) must carry a
+    # resolvable principal (auth-bff X-Forwarded-* headers or a valid
+    # devai_session cookie) or they're rejected with 401. Default False
+    # keeps today's "trust the auth-bff + Istio edge" behavior so flipping
+    # this on is an opt-in defense-in-depth step, not a breaking change.
+    # Webhook routes are always exempt — they authenticate via HMAC.
+    require_auth: bool = False
+
     # --- Pipeline ---
     max_review_iterations: int = 3
     pipeline_label: str = "devai:automate"

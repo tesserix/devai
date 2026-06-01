@@ -129,6 +129,18 @@ def create_sre_app() -> FastAPI:
         allow_credentials=True,
     )
 
+    # Expose settings so the opt-in auth gate (DEVAI_REQUIRE_AUTH) can read it.
+    app.state.config = settings
+
+    @app.middleware("http")
+    async def _auth_gate(request, call_next):
+        from devai.authz import enforce_auth
+
+        blocked = await enforce_auth(request)
+        if blocked is not None:
+            return blocked
+        return await call_next(request)
+
     # --- Chat ---
 
     @app.post("/api/chat/message")
@@ -150,7 +162,9 @@ def create_sre_app() -> FastAPI:
             response = await agent.chat(message, session_id)
         except Exception as exc:
             logger.exception("SRE chat failed for session %s", session_id)
-            response = f"Sorry, I encountered an error: {exc}"
+            from devai.services.redact import redact_secrets
+
+            response = f"Sorry, I encountered an error: {redact_secrets(str(exc))[:200]}"
         return {"response": response, "session_id": session_id}
 
     # --- Health ---

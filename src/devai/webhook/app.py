@@ -205,6 +205,18 @@ def create_app(
     app.state.state_manager = state
     app.state.config = config
 
+    # Opt-in auth gate (DEVAI_REQUIRE_AUTH). No-op unless enabled; when on,
+    # mutating requests without a resolvable principal get 401. Webhook
+    # routes are exempt (they authenticate via HMAC signature).
+    @app.middleware("http")
+    async def _auth_gate(request, call_next):
+        from devai.authz import enforce_auth
+
+        blocked = await enforce_auth(request)
+        if blocked is not None:
+            return blocked
+        return await call_next(request)
+
     # NOTE: app.state.registry_client is constructed in lifespan() above
     # alongside SpecializationService so the two share a single client +
     # cache. Set it to None here if the lifespan never ran (some test
