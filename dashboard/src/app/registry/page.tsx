@@ -80,23 +80,31 @@ export default function RegistryPage() {
         fetch("/api/catalog/counts").catch(() => null),
         fetch(path),
       ]);
-      if (hRes) {
-        const h: Health = await hRes.json();
-        setHealth(h);
-      }
-      if (cRes && cRes.ok) {
-        setCounts(await cRes.json());
-      }
-      if (lcRes && lcRes.ok) {
-        setLocalCounts(await lcRes.json());
-      }
+      // Each response is parsed defensively: a non-2xx (e.g. an Istio/Envoy
+      // 503 "upstream connect error" with a PLAIN-TEXT body) must not blow up
+      // the whole page via res.json(). Health degrades to "unreachable", counts
+      // degrade to empty, and only the active tab's items surface an error.
+      const h = await safeJson<Health>(hRes);
+      setHealth(h ?? { reachable: false, error: "registry unreachable" });
+
+      const c = await safeJson<Counts>(cRes);
+      if (c) setCounts(c);
+
+      const lc = await safeJson<LocalCounts>(lcRes);
+      if (lc) setLocalCounts(lc);
+
       if (iRes.ok) {
-        const data = await iRes.json();
+        const data = await safeJson<unknown>(iRes);
         // Some endpoints return arrays directly, some wrap them.
-        setItems(Array.isArray(data) ? data : data.entries || data.items || []);
+        const arr = Array.isArray(data)
+          ? data
+          : (data as { entries?: unknown[]; items?: unknown[] })?.entries ||
+            (data as { items?: unknown[] })?.items ||
+            [];
+        setItems(arr as unknown[]);
       } else {
-        const body = await iRes.text();
-        setError(`/${active}: HTTP ${iRes.status} — ${body.slice(0, 160)}`);
+        const body = await iRes.text().catch(() => "");
+        setError(`/${active}: HTTP ${iRes.status} — ${body.slice(0, 160) || "request failed"}`);
         setItems([]);
       }
     } catch (e) {
@@ -200,6 +208,21 @@ export default function RegistryPage() {
       </section>
     </div>
   );
+}
+
+// Parse a response as JSON only when it actually succeeded AND advertises a
+// JSON body. Guards against Istio/Envoy 503s whose body is plain text
+// ("upstream connect error …") — calling res.json() on those throws and would
+// otherwise blank the entire page.
+async function safeJson<T>(res: Response | null): Promise<T | null> {
+  if (!res || !res.ok) return null;
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) return null;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
 }
 
 function endpointFor(tab: Tab): string {
