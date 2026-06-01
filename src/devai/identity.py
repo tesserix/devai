@@ -27,6 +27,7 @@ Use::
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import uuid
@@ -121,6 +122,23 @@ def new_trace_id() -> str:
     return uuid.uuid4().hex
 
 
+def _forward_trusted(request: Request) -> bool:
+    """Whether ``X-Forwarded-*`` identity headers should be trusted.
+
+    When ``DEVAI_AUTH_BFF_SHARED_SECRET`` is configured, the auth-bff must
+    echo it in the ``X-Auth-Bff-Secret`` header; a request without a
+    matching secret is treated as un-forwarded (its X-Forwarded-* headers
+    are ignored). When no secret is configured, forwarded headers are
+    trusted unconditionally — the original behavior.
+    """
+    config = getattr(getattr(request, "app", None), "state", None)
+    secret = getattr(getattr(config, "config", None), "auth_bff_shared_secret", "") if config else ""
+    if not secret:
+        return True
+    provided = request.headers.get("x-auth-bff-secret", "")
+    return bool(provided) and hmac.compare_digest(provided, secret)
+
+
 async def extract_principal(request: Request) -> Principal | None:
     """Resolve the current Principal from the request, or None.
 
@@ -136,9 +154,11 @@ async def extract_principal(request: Request) -> Principal | None:
     3. None — caller decides whether to fall back to ``Principal.system()``
        or to refuse the request.
     """
-    # 1. auth-bff stamped headers
+    # 1. auth-bff stamped headers — trusted only when they actually came
+    #    from the bff (see _forward_trusted). Otherwise ignore them and fall
+    #    through, so a direct caller can't spoof identity by setting headers.
     fwd_email = request.headers.get("x-forwarded-user") or request.headers.get("x-forwarded-email")
-    if fwd_email:
+    if fwd_email and _forward_trusted(request):
         return Principal(
             email=fwd_email,
             uid=request.headers.get("x-forwarded-uid", ""),

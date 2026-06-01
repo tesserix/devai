@@ -130,6 +130,20 @@ class Settings(BaseSettings):
     # Webhook routes are always exempt — they authenticate via HMAC.
     require_auth: bool = False
 
+    # Shared secret the auth-bff includes (header X-Auth-Bff-Secret) so the
+    # backend only trusts X-Forwarded-* identity headers from the bff. When
+    # empty, X-Forwarded-* is trusted unconditionally (today's behavior).
+    # When set, forwarded identity is ignored unless the secret matches —
+    # closing header-spoofing if the pod is ever reachable without the edge.
+    auth_bff_shared_secret: str = ""
+
+    # When set, the document-ingestion agent tools (doc_read_pdf /
+    # doc_read_markdown / doc_parse_openapi) may only read files resolving
+    # inside this directory. Empty = no confinement (today's behavior).
+    # Set to the per-run workspace root to stop a prompt-injected agent
+    # from reading arbitrary files (e.g. /etc/passwd).
+    tool_workspace_root: str = ""
+
     # --- Pipeline ---
     max_review_iterations: int = 3
     pipeline_label: str = "devai:automate"

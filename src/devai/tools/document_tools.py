@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from devai.tools.path_guard import PathTraversalError, confine
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +106,20 @@ class DocumentToolExecutor:
             return result
         return json.dumps(result, indent=2, default=str)
 
+    def _resolve(self, file_path: str) -> Path:
+        """Resolve a tool-supplied path, confined to the workspace root when
+        ``DEVAI_TOOL_WORKSPACE_ROOT`` is set (otherwise unchanged)."""
+        from devai.config import settings
+
+        return confine(file_path, settings.tool_workspace_root)
+
     async def _handle_doc_read_pdf(self, inp: dict[str, Any]) -> dict[str, Any]:
         """Extract text from PDF using PyPDF2 or pdfplumber."""
         file_path = inp["file_path"]
-        path = Path(file_path)
+        try:
+            path = self._resolve(file_path)
+        except PathTraversalError as e:
+            return {"error": str(e)}
 
         if not path.exists():
             return {"error": f"File not found: {file_path}"}
@@ -158,7 +172,10 @@ class DocumentToolExecutor:
     async def _handle_doc_read_markdown(self, inp: dict[str, Any]) -> dict[str, Any]:
         """Parse markdown file into structured sections."""
         file_path = inp["file_path"]
-        path = Path(file_path)
+        try:
+            path = self._resolve(file_path)
+        except PathTraversalError as e:
+            return {"error": str(e)}
 
         if not path.exists():
             return {"error": f"File not found: {file_path}"}
@@ -253,7 +270,10 @@ class DocumentToolExecutor:
     async def _handle_doc_parse_openapi(self, inp: dict[str, Any]) -> dict[str, Any]:
         """Parse OpenAPI spec and extract structured API info."""
         file_path = inp["file_path"]
-        path = Path(file_path)
+        try:
+            path = self._resolve(file_path)
+        except PathTraversalError as e:
+            return {"error": str(e)}
 
         if not path.exists():
             return {"error": f"File not found: {file_path}"}
