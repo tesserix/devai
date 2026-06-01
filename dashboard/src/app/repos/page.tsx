@@ -15,6 +15,7 @@ import {
   type OnboardingStateValue,
   type RepoCatalogPage,
 } from "@/lib/api";
+import { useToast } from "@/components/toast";
 
 type Tab = "all" | "onboarded" | "available";
 
@@ -31,10 +32,10 @@ function StatePill({ state }: { state: OnboardingStateValue }) {
 }
 
 export default function ReposPage() {
+  const toast = useToast();
   const [data, setData] = useState<RepoCatalogPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -116,8 +117,8 @@ export default function ReposPage() {
   async function onboardSelected() {
     if (selected.size === 0) return;
     setBusy(true);
-    setNotice(null);
-    setError(null);
+    const count = selected.size;
+    const tid = toast.loading(`Opening onboarding PR${count === 1 ? "" : "s"} for ${count} repo${count === 1 ? "" : "s"}…`);
     try {
       const repos = [...selected].map((full) => {
         const [owner, name] = full.split("/");
@@ -126,15 +127,19 @@ export default function ReposPage() {
       const res = await api.onboardRepos(repos);
       const ok = res.succeeded.length;
       const failed = res.failed.length;
-      setNotice(
-        `Onboarding started: ${ok} PR${ok === 1 ? "" : "s"} opened${
-          failed ? `, ${failed} failed (${res.failed.map((f) => f.repo).join(", ")})` : ""
-        }.`
-      );
+      if (failed) {
+        toast.update(
+          tid,
+          ok ? "info" : "error",
+          `Onboarding: ${ok} PR${ok === 1 ? "" : "s"} opened, ${failed} failed (${res.failed.map((f) => f.repo).join(", ")}).`
+        );
+      } else {
+        toast.update(tid, "success", `Onboarding started: ${ok} PR${ok === 1 ? "" : "s"} opened.`);
+      }
       setSelected(new Set());
       await load({ refresh: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.update(tid, "error", `Onboard failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -142,13 +147,13 @@ export default function ReposPage() {
 
   async function markReady(repo: CatalogRepo) {
     setBusy(true);
-    setError(null);
+    const tid = toast.loading(`Marking PR #${repo.pr_number} ready (${repo.full_name})…`);
     try {
       await api.markOnboardingPRReady(repo.owner, repo.name);
-      setNotice(`PR #${repo.pr_number} for ${repo.full_name} is now ready for review.`);
+      toast.update(tid, "success", `PR #${repo.pr_number} for ${repo.full_name} is ready for review.`);
       await load({ refresh: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.update(tid, "error", `Mark ready failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -156,13 +161,13 @@ export default function ReposPage() {
 
   async function mergePR(repo: CatalogRepo) {
     setBusy(true);
-    setError(null);
+    const tid = toast.loading(`Merging onboarding PR for ${repo.full_name}…`);
     try {
       await api.mergeOnboardingPR(repo.owner, repo.name);
-      setNotice(`Merged onboarding PR for ${repo.full_name} — now onboarded.`);
+      toast.update(tid, "success", `Merged onboarding PR for ${repo.full_name} — now onboarded.`);
       await load({ refresh: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.update(tid, "error", `Merge failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -252,18 +257,6 @@ export default function ReposPage() {
         })}
       </div>
 
-      {notice && (
-        <div
-          className="rounded-md px-3 py-2 text-sm"
-          style={{
-            background: "var(--ok-soft-bg)",
-            color: "var(--ok-ink)",
-            border: "1px solid var(--ok-soft-bd)",
-          }}
-        >
-          {notice}
-        </div>
-      )}
       {error && (
         <div
           className="rounded-md px-3 py-2 text-sm font-mono"
@@ -423,18 +416,14 @@ export default function ReposPage() {
         <AssignReviewerModal
           repo={assignTarget}
           onClose={() => setAssignTarget(null)}
-          onAssigned={(msg) => {
-            setNotice(msg);
-            setAssignTarget(null);
-          }}
+          onAssigned={() => setAssignTarget(null)}
         />
       )}
 
       {creating && (
         <NewRepoModal
           onClose={() => setCreating(false)}
-          onCreated={(msg) => {
-            setNotice(msg);
+          onCreated={() => {
             setCreating(false);
             void load({ refresh: true });
           }}
@@ -449,8 +438,9 @@ function NewRepoModal({
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: (msg: string) => void;
+  onCreated: () => void;
 }) {
+  const toast = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [techStack, setTechStack] = useState("");
@@ -461,39 +451,51 @@ function NewRepoModal({
   const validName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name.trim());
 
   async function submit() {
+    if (busy) return;
     if (!validName) {
       setErr("Enter a valid repo name (letters, digits, '.', '-', '_').");
       return;
     }
     setBusy(true);
     setErr(null);
+    const repoName = name.trim();
+    const tid = toast.loading(`Creating ${repoName}…`);
     try {
       const res = await api.createAndOnboardRepo({
-        name: name.trim(),
+        name: repoName,
         description: description.trim(),
         private: isPrivate,
         tech_stack: techStack.trim(),
       });
       const skipped = res.files_skipped?.length ?? 0;
-      onCreated(
-        `Created ${res.repo} — scaffolded ${res.files_created.length} files and onboarded.` +
+      toast.update(
+        tid,
+        "success",
+        `Created ${res.repo} — ${res.files_created.length} files scaffolded and onboarded.` +
           (res.branch_protected ? " Branch protection on." : "") +
-          (skipped
-            ? ` ${skipped} workflow file(s) skipped — the GitHub token needs the 'Workflows' permission.`
-            : "")
+          (skipped ? ` ${skipped} workflow file(s) skipped — token needs the 'Workflows' permission.` : "") +
+          (res.adopted ? " (adopted an existing repo)" : "")
       );
+      onCreated();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(msg);
+      toast.update(tid, "error", `Create failed: ${msg}`);
     } finally {
       setBusy(false);
     }
+  }
+
+  // While a create is in flight the whole form is locked.
+  function close() {
+    if (!busy) onClose();
   }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "var(--surface-overlay)" }}
-      onClick={onClose}
+      onClick={close}
     >
       <div className="panel-raised p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <h2 className="font-serif text-lg" style={{ color: "var(--ink-strong)" }}>
@@ -517,6 +519,7 @@ function NewRepoModal({
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="my-service"
           className="field w-full"
+          disabled={busy}
         />
 
         <label className="block text-xs mt-3 mb-1" style={{ color: "var(--ink-muted)" }}>
@@ -527,6 +530,7 @@ function NewRepoModal({
           onChange={(e) => setDescription(e.target.value)}
           placeholder="One-line summary"
           className="field w-full"
+          disabled={busy}
         />
 
         <label className="block text-xs mt-3 mb-1" style={{ color: "var(--ink-muted)" }}>
@@ -537,18 +541,32 @@ function NewRepoModal({
           onChange={(e) => setTechStack(e.target.value)}
           placeholder="e.g. Go service, Next.js app…"
           className="field w-full"
+          disabled={busy}
         />
 
-        <label className="flex items-center gap-2 mt-3 text-sm" style={{ color: "var(--ink-soft)" }}>
-          <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
+        <label
+          className="flex items-center gap-2 mt-3 text-sm"
+          style={{ color: "var(--ink-soft)", opacity: busy ? 0.6 : 1 }}
+        >
+          <input
+            type="checkbox"
+            checked={isPrivate}
+            onChange={(e) => setIsPrivate(e.target.checked)}
+            disabled={busy}
+          />
           Private repository
         </label>
 
         {err && (
           <div className="text-xs font-mono mt-3" style={{ color: "var(--error-ink)" }}>{err}</div>
         )}
+        {busy && (
+          <div className="text-xs mt-3" style={{ color: "var(--ink-muted)" }}>
+            Creating &amp; onboarding… this can take a few seconds. The form is locked until it finishes.
+          </div>
+        )}
         <div className="flex justify-end gap-2 mt-4">
-          <button type="button" className="btn-ghost !py-1.5" onClick={onClose} disabled={busy}>
+          <button type="button" className="btn-ghost !py-1.5" onClick={close} disabled={busy}>
             Cancel
           </button>
           <button
@@ -572,13 +590,19 @@ function AssignReviewerModal({
 }: {
   repo: CatalogRepo;
   onClose: () => void;
-  onAssigned: (msg: string) => void;
+  onAssigned: () => void;
 }) {
+  const toast = useToast();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  function close() {
+    if (!busy) onClose();
+  }
+
   async function submit() {
+    if (busy) return;
     const reviewers = value
       .split(/[\s,]+/)
       .map((s) => s.trim())
@@ -586,11 +610,19 @@ function AssignReviewerModal({
     if (reviewers.length === 0) return;
     setBusy(true);
     setErr(null);
+    const tid = toast.loading(`Requesting review on ${repo.full_name} PR #${repo.pr_number}…`);
     try {
       await api.assignReviewer(repo.owner, repo.name, reviewers);
-      onAssigned(`Requested review on ${repo.full_name} PR #${repo.pr_number} from ${reviewers.join(", ")}.`);
+      toast.update(
+        tid,
+        "success",
+        `Requested review on ${repo.full_name} PR #${repo.pr_number} from ${reviewers.join(", ")}.`
+      );
+      onAssigned();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(msg);
+      toast.update(tid, "error", `Assign reviewer failed: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -600,7 +632,7 @@ function AssignReviewerModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "var(--surface-overlay)" }}
-      onClick={onClose}
+      onClick={close}
     >
       <div className="panel-raised p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <h2 className="font-serif text-lg" style={{ color: "var(--ink-strong)" }}>
@@ -618,12 +650,13 @@ function AssignReviewerModal({
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="github logins or org/team (comma-separated)"
           className="field mt-3 w-full"
+          disabled={busy}
         />
         {err && (
           <div className="text-xs font-mono mt-2" style={{ color: "var(--error-ink)" }}>{err}</div>
         )}
         <div className="flex justify-end gap-2 mt-4">
-          <button type="button" className="btn-ghost !py-1.5" onClick={onClose} disabled={busy}>
+          <button type="button" className="btn-ghost !py-1.5" onClick={close} disabled={busy}>
             Cancel
           </button>
           <button type="button" className="btn-primary !py-1.5" onClick={submit} disabled={busy || !value.trim()}>

@@ -3,6 +3,7 @@ import { Inter, IBM_Plex_Mono, Source_Serif_4, Syne } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "./theme-provider";
 import { MissionControlShell } from "@/components/mission-control-shell";
+import { ToastProvider } from "@/components/toast";
 
 // Fonts mirror PLATFORM.md §14 (Tactical Monospace). We load only the
 // weights we actually use to keep the bundle lean.
@@ -55,7 +56,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen" suppressHydrationWarning>
         <ThemeProvider>
-          <MissionControlShell>{children}</MissionControlShell>
+          <ToastProvider>
+            <MissionControlShell>{children}</MissionControlShell>
+          </ToastProvider>
         </ThemeProvider>
       </body>
     </html>

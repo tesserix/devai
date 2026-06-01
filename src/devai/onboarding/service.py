@@ -335,26 +335,53 @@ class OnboardingService:
         no PR/merge step. The marker on the default branch remains the source
         of truth, so the reconciler keeps it onboarded.
         """
+        import httpx
+
         owner = self._org
         full = f"{owner}/{name}"
 
+        # Idempotent fast path. A create takes several seconds (repo + ~13 file
+        # writes); a slow request can be retried by the browser / edge / mesh,
+        # and the retry would otherwise hit "repository already exists" and 409
+        # even though the original succeeded. If we've already onboarded this
+        # repo, just return that result instead of erroring.
         existing = await self._store.get(owner, name)
-        if existing and existing.state in (OnboardingState.ONBOARDED, OnboardingState.PENDING_PR):
-            raise ValueError(f"{full} is already onboarded ({existing.state})")
+        if existing and existing.state == OnboardingState.ONBOARDED:
+            return {
+                "ok": True,
+                "repo": full,
+                "html_url": "",
+                "default_branch": existing.default_base_branch or "main",
+                "state": str(existing.state),
+                "files_created": [],
+                "files_skipped": [],
+                "branch_protected": False,
+                "already_onboarded": True,
+            }
 
-        # Create empty (auto_init=False) so the scaffold owns every file,
-        # including the README — no collision with an auto-generated one.
-        repo = await self._scm.create_repo(owner, name, description, private, auto_init=False)
-        default_branch = repo.get("default_branch", "main") or "main"
+        # Create empty (auto_init=False) so the scaffold owns every file. If the
+        # repo already exists — a retry reached here, or it was created
+        # out-of-band — adopt it and finish onboarding rather than failing. This
+        # is what makes the whole operation safely retryable / idempotent.
+        adopted = False
+        try:
+            repo = await self._scm.create_repo(owner, name, description, private, auto_init=False)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (409, 422):  # name already exists
+                adopted = True
+                try:
+                    repo = await self._scm.get_repo_info(full)
+                except Exception:  # noqa: BLE001
+                    repo = {}
+            else:
+                raise
+        default_branch = repo.get("default_branch") or "main"
         html_url = repo.get("html_url", "")
 
-        # Seed the default files + quality gates. The first contents write
-        # creates the default branch on the empty repo; the rest append to it.
-        # Workflow files under .github/workflows/ need the token's "Workflows"
-        # permission — if that's missing, skip them (best-effort) instead of
-        # failing the whole onboard; the repo still gets README + marker.
-        import httpx
-
+        # Seed the default files + quality gates. Idempotent: a file that already
+        # exists (422 on adopt/retry) is left untouched; workflow files need the
+        # token's "Workflows" permission and are skipped (best-effort) on 403.
+        # The first write on a fresh empty repo creates the default branch.
         created: list[str] = []
         skipped: list[dict[str, str]] = []
         for f in default_scaffold_files(full, description=description, tech_stack=tech_stack):
@@ -362,26 +389,34 @@ class OnboardingService:
                 await self._scm.create_or_update_file(full, f.path, f.content, f.message, default_branch)
                 created.append(f.path)
             except httpx.HTTPStatusError as e:
-                if f.path.startswith(".github/workflows/") and e.response.status_code in (403, 422):
+                code = e.response.status_code
+                if f.path.startswith(".github/workflows/") and code in (403, 422):
                     skipped.append({"path": f.path, "reason": "GitHub token lacks the 'Workflows' permission"})
                     logger.warning("scaffold skipped %s for %s (Workflows permission): %s", f.path, full, e)
+                elif code in (409, 422):  # already present (adopt/retry) — leave it
+                    skipped.append({"path": f.path, "reason": "already present"})
                 else:
                     raise
 
         # The onboarding marker — presence on the default branch == onboarded.
+        # Tolerate it already existing (adopt/retry).
         metadata = OnboardingMetadata(
             onboarded_at=datetime.now(UTC).isoformat(),
             onboarded_by=onboarded_by,
             default_base_branch=default_branch,
             description=description,
         )
-        await self._scm.create_or_update_file(
-            full,
-            self._marker,
-            synthesize_marker(metadata),
-            "chore(devai): onboard repo to the DevAI platform",
-            default_branch,
-        )
+        try:
+            await self._scm.create_or_update_file(
+                full,
+                self._marker,
+                synthesize_marker(metadata),
+                "chore(devai): onboard repo to the DevAI platform",
+                default_branch,
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code not in (409, 422):
+                raise
         created.append(self._marker)
 
         # Branch-protection quality gate — best-effort (needs admin / a plan
@@ -408,6 +443,7 @@ class OnboardingService:
             "files_created": created,
             "files_skipped": skipped,
             "branch_protected": branch_protected,
+            "adopted": adopted,
         }
 
     async def _marker_present(self, full: str, ref: str) -> bool:

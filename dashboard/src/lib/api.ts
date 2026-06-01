@@ -641,6 +641,8 @@ export interface CreateRepoResult {
   files_created: string[];
   files_skipped: Array<{ path: string; reason: string }>;
   branch_protected: boolean;
+  adopted?: boolean;
+  already_onboarded?: boolean;
 }
 
 // ── Settings types ─────────────────────────────────────────────────────

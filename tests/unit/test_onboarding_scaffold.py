@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 import yaml
 
@@ -89,7 +90,9 @@ async def test_create_and_onboard_seeds_marker_and_records_onboarded() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_and_onboard_rejects_already_onboarded() -> None:
+async def test_create_and_onboard_idempotent_when_already_onboarded() -> None:
+    # A retry of an already-onboarded repo returns success (not 409/ValueError)
+    # and makes no GitHub calls — the slow create can be retried by the edge.
     from devai.onboarding.models import OnboardedRepo
 
     scm = FakeSCM()
@@ -97,7 +100,38 @@ async def test_create_and_onboard_rejects_already_onboarded() -> None:
     await store.upsert(OnboardedRepo(owner="tesserix", name="widget", state=OnboardingState.ONBOARDED))
     svc = OnboardingService(scm=scm, store=store, org="tesserix")
 
-    with pytest.raises(ValueError, match="already onboarded"):
-        await svc.create_and_onboard("widget")
-    # No repo was created.
+    result = await svc.create_and_onboard("widget")
+    assert result["ok"] is True
+    assert result["state"] == "onboarded"
+    assert result["already_onboarded"] is True
+    # No GitHub calls — pure fast-path.
     assert not any(c[0] == "create_repo" for c in scm.calls)
+
+
+class _ExistingRepoSCM(FakeSCM):
+    """create_repo raises 'already exists' (409); the flow must adopt + finish."""
+
+    async def create_repo(self, *args: object, **kwargs: object) -> dict:
+        self._record("create_repo", attempted=True)
+        req = httpx.Request("POST", "https://api.github.com/orgs/tesserix/repos")
+        raise httpx.HTTPStatusError("exists", request=req, response=httpx.Response(422, request=req))
+
+    async def get_repo_info(self, repo: str) -> dict:
+        return {"full_name": repo, "default_branch": "main", "html_url": f"https://github.com/{repo}"}
+
+
+@pytest.mark.asyncio
+async def test_create_and_onboard_adopts_existing_repo_on_retry() -> None:
+    # When the repo already exists (retry / out-of-band create), adopt it:
+    # finish scaffolding + marker and record ONBOARDED instead of 409.
+    scm = _ExistingRepoSCM(default_branch="main")
+    store = InMemoryOnboardingStore()
+    svc = OnboardingService(scm=scm, store=store, org="tesserix")
+
+    result = await svc.create_and_onboard("widget", onboarded_by="alice@example.com")
+    assert result["ok"] is True
+    assert result["adopted"] is True
+    assert result["state"] == "onboarded"
+    assert MARKER_PATH in result["files_created"]
+    row = await store.get("tesserix", "widget")
+    assert row is not None and row.state == OnboardingState.ONBOARDED
