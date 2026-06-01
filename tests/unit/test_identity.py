@@ -91,6 +91,10 @@ def _make_request(headers: dict[str, str] | None = None, cookies: dict[str, str]
     req.headers = headers or {}
     req.cookies = cookies or {}
     req.app.state.state_manager = MagicMock()
+    # Real Settings default auth_bff_shared_secret to "" (forwarded headers
+    # trusted unconditionally). A bare MagicMock would auto-create a truthy
+    # attribute, making _forward_trusted reject the unsigned forwarded headers.
+    req.app.state.config.auth_bff_shared_secret = ""
     return req
 
 
