@@ -172,3 +172,48 @@ async def refresh(request: Request) -> dict[str, str]:
     client = _client(request)
     client.refresh()
     return {"status": "cache cleared"}
+
+
+# plural → RegistryClient.publish_* method. Mirrors aregistry's POST /v0/{plural}.
+_PUBLISH_METHOD: dict[str, str] = {
+    "skills": "publish_skill",
+    "prompts": "publish_prompt",
+    "mcp-servers": "publish_mcp_server",
+    "servers": "publish_mcp_server",
+    "agents": "publish_agent",
+    "blueprints": "publish_blueprint",
+    "workflows": "publish_workflow",
+    "tools": "publish_tool",
+}
+
+
+@router.post("/{plural}", status_code=201)
+async def publish(request: Request, plural: str) -> dict[str, Any]:
+    """Publish a registry CR manifest (apiVersion/kind/metadata/spec) — the
+    write path behind the dashboard's artifact editor. Mirrors aregistry's
+    POST /v0/{plural}. The manifest is stamped with the tenant namespace so it
+    lands where the catalog lives and the dashboard (and aregistry) read it."""
+    method = _PUBLISH_METHOD.get(plural)
+    if method is None:
+        raise HTTPException(status_code=404, detail=f"unknown registry kind: {plural}")
+    client = _client(request)
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"invalid JSON body: {e}") from e
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="manifest must be a JSON object")
+    # Stamp the tenant namespace (the editor doesn't set it) so the artifact is
+    # visible to the same scoped reads the catalog uses.
+    ns = getattr(client, "_namespace", "") or ""
+    meta = body.get("metadata")
+    if ns and isinstance(meta, dict) and not meta.get("namespace"):
+        meta["namespace"] = ns
+    try:
+        result = await asyncio.to_thread(getattr(client, method), body)
+    except RegistryError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"publish: {e}") from e
+    client.refresh()
+    return result if isinstance(result, dict) else {"status": "published"}

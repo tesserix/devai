@@ -362,6 +362,18 @@ export const api = {
   listRegistryMcpServers: () => apiFetch<RegistryItem[]>("/registry/mcp-servers"),
   listRegistryAgents: () => apiFetch<RegistryItem[]>("/registry/agents"),
 
+  // Generic registry list (used by the artifact editor's reference pickers).
+  listRegistry: (plural: string) => apiFetch<RegistryItem[]>(`/registry/${plural}`),
+
+  // Publish a registry CR manifest (skills/agents/prompts/mcp-servers/…). The
+  // backend stamps the tenant namespace and forwards to the registry, so the
+  // artifact reflects in both DevAI and the aregistry marketplace.
+  publishArtifact: (plural: string, manifest: unknown) =>
+    apiFetch<{ name?: string; status?: string }>(`/registry/${plural}`, {
+      method: "POST",
+      body: JSON.stringify(manifest),
+    }),
+
   // ── Authoring: custom skills ──────────────────────────────────────
   createSkill: (input: CreateSkillInput) =>
     apiFetch<{ name: string; title?: string }>("/authoring/skills", {
