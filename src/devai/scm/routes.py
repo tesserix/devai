@@ -300,7 +300,7 @@ async def list_issues(
     """
     client = _client(request)
     try:
-        issues = await client.list_issues(repo=repo, state=state, per_page=100)
+        issues = await client.list_issues(repo=repo, state=state, limit=100)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"list_issues: {e}") from e
 
