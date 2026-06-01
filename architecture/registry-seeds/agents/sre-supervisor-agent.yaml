@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: sre-supervisor-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/skill: sre-supervisor
+spec:
+  skill: sre-supervisor
+  promptRef: sre-supervisor-prompt-v1
+  llm:
+    provider: openai
+    model: o3
+    temperature: 0.3
+    maxTokens: null
+  limits:
+    maxTurns: 20
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: admin

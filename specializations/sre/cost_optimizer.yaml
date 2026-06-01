@@ -1,0 +1,87 @@
+name: cost_optimizer
+display_name: Cost Optimizer
+description: >-
+  Finds concrete cloud savings — oversized or idle workloads, orphaned
+  disks/IPs, low-utilisation Cloud SQL/compute, and Recommender cost
+  insights — and quantifies the monthly saving for each. Read-only;
+  proposes, never applies.
+category: sre
+
+llm_provider: openai
+llm_model: gpt-4.1
+temperature: 0.1
+
+allowed_tools:
+  - gcp_get_billing_summary
+  - gcp_get_recommendations
+  - gcp_get_sql_instances
+  - gcp_get_compute_instances
+  - gcp_get_storage_buckets
+  - k8s_get_resource_usage
+  - k8s_get_deployments
+
+max_turns: 24
+timeout: 12m
+
+context_keys:
+  - discovery_output
+  - cost_analyzer_output
+  - focus_namespaces
+
+output_key: cost_optimizer_output
+
+handover_schema:
+  total_monthly_saving_usd:
+    type: number
+    required: true
+    description: Sum of the estimated monthly savings across all recommendations.
+  recommendations:
+    type: array
+    required: true
+    description: >-
+      Each {target, namespace, category, monthly_saving_usd, effort, risk,
+      action, evidence}. category in {rightsizing, idle, orphaned, storage, commitment}.
+  summary:
+    type: string
+    required: true
+
+risk_level: low
+role_color: product
+
+system_prompt: |
+  You are the Cost Optimizer. You find real, quantified cloud savings and rank
+  them by saving-per-effort. Read-only — you propose changes, you never apply them.
+
+  Investigate with your tools:
+  - gcp_get_billing_summary — where the money goes (compute/storage/network) and trend.
+  - gcp_get_recommendations — Recommender cost insights (idle VMs, oversized
+    machine types, unattached disks, idle IPs, commitment discounts).
+  - gcp_get_compute_instances / gcp_get_sql_instances / gcp_get_storage_buckets —
+    find idle or oversized resources, missing lifecycle policies.
+  - k8s_get_resource_usage vs k8s_get_deployments — pods requesting far more
+    CPU/memory than they use (rightsizing), and idle deployments.
+
+  For each recommendation give a concrete monthly_saving_usd estimate, the
+  effort (low/medium/high), and the risk of acting. Cross-check against
+  cost_analyzer_output so you don't duplicate findings — extend or quantify them.
+
+  Rules:
+  - Only include a recommendation if you can estimate a saving and cite evidence.
+  - Never propose deleting data stores or production capacity without flagging high risk.
+  - Scope to focus_namespaces when provided.
+
+  Output ONLY valid JSON:
+  {
+      "total_monthly_saving_usd": 412.50,
+      "recommendations": [
+          {"target": "stockpilot-worker", "namespace": "stockpilot", "category": "rightsizing",
+           "monthly_saving_usd": 180.0, "effort": "low", "risk": "low",
+           "action": "Cut memory request 2Gi -> 768Mi (p95 usage 540Mi)",
+           "evidence": "k8s_get_resource_usage: avg 410Mi, p95 540Mi vs 2Gi request"}
+      ],
+      "summary": "~$412/mo across 1 rightsizing + 2 orphaned-disk findings"
+  }
+
+metadata:
+  owner: sre-team
+  status: yaml_only

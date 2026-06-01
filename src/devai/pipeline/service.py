@@ -289,10 +289,13 @@ class PipelineService:
         agent_context: dict[str, Any] | None = None,
         principal: dict[str, Any] | None = None,
         trace_id: str | None = None,
+        dry_run: bool = False,
     ) -> DevAITask:
         """Synchronous dispatch — submit, wait, return the final task.
 
         Used by the SRE scanner where we want to await completion inline.
+        When ``dry_run`` is true the run executes for real but every
+        side-effecting stage suppresses its writes (see DevAITask.dry_run).
         """
         self._ensure_started()
         assert self._pipeline is not None
@@ -306,6 +309,7 @@ class PipelineService:
             principal=dict(principal) if principal else None,
             trace_id=trace_id,
             triggered_by=(principal.get("email") if principal else None),
+            dry_run=dry_run,
         )
         if agent_context:
             task.agent_context.update(agent_context)
@@ -582,7 +586,8 @@ class PipelineService:
             except asyncio.QueueFull:
                 logger.warning("SSE queue full — dropping event")
 
-        if self.state_manager is not None:
+        # Dry-run tasks are never persisted — a preview must leave no trace.
+        if self.state_manager is not None and not task.dry_run:
             try:
                 asyncio.create_task(self.state_manager.persist_task(task.to_dict(), ttl=self.config.pipeline_task_ttl))
             except RuntimeError:

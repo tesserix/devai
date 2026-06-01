@@ -1,0 +1,44 @@
+name: sre_crew
+display_name: SRE Investigation Crew
+description: >
+  A cross-functional reliability crew for deep investigations. The root
+  cause analyst leads: it dispatches the security, reliability, and
+  deployment specialists, then synthesises their findings into a single
+  ranked hypothesis. Cost is included so reliability work surfaces spend
+  side-effects. Read-only investigation — remediation is handled by the
+  blueprint's responder stage, not the crew.
+
+lead: root_cause_analyst
+
+members:
+  - specialization: root_cause_analyst
+    role_label: Investigation Lead
+  - specialization: security_auditor
+    role_label: Security Posture
+    allowed_tools:
+      - k8s_get_deployments
+      - k8s_get_pod_status
+      - k8s_check_certificates
+      - k8s_get_events
+      - gcp_get_recommendations
+  - specialization: reliability_analyst
+    role_label: SLO & Error Budgets
+    allowed_tools:
+      - prom_query
+      - prom_query_range
+      - prom_get_alerts
+      - prom_get_targets
+  - specialization: deployment_inspector
+    role_label: Rollout & Change
+    allowed_tools:
+      - k8s_get_deployments
+      - k8s_get_pod_status
+      - k8s_get_hpa_status
+      - k8s_get_events
+  - specialization: cost_optimizer
+    role_label: Cost Impact
+    allowed_tools:
+      - gcp_get_billing_summary
+      - gcp_get_recommendations
+      - k8s_get_resource_usage
+      - k8s_get_deployments

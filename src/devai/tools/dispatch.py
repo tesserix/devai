@@ -30,6 +30,46 @@ _SOURCES = (
     ("security", "devai.tools.security_tools", "SECURITY_TOOLS"),
     ("test", "devai.tools.test_tools", "TEST_TOOLS"),
     ("file", "devai.tools.file_tools", "FILE_TOOLS"),
+    # SRE observability tools — k8s / Prometheus / GCP. These let YAML-only
+    # SRE specializations (security_auditor, reliability_analyst, etc.) call
+    # live cluster + cloud tools through the same tool-calling loop the ALM
+    # roles use. Their executors take no constructor args, so the SCM-aware
+    # cls(scm) path in _executor_for raises TypeError and falls through to
+    # cls() cleanly.
+    ("k8s", "devai.sre.tools.k8s_tools", "K8S_TOOLS"),
+    ("prometheus", "devai.sre.tools.prometheus_tools", "PROMETHEUS_TOOLS"),
+    ("gcp", "devai.sre.tools.gcp_tools", "GCP_TOOLS"),
+    # Vendor-neutral observability fan-out (Datadog / New Relic / CloudWatch /
+    # Azure Monitor / Prometheus / Elasticsearch / Grafana). One set of tools
+    # that query whichever providers the tenant has connected in DevAI.
+    ("observability", "devai.sre.tools.observability_tools", "OBSERVABILITY_TOOLS"),
+)
+
+# Tools that change the outside world. In a dry run these are offered to the
+# model (so its reasoning is intact) but their execution is short-circuited —
+# the model gets a clear "[dry-run] blocked" result instead of a real write.
+# Everything not listed here is read-only and safe to run during a dry run.
+MUTATING_TOOLS: frozenset[str] = frozenset(
+    {
+        # SCM writes
+        "scm_create_branch",
+        "scm_commit_file",
+        "scm_create_pull_request",
+        "scm_merge_pull_request",
+        "scm_create_issue",
+        "scm_add_comment",
+        "scm_create_pr_review",
+        "scm_close_issue",
+        "scm_post_comment",
+        "scm_post_pr_review",
+        # Cluster / remediation writes used by SRE specs
+        "kubectl_rollout_restart",
+        "kubectl_scale",
+        "argocd_sync",
+        # Paging / messaging
+        "pagerduty_create_incident",
+        "slack_post_message",
+    }
 )
 
 
@@ -41,8 +81,10 @@ class ToolDispatcher:
     others are built with no args.
     """
 
-    def __init__(self, scm: Any | None = None) -> None:
+    def __init__(self, scm: Any | None = None, *, dry_run: bool = False) -> None:
         self._scm = scm
+        # When true, MUTATING_TOOLS are blocked at execute() time.
+        self._dry_run = dry_run
         # name → (schema dict, module path)
         self._index: dict[str, tuple[dict[str, Any], str]] = {}
         # module path → executor instance (lazily constructed, cached)
@@ -87,6 +129,12 @@ class ToolDispatcher:
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> str:
         """Run a tool call, returning a string the model can read."""
+        if self._dry_run and name in MUTATING_TOOLS:
+            logger.info("[dry-run] blocked mutating tool %s", name)
+            return (
+                f"[dry-run] '{name}' was NOT executed (dry-run mode). "
+                f"In a real run this would have applied the change with args: {arguments!r}"
+            )
         entry = self._index.get(name)
         if entry is None:
             return f"error: unknown tool {name!r}"

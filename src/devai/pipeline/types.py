@@ -253,6 +253,14 @@ class DevAITask:
     team_id: str = ""
     crew_id: str = ""
 
+    # ── Dry-run. When true the task runs for real (discovery, monitors,
+    # analysis all execute and return real findings) but every side-effecting
+    # stage suppresses its writes: no sre_incidents rows, no remediations, no
+    # PRs/issues, no pages, no memory writes, and the task is not persisted.
+    # SRE Studio uses this to preview exactly what a config WOULD do before
+    # it's published. Read by side-effecting stages via `task.dry_run`.
+    dry_run: bool = False
+
     # ────── Conditional helpers ──────
     # The blueprint executor uses these for `condition:` expressions.
     # Keep them as @property so they always reflect current state.

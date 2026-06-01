@@ -1,0 +1,44 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: cost-optimizer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Cost Optimizer
+  description: "Finds concrete cloud savings \u2014 oversized or idle workloads, orphaned disks/IPs, low-utilisation\
+    \ Cloud SQL/compute, and Recommender cost insights \u2014 and quantifies the monthly saving for each.\
+    \ Read-only; proposes, never applies."
+  category: sre
+  tools:
+  - gcp_get_billing_summary
+  - gcp_get_recommendations
+  - gcp_get_sql_instances
+  - gcp_get_compute_instances
+  - gcp_get_storage_buckets
+  - k8s_get_resource_usage
+  - k8s_get_deployments
+  handoverSchema:
+    total_monthly_saving_usd:
+      type: number
+      required: true
+      description: Sum of the estimated monthly savings across all recommendations.
+    recommendations:
+      type: array
+      required: true
+      description: Each {target, namespace, category, monthly_saving_usd, effort, risk, action, evidence}.
+        category in {rightsizing, idle, orphaned, storage, commitment}.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  - cost_analyzer_output
+  - focus_namespaces
+  outputKey: cost_optimizer_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

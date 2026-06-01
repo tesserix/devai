@@ -1,0 +1,53 @@
+name: sre-cost-optimization
+description: >-
+  Sequential cost-optimisation sweep. Discovers the cluster, gathers
+  current spend, then the Cost Optimizer quantifies concrete savings and
+  the responder files trackable findings. A linear chain — no fan-out.
+
+metadata:
+  domain: sre
+  kind: sequential
+  title: SRE Cost Optimisation
+  cadence: weekly
+  lanes: [discovery, analyse, report]
+
+stages:
+  - name: discover
+    type: agentic
+    stage: sre_discover
+    lane: discovery
+    timeout: 5m
+
+  - name: gather-cost
+    type: agentic
+    stage: sre_monitor_cost
+    lane: analyse
+    depends_on: [discover]
+    timeout: 10m
+
+  - name: optimise
+    type: agentic
+    stage: run_specialization
+    lane: analyse
+    title: Cost Optimizer
+    agent: cost_optimizer
+    depends_on: [gather-cost]
+    timeout: 12m
+    config:
+      specialization: cost_optimizer
+
+  - name: respond
+    type: agentic
+    stage: sre_respond
+    lane: report
+    depends_on: [optimise]
+    timeout: 10m
+    on_failure: continue
+
+  - name: learn
+    type: deterministic
+    stage: sre_learn
+    lane: report
+    depends_on: [respond]
+    timeout: 2m
+    on_failure: continue

@@ -194,6 +194,29 @@ def create_app(
             logger.exception("Authoring service failed to start — authoring API will 503")
             app.state.authoring_service = None
 
+        # SRE Studio — author/dry-run/publish custom SRE blueprints & agents.
+        # Drafts live in Postgres (sre_config_drafts); dry-run uses the
+        # PipelineService with dry_run=True; publish delegates to the
+        # authoring service (hot-register + push to the agentic-registry).
+        app.state.sre_studio_db = None
+        app.state.sre_studio_service = None
+        try:
+            from devai.services.database import Database as _StudioDB
+            from devai.sre_studio import SREStudioService
+
+            studio_db = _StudioDB(config.database_url)
+            await studio_db.connect()
+            app.state.sre_studio_db = studio_db
+            app.state.sre_studio_service = SREStudioService(
+                studio_db,
+                pipeline=app.state.pipeline_service,
+                authoring=app.state.authoring_service,
+            )
+            logger.info("SRE Studio service ready")
+        except Exception:
+            logger.exception("SRE Studio service failed to start — sre-studio API will 503")
+            app.state.sre_studio_service = None
+
         # Repo onboarding service (Repos page). Independent of the
         # pipeline runtime: build an SCM client (reuse the pipeline's if
         # one exists) + a best-effort Postgres pool, and fall back to the
@@ -338,6 +361,10 @@ def create_app(
             if settings_db is not None:
                 with suppress(Exception):
                     await settings_db.close()
+            studio_db = getattr(app.state, "sre_studio_db", None)
+            if studio_db is not None:
+                with suppress(Exception):
+                    await studio_db.close()
             if pipeline_service is not None:
                 try:
                     await pipeline_service.stop()
@@ -459,6 +486,12 @@ def create_app(
     from devai.authoring.routes import router as authoring_router
 
     app.include_router(authoring_router)
+
+    # SRE Studio routes (/api/sre-studio/*) — author/dry-run/publish SRE
+    # blueprints & agents. 503s until sre_studio_service is wired (lifespan).
+    from devai.sre_studio.routes import router as sre_studio_router
+
+    app.include_router(sre_studio_router)
 
     # Teams routes (/api/teams/*) — human teams + the AI crews they own.
     # Always mounted; returns 503 until team_service is wired (lifespan).

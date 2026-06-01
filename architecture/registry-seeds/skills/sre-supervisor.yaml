@@ -1,0 +1,47 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: sre-supervisor
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/risk-level: low
+spec:
+  displayName: SRE Supervisor
+  description: "Senior SRE / incident commander that plans a monitoring or incident run before any agent\
+    \ investigates. Reads the discovered cluster topology and the run intent, then produces a delegation\
+    \ plan: which SRE specialists to dispatch, in what order, against which namespaces, and what each\
+    \ should focus on. Pure planning \u2014 never touches the cluster. The multi-agent SRE blueprints\
+    \ hand off to it first."
+  category: orchestration
+  tools:
+  - k8s_get_deployments
+  - prom_get_alerts
+  handoverSchema:
+    delegation_plan:
+      type: object
+      required: true
+      description: "Which specialists run, their focus, target namespaces, and depends_on order \u2014\
+        \ {specialists: [{name, focus, namespaces, depends_on}]}."
+    focus_namespaces:
+      type: array
+      required: false
+      description: Namespaces the sweep should prioritise this run.
+    hypotheses:
+      type: array
+      required: false
+      description: Early hypotheses worth investigating, ranked by likelihood.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  - cluster_id
+  - trigger
+  - memory_context
+  outputKey: sre_supervisor_output
+  metadata:
+    owner: sre-team
+    status: yaml_only
+    parity: alm.supervisor

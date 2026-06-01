@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: sre-orchestrator-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/skill: sre-orchestrator
+spec:
+  skill: sre-orchestrator
+  promptRef: sre-orchestrator-prompt-v1
+  llm:
+    provider: openai
+    model: o3
+    temperature: 0.2
+    maxTokens: null
+  limits:
+    maxTurns: 12
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: admin

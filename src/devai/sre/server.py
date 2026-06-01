@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 # Set DEVAI_SRE_AUTO_SCAN=true to re-enable autonomous scanning.
 AUTO_SCAN_ENABLED = os.environ.get("DEVAI_SRE_AUTO_SCAN", "false").lower() in ("true", "1", "yes")
 DEFAULT_SCAN_INTERVAL = int(os.environ.get("DEVAI_SRE_SCAN_INTERVAL", "300"))
+# How often the multi-cadence scheduler wakes to check for due schedules.
+SCHEDULE_POLL_INTERVAL = int(os.environ.get("DEVAI_SRE_SCHEDULE_POLL", "60"))
 
 
 @asynccontextmanager
@@ -69,33 +71,60 @@ async def lifespan(app: FastAPI):
             from devai.core.state import StateManager
             from devai.pipeline.service import PipelineService
 
+            # An SCM client lets the code_remediator open fix PRs + file
+            # classified issues. Built only when SCM creds are configured;
+            # otherwise the remediator degrades to read-only investigation.
+            scm = None
+            try:
+                from devai.scm import create_scm_client
+
+                if getattr(settings, "scm_token", "") or getattr(settings, "github_app_id", 0):
+                    scm = create_scm_client(settings)
+                    logger.info("SRE: SCM client wired — code_remediator can open PRs/issues")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("SRE: SCM client unavailable (%s); code_remediator runs read-only", e)
+
             state_manager = StateManager(settings.redis_url)
             app.state.pipeline_state_manager = state_manager
             pipeline_service = PipelineService(
                 settings,
-                scm=None,  # SRE doesn't need an SCM client
+                scm=scm,
                 state_manager=state_manager,
             )
             await pipeline_service.start()
             app.state.pipeline_service = pipeline_service
-            logger.info("SRE PipelineService started — sre-monitor blueprint is the default scan path")
+            # Pull any DevAI-authored blueprints published to the shared
+            # registry and register them so they're runnable + schedulable.
+            await _consume_published_blueprints(pipeline_service)
+            logger.info("SRE PipelineService started — blueprint-driven scans enabled")
         except Exception:
             logger.exception("SRE PipelineService failed to start — falling back to legacy SREOrchestrator")
 
-    # Start the autonomous scanner only if explicitly enabled
+    # Legacy single-blueprint autonomous loop (opt-in via DEVAI_SRE_AUTO_SCAN).
     scan_task = None
     if AUTO_SCAN_ENABLED:
         scan_task = asyncio.create_task(_autonomous_scanner(db, app.state.pipeline_service))
         app.state.scan_task = scan_task
         logger.info("SRE server started — autonomous scanning every %ds", DEFAULT_SCAN_INTERVAL)
     else:
-        logger.info("SRE server started — auto-scan DISABLED, manual triggers only")
+        logger.info("SRE server started — legacy auto-scan DISABLED")
+
+    # Multi-cadence scheduler — runs published SRE blueprints on their own
+    # schedules (sre_schedules table). Always on when a DB + pipeline exist;
+    # does nothing until a schedule is created via the API.
+    sched_task = None
+    if app.state.db is not None and app.state.pipeline_service is not None:
+        sched_task = asyncio.create_task(_schedule_loop(app.state.db, app.state.pipeline_service))
+        app.state.sched_task = sched_task
+        logger.info("SRE scheduler started — polling sre_schedules every %ds", SCHEDULE_POLL_INTERVAL)
 
     yield
 
     # Shutdown
     if scan_task is not None:
         scan_task.cancel()
+    if sched_task is not None:
+        sched_task.cancel()
     if app.state.pipeline_service is not None:
         with contextlib_suppress(Exception):
             await app.state.pipeline_service.stop()
@@ -362,10 +391,293 @@ def create_sre_app() -> FastAPI:
             out.append(row)
         return out
 
+    # --- Blueprints (what the SRE runtime can run) ---
+
+    @app.get("/api/blueprints")
+    async def list_blueprints():
+        """SRE blueprints available to run (on-disk + published customs)."""
+        ps = app.state.pipeline_service
+        if ps is None:
+            return []
+        out = []
+        for bp in ps.list_blueprints():
+            meta = bp.get("metadata", {}) or {}
+            name = bp.get("name", "")
+            # SRE-domain blueprints only.
+            if meta.get("domain") == "sre" or name.startswith("sre-"):
+                out.append(
+                    {
+                        "name": name,
+                        "description": bp.get("description", ""),
+                        "stage_count": bp.get("stage_count", 0),
+                        "kind": meta.get("kind", ""),
+                        "pattern": meta.get("pattern", ""),
+                        "cadence": meta.get("cadence", ""),
+                        "title": meta.get("title", name),
+                    }
+                )
+        return out
+
+    @app.get("/api/blueprints/{name}/graph")
+    async def blueprint_graph(name: str):
+        ps = app.state.pipeline_service
+        if ps is None:
+            raise HTTPException(status_code=503, detail="pipeline runtime unavailable")
+        graph = ps.get_blueprint_graph(name)
+        if graph is None:
+            raise HTTPException(status_code=404, detail=f"blueprint {name!r} not found")
+        return graph
+
+    @app.post("/api/scan/trigger-blueprint")
+    async def trigger_blueprint(request: Request):
+        """Run a specific (published or built-in) SRE blueprint once."""
+        body = await request.json()
+        blueprint = body.get("blueprint")
+        cluster_id = body.get("cluster_id", "default")
+        if not blueprint:
+            raise HTTPException(status_code=422, detail="'blueprint' is required")
+        from ulid import ULID
+
+        scan_id = str(ULID())
+        with contextlib_suppress(Exception):
+            await app.state.db.pool.execute(
+                "INSERT INTO sre_clusters (id, name, provider, region) VALUES ($1,$2,'gke',$3) "
+                "ON CONFLICT (id) DO NOTHING",
+                cluster_id,
+                cluster_id,
+                "asia-south1",
+            )
+            await app.state.db.pool.execute(
+                "INSERT INTO sre_scan_runs (id, cluster_id, trigger, status, started_at) VALUES ($1,$2,'manual','running',NOW())",
+                scan_id,
+                cluster_id,
+            )
+        task = asyncio.create_task(
+            _run_single_scan(app.state.db, cluster_id, "manual", scan_id, app.state.pipeline_service, blueprint)
+        )
+        app.state.scan_tasks.add(task)
+        task.add_done_callback(app.state.scan_tasks.discard)
+        return {"status": "triggered", "blueprint": blueprint, "cluster": cluster_id, "scan_id": scan_id}
+
+    @app.get("/api/scan/runs/{scan_id}/flow")
+    async def scan_flow(scan_id: str):
+        """Per-stage timing for one scan run, for the dashboard flow view."""
+        db = app.state.db
+        row = await db.pool.fetchrow("SELECT * FROM sre_scan_runs WHERE id = $1", scan_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"scan {scan_id!r} not found")
+        rec = dict(row)
+        timings = rec.get("agent_timings")
+        if isinstance(timings, str):
+            with contextlib_suppress(Exception):
+                timings = json.loads(timings)
+        blueprint = (timings or {}).get("_blueprint") if isinstance(timings, dict) else None
+        graph = None
+        if blueprint and app.state.pipeline_service is not None:
+            graph = app.state.pipeline_service.get_blueprint_graph(blueprint)
+        return {
+            "scan_id": scan_id,
+            "status": rec.get("status"),
+            "blueprint": blueprint,
+            "trigger": rec.get("trigger"),
+            "incidents_found": rec.get("incidents_found"),
+            "agent_timings": timings if isinstance(timings, dict) else {},
+            "graph": graph,
+            "started_at": str(rec.get("started_at")) if rec.get("started_at") else None,
+            "completed_at": str(rec.get("completed_at")) if rec.get("completed_at") else None,
+        }
+
+    # --- Observability sources (read-only health; configured in DevAI) ---
+
+    @app.get("/api/observability/sources")
+    async def observability_sources():
+        """Which observability backends are connected + healthy. Read-only —
+        configuration lives in DevAI Settings → Observability."""
+        try:
+            from devai.adapters.observability import MultiObservabilityAdapter, providers_from_env
+
+            multi = MultiObservabilityAdapter.from_env()
+            health = await multi.health()
+            return {
+                "connected": providers_from_env(),
+                "sources": [{"provider": h.provider, "ok": h.ok, "detail": h.detail} for h in health],
+            }
+        except Exception as e:  # noqa: BLE001
+            return {"connected": [], "sources": [], "error": str(e)[:200]}
+
+    # --- Schedules (cadence for published blueprints) ---
+
+    @app.get("/api/schedules")
+    async def list_schedules():
+        rows = await app.state.db.list_schedules()
+        out = []
+        for r in rows:
+            rec = dict(r)
+            for k in ("created_at", "updated_at", "last_run_at"):
+                if rec.get(k) is not None and hasattr(rec[k], "isoformat"):
+                    rec[k] = rec[k].isoformat()
+            out.append(rec)
+        return out
+
+    @app.post("/api/schedules", status_code=201)
+    async def create_schedule(request: Request):
+        body = await request.json()
+        blueprint = body.get("blueprint")
+        cron = body.get("cron") or body.get("cadence") or ""
+        if not blueprint or not cron:
+            raise HTTPException(status_code=422, detail="'blueprint' and 'cron' (cadence) are required")
+        from ulid import ULID
+
+        sid = str(ULID())
+        await app.state.db.create_schedule(
+            sid,
+            blueprint,
+            cron,
+            body.get("cluster_id", "default"),
+            body.get("created_by", "operator"),
+            enabled=bool(body.get("enabled", True)),
+        )
+        return {"id": sid, "blueprint": blueprint, "cron": cron, "interval_seconds": _cadence_to_seconds(cron)}
+
+    @app.patch("/api/schedules/{schedule_id}")
+    async def update_schedule(schedule_id: str, request: Request):
+        body = await request.json()
+        await app.state.db.update_schedule(
+            schedule_id, cron=body.get("cron"), enabled=body.get("enabled")
+        )
+        return {"updated": schedule_id}
+
+    @app.delete("/api/schedules/{schedule_id}")
+    async def delete_schedule(schedule_id: str):
+        if not await app.state.db.delete_schedule(schedule_id):
+            raise HTTPException(status_code=404, detail=f"schedule {schedule_id!r} not found")
+        return {"deleted": schedule_id}
+
     return app
 
 
 # --- Autonomous Scanner ---
+
+
+async def _consume_published_blueprints(pipeline_service: Any) -> int:
+    """Pull DevAI-authored blueprints from the shared registry and register
+    them so the SRE runtime can run + schedule them.
+
+    Best-effort: the on-disk SRE blueprints are always available regardless;
+    this only adds the customs published from SRE Studio. The canonical YAML
+    round-trips via ``spec.devaiBlueprintYaml`` (see registry mapping).
+    """
+    registry_url = getattr(settings, "registry_url", "") or ""
+    if not registry_url:
+        return 0
+    try:
+        from devai.blueprint.loader import load_blueprint_from_string
+        from devai.registry import create_registry_client
+
+        client = create_registry_client(settings)
+        if client is None:
+            return 0
+        envelopes = client._get_collection("/v0/blueprints", "blueprints")  # noqa: SLF001
+    except Exception:  # noqa: BLE001
+        logger.warning("SRE: could not list published blueprints from registry", exc_info=True)
+        return 0
+
+    count = 0
+    for env in envelopes:
+        try:
+            spec = env.get("spec", {}) if isinstance(env, dict) else {}
+            yaml_text = spec.get("devaiBlueprintYaml") or ""
+            if not yaml_text:
+                continue
+            bp = load_blueprint_from_string(yaml_text, source="<registry>")
+            if pipeline_service.register_blueprint(bp):
+                count += 1
+        except Exception:  # noqa: BLE001
+            logger.debug("SRE: skipped a published blueprint that wouldn't load", exc_info=True)
+    if count:
+        logger.info("SRE: registered %d published blueprint(s) from the registry", count)
+    return count
+
+
+def _cadence_to_seconds(cadence: str) -> int | None:
+    """Parse a schedule cadence into seconds. None = never auto-run.
+
+    Accepts duration shorthand ("30s", "5m", "2h", "1d") and a few words
+    ("hourly", "daily", "weekly"). "on-alert" / "manual" / "" → None.
+    """
+    import re
+
+    c = (cadence or "").strip().lower()
+    if not c or c in ("on-alert", "on_alert", "manual", "none"):
+        return None
+    words = {"hourly": 3600, "daily": 86400, "weekly": 604800}
+    if c in words:
+        return words[c]
+    m = re.match(r"^every\s+(\d+)\s*(second|minute|hour|day)s?$", c)
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        return n * {"second": 1, "minute": 60, "hour": 3600, "day": 86400}[unit]
+    m = re.match(r"^(\d+)\s*(s|m|h|d)$", c)
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        return n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+    return None
+
+
+def _schedule_due(schedule: dict[str, Any]) -> bool:
+    """Has enough time elapsed since this schedule last ran?"""
+    interval = _cadence_to_seconds(schedule.get("cron", ""))
+    if interval is None:
+        return False
+    last = schedule.get("last_run_at")
+    if last is None:
+        return True
+    import time as _t
+    from datetime import datetime
+
+    if isinstance(last, str):
+        try:
+            last_dt = datetime.fromisoformat(last)
+        except ValueError:
+            return True
+        last_ts = last_dt.timestamp()
+    elif hasattr(last, "timestamp"):
+        last_ts = last.timestamp()
+    else:
+        return True
+    return (_t.time() - last_ts) >= interval
+
+
+async def _schedule_loop(db: Any, pipeline_service: Any) -> None:
+    """Run published SRE blueprints on their own cadences.
+
+    Wakes every SCHEDULE_POLL_INTERVAL seconds, loads enabled schedules,
+    and runs any that are due. Each schedule names a blueprint + cluster.
+    """
+    while True:
+        try:
+            schedules = await db.list_schedules(enabled_only=True)
+            for sch in schedules:
+                if not _schedule_due(sch):
+                    continue
+                logger.info("SRE scheduler: running blueprint=%s (schedule=%s)", sch.get("blueprint"), sch.get("id"))
+                try:
+                    await _run_single_scan(
+                        db,
+                        sch.get("cluster_id", "default"),
+                        "cron",
+                        None,
+                        pipeline_service,
+                        blueprint=sch.get("blueprint"),
+                    )
+                    await db.mark_schedule_ran(sch["id"])
+                except Exception:
+                    logger.exception("SRE scheduler: blueprint %s failed", sch.get("blueprint"))
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("SRE scheduler poll failed")
+        await asyncio.sleep(SCHEDULE_POLL_INTERVAL)
 
 
 async def _autonomous_scanner(db: Any, pipeline_service: Any = None) -> None:
@@ -387,20 +699,25 @@ async def _run_single_scan(
     trigger: str,
     scan_id: str | None = None,
     pipeline_service: Any = None,
+    blueprint: str | None = None,
 ) -> None:
-    """Execute a single SRE monitoring scan.
+    """Execute a single SRE scan with the named blueprint.
 
-    Routes through the Fiber-style `sre-monitor` blueprint when a
-    PipelineService is available; otherwise falls back to the legacy
-    `SREOrchestrator`. The DB-side `sre_scan_runs` row is updated in
-    both paths so the dashboard sees the same rows.
+    Routes through the Fiber-style blueprint when a PipelineService is
+    available; otherwise falls back to the legacy `SREOrchestrator`. The
+    DB-side `sre_scan_runs` row is updated in both paths. ``blueprint``
+    defaults to the configured ``pipeline_sre_blueprint`` (sre-monitor);
+    schedules and the trigger-blueprint endpoint pass any published SRE
+    blueprint here.
     """
-    logger.info("Starting SRE scan: cluster=%s trigger=%s scan_id=%s", cluster_id, trigger, scan_id)
+    logger.info(
+        "Starting SRE scan: cluster=%s trigger=%s scan_id=%s blueprint=%s", cluster_id, trigger, scan_id, blueprint
+    )
 
-    # ── New path: sre-monitor blueprint via PipelineService ──────────
+    # ── New path: blueprint via PipelineService ──────────────────────
     if pipeline_service is not None:
         try:
-            blueprint = getattr(settings, "pipeline_sre_blueprint", "sre-monitor")
+            blueprint = blueprint or getattr(settings, "pipeline_sre_blueprint", "sre-monitor")
             task = await pipeline_service.run_once(
                 intent=f"SRE scan cluster={cluster_id} trigger={trigger}",
                 blueprint=blueprint,

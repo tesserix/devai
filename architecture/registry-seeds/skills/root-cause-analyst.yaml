@@ -1,0 +1,60 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: root-cause-analyst
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Root Cause Analyst
+  description: "Synthesis role. Reads every specialist's findings plus the correlated finding set and\
+    \ produces a single ranked root-cause hypothesis with a causal chain and confidence. Pure reasoning\
+    \ over prior outputs \u2014 calls no tools, changes nothing."
+  category: sre
+  tools: []
+  handoverSchema:
+    root_cause:
+      type: string
+      required: true
+      description: The single most likely root cause, stated plainly.
+    causal_chain:
+      type: array
+      required: false
+      description: "Ordered cause\u2192effect steps that link the root cause to the symptoms."
+    confidence:
+      type: string
+      required: true
+      description: high | medium | low
+    affected_services:
+      type: array
+      required: false
+      description: Services impacted by this root cause.
+    blast_radius:
+      type: string
+      required: true
+      description: single_app | multi_app | cluster
+    alternative_hypotheses:
+      type: array
+      required: false
+      description: Other plausible causes, ranked, each {hypothesis, why_less_likely}.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - correlated_findings
+  - discovery_output
+  - infra_monitor_output
+  - perf_monitor_output
+  - log_analyzer_output
+  - cost_analyzer_output
+  - capacity_planner_output
+  - security_auditor_output
+  - reliability_analyst_output
+  - deployment_inspector_output
+  - observability_analyst_output
+  outputKey: root_cause_analyst_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

@@ -431,7 +431,71 @@ export const api = {
       `/pipeline/runs/${encodeURIComponent(taskId)}/rollback`,
       { method: "POST", body: JSON.stringify({ sha }) }
     ),
+
+  // ── SRE Studio: author → dry-run → publish ──────────────────────
+  // Drafts live in DevAI; publish pushes to the shared registry which the
+  // SRE runtime consumes + schedules.
+  sreStudio: {
+    listDrafts: (status?: string) =>
+      apiFetch<SREDraft[]>(`/sre-studio/drafts${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+    getDraft: (id: string) => apiFetch<SREDraft>(`/sre-studio/drafts/${encodeURIComponent(id)}`),
+    createDraft: (input: { kind: "blueprint" | "agent"; yaml: string; description?: string }) =>
+      apiFetch<SREDraft>("/sre-studio/drafts", { method: "POST", body: JSON.stringify(input) }),
+    updateDraft: (id: string, input: { yaml?: string; name?: string; description?: string }) =>
+      apiFetch<SREDraft>(`/sre-studio/drafts/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    deleteDraft: (id: string) =>
+      apiFetch<{ deleted: string }>(`/sre-studio/drafts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    dryRun: (id: string, clusterId = "default") =>
+      apiFetch<SREDryRunPreview>(`/sre-studio/drafts/${encodeURIComponent(id)}/dry-run`, {
+        method: "POST",
+        body: JSON.stringify({ cluster_id: clusterId }),
+      }),
+    publish: (id: string) =>
+      apiFetch<{ published: boolean; kind: string; name: string }>(
+        `/sre-studio/drafts/${encodeURIComponent(id)}/publish`,
+        { method: "POST" }
+      ),
+  },
 };
+
+// ── SRE Studio types ──────────────────────────────────────────────
+export interface SREDraft {
+  id: string;
+  kind: "blueprint" | "agent";
+  name: string;
+  yaml: string;
+  description: string;
+  status: "draft" | "published";
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  published_at?: string | null;
+  last_dry_run_at?: string | null;
+  dry_run_summary?: SREDryRunPreview | null;
+}
+
+export interface SREDryRunStageEvent {
+  stage: string;
+  phase: string;
+  duration_ms?: number | null;
+  message?: string;
+  error?: string | null;
+}
+
+export interface SREDryRunPreview {
+  dry_run: boolean;
+  blueprint: string;
+  task_id: string;
+  state: string;
+  stages_completed: string[];
+  stages_failed: string[];
+  stage_events: SREDryRunStageEvent[];
+  outputs: Record<string, unknown>;
+  note: string;
+}
 
 // ── Authoring types ───────────────────────────────────────────────
 export interface CatalogTool {
@@ -653,6 +717,9 @@ export interface SettingsField {
   required: boolean;
   placeholder: string;
   help: string;
+  // For multi-provider connectors: the provider this field belongs to.
+  // Empty = shown for all providers. The form shows only matching fields.
+  provider?: string;
 }
 
 export interface SettingsConnectorSpec {

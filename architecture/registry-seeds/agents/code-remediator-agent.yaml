@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: code-remediator-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/skill: code-remediator
+spec:
+  skill: code-remediator
+  promptRef: code-remediator-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: 0.2
+    maxTokens: null
+  limits:
+    maxTurns: 40
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: medium
+  roleColor: engineer

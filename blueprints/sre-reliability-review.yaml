@@ -1,0 +1,58 @@
+name: sre-reliability-review
+description: >-
+  Sequential SLO / error-budget review. Discovers the cluster, the
+  Reliability Analyst scores each service against its SLOs, the Root
+  Cause Analyst explains any breach, and the responder records findings.
+  Linear chain.
+
+metadata:
+  domain: sre
+  kind: sequential
+  title: SRE Reliability Review
+  cadence: hourly
+  lanes: [discovery, analyse, respond]
+
+stages:
+  - name: discover
+    type: agentic
+    stage: sre_discover
+    lane: discovery
+    timeout: 5m
+
+  - name: analyse-slo
+    type: agentic
+    stage: run_specialization
+    lane: analyse
+    title: Reliability Analyst
+    agent: reliability_analyst
+    depends_on: [discover]
+    timeout: 10m
+    config:
+      specialization: reliability_analyst
+
+  - name: root-cause
+    type: analyst
+    stage: run_specialization
+    lane: analyse
+    title: Root Cause
+    agent: root_cause_analyst
+    depends_on: [analyse-slo]
+    timeout: 6m
+    config:
+      specialization: root_cause_analyst
+
+  - name: respond
+    type: agentic
+    stage: sre_respond
+    lane: respond
+    depends_on: [root-cause]
+    timeout: 10m
+    on_failure: continue
+
+  - name: learn
+    type: deterministic
+    stage: sre_learn
+    lane: respond
+    depends_on: [respond]
+    timeout: 2m
+    on_failure: continue

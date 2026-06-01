@@ -1,0 +1,45 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: deployment-inspector
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Deployment Inspector
+  description: "Inspects workload rollout health \u2014 stuck or partial rollouts, replica mismatches,\
+    \ autoscaler saturation, image drift, and recent deploy-correlated regressions. Read-only; surfaces\
+    \ what changed and whether it looks healthy."
+  category: sre
+  tools:
+  - k8s_get_deployments
+  - k8s_get_pod_status
+  - k8s_get_hpa_status
+  - k8s_get_events
+  - k8s_get_resource_usage
+  handoverSchema:
+    overall_status:
+      type: string
+      required: true
+      description: healthy | degraded | failing
+    findings:
+      type: array
+      required: true
+      description: Each {service, namespace, category, severity, title, evidence, recommendation}. category
+        in {rollout, replicas, hpa, image, regression}.
+    recent_changes:
+      type: array
+      required: false
+      description: "Deploys/image changes seen in events \u2014 {service, change, when}."
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  - focus_namespaces
+  outputKey: deployment_inspector_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

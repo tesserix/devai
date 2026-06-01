@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: observability-analyst-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/skill: observability-analyst
+spec:
+  skill: observability-analyst
+  promptRef: observability-analyst-prompt-v1
+  llm:
+    provider: openai
+    model: gpt-4.1
+    temperature: 0.1
+    maxTokens: null
+  limits:
+    maxTurns: 24
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: engineer

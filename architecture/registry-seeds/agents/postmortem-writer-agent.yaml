@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: postmortem-writer-agent
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/skill: postmortem-writer
+spec:
+  skill: postmortem-writer
+  promptRef: postmortem-writer-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: 0.3
+    maxTokens: null
+  limits:
+    maxTurns: 10
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: low
+  roleColor: product

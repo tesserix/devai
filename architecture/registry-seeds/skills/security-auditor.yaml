@@ -1,0 +1,43 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: security-auditor
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: medium
+spec:
+  displayName: Security Auditor
+  description: "Scans the running cluster for security posture issues \u2014 publicly exposed services,\
+    \ expiring TLS certificates, risky workload settings, and Google Cloud Recommender security findings.\
+    \ Read-only: it reports and ranks, it never changes anything."
+  category: sre
+  tools:
+  - k8s_get_deployments
+  - k8s_get_pod_status
+  - k8s_check_certificates
+  - k8s_get_events
+  - prom_get_alerts
+  - gcp_get_recommendations
+  - gcp_get_project_info
+  handoverSchema:
+    overall_status:
+      type: string
+      required: true
+      description: ok | warnings | critical
+    findings:
+      type: array
+      required: true
+      description: Each {service, namespace, category, severity, title, evidence, recommendation}. category
+        in {exposure, certificate, rbac, config, cloud}.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  - focus_namespaces
+  outputKey: security_auditor_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

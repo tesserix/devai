@@ -541,3 +541,157 @@ class Database:
         else:
             rows = await self.pool.fetch("SELECT * FROM v_security_posture")
         return [dict(r) for r in rows]
+
+    # =========================================================================
+    # SRE Studio — config drafts (author → dry-run → publish)
+    #
+    # DDL lives in tesserix-k8s db-schema-bootstrap (sre_config_drafts).
+    # A draft is the unpublished form of a user-authored SRE artifact:
+    #   kind ∈ {blueprint, agent}, the validated YAML, a status
+    #   (draft | published), and the last dry-run summary (JSONB).
+    # =========================================================================
+
+    async def create_draft(
+        self,
+        draft_id: str,
+        kind: str,
+        name: str,
+        yaml_text: str,
+        created_by: str,
+        description: str = "",
+    ) -> None:
+        await self.pool.execute(
+            """INSERT INTO sre_config_drafts
+                 (id, kind, name, yaml, description, status, created_by)
+               VALUES ($1, $2, $3, $4, $5, 'draft', $6)""",
+            draft_id,
+            kind,
+            name,
+            yaml_text,
+            description,
+            created_by,
+        )
+
+    async def get_draft(self, draft_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow("SELECT * FROM sre_config_drafts WHERE id = $1", draft_id)
+        return dict(row) if row else None
+
+    async def list_drafts(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        if status:
+            rows = await self.pool.fetch(
+                "SELECT * FROM sre_config_drafts WHERE status = $1 ORDER BY updated_at DESC LIMIT $2",
+                status,
+                limit,
+            )
+        else:
+            rows = await self.pool.fetch(
+                "SELECT * FROM sre_config_drafts ORDER BY updated_at DESC LIMIT $1",
+                limit,
+            )
+        return [dict(r) for r in rows]
+
+    async def update_draft(
+        self,
+        draft_id: str,
+        *,
+        yaml_text: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        await self.pool.execute(
+            """UPDATE sre_config_drafts
+                 SET yaml        = COALESCE($2, yaml),
+                     name        = COALESCE($3, name),
+                     description = COALESCE($4, description),
+                     updated_at  = NOW()
+               WHERE id = $1""",
+            draft_id,
+            yaml_text,
+            name,
+            description,
+        )
+
+    async def set_draft_dry_run(self, draft_id: str, summary: str) -> None:
+        await self.pool.execute(
+            "UPDATE sre_config_drafts SET dry_run_summary = $2::jsonb, last_dry_run_at = NOW(), updated_at = NOW() "
+            "WHERE id = $1",
+            draft_id,
+            summary,
+        )
+
+    async def set_draft_status(self, draft_id: str, status: str) -> None:
+        await self.pool.execute(
+            "UPDATE sre_config_drafts SET status = $2, "
+            "published_at = CASE WHEN $2 = 'published' THEN NOW() ELSE published_at END, "
+            "updated_at = NOW() WHERE id = $1",
+            draft_id,
+            status,
+        )
+
+    async def delete_draft(self, draft_id: str) -> bool:
+        result = await self.pool.execute("DELETE FROM sre_config_drafts WHERE id = $1", draft_id)
+        return result.split()[-1] != "0"
+
+    # =========================================================================
+    # SRE Studio — schedules (cadence for published blueprints)
+    #
+    # DDL lives in tesserix-k8s db-schema-bootstrap (sre_schedules).
+    # =========================================================================
+
+    async def create_schedule(
+        self,
+        schedule_id: str,
+        blueprint: str,
+        cron: str,
+        cluster_id: str,
+        created_by: str,
+        enabled: bool = True,
+    ) -> None:
+        await self.pool.execute(
+            """INSERT INTO sre_schedules
+                 (id, blueprint, cron, cluster_id, enabled, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            schedule_id,
+            blueprint,
+            cron,
+            cluster_id,
+            enabled,
+            created_by,
+        )
+
+    async def list_schedules(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        if enabled_only:
+            rows = await self.pool.fetch(
+                "SELECT * FROM sre_schedules WHERE enabled = true ORDER BY created_at DESC"
+            )
+        else:
+            rows = await self.pool.fetch("SELECT * FROM sre_schedules ORDER BY created_at DESC")
+        return [dict(r) for r in rows]
+
+    async def update_schedule(
+        self,
+        schedule_id: str,
+        *,
+        cron: str | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        await self.pool.execute(
+            """UPDATE sre_schedules
+                 SET cron    = COALESCE($2, cron),
+                     enabled = COALESCE($3, enabled),
+                     updated_at = NOW()
+               WHERE id = $1""",
+            schedule_id,
+            cron,
+            enabled,
+        )
+
+    async def mark_schedule_ran(self, schedule_id: str) -> None:
+        await self.pool.execute(
+            "UPDATE sre_schedules SET last_run_at = NOW() WHERE id = $1",
+            schedule_id,
+        )
+
+    async def delete_schedule(self, schedule_id: str) -> bool:
+        result = await self.pool.execute("DELETE FROM sre_schedules WHERE id = $1", schedule_id)
+        return result.split()[-1] != "0"

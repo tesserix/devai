@@ -1,0 +1,43 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: sre-orchestrator
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/risk-level: low
+spec:
+  displayName: SRE Orchestrator
+  description: "Mid-run decision gate for SRE blueprints. After the specialists report and root cause\
+    \ is hypothesised, the orchestrator inspects severity, blast radius, and confidence and decides what\
+    \ happens next: auto- remediate (safe actions only), plan-and-escalate to a human, or close the run\
+    \ as healthy. Pure routing \u2014 it issues no cluster changes itself."
+  category: orchestration
+  tools: []
+  handoverSchema:
+    routing:
+      type: object
+      required: true
+      description: "The decision \u2014 {decision: auto_remediate|escalate|close, reason, severity, blast_radius,\
+        \ confidence}."
+    approved_remediations:
+      type: array
+      required: false
+      description: "When decision == auto_remediate, the safe actions cleared to run \u2014 each {action,\
+        \ target, rationale}. Empty for escalate/close."
+    escalation:
+      type: object
+      required: false
+      description: When decision == escalate, {severity, page, summary}.
+  contextKeys:
+  - correlated_findings
+  - root_cause_analyst_output
+  - reliability_analyst_output
+  - security_auditor_output
+  - deployment_inspector_output
+  outputKey: sre_orchestrator_output
+  metadata:
+    owner: sre-team
+    status: yaml_only
+    parity: alm.orchestrator

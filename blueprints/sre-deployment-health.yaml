@@ -1,0 +1,58 @@
+name: sre-deployment-health
+description: >-
+  Sequential rollout-health check. Discovers the cluster, the Deployment
+  Inspector checks rollouts / replicas / HPA / image drift and flags
+  recent regressions, the Remediation Planner proposes safe fixes, and
+  the responder records incidents. Linear chain.
+
+metadata:
+  domain: sre
+  kind: sequential
+  title: SRE Deployment Health
+  cadence: every 15 minutes
+  lanes: [discovery, inspect, respond]
+
+stages:
+  - name: discover
+    type: agentic
+    stage: sre_discover
+    lane: discovery
+    timeout: 5m
+
+  - name: inspect
+    type: agentic
+    stage: run_specialization
+    lane: inspect
+    title: Deployment Inspector
+    agent: deployment_inspector
+    depends_on: [discover]
+    timeout: 10m
+    config:
+      specialization: deployment_inspector
+
+  - name: plan-fixes
+    type: agentic
+    stage: run_specialization
+    lane: respond
+    title: Remediation Plan
+    agent: remediation_planner
+    depends_on: [inspect]
+    timeout: 8m
+    config:
+      specialization: remediation_planner
+
+  - name: respond
+    type: agentic
+    stage: sre_respond
+    lane: respond
+    depends_on: [plan-fixes]
+    timeout: 10m
+    on_failure: continue
+
+  - name: learn
+    type: deterministic
+    stage: sre_learn
+    lane: respond
+    depends_on: [respond]
+    timeout: 2m
+    on_failure: continue

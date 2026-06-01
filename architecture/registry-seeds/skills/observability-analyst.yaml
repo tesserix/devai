@@ -1,0 +1,46 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: observability-analyst
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Observability Analyst
+  description: "Pulls signal from the tenant's connected observability backends \u2014 Datadog, New Relic,\
+    \ CloudWatch, Azure Monitor, Prometheus, Elasticsearch, Grafana \u2014 through one vendor-neutral\
+    \ fan-out tool. It discovers which sources are connected, queries metrics/logs/alerts across one or\
+    \ many, and reports a cross-source health picture. Read-only."
+  category: sre
+  tools:
+  - obs_list_sources
+  - obs_query_metrics
+  - obs_query_logs
+  - obs_list_alerts
+  handoverSchema:
+    sources_used:
+      type: array
+      required: true
+      description: The observability providers actually queried this run.
+    overall_status:
+      type: string
+      required: true
+      description: healthy | degraded | critical
+    findings:
+      type: array
+      required: true
+      description: "Cross-source findings \u2014 each {service, source, signal, severity, title, evidence}.\
+        \ signal in {metric, log, alert}."
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  - focus_namespaces
+  outputKey: observability_analyst_output
+  metadata:
+    owner: sre-team
+    status: yaml_only
+    observability: true

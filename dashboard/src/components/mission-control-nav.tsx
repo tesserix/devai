@@ -8,6 +8,7 @@ import {
   Box,
   Boxes,
   BrainCog,
+  ChevronRight,
   ChevronsLeftRight,
   Database,
   FolderGit2,
@@ -101,6 +102,10 @@ const MID: NavItem[] = [
   { href: "/catalog", label: "Catalog", Icon: Database, description: "Resolved capability map" },
   { href: "/control", label: "Control", Icon: ChevronsLeftRight, description: "Manual pause / takeover" },
   { href: "/analytics", label: "Analytics", Icon: LineChart, description: "Cost + duration trends" },
+];
+
+const SRE: NavItem[] = [
+  { href: "/sre-studio", label: "SRE Studio", Icon: ShieldHalf, description: "Author, dry-run + publish SRE configs" },
 ];
 
 const BOTTOM: NavItem[] = [
@@ -230,6 +235,7 @@ export function MissionControlNav({
         <NavSection items={TOP} pathname={pathname} label="Fleet" />
         <NavSection items={REGISTRY} pathname={pathname} label="Registry" />
         <NavSection items={MID} pathname={pathname} label="Platform" />
+        <NavSection items={SRE} pathname={pathname} label="SRE" />
       </div>
 
       {/* Meta + theme toggle + sign out */}
@@ -266,9 +272,46 @@ function NavSection({
   pathname: string;
   label?: string;
 }) {
+  // Labelled sections are collapsible; the collapsed state persists per
+  // section in localStorage. Unlabelled sections (e.g. the bottom row) are
+  // always shown. A section that contains the active route is force-expanded
+  // so you never lose sight of where you are.
+  const storageKey = label ? `devai-nav-collapsed:${label}` : "";
+  const containsActive = items.some((it) => isActive(it.href, pathname));
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    setCollapsed(localStorage.getItem(storageKey) === "1");
+  }, [storageKey]);
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    if (storageKey) localStorage.setItem(storageKey, next ? "1" : "0");
+  };
+
+  const showItems = !label || !collapsed || containsActive;
+
   return (
     <nav className="mb-4">
-      {label && <div className="px-2 mb-1.5 label-eyebrow">{label}</div>}
+      {label && (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={showItems}
+          className="w-full flex items-center gap-1 px-2 mb-1.5 group"
+          style={{ color: "var(--ink-muted)" }}
+          title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+        >
+          <ChevronRight
+            className="w-3 h-3 shrink-0 transition-transform"
+            style={{ transform: showItems ? "rotate(90deg)" : "rotate(0deg)" }}
+          />
+          <span className="label-eyebrow">{label}</span>
+        </button>
+      )}
+      {showItems && (
       <ul className="space-y-0.5">
         {items.map(({ href, label: l, Icon, description, badge }) => {
           const active = isActive(href, pathname);
@@ -317,6 +360,7 @@ function NavSection({
           );
         })}
       </ul>
+      )}
     </nav>
   );
 }

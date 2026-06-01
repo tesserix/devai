@@ -96,4 +96,94 @@ export const sre = {
     apiFetch<any[]>(`/metrics?${appId ? `app_id=${appId}&` : ""}limit=${limit}`),
 
   costs: (days = 30) => apiFetch<CostReport[]>(`/costs?days=${days}`),
+
+  // ── Blueprints (published from DevAI SRE Studio + built-ins) ──────
+  listBlueprints: () => apiFetch<SREBlueprint[]>("/blueprints"),
+
+  blueprintGraph: (name: string) => apiFetch<BlueprintGraph>(`/blueprints/${encodeURIComponent(name)}/graph`),
+
+  triggerBlueprint: (blueprint: string, clusterId = "default") =>
+    apiFetch<{ status: string; blueprint: string; scan_id: string }>("/scan/trigger-blueprint", {
+      method: "POST",
+      body: JSON.stringify({ blueprint, cluster_id: clusterId }),
+    }),
+
+  scanFlow: (scanId: string) => apiFetch<ScanFlow>(`/scan/runs/${encodeURIComponent(scanId)}/flow`),
+
+  // ── Schedules (cadence for published blueprints) ──────────────────
+  listSchedules: () => apiFetch<SRESchedule[]>("/schedules"),
+
+  createSchedule: (input: { blueprint: string; cron: string; cluster_id?: string; enabled?: boolean }) =>
+    apiFetch<{ id: string }>("/schedules", { method: "POST", body: JSON.stringify(input) }),
+
+  updateSchedule: (id: string, input: { cron?: string; enabled?: boolean }) =>
+    apiFetch<{ updated: string }>(`/schedules/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  deleteSchedule: (id: string) => apiFetch<{ deleted: string }>(`/schedules/${id}`, { method: "DELETE" }),
+
+  // ── Observability sources (read-only; configured in DevAI Settings) ──
+  observabilitySources: () => apiFetch<ObservabilitySources>("/observability/sources"),
 };
+
+export interface ObservabilitySource {
+  provider: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ObservabilitySources {
+  connected: string[];
+  sources: ObservabilitySource[];
+  error?: string;
+}
+
+export interface SREBlueprint {
+  name: string;
+  description: string;
+  stage_count: number;
+  kind: string;
+  pattern: string;
+  cadence: string;
+  title: string;
+}
+
+export interface BlueprintGraphNode {
+  name: string;
+  stage: string;
+  type: string;
+  title: string;
+  lane: string;
+  depends_on: string[];
+  parallel: boolean;
+}
+
+export interface BlueprintGraph {
+  name: string;
+  title: string;
+  description: string;
+  lanes: string[];
+  nodes: BlueprintGraphNode[];
+  levels: string[][];
+}
+
+export interface SRESchedule {
+  id: string;
+  blueprint: string;
+  cron: string;
+  cluster_id: string;
+  enabled: boolean;
+  last_run_at?: string | null;
+  created_at?: string;
+}
+
+export interface ScanFlow {
+  scan_id: string;
+  status: string;
+  blueprint?: string | null;
+  trigger: string;
+  incidents_found: number;
+  agent_timings: Record<string, number>;
+  graph: BlueprintGraph | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+}

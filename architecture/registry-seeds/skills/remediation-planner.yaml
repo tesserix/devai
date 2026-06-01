@@ -1,0 +1,45 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: remediation-planner
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: medium
+spec:
+  displayName: Remediation Planner
+  description: "Turns a root-cause hypothesis into a concrete, ordered remediation plan \u2014 separating\
+    \ safe auto-remediations from changes that need human approval. It plans; the Incident Responder executes.\
+    \ Read-only with respect to the cluster."
+  category: sre
+  tools:
+  - k8s_get_deployments
+  - k8s_get_pod_status
+  - k8s_get_hpa_status
+  handoverSchema:
+    plan:
+      type: array
+      required: true
+      description: "Ordered steps \u2014 each {step, action, target, namespace, kind, risk, requires_approval,\
+        \ rationale, rollback}. kind in {auto_safe, human_approval, observe}."
+    auto_safe_actions:
+      type: array
+      required: false
+      description: The subset of steps cleared to run automatically (kind == auto_safe).
+    requires_human:
+      type: boolean
+      required: true
+      description: True if any step needs human approval before it can run.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - root_cause_analyst_output
+  - sre_orchestrator_output
+  - correlated_findings
+  - discovery_output
+  outputKey: remediation_planner_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

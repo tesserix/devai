@@ -1,0 +1,62 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: code-remediator
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: medium
+spec:
+  displayName: Code Remediator
+  description: "Bridges a production root cause to the codebase. When the root cause is a code defect\
+    \ (not just a config/capacity issue), it reads the affected service's repository, confirms the bug\
+    \ in source, opens a fix pull request on a branch, and files a classified, priority-labelled tracking\
+    \ issue. It never merges and never deploys \u2014 humans review the PR."
+  category: sre
+  tools:
+  - scm_get_repo_tree
+  - scm_list_files
+  - scm_get_file_content
+  - scm_get_pr_diff
+  - scm_create_branch
+  - scm_commit_file
+  - scm_create_pull_request
+  - scm_create_issue
+  - scm_add_comment
+  handoverSchema:
+    is_code_bug:
+      type: boolean
+      required: true
+      description: "True only if the root cause is a defect in source code that this run could localise.\
+        \ False for pure config/capacity/infra causes \u2014 then it does nothing and explains why."
+    repo:
+      type: string
+      required: false
+      description: owner/name of the repository investigated.
+    bug:
+      type: object
+      required: false
+      description: "The confirmed defect \u2014 {classification, severity, priority, file, lines, explanation}.\
+        \ classification in {logic, concurrency, resource_leak, null_deref, regression, security, dependency,\
+        \ config_in_code}."
+    pull_request:
+      type: object
+      required: false
+      description: "The fix PR \u2014 {number, url, branch, title, files_changed}."
+    issue:
+      type: object
+      required: false
+      description: "The tracking issue \u2014 {number, url, labels}."
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - root_cause_analyst_output
+  - remediation_planner_output
+  - discovery_output
+  - correlated_findings
+  outputKey: code_remediator_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

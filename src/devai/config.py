@@ -284,6 +284,27 @@ class Settings(BaseSettings):
     prometheus_url: str = "http://prometheus-server.monitoring.svc.cluster.local:80"
     grafana_url: str = "http://grafana.monitoring.svc.cluster.local:80"
 
+    # --- Observability connectors (configured in DevAI Settings; the SRE
+    # runtime reads these from env via its ExternalSecret). The fan-out tool
+    # queries whichever providers have creds present. ---
+    observability_provider: str = ""  # informational; multi-provider via fan-out
+    prometheus_token: str = ""
+    datadog_api_key: str = ""
+    datadog_app_key: str = ""
+    datadog_site: str = "datadoghq.com"
+    newrelic_api_key: str = ""
+    newrelic_account_id: str = ""
+    cloudwatch_region: str = "us-east-1"
+    cloudwatch_log_group: str = ""
+    azure_workspace_id: str = ""
+    azure_resource_id: str = ""
+    elasticsearch_url: str = ""
+    elasticsearch_api_key: str = ""
+    elasticsearch_username: str = ""
+    elasticsearch_password: str = ""
+    grafana_token: str = ""
+    grafana_datasource_uid: str = ""
+
     # --- ArgoCD ---
     argocd_namespace: str = "argocd"
     argocd_sync_timeout: int = 300  # seconds to wait for ArgoCD sync

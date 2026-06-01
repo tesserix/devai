@@ -13,15 +13,28 @@ import { IncidentFeed } from "@/components/incident-feed";
 import { ClusterOverview } from "@/components/cluster-overview";
 import { ScanHistory } from "@/components/scan-history";
 import { SREChatPanel } from "@/components/sre-chat-panel";
+import { RuntimePanel } from "@/components/runtime-panel";
 import { clsx } from "clsx";
 
-type Tab = "overview" | "incidents" | "apps" | "scans" | "costs" | "chat";
+type Tab =
+  | "overview"
+  | "incidents"
+  | "apps"
+  | "scans"
+  | "blueprints"
+  | "schedules"
+  | "sources"
+  | "costs"
+  | "chat";
 
 const NAV_ITEMS: { key: Tab; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "incidents", label: "Incidents" },
   { key: "apps", label: "Applications" },
   { key: "scans", label: "Scan History" },
+  { key: "blueprints", label: "Blueprints" },
+  { key: "schedules", label: "Schedules" },
+  { key: "sources", label: "Sources" },
   { key: "costs", label: "Cost Analysis" },
   { key: "chat", label: "Chat" },
 ];
@@ -204,6 +217,9 @@ export default function SREDashboard() {
             {tab === "incidents" && "Incidents"}
             {tab === "apps" && "Application Reliability"}
             {tab === "scans" && "Scan History"}
+            {tab === "blueprints" && "Blueprints"}
+            {tab === "schedules" && "Schedules"}
+            {tab === "sources" && "Observability Sources"}
             {tab === "costs" && "Cost Analysis"}
             {tab === "chat" && "SRE Assistant"}
           </h2>
@@ -386,6 +402,10 @@ export default function SREDashboard() {
                   </div>
                 )
               )}
+
+              {tab === "blueprints" && <RuntimePanel mode="blueprints" />}
+              {tab === "schedules" && <RuntimePanel mode="schedules" />}
+              {tab === "sources" && <RuntimePanel mode="sources" />}
 
               {tab === "chat" && <SREChatPanel />}
             </>

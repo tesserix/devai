@@ -7,6 +7,7 @@ import {
   GitPullRequestArrow,
   Plus,
   RefreshCw,
+  SearchCheck,
   UserPlus,
 } from "lucide-react";
 import {
@@ -145,6 +146,29 @@ export default function ReposPage() {
     }
   }
 
+  // Re-scan: server-side reconcile against the `.platform/devai.yaml` marker
+  // (the source of truth). Adopts repos whose marker was added out-of-band,
+  // and drops repos whose marker (or whole repo) was deleted — so the list
+  // matches reality on demand without waiting for the hourly job.
+  async function rescan() {
+    setBusy(true);
+    const tid = toast.loading("Re-scanning org for .platform/devai.yaml markers…");
+    try {
+      const r = await api.reconcileRepos();
+      const errs = r.errors?.length ? `, ${r.errors.length} error(s)` : "";
+      toast.update(
+        tid,
+        "success",
+        `Re-scan complete — ${r.scanned} scanned, ${r.reconciled} updated${errs}.`
+      );
+      await load({ refresh: true });
+    } catch (e) {
+      toast.update(tid, "error", `Re-scan failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function markReady(repo: CatalogRepo) {
     setBusy(true);
     const tid = toast.loading(`Marking PR #${repo.pr_number} ready (${repo.full_name})…`);
@@ -214,6 +238,15 @@ export default function ReposPage() {
             disabled={loading || busy}
           >
             <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            className="btn-ghost !py-1.5 flex items-center gap-1.5"
+            title="Re-scan the org for .platform/devai.yaml markers — adopt newly-marked repos and drop ones whose marker (or repo) was deleted"
+            onClick={rescan}
+            disabled={loading || busy}
+          >
+            <SearchCheck className="w-4 h-4" /> Re-scan
           </button>
           <button
             type="button"

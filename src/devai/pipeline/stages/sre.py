@@ -232,6 +232,25 @@ class _RespondStage(_SREAgentStage):
             logger.exception("IncidentResponderAgent construction failed")
             return None
 
+    async def execute(self, task: DevAITask) -> StageResult:
+        # Dry-run: never create incidents, file issues, page, or remediate.
+        # Report what WOULD happen so the preview stays meaningful.
+        if getattr(task, "dry_run", False):
+            findings = task.agent_context.get("correlated_findings", []) or []
+            return StageResult(
+                next_state=self._next_state(),
+                message=f"[dry-run] would triage {len(findings)} finding(s)",
+                data={
+                    "incident_responder_output": {
+                        "dry_run": True,
+                        "would_create_incidents": len(findings),
+                        "summary": f"[dry-run] {len(findings)} finding(s) would be triaged; "
+                        "no incidents, remediations, pages or issues were created",
+                    }
+                },
+            )
+        return await super().execute(task)
+
     async def _call(self, agent: Any, task: DevAITask) -> Any:
         findings = task.agent_context.get("correlated_findings", [])
         # IncidentResponderAgent.run takes findings or similar — try a few shapes.
@@ -265,6 +284,14 @@ class _LearnStage(PipelineStage):
     async def execute(self, task: DevAITask) -> StageResult:
         findings = task.agent_context.get("correlated_findings", []) or []
         response = task.agent_context.get("incident_responder_output")
+
+        # Dry-run: don't write learnings to memory — leave no trace.
+        if getattr(task, "dry_run", False):
+            return StageResult(
+                next_state=TaskState.LEARNING,
+                message=f"[dry-run] would record {len(findings)} finding(s) to memory",
+                data={"learn_done": True, "dry_run": True},
+            )
 
         summary = (
             f"SRE sweep task={task.id} repo={task.repo or 'n/a'} "

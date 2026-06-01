@@ -1,0 +1,168 @@
+name: sre-incident-response
+description: >-
+  Supervisor-led incident war-room. Triggered on an alert: the SRE
+  Supervisor scopes the run, the cluster is discovered, focused
+  specialists investigate in parallel, findings are correlated and a root
+  cause formed. The SRE Orchestrator decides at a gate; the Remediation
+  Planner produces a safe plan; the responder acts. If the root cause is
+  a code defect, the Code Remediator reads the repo, opens a fix PR and a
+  classified tracking issue. A postmortem closes the run.
+
+metadata:
+  domain: sre
+  kind: multi_agent
+  pattern: supervisor+orchestrator
+  title: SRE Incident Response
+  cadence: on-alert
+  lanes: [plan, discovery, investigate, decide, respond, code, learn]
+
+stages:
+  # ─── Plan ──────────────────────────────────────────────────────────
+  - name: supervise
+    type: agentic
+    stage: run_specialization
+    lane: plan
+    title: SRE Supervisor
+    agent: sre_supervisor
+    timeout: 8m
+    config:
+      specialization: sre_supervisor
+
+  # ─── Discovery ─────────────────────────────────────────────────────
+  - name: discover
+    type: agentic
+    stage: sre_discover
+    lane: discovery
+    depends_on: [supervise]
+    timeout: 5m
+
+  # ─── Focused parallel investigation ────────────────────────────────
+  - name: monitor-infra
+    type: agentic
+    stage: sre_monitor_infra
+    lane: investigate
+    depends_on: [discover]
+    parallel: true
+    timeout: 8m
+    on_failure: continue
+
+  - name: monitor-logs
+    type: agentic
+    stage: sre_monitor_logs
+    lane: investigate
+    depends_on: [discover]
+    parallel: true
+    timeout: 8m
+    on_failure: continue
+
+  - name: monitor-perf
+    type: agentic
+    stage: sre_monitor_perf
+    lane: investigate
+    depends_on: [discover]
+    parallel: true
+    timeout: 8m
+    on_failure: continue
+
+  - name: inspect-deploys
+    type: agentic
+    stage: run_specialization
+    lane: investigate
+    title: Deployment Inspector
+    agent: deployment_inspector
+    depends_on: [discover]
+    parallel: true
+    timeout: 8m
+    on_failure: continue
+    config:
+      specialization: deployment_inspector
+
+  # ─── Correlate + reason ────────────────────────────────────────────
+  - name: correlate
+    type: analyst
+    stage: sre_correlate
+    lane: decide
+    depends_on:
+      - monitor-infra
+      - monitor-logs
+      - monitor-perf
+      - inspect-deploys
+    timeout: 5m
+
+  - name: root-cause
+    type: analyst
+    stage: run_specialization
+    lane: decide
+    title: Root Cause
+    agent: root_cause_analyst
+    depends_on: [correlate]
+    timeout: 6m
+    config:
+      specialization: root_cause_analyst
+
+  # ─── Decision gate ─────────────────────────────────────────────────
+  - name: orchestrate
+    type: review
+    stage: run_specialization
+    lane: decide
+    title: SRE Orchestrator
+    agent: sre_orchestrator
+    gate: true
+    depends_on: [root-cause]
+    timeout: 5m
+    config:
+      specialization: sre_orchestrator
+
+  # ─── Respond ───────────────────────────────────────────────────────
+  - name: plan-remediation
+    type: agentic
+    stage: run_specialization
+    lane: respond
+    title: Remediation Plan
+    agent: remediation_planner
+    depends_on: [orchestrate]
+    timeout: 8m
+    config:
+      specialization: remediation_planner
+
+  - name: respond
+    type: agentic
+    stage: sre_respond
+    lane: respond
+    depends_on: [plan-remediation]
+    timeout: 10m
+    on_failure: continue
+
+  # ─── Code fix (only when the root cause is a code defect) ──────────
+  - name: code-fix
+    type: agentic
+    stage: run_specialization
+    lane: code
+    title: Code Remediator
+    agent: code_remediator
+    depends_on: [root-cause, respond]
+    timeout: 20m
+    on_failure: continue
+    config:
+      specialization: code_remediator
+
+  # ─── Close out ─────────────────────────────────────────────────────
+  - name: postmortem
+    type: deterministic
+    stage: run_specialization
+    lane: learn
+    title: Postmortem
+    agent: postmortem_writer
+    depends_on: [respond, code-fix]
+    timeout: 6m
+    on_failure: continue
+    config:
+      specialization: postmortem_writer
+
+  - name: learn
+    type: deterministic
+    stage: sre_learn
+    lane: learn
+    depends_on: [postmortem]
+    timeout: 2m
+    on_failure: continue

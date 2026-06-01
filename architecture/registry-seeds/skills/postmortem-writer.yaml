@@ -1,0 +1,47 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: postmortem-writer
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Postmortem Writer
+  description: "Closes out a run by writing a blameless postmortem from the root cause, the actions taken,\
+    \ and the timeline \u2014 and optionally filing it as a tracking issue. Reasoning + SCM only; touches\
+    \ no cluster resources."
+  category: sre
+  tools:
+  - scm_create_issue
+  - scm_get_file_content
+  handoverSchema:
+    title:
+      type: string
+      required: true
+    postmortem_markdown:
+      type: string
+      required: true
+      description: The full blameless postmortem document in markdown.
+    action_items:
+      type: array
+      required: false
+      description: "Follow-up items \u2014 each {item, owner, priority}."
+    issue_number:
+      type: integer
+      required: false
+      description: Tracking issue number, if one was filed.
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - root_cause_analyst_output
+  - remediation_planner_output
+  - sre_orchestrator_output
+  - incident_responder_output
+  - correlated_findings
+  outputKey: postmortem_writer_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

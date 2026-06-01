@@ -37,6 +37,10 @@ class ConnectorField:
     required: bool = False
     placeholder: str = ""
     help: str = ""
+    # For multi-provider connectors (e.g. observability), the provider this
+    # field belongs to. Blank = shown for every provider. The Settings UI
+    # shows only the fields whose provider matches the selected one.
+    provider: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,10 +78,11 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
                 secret=True,
                 placeholder="sk-ant-...",
                 help="Used when provider = anthropic.",
+                provider="anthropic",
             ),
-            _f("claude_model", "Claude Model", "claude_model", placeholder="claude-sonnet-4-20250514"),
-            _f("openai_api_key", "OpenAI API Key", "openai_api_key", secret=True, placeholder="sk-..."),
-            _f("openai_model", "OpenAI Model", "openai_model", placeholder="gpt-4.1"),
+            _f("claude_model", "Claude Model", "claude_model", placeholder="claude-sonnet-4-20250514", provider="anthropic"),
+            _f("openai_api_key", "OpenAI API Key", "openai_api_key", secret=True, placeholder="sk-...", provider="openai"),
+            _f("openai_model", "OpenAI Model", "openai_model", placeholder="gpt-4.1", provider="openai"),
         ),
     ),
     ConnectorSpec(
@@ -148,6 +153,36 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         description="Give agents a web-search tool.",
         fields=(_f("tavily_api_key", "Tavily API Key", "tavily_api_key", secret=True),),
     ),
+    ConnectorSpec(
+        key="observability",
+        label="Observability",
+        family="observability",
+        provider_attr="observability_provider",
+        providers=("prometheus", "datadog", "newrelic", "cloudwatch", "azure_monitor", "elasticsearch", "grafana"),
+        multi=True,
+        description=(
+            "Connect monitoring backends the SRE runtime pulls metrics, logs, and alerts from. "
+            "Add one or many — agents fan out across all connected sources."
+        ),
+        fields=(
+            _f("prometheus_url", "Prometheus URL", "prometheus_url", placeholder="http://prometheus:9090", provider="prometheus"),
+            _f("prometheus_token", "Prometheus Bearer Token", "prometheus_token", secret=True, provider="prometheus"),
+            _f("datadog_api_key", "Datadog API Key", "datadog_api_key", secret=True, provider="datadog"),
+            _f("datadog_app_key", "Datadog Application Key", "datadog_app_key", secret=True, provider="datadog"),
+            _f("datadog_site", "Datadog Site", "datadog_site", placeholder="datadoghq.com", provider="datadog"),
+            _f("newrelic_api_key", "New Relic User Key", "newrelic_api_key", secret=True, provider="newrelic"),
+            _f("newrelic_account_id", "New Relic Account ID", "newrelic_account_id", provider="newrelic"),
+            _f("cloudwatch_region", "AWS Region", "cloudwatch_region", placeholder="us-east-1", provider="cloudwatch"),
+            _f("cloudwatch_log_group", "CloudWatch Log Group", "cloudwatch_log_group", provider="cloudwatch"),
+            _f("azure_workspace_id", "Log Analytics Workspace ID", "azure_workspace_id", provider="azure_monitor"),
+            _f("azure_resource_id", "Azure Resource ID (metrics)", "azure_resource_id", provider="azure_monitor"),
+            _f("elasticsearch_url", "Elasticsearch URL", "elasticsearch_url", provider="elasticsearch"),
+            _f("elasticsearch_api_key", "Elasticsearch API Key", "elasticsearch_api_key", secret=True, provider="elasticsearch"),
+            _f("grafana_url", "Grafana URL", "grafana_url", provider="grafana"),
+            _f("grafana_token", "Grafana Service-Account Token", "grafana_token", secret=True, provider="grafana"),
+            _f("grafana_datasource_uid", "Grafana Datasource UID", "grafana_datasource_uid", provider="grafana"),
+        ),
+    ),
 )
 
 CONNECTOR_BY_KEY: dict[str, ConnectorSpec] = {c.key: c for c in CONNECTOR_SPECS}
@@ -212,6 +247,7 @@ def catalog_public() -> list[dict[str, Any]]:
                         "required": f.required,
                         "placeholder": f.placeholder,
                         "help": f.help,
+                        "provider": f.provider,
                     }
                     for f in c.fields
                 ],

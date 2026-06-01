@@ -1,0 +1,44 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: reliability-analyst
+  namespace: devai
+  labels:
+    devai.io/source: devai
+    devai.io/category: sre
+    devai.io/risk-level: low
+spec:
+  displayName: Reliability Analyst
+  description: "Evaluates service reliability against SLOs using Prometheus \u2014 request success rate,\
+    \ latency percentiles, and error-budget burn. Produces an SLO scorecard per service and flags budgets\
+    \ that are nearly exhausted. Read-only."
+  category: sre
+  tools:
+  - prom_query
+  - prom_query_range
+  - prom_get_alerts
+  - prom_get_targets
+  handoverSchema:
+    overall_status:
+      type: string
+      required: true
+      description: healthy | at_risk | breaching
+    slo_scorecards:
+      type: array
+      required: true
+      description: Per service {service, namespace, availability_pct, latency_p99_ms, error_rate_pct,
+        error_budget_remaining_pct, status}.
+    findings:
+      type: array
+      required: false
+      description: "Reliability findings worth escalating \u2014 {service, severity, title, evidence}."
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - discovery_output
+  - focus_namespaces
+  outputKey: reliability_analyst_output
+  metadata:
+    owner: sre-team
+    status: yaml_only

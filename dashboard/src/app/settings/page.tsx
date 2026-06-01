@@ -208,14 +208,23 @@ function ConnectorForm({
     [spec.fields]
   );
 
+  // Show only the fields for the selected provider (untagged fields show
+  // for every provider). Keeps multi-provider connectors like Observability
+  // from dumping all 7 vendors' fields at once.
+  const visibleFields = useMemo(
+    () => spec.fields.filter((f) => !f.provider || f.provider === provider),
+    [spec.fields, provider]
+  );
+
   const save = async () => {
     setSaving(true);
     setErr(null);
     try {
       const prefs: Record<string, string> = {};
       const secrets: Record<string, string> = {};
+      const visibleKeys = new Set(visibleFields.map((f) => f.key));
       for (const [k, v] of Object.entries(values)) {
-        if (!v) continue;
+        if (!v || !visibleKeys.has(k)) continue; // only the selected provider's fields
         if (secretKeys.has(k)) secrets[k] = v;
         else prefs[k] = v;
       }
@@ -288,7 +297,7 @@ function ConnectorForm({
       </div>
 
       <div className="space-y-3">
-        {spec.fields.map((f) => (
+        {visibleFields.map((f) => (
           <label key={f.key} className="block">
             <span className="text-xs text-[var(--ink-300)] flex items-center gap-1.5">
               {f.label}
