@@ -70,8 +70,43 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
     ...opts,
     headers: { "Content-Type": "application/json", ...opts?.headers },
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
+}
+
+// Turn a failed response into a short, human-readable message. Crucially, this
+// never surfaces a raw HTML error page (e.g. a Cloudflare 502 served when the
+// backend is slow or restarting) — those dump hundreds of lines of markup into
+// the UI. We extract the JSON `detail` when present, drop HTML bodies, and give
+// gateway statuses a friendly retry hint.
+async function errorMessage(res: Response): Promise<string> {
+  let detail = "";
+  try {
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("application/json")) {
+      const body = await res.json();
+      detail =
+        typeof body?.detail === "string"
+          ? body.detail
+          : body?.detail
+            ? JSON.stringify(body.detail)
+            : typeof body?.message === "string"
+              ? body.message
+              : "";
+    } else {
+      const text = (await res.text()).trim();
+      // Skip HTML (gateway/error pages) — only keep short plain-text bodies.
+      if (text && !text.startsWith("<")) detail = text.slice(0, 200);
+    }
+  } catch {
+    /* body unreadable — fall through to the status-only message */
+  }
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    return `Service temporarily unavailable (${res.status}). The backend may be busy or starting up — try again in a moment.${
+      detail ? ` · ${detail}` : ""
+    }`;
+  }
+  return `API ${res.status}${detail ? `: ${detail}` : ""}`;
 }
 
 export const api = {

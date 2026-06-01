@@ -76,3 +76,86 @@ async def test_request_reviewers_splits_users_and_teams() -> None:
     assert captured["json"] == {"reviewers": ["mahesh"], "team_reviewers": ["platform"]}
     assert out == {"requested": ["mahesh"]}
     await client.close()
+
+
+def _repo(full_name: str, **extra) -> dict:
+    owner, name = full_name.split("/")
+    return {
+        "full_name": full_name,
+        "name": name,
+        "owner": {"login": owner},
+        "default_branch": "main",
+        **extra,
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_installation_repos_pat_uses_org_scoped_endpoint() -> None:
+    # A PAT bound to an org must query the cheap org-scoped listing rather than
+    # walking every org the token can see (the slow path that tripped the edge
+    # gateway timeout and served a raw 502 to the Repos page).
+    client = GitHubSCMClient(auth_method=AuthMethod.PAT, token="t", org="tesserix")
+    paths: list[str] = []
+
+    async def fake_request(method: str, path: str, **kwargs):
+        paths.append(path)
+        return httpx.Response(200, json=[_repo("tesserix/devai")], request=httpx.Request(method, path))
+
+    client._request = fake_request  # type: ignore[assignment]
+    out = await client.list_installation_repos(per_page=100)
+
+    assert len(paths) == 1
+    assert paths[0].startswith("/orgs/tesserix/repos")
+    assert [r["full_name"] for r in out] == ["tesserix/devai"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_list_installation_repos_falls_back_to_user_repos_on_404() -> None:
+    # If the configured "org" is actually a user account, /orgs/{org}/repos
+    # 404s — we must fall back to /user/repos (scoped to the owner) instead of
+    # surfacing a hard error.
+    client = GitHubSCMClient(auth_method=AuthMethod.PAT, token="t", org="someuser")
+    paths: list[str] = []
+
+    async def fake_request(method: str, path: str, **kwargs):
+        paths.append(path)
+        if path.startswith("/orgs/"):
+            req = httpx.Request(method, path)
+            raise httpx.HTTPStatusError("not found", request=req, response=httpx.Response(404, request=req))
+        # /user/repos spans orgs — include one foreign repo to prove filtering.
+        return httpx.Response(
+            200,
+            json=[_repo("someuser/app"), _repo("otherorg/lib")],
+            request=httpx.Request(method, path),
+        )
+
+    client._request = fake_request  # type: ignore[assignment]
+    out = await client.list_installation_repos(per_page=100)
+
+    assert paths[0].startswith("/orgs/someuser/repos")
+    assert any(p.startswith("/user/repos") for p in paths)
+    # Only the bound owner's repo survives the filter.
+    assert [r["full_name"] for r in out] == ["someuser/app"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_list_installation_repos_github_app_uses_installation_endpoint() -> None:
+    client = GitHubSCMClient(auth_method=AuthMethod.GITHUB_APP, org="tesserix")
+    paths: list[str] = []
+
+    async def fake_request(method: str, path: str, **kwargs):
+        paths.append(path)
+        return httpx.Response(
+            200,
+            json={"repositories": [_repo("tesserix/devai")]},
+            request=httpx.Request(method, path),
+        )
+
+    client._request = fake_request  # type: ignore[assignment]
+    out = await client.list_installation_repos(per_page=100)
+
+    assert paths[0].startswith("/installation/repositories")
+    assert [r["full_name"] for r in out] == ["tesserix/devai"]
+    await client.close()

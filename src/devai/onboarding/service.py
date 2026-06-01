@@ -73,7 +73,7 @@ class OnboardingService:
             return entry.value, True
 
         try:
-            raw = await self._scm.list_installation_repos(per_page=100)
+            raw = await self._scm.list_installation_repos(per_page=100, org=self._org)
         except NotImplementedError:
             raw = []
         snaps: list[RepoSnapshot] = []

@@ -25,8 +25,8 @@ class FakeSCM:
     def _record(self, name: str, *args: Any, **kwargs: Any) -> None:
         self.calls.append((name, args, kwargs))
 
-    async def list_installation_repos(self, per_page: int = 100) -> list[dict[str, Any]]:
-        self._record("list_installation_repos", per_page=per_page)
+    async def list_installation_repos(self, per_page: int = 100, org: str = "") -> list[dict[str, Any]]:
+        self._record("list_installation_repos", per_page=per_page, org=org)
         return self.repos
 
     async def probe_markers(self, repos, marker_path):

@@ -10,6 +10,7 @@ SCM unconfigured) so the UI renders an empty state, not a hard error.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import TYPE_CHECKING, Any
@@ -92,9 +93,19 @@ async def list_org_repos(
     """
     svc = _service(request)
     try:
-        return await svc.list_catalog(
-            query=q, page=page, per_page=per_page, refresh=bool(refresh), probe=bool(probe)
+        # Bound the whole catalog build so a slow upstream returns a clean JSON
+        # error well before an edge gateway (e.g. Cloudflare ~100s) would cut
+        # the connection and serve its own raw HTML 502 to the dashboard.
+        return await asyncio.wait_for(
+            svc.list_catalog(
+                query=q, page=page, per_page=per_page, refresh=bool(refresh), probe=bool(probe)
+            ),
+            timeout=75,
         )
+    except TimeoutError as e:
+        raise HTTPException(
+            status_code=504, detail="catalog: upstream SCM timed out — try again or use Refresh"
+        ) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"catalog: {e}") from e
 

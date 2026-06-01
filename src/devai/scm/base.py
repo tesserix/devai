@@ -511,9 +511,15 @@ class SCMClient(ABC):
 
     # --- Repo onboarding (Repos page) ---
 
-    async def list_installation_repos(self, per_page: int = 100) -> list[dict[str, Any]]:
+    async def list_installation_repos(
+        self, per_page: int = 100, org: str = ""
+    ) -> list[dict[str, Any]]:
         """List every repo this credential can see (GitHub App installation
-        or token scope). Default empty — override in provider."""
+        or token scope).
+
+        ``org`` scopes the listing to a single organization when the provider
+        supports it (avoids walking every org a broad token can see). Default
+        empty — override in provider."""
         return []
 
     async def probe_markers(

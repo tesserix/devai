@@ -47,10 +47,15 @@ class GitHubSCMClient(SCMClient):
         app_id: int = 0,
         app_private_key: str = "",
         installation_id: int = 0,
+        org: str = "",
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._auth_method = auth_method
         self._token = token
+        # Default org the repo-listing surfaces are scoped to. Lets PAT/OAuth
+        # tokens query the org-scoped endpoint directly instead of walking
+        # every org the token can see. Callers may override per call.
+        self._org = org
         # Transport adapter: owns auth (PAT / OAuth / GitHub App installation
         # token) + the REST and GraphQL endpoint URLs. PAT and GitHub App are
         # interchangeable from here on — see github_transport.py.
@@ -133,42 +138,86 @@ class GitHubSCMClient(SCMClient):
 
     # --- Repositories ---
 
-    async def list_installation_repos(self, per_page: int = 100) -> list[dict[str, Any]]:
-        """List repos the configured token can see.
+    async def list_installation_repos(
+        self, per_page: int = 100, org: str = ""
+    ) -> list[dict[str, Any]]:
+        """List repos the configured token can see, scoped to ``org``.
 
         The endpoint differs by auth method:
 
-          * GitHub App   → GET /installation/repositories      (returns {repositories:[...]})
-          * PAT / OAuth  → GET /user/repos                     (returns a flat list, all
-                                                                visibilities incl. private
-                                                                membership repos)
+          * GitHub App   → GET /installation/repositories  (returns {repositories:[...]};
+                                                            already scoped to the installation)
+          * PAT / OAuth  → GET /orgs/{org}/repos            (org-scoped — fast)
+                           GET /user/repos                  (fallback when no org, or the
+                                                            "org" is actually a user account)
 
-        The /installation/* path is App-only — calling it with a PAT
-        yields 404. The dashboard's repo picker uses the PAT path
-        (devai-github-pat), so detect the auth method and pick the
-        right endpoint. Both return the same shape on the wire so
-        downstream callers don't change.
+        Why org-scope the PAT path: ``/user/repos`` returns every repo the
+        token can see across *all* orgs (potentially thousands), which is slow
+        enough to trip an edge gateway timeout before the request returns. When
+        the platform is bound to a single org (``github_org``), asking GitHub
+        for just that org's repos is one short, cheap listing. The
+        ``/installation/*`` path is App-only — calling it with a PAT yields 404.
 
-        Extra fields returned to the caller (used by the New Pipeline
-        Run dialog): owner.login, pushed_at, html_url.
+        Both endpoints return the same shape on the wire so downstream callers
+        don't change. Extra fields (used by the New Pipeline Run dialog):
+        owner.login, pushed_at, html_url.
+        """
+        org = (org or self._org).strip()
+        use_token_endpoint = self._auth_method in (AuthMethod.PAT, AuthMethod.OAUTH)
+
+        if use_token_endpoint and org:
+            # Org-scoped — the common case for an org-bound platform.
+            try:
+                return await self._paginate_repos(
+                    lambda page: f"/orgs/{org}/repos"
+                    f"?per_page={per_page}&page={page}&type=all&sort=pushed&direction=desc",
+                    per_page,
+                )
+            except httpx.HTTPStatusError as e:
+                # 404 → the configured "org" is a user account (or the token
+                # can't see it as an org). Fall back to the user-scoped listing
+                # rather than surfacing a hard error.
+                if e.response.status_code != 404:
+                    raise
+                logger.info("'/orgs/%s/repos' 404 — falling back to /user/repos", org)
+
+        if use_token_endpoint:
+            repos = await self._paginate_repos(
+                lambda page: f"/user/repos"
+                f"?per_page={per_page}&page={page}&sort=pushed&direction=desc"
+                "&affiliation=owner,collaborator,organization_member",
+                per_page,
+            )
+            # A broad token spans orgs — keep only the bound org's repos when set.
+            if org:
+                repos = [r for r in repos if (r.get("owner") or {}).get("login", "").lower() == org.lower()]
+            return repos
+
+        # GitHub App installation token — already scoped to the installation.
+        return await self._paginate_repos(
+            lambda page: f"/installation/repositories?per_page={per_page}&page={page}",
+            per_page,
+            envelope="repositories",
+        )
+
+    async def _paginate_repos(
+        self,
+        path_for_page: Any,
+        per_page: int,
+        envelope: str = "",
+    ) -> list[dict[str, Any]]:
+        """Page through a GitHub repo-listing endpoint into the common shape.
+
+        ``path_for_page(page)`` builds the request path for a 1-based page.
+        ``envelope`` names the wrapping key when the response is an object
+        (``{"repositories": [...]}``) rather than a bare array.
         """
         repos: list[dict[str, Any]] = []
         page = 1
-        use_user_endpoint = self._auth_method in (AuthMethod.PAT, AuthMethod.OAUTH)
         while True:
-            if use_user_endpoint:
-                resp = await self._request(
-                    "GET",
-                    f"/user/repos?per_page={per_page}&page={page}&sort=pushed&direction=desc&affiliation=owner,collaborator,organization_member",
-                )
-                batch = resp.json()
-            else:
-                resp = await self._request(
-                    "GET",
-                    f"/installation/repositories?per_page={per_page}&page={page}",
-                )
-                batch = resp.json().get("repositories", [])
-
+            resp = await self._request("GET", path_for_page(page))
+            payload = resp.json()
+            batch = payload.get(envelope, []) if envelope else payload
             for r in batch:
                 repos.append(
                     {

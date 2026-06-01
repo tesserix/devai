@@ -85,6 +85,7 @@ def create_scm_client(config: Settings) -> SCMClient:
             app_id=config.github_app_id,
             app_private_key=config.github_app_private_key,
             installation_id=config.github_app_installation_id,
+            org=getattr(config, "github_org", ""),
         )
 
     if provider == SCMProvider.GITLAB:
@@ -138,6 +139,7 @@ def create_scm_from_connection(
             app_id=app_id,
             app_private_key=app_private_key,
             installation_id=installation_id,
+            org=organization,
         )
 
     if scm_provider == SCMProvider.GITLAB:

@@ -26,8 +26,16 @@ git config user.email "samyak.rout@gmail.com"
 
 ### 3. CI Build & Deploy Procedure (MUST FOLLOW)
 
+> **TEMPORARY — repo is currently PUBLIC.** As of 2026-05-29 `tesserix/devai` is kept
+> public to allow continuous build and deploy without burning private-repo Actions minutes.
+> While public, the repo is locked down: forking is org-restricted, pushes to `main` are
+> restricted to `sam123ben` (samyak.rout@gmail.com) and `mahesh-sangawar` (mayu) via branch
+> protection, and force-pushes/deletions are blocked. **Note:** anyone can `clone` a public
+> repo — that cannot be prevented while public. Revert to private when continuous CI is no
+> longer needed (`gh repo edit tesserix/devai --visibility private --accept-visibility-change-consequences`).
+
 The `tesserix` GitHub org has **limited Actions minutes** for private repos.
-Every CI build requires a **public->build->private** cycle:
+Every CI build requires a **public->build->private** cycle (skip the toggle while temporarily public, per the note above):
 
 ```bash
 # Step 1: Make repo public
@@ -56,6 +64,14 @@ gh repo edit tesserix/devai --visibility private --accept-visibility-change-cons
 ### 4. No Manual kubectl apply — ArgoCD Only
 
 **NEVER** use `kubectl apply`, `kubectl create`, `kubectl patch`, `kubectl edit`, or `kubectl set` to deploy or modify cluster resources. All changes go through ArgoCD via the `tesserix-k8s` repo.
+
+### 4a. ALWAYS connect-local first — never touch prod
+
+**Before ANY cluster or registry operation (`kubectl`, `argocd`, `helm`, querying `localhost:5050`, etc.), run `connect-local` first.** It points the kube context at the **local kind sandbox** (`argo.sandbox.app` / `localhost:5050`). This is the de-facto default for all work in this repo.
+
+- The default kube context may be a **production** cluster (e.g. `gke_tesseracthub-480811_...tesseract-prod-in-gke`). Operating there is forbidden. Always `connect-local` and verify with `kubectl config current-context` before proceeding.
+- Local/sandbox deploys use `sandboxctl` (which feeds the local Argo) — never `kubectl apply` (see rule 4).
+- Anything scoped "for local/sandbox only" must change ONLY local artifacts: `sandboxctl.yaml`, each chart's `values-local.yaml` / `values-sandbox.yaml`, and `k8s/secrets.yaml` — never prod `values.yaml` / `values-prod.yaml` or the prod ArgoCD apps.
 
 ### 5. SQL Scripts & Database Schemas
 

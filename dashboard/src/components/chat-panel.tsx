@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
-import DOMPurify from "dompurify";
 
 interface Message {
   role: "user" | "assistant";
@@ -185,7 +184,16 @@ function renderMarkdown(md: string): string {
   // regex above can be fragile to future edits and chat tool output can echo
   // untrusted repo/issue/PR text. Sanitize the final HTML so no event handlers
   // or scriptable attributes can survive into the DOM.
-  return DOMPurify.sanitize(html, {
+  //
+  // DOMPurify is browser-only (it needs `window`). Import it lazily and only in
+  // the browser so server-side rendering of this client component doesn't crash
+  // the whole app. On the server we return the entity-escaped HTML (already the
+  // primary XSS defense); the browser re-renders + sanitizes on hydration.
+  if (typeof window === "undefined") return html;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const DOMPurify = require("dompurify");
+  const sanitize = DOMPurify.sanitize ?? DOMPurify.default?.sanitize;
+  return sanitize(html, {
     ALLOWED_TAGS: ["pre", "code", "strong", "em", "h1", "h2", "h3", "table", "tr", "td", "ul", "li", "br", "a", "p"],
     ALLOWED_ATTR: ["class", "href", "target", "rel"],
   });
