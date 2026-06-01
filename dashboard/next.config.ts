@@ -63,6 +63,31 @@ const nextConfig: NextConfig = {
         source: "/api/scm/:path*",
         destination: `${API_INTERNAL_URL}/api/scm/:path*`,
       },
+      // Authoring (create/list/delete agents, skills, tools, blueprints) —
+      // mounted at /api/authoring/* on devai-api, NOT the legacy prefix.
+      {
+        source: "/api/authoring/:path*",
+        destination: `${API_INTERNAL_URL}/api/authoring/:path*`,
+      },
+      // Settings (per-user/tenant connectors + secrets) — /api/settings/*.
+      {
+        source: "/api/settings/:path*",
+        destination: `${API_INTERNAL_URL}/api/settings/:path*`,
+      },
+      // Catalog (built-in tools picker), Teams/crews (composer), per-run
+      // repo viewer — all live at /api/* on devai-api directly.
+      {
+        source: "/api/catalog/:path*",
+        destination: `${API_INTERNAL_URL}/api/catalog/:path*`,
+      },
+      {
+        source: "/api/teams/:path*",
+        destination: `${API_INTERNAL_URL}/api/teams/:path*`,
+      },
+      {
+        source: "/api/runs/:path*",
+        destination: `${API_INTERNAL_URL}/api/runs/:path*`,
+      },
       // Legacy catch-all — original dashboard endpoints sit under
       // /dashboard/api/* on devai-api. Keep this last so it doesn't
       // shadow the more-specific rewrites above.
