@@ -37,9 +37,7 @@ def create_authoring_service(
     When a ``registry_client`` + ``settings`` are supplied (and publishing is
     enabled), authored artifacts are also published to the shared registry.
     """
-    store: DefinitionStore = (
-        RedisDefinitionStore(redis) if redis is not None else InMemoryDefinitionStore()
-    )
+    store: DefinitionStore = RedisDefinitionStore(redis) if redis is not None else InMemoryDefinitionStore()
     return AuthoringService(
         store,
         spec_registry=spec_registry,

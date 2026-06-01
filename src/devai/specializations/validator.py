@@ -124,9 +124,7 @@ def validate_handover(
             continue
 
         if require_non_empty and field_spec.required and _is_empty(value):
-            violations.append(
-                HandoverViolation(field=field_name, reason="empty", expected=field_spec.type)
-            )
+            violations.append(HandoverViolation(field=field_name, reason="empty", expected=field_spec.type))
 
     if strict and violations:
         raise HandoverValidationError(spec.name, violations)

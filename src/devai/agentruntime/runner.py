@@ -138,9 +138,7 @@ class AgentRunner:
 
             # Record the assistant turn (carry tool_calls so the provider can
             # bind the tool_results we append next round — see LLMMessage).
-            messages.append(
-                LLMMessage(role=LLMRole.ASSISTANT, content=resp.text, tool_calls=list(resp.tool_calls))
-            )
+            messages.append(LLMMessage(role=LLMRole.ASSISTANT, content=resp.text, tool_calls=list(resp.tool_calls)))
 
             if not resp.tool_calls:
                 result.final_text = resp.text
@@ -180,8 +178,7 @@ class AgentRunner:
         # the handover schema as the LAST thing it says.
         if spec.handover_schema:
             fields = ", ".join(
-                f"{name} ({f.type}{'' if f.required else ', optional'})"
-                for name, f in spec.handover_schema.items()
+                f"{name} ({f.type}{'' if f.required else ', optional'})" for name, f in spec.handover_schema.items()
             )
             parts.append(
                 "When you have completed the task, stop calling tools and reply with a single "
@@ -190,8 +187,7 @@ class AgentRunner:
             )
         else:
             parts.append(
-                "When you have completed the task, stop calling tools and give a short summary "
-                "of what you did."
+                "When you have completed the task, stop calling tools and give a short summary of what you did."
             )
         return "\n\n".join(parts)
 

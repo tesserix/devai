@@ -28,11 +28,11 @@ if TYPE_CHECKING:
 class OnboardingState(StrEnum):
     """Lifecycle of a repo inside the DevAI platform."""
 
-    DISCOVERED = "discovered"      # seen in the org catalog, not enrolled
-    PENDING_PR = "pending_pr"      # onboarding PR open, awaiting merge
-    ONBOARDED = "onboarded"        # marker present on the default branch
-    ARCHIVED = "archived"          # soft-deleted by an operator
-    DORMANT = "dormant"            # was onboarded, marker deleted out-of-band
+    DISCOVERED = "discovered"  # seen in the org catalog, not enrolled
+    PENDING_PR = "pending_pr"  # onboarding PR open, awaiting merge
+    ONBOARDED = "onboarded"  # marker present on the default branch
+    ARCHIVED = "archived"  # soft-deleted by an operator
+    DORMANT = "dormant"  # was onboarded, marker deleted out-of-band
 
     def __str__(self) -> str:  # so f-strings / DB writes use the value
         return self.value
@@ -48,7 +48,7 @@ class OnboardingMetadata:
     """
 
     version: int = 1
-    onboarded_at: str = ""          # ISO-8601 string (kept as text in the marker)
+    onboarded_at: str = ""  # ISO-8601 string (kept as text in the marker)
     onboarded_by: str = ""
     default_base_branch: str = "main"
     description: str = ""
@@ -109,7 +109,7 @@ class OnboardedRepo:
     state: OnboardingState = OnboardingState.DISCOVERED
     pr_number: int | None = None
     pr_url: str = ""
-    draft: bool = False             # onboarding PR opens as draft, until marked ready
+    draft: bool = False  # onboarding PR opens as draft, until marked ready
     default_base_branch: str = "main"
     description: str = ""
     detected_stack: dict[str, Any] = field(default_factory=dict)

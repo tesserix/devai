@@ -209,9 +209,7 @@ def load_blueprint_from_string(text: str, *, source: str = "<inline>") -> Bluepr
             raise BlueprintLoadError(f"{source}: stages[{i}] must be a mapping")
         unknown_stage_keys = set(entry.keys()) - _ALLOWED_STAGE_KEYS
         if unknown_stage_keys:
-            raise BlueprintLoadError(
-                f"{source}: stages[{i}] has unknown keys: {sorted(unknown_stage_keys)}"
-            )
+            raise BlueprintLoadError(f"{source}: stages[{i}] has unknown keys: {sorted(unknown_stage_keys)}")
 
         stage_name = entry.get("name")
         stage_key = entry.get("stage")
@@ -225,15 +223,11 @@ def load_blueprint_from_string(text: str, *, source: str = "<inline>") -> Bluepr
 
         depends_on = entry.get("depends_on") or []
         if not isinstance(depends_on, list) or not all(isinstance(d, str) for d in depends_on):
-            raise BlueprintLoadError(
-                f"{source}: stages[{i}] ({stage_name}) depends_on must be a list of strings"
-            )
+            raise BlueprintLoadError(f"{source}: stages[{i}] ({stage_name}) depends_on must be a list of strings")
 
         config = entry.get("config") or {}
         if not isinstance(config, dict):
-            raise BlueprintLoadError(
-                f"{source}: stages[{i}] ({stage_name}) config must be a mapping"
-            )
+            raise BlueprintLoadError(f"{source}: stages[{i}] ({stage_name}) config must be a mapping")
         # Coerce values to strings — Fiber config maps are string→string.
         config = {str(k): str(v) for k, v in config.items()}
 
@@ -261,9 +255,7 @@ def load_blueprint_from_string(text: str, *, source: str = "<inline>") -> Bluepr
     for s in stages:
         for dep in s.depends_on:
             if dep not in all_names:
-                raise BlueprintLoadError(
-                    f"{source}: stage {s.name!r} depends on unknown stage {dep!r}"
-                )
+                raise BlueprintLoadError(f"{source}: stage {s.name!r} depends on unknown stage {dep!r}")
 
     metadata = raw.get("metadata") or {}
     if not isinstance(metadata, dict):
@@ -300,8 +292,6 @@ def discover_blueprints(directory: str | Path) -> dict[str, Blueprint]:
             continue
         bp = load_blueprint(path)
         if bp.name in out:
-            raise BlueprintLoadError(
-                f"duplicate blueprint name {bp.name!r} (in {path} and earlier file)"
-            )
+            raise BlueprintLoadError(f"duplicate blueprint name {bp.name!r} (in {path} and earlier file)")
         out[bp.name] = bp
     return out

@@ -184,7 +184,7 @@ class GitLabSCMClient(SCMClient):
         title = str(mr.get("title", ""))
         for prefix in ("Draft:", "draft:", "WIP:", "wip:"):
             if title.startswith(prefix):
-                title = title[len(prefix):].strip()
+                title = title[len(prefix) :].strip()
                 break
         resp = await self._request(
             "PUT",

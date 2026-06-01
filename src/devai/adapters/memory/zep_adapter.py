@@ -47,9 +47,7 @@ class ZepMemoryAdapter(MemoryAdapter):
         try:
             from zep_python.client import AsyncZep  # type: ignore[import-untyped]
         except ImportError as e:
-            raise AdapterNotInstalled(
-                "zep adapter requires `pip install zep-python` — falling back to Noop"
-            ) from e
+            raise AdapterNotInstalled("zep adapter requires `pip install zep-python` — falling back to Noop") from e
 
         self._client = AsyncZep(api_key=api_key or None, base_url=url)
         self._url = url
@@ -119,7 +117,9 @@ class ZepMemoryAdapter(MemoryAdapter):
             raw = await self._client.memory.get(session_id=session, limit=limit)
         except Exception:  # noqa: BLE001
             return []
-        return self._normalize_messages(getattr(raw, "messages", []), agent=agent, repo=repo, memory_type=memory_type, limit=limit)
+        return self._normalize_messages(
+            getattr(raw, "messages", []), agent=agent, repo=repo, memory_type=memory_type, limit=limit
+        )
 
     async def semantic_search(
         self,
@@ -143,9 +143,7 @@ class ZepMemoryAdapter(MemoryAdapter):
         # Zep's `delete_session` removes the whole thread, which is too big.
         # Per-message deletion isn't supported via the public SDK in current
         # versions; we return False to signal "not supported".
-        logger.warning(
-            "ZepMemoryAdapter.forget is a no-op — Zep does not support per-message delete"
-        )
+        logger.warning("ZepMemoryAdapter.forget is a no-op — Zep does not support per-message delete")
         return False
 
     # ── Adapter contract ──────────────────────────────────────────────
@@ -213,7 +211,7 @@ class ZepMemoryAdapter(MemoryAdapter):
         out: list[MemoryRecord] = []
         for item in results:
             msg = getattr(item, "message", None) or item
-            meta = (getattr(msg, "metadata", None) or {})
+            meta = getattr(msg, "metadata", None) or {}
             mt = MemoryType.parse(meta.get("memory_type"))
             if wanted_type and mt != wanted_type:
                 continue

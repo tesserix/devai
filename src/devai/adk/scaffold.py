@@ -156,7 +156,10 @@ def scaffold_agent(
                 "maxTokens": None,
             },
             "limits": {"maxTurns": 60, "timeoutSeconds": 900},
-            "runtime": {"kind": "python_class", "pythonClass": f"devai.agents.{name.replace('-', '_')}.{_to_class_name(name)}"},
+            "runtime": {
+                "kind": "python_class",
+                "pythonClass": f"devai.agents.{name.replace('-', '_')}.{_to_class_name(name)}",
+            },
             "riskLevel": "low",
             "roleColor": "engineer",
         },

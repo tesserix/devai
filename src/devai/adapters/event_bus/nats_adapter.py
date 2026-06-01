@@ -63,9 +63,7 @@ class NatsEventBusAdapter(EventBusAdapter):
         try:
             import nats  # noqa: F401
         except ImportError as e:
-            raise AdapterNotInstalled(
-                "nats-py is not installed (`pip install nats-py`)"
-            ) from e
+            raise AdapterNotInstalled("nats-py is not installed (`pip install nats-py`)") from e
 
         self.url = url
         self.default_stream = default_stream
@@ -130,9 +128,7 @@ class NatsEventBusAdapter(EventBusAdapter):
         import nats
         from nats.js.api import RetentionPolicy, StorageType, StreamConfig
 
-        retention = (
-            RetentionPolicy.WORK_QUEUE if work_queue else RetentionPolicy.LIMITS
-        )
+        retention = RetentionPolicy.WORK_QUEUE if work_queue else RetentionPolicy.LIMITS
 
         cfg_kwargs: dict[str, Any] = {
             "name": name,
@@ -339,10 +335,7 @@ class NatsEventBusAdapter(EventBusAdapter):
         return {
             "ok": connected,
             "provider": self.provider_name,
-            "detail": (
-                f"url={self.url}, streams={sorted(self._ensured_streams)}, "
-                f"subscriptions={len(self._subs)}"
-            ),
+            "detail": (f"url={self.url}, streams={sorted(self._ensured_streams)}, subscriptions={len(self._subs)}"),
         }
 
 

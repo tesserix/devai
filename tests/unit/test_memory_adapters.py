@@ -53,9 +53,7 @@ def noop_adapter() -> NoopMemoryAdapter:
 
 @pytest.mark.asyncio
 async def test_contract_remember_returns_record(noop_adapter):
-    r = await noop_adapter.remember(
-        "first memory", agent="sr_dev", repo="org/repo", tags=["lesson"]
-    )
+    r = await noop_adapter.remember("first memory", agent="sr_dev", repo="org/repo", tags=["lesson"])
     assert isinstance(r, MemoryRecord)
     assert r.content == "first memory"
     assert r.agent == "sr_dev"

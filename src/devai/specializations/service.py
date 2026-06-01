@@ -61,9 +61,7 @@ class SpecializationService:
         try:
             local_registry = SpecializationRegistry.from_directory(self.directory)
         except Exception:
-            logger.exception(
-                "specializations: local YAML load failed — starting with empty"
-            )
+            logger.exception("specializations: local YAML load failed — starting with empty")
 
         if self._registry_client is None:
             self._source = "local"
@@ -83,21 +81,16 @@ class SpecializationService:
             # OVERWRITE the runtime metadata.
             cat_skills = self._registry_client.list_skills()
             cat_agents = self._registry_client.list_agents()
-            self._source = (
-                "registry+local" if (cat_skills or cat_agents) else "local"
-            )
+            self._source = "registry+local" if (cat_skills or cat_agents) else "local"
             logger.info(
-                "specializations: loaded %d local specs; aregistry advertises "
-                "%d skills + %d agents (source=%s)",
+                "specializations: loaded %d local specs; aregistry advertises %d skills + %d agents (source=%s)",
                 len(local_registry),
                 len(cat_skills),
                 len(cat_agents),
                 self._source,
             )
         except Exception:  # noqa: BLE001
-            logger.exception(
-                "specializations: aregistry consultation failed — falling back to local"
-            )
+            logger.exception("specializations: aregistry consultation failed — falling back to local")
             self._source = "local"
         return local_registry
 

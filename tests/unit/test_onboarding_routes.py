@@ -29,9 +29,7 @@ def _client(scm: FakeSCM | None) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     if scm is not None:
-        app.state.onboarding_service = OnboardingService(
-            scm=scm, store=InMemoryOnboardingStore(), org="tesserix"
-        )
+        app.state.onboarding_service = OnboardingService(scm=scm, store=InMemoryOnboardingStore(), org="tesserix")
     else:
         app.state.onboarding_service = None
     return TestClient(app)
@@ -99,9 +97,7 @@ def test_get_unonboarded_returns_404() -> None:
 
 def test_assign_reviewer_requires_open_pr() -> None:
     scm = FakeSCM(repos=[_repo("tesserix", "a")])
-    resp = _client(scm).post(
-        "/api/scm/onboarded/tesserix/a/assign", json={"reviewers": ["mahesh"]}
-    )
+    resp = _client(scm).post("/api/scm/onboarded/tesserix/a/assign", json={"reviewers": ["mahesh"]})
     assert resp.status_code == 409  # nothing onboarded yet
 
 
@@ -119,9 +115,7 @@ def test_reconcile_returns_report() -> None:
 
 def test_onboard_rejects_path_traversal_owner() -> None:
     scm = FakeSCM(repos=[_repo("tesserix", "a")])
-    resp = _client(scm).post(
-        "/api/scm/onboarded", json={"repos": [{"owner": "..", "name": "etc"}]}
-    )
+    resp = _client(scm).post("/api/scm/onboarded", json={"repos": [{"owner": "..", "name": "etc"}]})
     assert resp.status_code == 422
     # No SCM call was attempted for the malformed ref.
     assert scm.count("create_pull_request") == 0
@@ -136,15 +130,11 @@ def test_onboard_rejects_oversized_batch() -> None:
 
 def test_merge_rejects_bad_method() -> None:
     scm = FakeSCM(repos=[_repo("tesserix", "a")])
-    resp = _client(scm).post(
-        "/api/scm/onboarded/tesserix/a/merge", json={"method": "force; rm -rf"}
-    )
+    resp = _client(scm).post("/api/scm/onboarded/tesserix/a/merge", json={"method": "force; rm -rf"})
     assert resp.status_code == 422
 
 
 def test_assign_rejects_malformed_reviewer() -> None:
     scm = FakeSCM(repos=[_repo("tesserix", "a")])
-    resp = _client(scm).post(
-        "/api/scm/onboarded/tesserix/a/assign", json={"reviewers": ["evil reviewer!"]}
-    )
+    resp = _client(scm).post("/api/scm/onboarded/tesserix/a/assign", json={"reviewers": ["evil reviewer!"]})
     assert resp.status_code == 422

@@ -131,9 +131,7 @@ class K8sJobRuntime:
             from kubernetes_asyncio import client
             from kubernetes_asyncio import config as k8s_config
         except ImportError as e:
-            raise RuntimeNotAvailable(
-                "kubernetes_asyncio not installed — add it to dependencies"
-            ) from e
+            raise RuntimeNotAvailable("kubernetes_asyncio not installed — add it to dependencies") from e
 
         # In-cluster first (pod-mounted SA token). Fall back to kubeconfig
         # for local dev. Failures aren't fatal — surface as
@@ -153,9 +151,7 @@ class K8sJobRuntime:
                 loaded = True
                 logger.info("k8s runtime: loaded local kubeconfig")
             except Exception as e:
-                raise RuntimeNotConfigured(
-                    f"no kubernetes config (in-cluster nor kubeconfig): {e}"
-                ) from e
+                raise RuntimeNotConfigured(f"no kubernetes config (in-cluster nor kubeconfig): {e}") from e
 
         self._api_client = client.ApiClient()
         self._batch_v1 = client.BatchV1Api(self._api_client)
@@ -212,9 +208,7 @@ class K8sJobRuntime:
         from devai.runtime.errors import JobDispatchFailed
 
         try:
-            created = await self._batch_v1.create_namespaced_job(
-                namespace=self._config.namespace, body=job_spec
-            )
+            created = await self._batch_v1.create_namespaced_job(namespace=self._config.namespace, body=job_spec)
         except Exception as e:  # noqa: BLE001 — surface every API error
             raise JobDispatchFailed(f"create_namespaced_job: {e}") from e
         name = created.metadata.name
@@ -237,9 +231,7 @@ class K8sJobRuntime:
 
     async def get_job(self, name: str) -> Any:
         """Read a Job's current state."""
-        return await self._batch_v1.read_namespaced_job(
-            name=name, namespace=self._config.namespace
-        )
+        return await self._batch_v1.read_namespaced_job(name=name, namespace=self._config.namespace)
 
     async def pod_logs(self, pod_name: str, *, tail_lines: int = 500) -> str:
         """Fetch the (truncated) stdout of a pod. Used for failure triage."""
@@ -301,9 +293,7 @@ class K8sJobRuntime:
         except Exception as e:
             if "AlreadyExists" in str(e) or " 409 " in str(e):
                 try:
-                    await self._core_v1.patch_namespaced_service(
-                        name=svc["metadata"]["name"], namespace=ns, body=svc
-                    )
+                    await self._core_v1.patch_namespaced_service(name=svc["metadata"]["name"], namespace=ns, body=svc)
                 except Exception as patch_err:
                     raise JobDispatchFailed(f"patch service: {patch_err}") from patch_err
             else:
@@ -425,9 +415,7 @@ async def create_runtime(settings: Settings) -> K8sJobRuntime | None:
     try:
         await runtime.connect()
     except RuntimeNotAvailable:
-        logger.warning(
-            "k8s runtime: kubernetes_asyncio SDK missing — running stages in-process"
-        )
+        logger.warning("k8s runtime: kubernetes_asyncio SDK missing — running stages in-process")
         return None
     except RuntimeNotConfigured as e:
         logger.warning("k8s runtime: cluster auth unavailable (%s) — running in-process", e)

@@ -56,9 +56,7 @@ class AnthropicLLMAdapter(LLMAdapter):
         timeout_seconds: float | None = None,
     ) -> None:
         if not api_key:
-            raise AdapterNotConfigured(
-                "anthropic adapter requires DEVAI_ANTHROPIC_API_KEY"
-            )
+            raise AdapterNotConfigured("anthropic adapter requires DEVAI_ANTHROPIC_API_KEY")
         try:
             from anthropic import AsyncAnthropic  # type: ignore[import-untyped]
         except ImportError as e:
@@ -121,11 +119,7 @@ class AnthropicLLMAdapter(LLMAdapter):
     def _build_kwargs(self, request: LLMRequest) -> dict[str, Any]:
         # Filter out SYSTEM messages — they go to the top-level
         # `system` param, not into the messages list (Anthropic API).
-        wire_messages = [
-            self._message_to_wire(m)
-            for m in request.messages
-            if m.role != LLMRole.SYSTEM
-        ]
+        wire_messages = [self._message_to_wire(m) for m in request.messages if m.role != LLMRole.SYSTEM]
 
         # Anthropic requires non-empty messages — if the caller passed
         # only system text, synthesize a placeholder user turn.
@@ -242,9 +236,7 @@ class AnthropicLLMAdapter(LLMAdapter):
             usage.prompt_tokens = int(getattr(usage_raw, "input_tokens", 0) or 0)
             usage.completion_tokens = int(getattr(usage_raw, "output_tokens", 0) or 0)
             usage.cached_tokens = int(
-                getattr(usage_raw, "cache_read_input_tokens", 0)
-                or getattr(usage_raw, "cached_tokens", 0)
-                or 0
+                getattr(usage_raw, "cache_read_input_tokens", 0) or getattr(usage_raw, "cached_tokens", 0) or 0
             )
             usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
 

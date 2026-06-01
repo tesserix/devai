@@ -35,7 +35,7 @@ class _FakeSlackChannel:
         ts = ev.get("thread_ts") or ev.get("ts")
         return ConversationTurn(
             text=ev.get("text", ""),
-            conversation_id=f'slack:{ev.get("channel")}:{ts}',
+            conversation_id=f"slack:{ev.get('channel')}:{ts}",
             channel="slack",
             metadata={"channel_id": ev.get("channel"), "thread_ts": ts},
         )

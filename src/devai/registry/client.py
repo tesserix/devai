@@ -199,9 +199,7 @@ class RegistryClient:
                 return a
         return None
 
-    def get_agent_card(
-        self, name: str, *, namespace: str = "", tag: str = ""
-    ) -> dict[str, Any]:
+    def get_agent_card(self, name: str, *, namespace: str = "", tag: str = "") -> dict[str, Any]:
         """Fetch the A2A (Agent2Agent) Agent Card for an agent.
 
         The registry renders the card from the Agent object + its linked
@@ -495,8 +493,11 @@ def create_registry_client(settings: Any) -> RegistryClient | None:
 
     try:
         return RegistryClient(
-            base_url=base_url, token=token, token_provider=token_provider,
-            timeout_seconds=timeout, ttl_seconds=ttl,
+            base_url=base_url,
+            token=token,
+            token_provider=token_provider,
+            timeout_seconds=timeout,
+            ttl_seconds=ttl,
         )
     except RegistryError as e:
         logger.warning("registry: client construction failed: %s", e)

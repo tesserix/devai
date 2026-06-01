@@ -68,9 +68,7 @@ class Publisher:
         token: str = "",
         timeout_seconds: float = 10.0,
     ) -> None:
-        self._client = RegistryClient(
-            base_url=registry_url, token=token, timeout_seconds=timeout_seconds
-        )
+        self._client = RegistryClient(base_url=registry_url, token=token, timeout_seconds=timeout_seconds)
         self._summary = PublishSummary()
 
     def publish(self, builder: Skill | Prompt | McpServer | Agent) -> PublishResult:
@@ -89,9 +87,7 @@ class Publisher:
         self._summary.add(r)
         return r
 
-    def publish_many(
-        self, builders: list[Skill | Prompt | McpServer | Agent]
-    ) -> PublishSummary:
+    def publish_many(self, builders: list[Skill | Prompt | McpServer | Agent]) -> PublishSummary:
         for b in builders:
             self.publish(b)
         return self._summary

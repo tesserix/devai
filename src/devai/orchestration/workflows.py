@@ -188,9 +188,7 @@ class BlueprintWorkflow:
         """Merge one stage outcome into the task (declared-order, deterministic)."""
         if isinstance(res, BaseException):
             if should_continue_on_failure(spec.on_failure):
-                workflow.logger.warning(
-                    "stage %s failed, on_failure=continue: %s", spec.name, res
-                )
+                workflow.logger.warning("stage %s failed, on_failure=continue: %s", spec.name, res)
                 task.stages_failed.append(spec.name)
                 return
             task.state = TaskState.STAGE_FAILED

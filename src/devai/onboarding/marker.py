@@ -89,11 +89,7 @@ def parse_marker(text: str) -> tuple[OnboardingMetadata, bool]:
     api_version = str(doc.get("apiVersion", ""))
     kind = str(doc.get("kind", ""))
     onboarding = doc.get("onboarding")
-    is_marker = (
-        api_version.startswith("devai.tesserix.app")
-        or kind == "PlatformConfig"
-        or isinstance(onboarding, dict)
-    )
+    is_marker = api_version.startswith("devai.tesserix.app") or kind == "PlatformConfig" or isinstance(onboarding, dict)
     if not is_marker:
         return OnboardingMetadata(), False
 

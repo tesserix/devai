@@ -366,11 +366,7 @@ def build_preview_manifests(
                     "initContainers": init_containers,
                     "containers": [dev_container, bridge_container],
                     "volumes": pod_volumes,
-                    **(
-                        {"imagePullSecrets": [{"name": cfg.pull_secret_name}]}
-                        if cfg.pull_secret_name
-                        else {}
-                    ),
+                    **({"imagePullSecrets": [{"name": cfg.pull_secret_name}]} if cfg.pull_secret_name else {}),
                 },
             },
         },

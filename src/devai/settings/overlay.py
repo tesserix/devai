@@ -71,7 +71,7 @@ class PrincipalSettingsOverlay:
 
     def __repr__(self) -> str:
         return (
-            f"PrincipalSettingsOverlay(user={object.__getattribute__(self,'_principal_email')!r}, "
+            f"PrincipalSettingsOverlay(user={object.__getattribute__(self, '_principal_email')!r}, "
             f"overrides={self.overlaid_attrs})"
         )
 

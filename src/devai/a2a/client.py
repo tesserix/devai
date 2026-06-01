@@ -192,11 +192,7 @@ def create_a2a_client(settings: Settings, registry: RegistryClient | None) -> A2
     """
     if registry is None:
         return None
-    namespace = (
-        getattr(settings, "scm_organization", "")
-        or getattr(settings, "github_org", "")
-        or ""
-    )
+    namespace = getattr(settings, "scm_organization", "") or getattr(settings, "github_org", "") or ""
     token = getattr(settings, "registry_token", "") or ""
     verify_cards = bool(getattr(settings, "a2a_secure", True))
     suffixes = list(getattr(settings, "a2a_allowed_url_suffixes", None) or _DEFAULT_URL_SUFFIXES)

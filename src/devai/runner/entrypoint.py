@@ -70,7 +70,13 @@ async def _run() -> int:
 
     logger.info(
         "runner: task=%s stage=%s agent=%s repo=%s blueprint=%s triggered_by=%s trace=%s",
-        task_id, stage, agent_name, repo, blueprint, triggered_by or "-", trace_id or "-",
+        task_id,
+        stage,
+        agent_name,
+        repo,
+        blueprint,
+        triggered_by or "-",
+        trace_id or "-",
     )
 
     # Build the minimum config + adapters the agent needs.
@@ -217,9 +223,7 @@ async def _run_agent(
         if agent_meta.get("mcp_servers"):
             # Resolve MCP server names → endpoint URLs, honoring the
             # agentgateway routing override when set.
-            state_slice["mcp_endpoints"] = _resolve_mcp_endpoints(
-                agent_meta["mcp_servers"], registry_client, config
-            )
+            state_slice["mcp_endpoints"] = _resolve_mcp_endpoints(agent_meta["mcp_servers"], registry_client, config)
 
     try:
         patch = await service.invoke(agent_name, state_slice)
@@ -241,9 +245,7 @@ async def _run_agent(
     return patch
 
 
-async def _invoke_legacy(
-    agent_name: str, state: dict[str, Any], config: Any
-) -> dict[str, Any]:
+async def _invoke_legacy(agent_name: str, state: dict[str, Any], config: Any) -> dict[str, Any]:
     """Construct a legacy `devai.agents.<name>` and call `run(state)`.
 
     A best-effort path so existing agent classes work in the runner
@@ -294,8 +296,13 @@ async def _stage_scan_repo(*, repo: str, intent: str, stage_config: dict[str, An
 
     # Look for marker files. If none exist, treat as blank.
     markers = (
-        "package.json", "pyproject.toml", "go.mod", "Cargo.toml",
-        "pom.xml", "build.gradle", "Gemfile",
+        "package.json",
+        "pyproject.toml",
+        "go.mod",
+        "Cargo.toml",
+        "pom.xml",
+        "build.gradle",
+        "Gemfile",
     )
     found = [m for m in markers if os.path.exists(os.path.join(work, m))]
     file_count = 0

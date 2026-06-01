@@ -74,9 +74,7 @@ class PreviewSpinnerStage(PipelineStage):
         runtime = self._runtime()
         if runtime is None:
             if str(self.config.get("runner_required", "true")).lower() == "true":
-                raise RuntimeError(
-                    "spin_preview_pod requires K8s runtime — set DEVAI_K8S_RUNTIME_ENABLED=true"
-                )
+                raise RuntimeError("spin_preview_pod requires K8s runtime — set DEVAI_K8S_RUNTIME_ENABLED=true")
             return StageResult(
                 next_state=TaskState.RUNNING,
                 message="K8s runtime not available — preview skipped",

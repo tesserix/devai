@@ -101,7 +101,9 @@ class AuthoringService:
             self._publish(f"agent/{spec.name}", self._registry.publish_agent, env)
         return {"name": spec.name, "display_name": spec.display_name, "category": spec.category}
 
-    async def create_specialization_from_fields(self, fields: dict[str, Any], created_by: str = "operator") -> dict[str, Any]:
+    async def create_specialization_from_fields(
+        self, fields: dict[str, Any], created_by: str = "operator"
+    ) -> dict[str, Any]:
         """Build a spec YAML from the Create-Agent form fields, then create it."""
         return await self.create_specialization(_spec_yaml_from_fields(fields), created_by=created_by)
 
@@ -131,9 +133,7 @@ class AuthoringService:
         logger.info("authored blueprint %s (by %s)", bp.name, created_by)
 
         if self._publish_enabled:
-            env = mapping.blueprint_to_blueprint_envelope(
-                bp, yaml_text, tenant=self._tenant, created_by=created_by
-            )
+            env = mapping.blueprint_to_blueprint_envelope(bp, yaml_text, tenant=self._tenant, created_by=created_by)
             self._publish(f"blueprint/{bp.name}", self._registry.publish_blueprint, env)
         return {"name": bp.name, "stages": len(getattr(bp, "stages", []) or [])}
 
@@ -151,7 +151,9 @@ class AuthoringService:
             raise AuthoringError("skill: 'name' is required")
         env = mapping.skill_fields_to_skill_envelope(fields, tenant=self._tenant, created_by=created_by)
         await self._store.upsert(
-            AuthoredDefinition(kind="skill", name=name, yaml=yaml.safe_dump(env, sort_keys=False), created_by=created_by)
+            AuthoredDefinition(
+                kind="skill", name=name, yaml=yaml.safe_dump(env, sort_keys=False), created_by=created_by
+            )
         )
         logger.info("authored skill %s (by %s)", name, created_by)
         if self._publish_enabled:
@@ -165,7 +167,9 @@ class AuthoringService:
             raise AuthoringError("mcp_server: 'name' is required")
         env = mapping.mcp_fields_to_mcpserver_envelope(fields, tenant=self._tenant, created_by=created_by)
         await self._store.upsert(
-            AuthoredDefinition(kind="mcp_server", name=name, yaml=yaml.safe_dump(env, sort_keys=False), created_by=created_by)
+            AuthoredDefinition(
+                kind="mcp_server", name=name, yaml=yaml.safe_dump(env, sort_keys=False), created_by=created_by
+            )
         )
         logger.info("authored mcp_server %s (by %s)", name, created_by)
         if self._publish_enabled:
@@ -204,7 +208,9 @@ class AuthoringService:
         for defn in await self._store.list("blueprint"):
             try:
                 bp = load_blueprint_from_string(defn.yaml, source=f"<authored:{defn.name}>")
-                env = mapping.blueprint_to_blueprint_envelope(bp, defn.yaml, tenant=self._tenant, created_by=defn.created_by)
+                env = mapping.blueprint_to_blueprint_envelope(
+                    bp, defn.yaml, tenant=self._tenant, created_by=defn.created_by
+                )
                 self._publish(f"blueprint/{defn.name}", self._registry.publish_blueprint, env)
                 count += 1
             except Exception:  # noqa: BLE001

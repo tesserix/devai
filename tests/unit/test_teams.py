@@ -102,7 +102,9 @@ async def test_create_team_adds_creator_as_admin():
 @pytest.mark.asyncio
 async def test_list_crews_decodes_json_members():
     pool = FakePool(
-        rows=[{"id": "crew-1", "team_id": "t", "name": "Frontend", "members": '[{"specialization": "ui"}]', "lead": "ui"}]
+        rows=[
+            {"id": "crew-1", "team_id": "t", "name": "Frontend", "members": '[{"specialization": "ui"}]', "lead": "ui"}
+        ]
     )
     svc = TeamService(FakeDB(pool))
     crews = await svc.list_crews("t")

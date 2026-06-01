@@ -97,15 +97,11 @@ async def list_org_repos(
         # error well before an edge gateway (e.g. Cloudflare ~100s) would cut
         # the connection and serve its own raw HTML 502 to the dashboard.
         return await asyncio.wait_for(
-            svc.list_catalog(
-                query=q, page=page, per_page=per_page, refresh=bool(refresh), probe=bool(probe)
-            ),
+            svc.list_catalog(query=q, page=page, per_page=per_page, refresh=bool(refresh), probe=bool(probe)),
             timeout=75,
         )
     except TimeoutError as e:
-        raise HTTPException(
-            status_code=504, detail="catalog: upstream SCM timed out — try again or use Refresh"
-        ) from e
+        raise HTTPException(status_code=504, detail="catalog: upstream SCM timed out — try again or use Refresh") from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"catalog: {e}") from e
 
@@ -217,9 +213,7 @@ class MergeRequest(BaseModel):
 
 
 @router.post("/onboarded/{owner}/{name}/ready")
-async def mark_onboarding_pr_ready(
-    request: Request, owner: str, name: str
-) -> dict[str, Any]:
+async def mark_onboarding_pr_ready(request: Request, owner: str, name: str) -> dict[str, Any]:
     """Promote the draft onboarding PR to a ready-for-review (real) PR."""
     _check_repo(owner, name)
     svc = _service(request)
@@ -270,9 +264,7 @@ class AssignRequest(BaseModel):
 
 
 @router.post("/onboarded/{owner}/{name}/assign")
-async def assign_reviewer(
-    request: Request, owner: str, name: str, body: AssignRequest
-) -> dict[str, Any]:
+async def assign_reviewer(request: Request, owner: str, name: str, body: AssignRequest) -> dict[str, Any]:
     """Request a reviewer on the onboarding PR (assign-to-approve flow)."""
     _check_repo(owner, name)
     svc = _service(request)

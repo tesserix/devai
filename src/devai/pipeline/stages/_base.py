@@ -172,9 +172,7 @@ class AgentAdapter(PipelineStage):
         )
 
 
-def _safe_agent(
-    factory: Callable[[Any, Any, Any, Any], Any], deps: StageDeps
-) -> Any | None:
+def _safe_agent(factory: Callable[[Any, Any, Any, Any], Any], deps: StageDeps) -> Any | None:
     """Try to construct an agent. Returns None if required deps are missing.
 
     Most existing agents require both `scm` and `state_manager`. If either

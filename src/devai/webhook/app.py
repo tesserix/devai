@@ -153,9 +153,7 @@ def create_app(
             try:
                 from devai.specializations.service import SpecializationService
 
-                spec_service = SpecializationService(
-                    config, registry_client=_registry_client
-                )
+                spec_service = SpecializationService(config, registry_client=_registry_client)
                 await spec_service.start()
                 app.state.specialization_service = spec_service
             except Exception:
@@ -227,9 +225,7 @@ def create_app(
                 logger.warning("Onboarding: DB pool unavailable (%s) — using in-memory store", e)
                 onboarding_db = None
 
-            app.state.onboarding_service = create_onboarding_service(
-                config, scm=onboarding_scm, pool=pool
-            )
+            app.state.onboarding_service = create_onboarding_service(config, scm=onboarding_scm, pool=pool)
             logger.info("Onboarding service ready (store=%s)", "postgres" if pool else "in-memory")
 
             # Teams service shares the onboarding DB pool. When the DB is
@@ -259,9 +255,7 @@ def create_app(
         # reconcile() folds the whole org into one batched GraphQL probe, so
         # each pass is cheap. Endpoint reconcile stays available regardless.
         onboarding_reconcile_task = None
-        if app.state.onboarding_service is not None and getattr(
-            config, "onboarding_reconcile_on_boot", True
-        ):
+        if app.state.onboarding_service is not None and getattr(config, "onboarding_reconcile_on_boot", True):
             reconcile_interval = max(0, int(getattr(config, "onboarding_reconcile_interval_seconds", 300)))
 
             async def _reconcile_poller(svc: object, interval: int) -> None:

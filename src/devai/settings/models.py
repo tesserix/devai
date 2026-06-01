@@ -67,12 +67,16 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         providers=("anthropic", "openai", "noop"),
         description="The model provider that powers your agents and chat.",
         fields=(
-            _f("anthropic_api_key", "Anthropic API Key", "anthropic_api_key", secret=True,
-               placeholder="sk-ant-...", help="Used when provider = anthropic."),
-            _f("claude_model", "Claude Model", "claude_model",
-               placeholder="claude-sonnet-4-20250514"),
-            _f("openai_api_key", "OpenAI API Key", "openai_api_key", secret=True,
-               placeholder="sk-..."),
+            _f(
+                "anthropic_api_key",
+                "Anthropic API Key",
+                "anthropic_api_key",
+                secret=True,
+                placeholder="sk-ant-...",
+                help="Used when provider = anthropic.",
+            ),
+            _f("claude_model", "Claude Model", "claude_model", placeholder="claude-sonnet-4-20250514"),
+            _f("openai_api_key", "OpenAI API Key", "openai_api_key", secret=True, placeholder="sk-..."),
             _f("openai_model", "OpenAI Model", "openai_model", placeholder="gpt-4.1"),
         ),
     ),
@@ -84,10 +88,15 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         providers=("github", "gitlab", "azure_devops"),
         description="The git host DevAI reads from and opens PRs against.",
         fields=(
-            _f("scm_token", "Access Token / PAT", "scm_token", secret=True,
-               placeholder="ghp_...", help="Personal access token or GitLab/ADO token."),
-            _f("scm_base_url", "API Base URL", "scm_base_url",
-               placeholder="(blank for public github.com)"),
+            _f(
+                "scm_token",
+                "Access Token / PAT",
+                "scm_token",
+                secret=True,
+                placeholder="ghp_...",
+                help="Personal access token or GitLab/ADO token.",
+            ),
+            _f("scm_base_url", "API Base URL", "scm_base_url", placeholder="(blank for public github.com)"),
             _f("scm_organization", "Organization", "scm_organization"),
         ),
     ),
@@ -112,8 +121,7 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         providers=("on", "off"),
         description="Talk to DevAI from Slack (per-tenant workspace).",
         fields=(
-            _f("slack_bot_token", "Bot Token", "slack_bot_token", secret=True,
-               placeholder="xoxb-..."),
+            _f("slack_bot_token", "Bot Token", "slack_bot_token", secret=True, placeholder="xoxb-..."),
             _f("slack_signing_secret", "Signing Secret", "slack_signing_secret", secret=True),
         ),
     ),
@@ -127,8 +135,7 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         description="Connect an external MCP server your agents can call.",
         fields=(
             _f("mcp_name", "Name", "mcp_name", required=True, placeholder="my-tools"),
-            _f("mcp_url", "Endpoint URL", "mcp_url", required=True,
-               placeholder="https://host/mcp"),
+            _f("mcp_url", "Endpoint URL", "mcp_url", required=True, placeholder="https://host/mcp"),
             _f("mcp_token", "Bearer Token", "mcp_token", secret=True),
         ),
     ),
@@ -139,9 +146,7 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         provider_attr="web_search_provider",
         providers=("noop", "tavily"),
         description="Give agents a web-search tool.",
-        fields=(
-            _f("tavily_api_key", "Tavily API Key", "tavily_api_key", secret=True),
-        ),
+        fields=(_f("tavily_api_key", "Tavily API Key", "tavily_api_key", secret=True),),
     ),
 )
 

@@ -104,18 +104,14 @@ class BlueprintExecutor:
 
             if parallel_in_level and not sequential_in_level:
                 # All-parallel level
-                await asyncio.gather(
-                    *(self._run_one(spec, task) for spec in parallel_in_level)
-                )
+                await asyncio.gather(*(self._run_one(spec, task) for spec in parallel_in_level))
             else:
                 # Mixed or all-sequential
                 for spec in level:
                     await self._run_one(spec, task)
 
             if task.is_failed:
-                logger.warning(
-                    "blueprint %s halted at level %d due to failure", blueprint.name, level_idx
-                )
+                logger.warning("blueprint %s halted at level %d due to failure", blueprint.name, level_idx)
                 break
 
         if not task.is_failed and not task.is_terminal:

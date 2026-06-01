@@ -164,12 +164,11 @@ class _CrewRunnerStage(PipelineStage):
 
     # ── planning ──────────────────────────────────────────────────────
 
-    async def _plan(self, runner, crew, lead_spec, task: DevAITask, trail: list[dict[str, Any]]) -> list[dict[str, str]]:
+    async def _plan(
+        self, runner, crew, lead_spec, task: DevAITask, trail: list[dict[str, Any]]
+    ) -> list[dict[str, str]]:
         """Ask the lead to propose assignments; fall back to one-per-member."""
-        fallback = [
-            {"member": m.specialization, "task": task.intent}
-            for m in (crew.non_lead_members or crew.members)
-        ]
+        fallback = [{"member": m.specialization, "task": task.intent} for m in (crew.non_lead_members or crew.members)]
         if lead_spec is None or self.deps.llm is None:
             return fallback
 

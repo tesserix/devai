@@ -37,12 +37,9 @@ class WorkflowAdapter(ABC):
 
     @property
     @abstractmethod
-    def provider_name(self) -> str:
-        ...
+    def provider_name(self) -> str: ...
 
-    async def signal(
-        self, task_id: str, signal_name: str, args: list | None = None
-    ) -> bool:
+    async def signal(self, task_id: str, signal_name: str, args: list | None = None) -> bool:
         """Send a control Signal to a running run (pause/resume/stop/approve…).
 
         Default: unsupported (returns False) — the in-process backends drive

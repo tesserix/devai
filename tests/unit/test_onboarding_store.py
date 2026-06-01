@@ -31,9 +31,7 @@ async def test_upsert_then_get_roundtrips(store) -> None:
 async def test_upsert_preserves_created_at_on_update(store) -> None:
     first = await store.upsert(OnboardedRepo(owner="tesserix", name="devai"))
     created = first.created_at
-    updated = await store.upsert(
-        OnboardedRepo(owner="tesserix", name="devai", state=OnboardingState.ONBOARDED)
-    )
+    updated = await store.upsert(OnboardedRepo(owner="tesserix", name="devai", state=OnboardingState.ONBOARDED))
     assert updated.created_at == created
     assert updated.state == OnboardingState.ONBOARDED
 

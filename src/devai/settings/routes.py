@@ -158,9 +158,7 @@ async def upsert_connector(request: Request) -> dict[str, Any]:
 
 
 @router.delete("/connectors/{scope}/{scope_id}/{connector_key}")
-async def delete_connector(
-    scope: str, scope_id: str, connector_key: str, request: Request
-) -> dict[str, str]:
+async def delete_connector(scope: str, scope_id: str, connector_key: str, request: Request) -> dict[str, str]:
     principal = await _require_principal(request)
     svc = _svc(request)
     try:

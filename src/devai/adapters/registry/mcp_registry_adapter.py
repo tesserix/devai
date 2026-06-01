@@ -73,7 +73,9 @@ class MCPRegistryAdapter(RegistryAdapter):
         headers = {"Content-Type": "application/json"}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
-        r = httpx.post(f"{self._base}/v0.1/publish", json=body.get("spec", body), headers=headers, timeout=self._timeout)
+        r = httpx.post(
+            f"{self._base}/v0.1/publish", json=body.get("spec", body), headers=headers, timeout=self._timeout
+        )
         r.raise_for_status()
         return r.json() if r.text else {}
 

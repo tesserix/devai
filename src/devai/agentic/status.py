@@ -24,7 +24,7 @@ class ComponentStatus:
     """Live state of one control-plane component."""
 
     name: str
-    role: str            # "registry" | "gateway" | "controller" | "llm-proxy"
+    role: str  # "registry" | "gateway" | "controller" | "llm-proxy"
     namespace: str
     url: str
     reachable: bool
@@ -150,9 +150,7 @@ def _probe_http(
     httpx is lazy-imported to keep the cold-start light when the
     Gateway page isn't loaded.
     """
-    cs = ComponentStatus(
-        name=name, role=role, namespace=namespace, url=url, reachable=False
-    )
+    cs = ComponentStatus(name=name, role=role, namespace=namespace, url=url, reachable=False)
     if os.environ.get("DEVAI_AGENTIC_PROBES", "true").lower() == "false":
         cs.error = "probes disabled (DEVAI_AGENTIC_PROBES=false)"
         return cs

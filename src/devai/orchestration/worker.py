@@ -94,9 +94,7 @@ async def run_worker(config: Settings | None = None) -> None:
         activities=[run_stage_activity],
         max_concurrent_activities=max_activities,
     )
-    logger.info(
-        "devai-worker started: host=%s ns=%s queue=%s", host, namespace, task_queue
-    )
+    logger.info("devai-worker started: host=%s ns=%s queue=%s", host, namespace, task_queue)
     try:
         await worker.run()
     finally:

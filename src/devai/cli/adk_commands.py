@@ -153,16 +153,12 @@ def validate(target: Path = typer.Argument(..., help="YAML file or directory."))
 @adk_app.command("publish")
 def publish(
     target: Path = typer.Argument(..., help="YAML file or directory."),
-    registry_url: str = typer.Option(
-        "", "--registry-url", help="Default: settings.registry_url."
-    ),
+    registry_url: str = typer.Option("", "--registry-url", help="Default: settings.registry_url."),
     token: str = typer.Option("", "--token"),
 ) -> None:
     url = registry_url or settings.registry_url
     if not url:
-        console.print(
-            "[red]no registry URL[/] — pass --registry-url or set DEVAI_REGISTRY_URL"
-        )
+        console.print("[red]no registry URL[/] — pass --registry-url or set DEVAI_REGISTRY_URL")
         raise typer.Exit(code=1)
     files = list(_walk(target))
     if not files:

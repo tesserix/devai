@@ -43,6 +43,7 @@ class _IngestDocumentsStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.document_analyzer import DocumentAnalyzerAgent
+
         return _make(DocumentAnalyzerAgent, self.deps)
 
 
@@ -62,6 +63,7 @@ class _DetectTechStackStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.tech_detector import TechDetectorAgent
+
         return _make(TechDetectorAgent, self.deps)
 
 
@@ -81,6 +83,7 @@ class _AnalyzeRequirementsStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.requirements_analyst import RequirementsAnalystAgent
+
         return _make(RequirementsAnalystAgent, self.deps)
 
 
@@ -100,6 +103,7 @@ class _CreateEpicStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.product_director import ProductDirectorAgent
+
         return _make(ProductDirectorAgent, self.deps)
 
 
@@ -144,6 +148,7 @@ class _CreatePlanStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.engineering_manager import EngineeringManagerAgent
+
         return _make(EngineeringManagerAgent, self.deps)
 
 
@@ -168,6 +173,7 @@ class _ImplementCodeStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.senior_developer import SeniorDeveloperAgent
+
         return _make(SeniorDeveloperAgent, self.deps)
 
 
@@ -187,6 +193,7 @@ class _DBEngineeringStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.db_engineer import DBEngineerAgent
+
         return _make(DBEngineerAgent, self.deps)
 
 
@@ -211,6 +218,7 @@ class _ReviewCodeStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.staff_reviewer import StaffReviewerAgent
+
         return _make(StaffReviewerAgent, self.deps)
 
 
@@ -233,6 +241,7 @@ class _StaffReviewStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.staff_reviewer import StaffReviewerAgent
+
         return _make(StaffReviewerAgent, self.deps)
 
 
@@ -252,6 +261,7 @@ class _SecurityScanStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.security_expert import SecurityExpertAgent
+
         return _make(SecurityExpertAgent, self.deps)
 
 
@@ -271,6 +281,7 @@ class _MonitorBuildStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.ci_monitor import CIMonitorAgent
+
         return _make(CIMonitorAgent, self.deps)
 
 
@@ -290,6 +301,7 @@ class _RunTestsStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.qa_tester import QATesterAgent
+
         return _make(QATesterAgent, self.deps)
 
 
@@ -314,6 +326,7 @@ class _ProvisionInfraStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.infra_provisioner import InfraProvisionerAgent
+
         return _make(InfraProvisionerAgent, self.deps)
 
 
@@ -333,6 +346,7 @@ class _DeployReleaseStage(AgentAdapter):
 
     def _make_agent(self):
         from devai.agents.release_manager import ReleaseManagerAgent
+
         return _make(ReleaseManagerAgent, self.deps)
 
 

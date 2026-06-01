@@ -372,9 +372,7 @@ class SCMClient(ABC):
         Default raises so non-GitHub backends degrade clearly; GitHub
         overrides it. Returns provider-specific PR data on success.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support marking PRs ready for review"
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not support marking PRs ready for review")
 
     @abstractmethod
     async def get_pull_request(self, repo: str, pr_id: int) -> dict[str, Any]:
@@ -511,17 +509,13 @@ class SCMClient(ABC):
 
     # --- Repo onboarding (Repos page) ---
 
-    async def set_branch_protection(
-        self, repo: str, branch: str, *, required_approvals: int = 1
-    ) -> dict[str, Any]:
+    async def set_branch_protection(self, repo: str, branch: str, *, required_approvals: int = 1) -> dict[str, Any]:
         """Enable a baseline branch-protection gate on ``branch``.
 
         Default no-op — override in providers that support it."""
         return {}
 
-    async def list_installation_repos(
-        self, per_page: int = 100, org: str = ""
-    ) -> list[dict[str, Any]]:
+    async def list_installation_repos(self, per_page: int = 100, org: str = "") -> list[dict[str, Any]]:
         """List every repo this credential can see (GitHub App installation
         or token scope).
 
@@ -530,9 +524,7 @@ class SCMClient(ABC):
         empty — override in provider."""
         return []
 
-    async def probe_markers(
-        self, repos: list[tuple[str, str, str]], marker_path: str
-    ) -> dict[str, bool]:
+    async def probe_markers(self, repos: list[tuple[str, str, str]], marker_path: str) -> dict[str, bool]:
         """Return {``owner/name``: marker_present} for the given repos.
 
         ``repos`` is a list of ``(owner, name, ref)`` tuples. The default
@@ -550,9 +542,7 @@ class SCMClient(ABC):
                 out[full] = False
         return out
 
-    async def request_reviewers(
-        self, repo: str, pr_id: int, reviewers: list[str]
-    ) -> dict[str, Any]:
+    async def request_reviewers(self, repo: str, pr_id: int, reviewers: list[str]) -> dict[str, Any]:
         """Request reviewers on a pull request (assign-to-approve flow).
 
         Default no-op — override in provider.

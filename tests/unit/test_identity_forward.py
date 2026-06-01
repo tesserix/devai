@@ -14,9 +14,7 @@ class _FakeRequest:
     def __init__(self, headers, secret="", cookies=None):
         self.headers = _Headers(headers)
         self.cookies = cookies or {}
-        self.app = SimpleNamespace(
-            state=SimpleNamespace(config=SimpleNamespace(auth_bff_shared_secret=secret))
-        )
+        self.app = SimpleNamespace(state=SimpleNamespace(config=SimpleNamespace(auth_bff_shared_secret=secret)))
 
 
 def test_forward_trusted_when_no_secret_configured():
@@ -46,8 +44,6 @@ async def test_extract_principal_honors_secret_gate():
     assert await extract_principal(spoof) is None
 
     # Correct secret → principal resolves from the forwarded header.
-    legit = _FakeRequest(
-        {"x-forwarded-user": "alice@corp.com", "x-auth-bff-secret": "s3cret"}, secret="s3cret"
-    )
+    legit = _FakeRequest({"x-forwarded-user": "alice@corp.com", "x-auth-bff-secret": "s3cret"}, secret="s3cret")
     p = await extract_principal(legit)
     assert p is not None and p.email == "alice@corp.com"

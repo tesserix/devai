@@ -57,9 +57,7 @@ async def slack_events(request: Request):
     if event_id:
         try:
             state = request.app.state.state_manager
-            fresh = await state.redis.set(
-                f"devai:slack:event:{event_id}", "1", nx=True, ex=_DEDUP_TTL_SECONDS
-            )
+            fresh = await state.redis.set(f"devai:slack:event:{event_id}", "1", nx=True, ex=_DEDUP_TTL_SECONDS)
             if not fresh:
                 return JSONResponse({"status": "duplicate"})
         except Exception:

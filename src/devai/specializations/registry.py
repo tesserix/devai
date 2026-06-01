@@ -45,9 +45,7 @@ class SpecializationRegistry:
 
     def register(self, spec: Specialization) -> None:
         if spec.name in self._by_name:
-            raise SpecializationRegistryError(
-                f"specialization {spec.name!r} already registered"
-            )
+            raise SpecializationRegistryError(f"specialization {spec.name!r} already registered")
         self._by_name[spec.name] = spec
 
     def register_or_replace(self, spec: Specialization) -> None:
@@ -58,9 +56,7 @@ class SpecializationRegistry:
     def resolve(self, name: str) -> Specialization:
         if name not in self._by_name:
             known = ", ".join(sorted(self._by_name.keys()))
-            raise SpecializationRegistryError(
-                f"unknown specialization {name!r}. Known: {known}"
-            )
+            raise SpecializationRegistryError(f"unknown specialization {name!r}. Known: {known}")
         return self._by_name[name]
 
     def has(self, name: str) -> bool:

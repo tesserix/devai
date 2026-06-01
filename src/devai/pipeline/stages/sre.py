@@ -88,6 +88,7 @@ class _DiscoverStage(_SREAgentStage):
             return None
         try:
             from devai.sre.agents.discovery_agent import DiscoveryAgent
+
             return DiscoveryAgent(self.deps.config, memory=getattr(self.deps.state_manager, "memory", None))
         except Exception:  # noqa: BLE001
             logger.exception("DiscoveryAgent construction failed")
@@ -114,6 +115,7 @@ def _build_monitor_stage(stage_name: str, role_key: str, klass_path: str):
         try:
             module_path, class_name = klass_path.rsplit(".", 1)
             import importlib
+
             mod = importlib.import_module(module_path)
             klass = getattr(mod, class_name)
             return klass(self.deps.config, memory=getattr(self.deps.state_manager, "memory", None))
@@ -133,11 +135,19 @@ def _build_monitor_stage(stage_name: str, role_key: str, klass_path: str):
     return _MonitorStage
 
 
-_InfraMonitor = _build_monitor_stage("sre_monitor_infra", "infra_monitor", "devai.sre.agents.infra_monitor.InfraMonitorAgent")
-_PerfMonitor = _build_monitor_stage("sre_monitor_perf", "perf_monitor", "devai.sre.agents.perf_monitor.PerfMonitorAgent")
+_InfraMonitor = _build_monitor_stage(
+    "sre_monitor_infra", "infra_monitor", "devai.sre.agents.infra_monitor.InfraMonitorAgent"
+)
+_PerfMonitor = _build_monitor_stage(
+    "sre_monitor_perf", "perf_monitor", "devai.sre.agents.perf_monitor.PerfMonitorAgent"
+)
 _LogMonitor = _build_monitor_stage("sre_monitor_logs", "log_analyzer", "devai.sre.agents.log_analyzer.LogAnalyzerAgent")
-_CostMonitor = _build_monitor_stage("sre_monitor_cost", "cost_analyzer", "devai.sre.agents.cost_analyzer.CostAnalyzerAgent")
-_CapacityMonitor = _build_monitor_stage("sre_monitor_capacity", "capacity_planner", "devai.sre.agents.capacity_planner.CapacityPlannerAgent")
+_CostMonitor = _build_monitor_stage(
+    "sre_monitor_cost", "cost_analyzer", "devai.sre.agents.cost_analyzer.CostAnalyzerAgent"
+)
+_CapacityMonitor = _build_monitor_stage(
+    "sre_monitor_capacity", "capacity_planner", "devai.sre.agents.capacity_planner.CapacityPlannerAgent"
+)
 
 
 def monitor_infra_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
@@ -181,7 +191,13 @@ class _CorrelateStage(PipelineStage):
 
     async def execute(self, task: DevAITask) -> StageResult:
         findings: list[dict[str, Any]] = []
-        for key in ("infra_monitor_output", "perf_monitor_output", "log_analyzer_output", "cost_analyzer_output", "capacity_planner_output"):
+        for key in (
+            "infra_monitor_output",
+            "perf_monitor_output",
+            "log_analyzer_output",
+            "cost_analyzer_output",
+            "capacity_planner_output",
+        ):
             entry = task.agent_context.get(key)
             if isinstance(entry, dict) and entry.get("findings"):
                 findings.extend(entry["findings"])
@@ -209,6 +225,7 @@ class _RespondStage(_SREAgentStage):
             return None
         try:
             from devai.sre.agents.incident_responder import IncidentResponderAgent
+
             db = getattr(self.deps.state_manager, "db", None)
             return IncidentResponderAgent(self.deps.config, db)
         except Exception:  # noqa: BLE001

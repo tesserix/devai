@@ -77,9 +77,7 @@ class ConversationGateway:
             if not isinstance(overlaid, PrincipalSettingsOverlay) or not overlaid.overlaid_attrs:
                 return self._get_agent()  # nothing user-specific → shared agent
 
-            fingerprint = "|".join(
-                f"{a}={getattr(overlaid, a)!r}" for a in overlaid.overlaid_attrs
-            )
+            fingerprint = "|".join(f"{a}={getattr(overlaid, a)!r}" for a in overlaid.overlaid_attrs)
             cached = self._agent_cache.get(fingerprint)
             if cached is None:
                 from devai.chat.agent import DevAIChatAgent

@@ -43,9 +43,7 @@ def _build_nats(settings: Any) -> EventBusAdapter:
 
     url = getattr(settings, "nats_url", "") or ""
     if not url:
-        raise AdapterNotConfigured(
-            "nats event-bus adapter requires DEVAI_NATS_URL"
-        )
+        raise AdapterNotConfigured("nats event-bus adapter requires DEVAI_NATS_URL")
     return NatsEventBusAdapter(
         url=url,
         default_stream=getattr(settings, "nats_stream", "DEVAI"),

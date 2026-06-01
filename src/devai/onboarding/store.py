@@ -237,9 +237,7 @@ class PostgresOnboardingStore(OnboardingStore):
                 str(state),
             )
         elif include_archived:
-            rows = await self._call(
-                "fetch", "SELECT * FROM repo_onboarding ORDER BY updated_at DESC"
-            )
+            rows = await self._call("fetch", "SELECT * FROM repo_onboarding ORDER BY updated_at DESC")
         else:
             rows = await self._call(
                 "fetch",

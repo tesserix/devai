@@ -46,9 +46,7 @@ class Mem0MemoryAdapter(MemoryAdapter):
         try:
             from mem0 import Memory, MemoryClient  # type: ignore[import-untyped]
         except ImportError as e:
-            raise AdapterNotInstalled(
-                "mem0 adapter requires `pip install mem0ai` — falling back to Noop"
-            ) from e
+            raise AdapterNotInstalled("mem0 adapter requires `pip install mem0ai` — falling back to Noop") from e
 
         if api_key:
             self._client = MemoryClient(api_key=api_key, host=host or None)
@@ -56,9 +54,7 @@ class Mem0MemoryAdapter(MemoryAdapter):
             # Self-hosted instance without an API key
             self._client = Memory.from_config({"vector_store": {"provider": "pgvector"}})
         else:
-            raise AdapterNotConfigured(
-                "mem0 adapter requires DEVAI_MEM0_API_KEY or DEVAI_MEM0_HOST"
-            )
+            raise AdapterNotConfigured("mem0 adapter requires DEVAI_MEM0_API_KEY or DEVAI_MEM0_HOST")
 
         self._host = host
         self._has_api_key = bool(api_key)

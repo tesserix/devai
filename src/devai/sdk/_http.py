@@ -22,8 +22,5 @@ def lazy_httpx():
     except ImportError as e:
         from devai.sdk.client import DevAIError
 
-        raise DevAIError(
-            "sdk: httpx is not installed — `pip install httpx` or "
-            "`pip install devai[sdk]`"
-        ) from e
+        raise DevAIError("sdk: httpx is not installed — `pip install httpx` or `pip install devai[sdk]`") from e
     return httpx

@@ -62,9 +62,13 @@ def test_upsert_stores_secret_ref_not_value():
 
     async def go():
         c = await svc.upsert_connector(
-            scope=Scope.USER, scope_id="alice-uid", connector_key="llm", provider="openai",
+            scope=Scope.USER,
+            scope_id="alice-uid",
+            connector_key="llm",
+            provider="openai",
             prefs={"openai_model": "gpt-4.1"},
-            secret_values={"openai_api_key": "ALICE-KEY"}, updated_by="alice@x.com",
+            secret_values={"openai_api_key": "ALICE-KEY"},
+            updated_by="alice@x.com",
         )
         # The stored connector keeps only a ref, never the value.
         assert "openai_api_key" in c.secret_refs
@@ -94,13 +98,21 @@ def test_overlay_scope_resolution_user_wins():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.GLOBAL, scope_id="", connector_key="llm", provider="anthropic",
-            secret_values={"anthropic_api_key": "GLOBAL-A"}, updated_by="admin",
+            scope=Scope.GLOBAL,
+            scope_id="",
+            connector_key="llm",
+            provider="anthropic",
+            secret_values={"anthropic_api_key": "GLOBAL-A"},
+            updated_by="admin",
         )
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="alice-uid", connector_key="llm", provider="openai",
+            scope=Scope.USER,
+            scope_id="alice-uid",
+            connector_key="llm",
+            provider="openai",
             prefs={"openai_model": "gpt-4.1"},
-            secret_values={"openai_api_key": "ALICE-OAI"}, updated_by="alice@x.com",
+            secret_values={"openai_api_key": "ALICE-OAI"},
+            updated_by="alice@x.com",
         )
         ov = await build_overlay(_Base(), _P(), svc)
         assert isinstance(ov, PrincipalSettingsOverlay)
@@ -129,10 +141,14 @@ def test_overlay_collects_mcp_servers():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="alice-uid", connector_key="mcp",
-            provider="streamable_http", instance_id="tools",
+            scope=Scope.USER,
+            scope_id="alice-uid",
+            connector_key="mcp",
+            provider="streamable_http",
+            instance_id="tools",
             prefs={"mcp_name": "tools", "mcp_url": "https://h/mcp"},
-            secret_values={"mcp_token": "TKN"}, updated_by="alice@x.com",
+            secret_values={"mcp_token": "TKN"},
+            updated_by="alice@x.com",
         )
         ov = await build_overlay(_Base(), _P(), svc)
         assert isinstance(ov, PrincipalSettingsOverlay)
@@ -147,8 +163,12 @@ def test_delete_removes_secret():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="alice-uid", connector_key="llm", provider="openai",
-            secret_values={"openai_api_key": "K"}, updated_by="a",
+            scope=Scope.USER,
+            scope_id="alice-uid",
+            connector_key="llm",
+            provider="openai",
+            secret_values={"openai_api_key": "K"},
+            updated_by="a",
         )
         assert await svc.delete_connector(Scope.USER, "alice-uid", "llm") is True
         ov = await build_overlay(_Base(), _P(), svc)
@@ -161,8 +181,4 @@ def test_delete_removes_secret():
 def test_unknown_connector_rejected():
     svc = _svc()
     with pytest.raises(ValueError):
-        asyncio.run(
-            svc.upsert_connector(
-                scope=Scope.USER, scope_id="x", connector_key="nope", provider="p"
-            )
-        )
+        asyncio.run(svc.upsert_connector(scope=Scope.USER, scope_id="x", connector_key="nope", provider="p"))

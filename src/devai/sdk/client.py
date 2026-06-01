@@ -110,9 +110,7 @@ class DevAI:
         if self._pipeline is None and self._api_url:
             from devai.sdk.pipeline import PipelineSDK
 
-            self._pipeline = PipelineSDK(
-                base_url=self._api_url, timeout_seconds=self._timeout
-            )
+            self._pipeline = PipelineSDK(base_url=self._api_url, timeout_seconds=self._timeout)
         return self._pipeline
 
     @property
@@ -120,9 +118,7 @@ class DevAI:
         if self._specializations is None and self._api_url:
             from devai.sdk.specializations import SpecializationsSDK
 
-            self._specializations = SpecializationsSDK(
-                base_url=self._api_url, timeout_seconds=self._timeout
-            )
+            self._specializations = SpecializationsSDK(base_url=self._api_url, timeout_seconds=self._timeout)
         return self._specializations
 
     # ---- catalog (registry passthroughs) ----------------------------------

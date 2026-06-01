@@ -54,15 +54,12 @@ class GcpSecretManagerAdapter(SecretsAdapter):
         )
         if not self._project:
             raise AdapterNotConfigured(
-                "gcp_sm secrets adapter requires a GCP project "
-                "(DEVAI_SECRETS_GCP_PROJECT or DEVAI_GKE_PROJECT)"
+                "gcp_sm secrets adapter requires a GCP project (DEVAI_SECRETS_GCP_PROJECT or DEVAI_GKE_PROJECT)"
             )
         try:
             from google.cloud import secretmanager_v1  # lazy
         except ImportError as e:
-            raise AdapterNotInstalled(
-                "google-cloud-secret-manager is not installed"
-            ) from e
+            raise AdapterNotInstalled("google-cloud-secret-manager is not installed") from e
         self._sm = secretmanager_v1
         # Async client uses ADC (Workload Identity in-cluster).
         self._client = secretmanager_v1.SecretManagerServiceAsyncClient()
@@ -95,9 +92,7 @@ class GcpSecretManagerAdapter(SecretsAdapter):
             # throwaway secret. We do the cheap read probe and assume write IAM
             # is co-granted (the deploy grants admin or none). set_secret still
             # surfaces a real PermissionDenied if not.
-            it = await self._client.list_secrets(
-                request={"parent": self._parent, "page_size": 1}
-            )
+            it = await self._client.list_secrets(request={"parent": self._parent, "page_size": 1})
             # Touch the iterator so the RPC actually fires.
             async for _ in it:  # noqa: B007
                 break
@@ -116,9 +111,7 @@ class GcpSecretManagerAdapter(SecretsAdapter):
     ) -> SecretRef:
         secret_id = sanitize_secret_id(key)
         # GCP labels: lowercase letters/digits/_/-, <=63 chars; sanitize.
-        gcp_labels = {
-            _label_key(k): _label_val(v) for k, v in (labels or {}).items()
-        }
+        gcp_labels = {_label_key(k): _label_val(v) for k, v in (labels or {}).items()}
         try:
             # Create the secret container if it doesn't exist yet.
             try:
@@ -144,9 +137,7 @@ class GcpSecretManagerAdapter(SecretsAdapter):
                 }
             )
             self._can_write = True
-            return SecretRef(
-                name=secret_id, provider=self.provider_name, labels=dict(labels or {})
-            )
+            return SecretRef(name=secret_id, provider=self.provider_name, labels=dict(labels or {}))
         except Exception as e:  # noqa: BLE001
             self._can_write = False
             raise AdapterError(f"gcp_sm set_secret({secret_id}) failed: {e}") from e
@@ -155,9 +146,7 @@ class GcpSecretManagerAdapter(SecretsAdapter):
         secret_id = self._id_of(ref)
         version = ref.version if isinstance(ref, SecretRef) else "latest"
         try:
-            resp = await self._client.access_secret_version(
-                request={"name": self._version_path(secret_id, version)}
-            )
+            resp = await self._client.access_secret_version(request={"name": self._version_path(secret_id, version)})
             return resp.payload.data.decode("utf-8")
         except Exception as e:  # noqa: BLE001
             logger.warning("gcp_sm get_secret(%s) failed: %s", secret_id, e)
@@ -166,9 +155,7 @@ class GcpSecretManagerAdapter(SecretsAdapter):
     async def delete_secret(self, ref: SecretRef | str) -> bool:
         secret_id = self._id_of(ref)
         try:
-            await self._client.delete_secret(
-                request={"name": self._secret_path(secret_id)}
-            )
+            await self._client.delete_secret(request={"name": self._secret_path(secret_id)})
             return True
         except Exception as e:  # noqa: BLE001
             if "NotFound" in str(e) or " 404 " in str(e):

@@ -132,6 +132,7 @@ class _DetectPRStage(PipelineStage):
             return StageResult(message="no SCM client or branch — skipping detect_pr", data={"detect_pr_stub": True})
 
         import asyncio
+
         deadline = asyncio.get_event_loop().time() + self.timeout_seconds
         while asyncio.get_event_loop().time() < deadline:
             try:
@@ -174,6 +175,7 @@ class _AwaitMergeStage(PipelineStage):
             )
 
         import asyncio
+
         deadline = asyncio.get_event_loop().time() + self.timeout_seconds
         while asyncio.get_event_loop().time() < deadline:
             try:

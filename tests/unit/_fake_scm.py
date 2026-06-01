@@ -17,7 +17,7 @@ class FakeSCM:
         default_branch: str = "main",
     ) -> None:
         self.repos = repos or []
-        self.markers = set(markers or set())   # full_names with a marker present
+        self.markers = set(markers or set())  # full_names with a marker present
         self.default_branch = default_branch
         self.calls: list[tuple[str, tuple, dict]] = []
         self._pr_seq = 100

@@ -77,9 +77,7 @@ def _parse_handover_schema(raw: Any, *, source: str) -> dict[str, HandoverField]
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise SpecializationLoadError(
-            f"{source}: handover_schema must be a mapping, got {type(raw).__name__}"
-        )
+        raise SpecializationLoadError(f"{source}: handover_schema must be a mapping, got {type(raw).__name__}")
     out: dict[str, HandoverField] = {}
     for field_name, field_def in raw.items():
         if not isinstance(field_name, str) or not field_name:
@@ -94,9 +92,7 @@ def _parse_handover_schema(raw: Any, *, source: str) -> dict[str, HandoverField]
             continue
 
         if not isinstance(field_def, dict):
-            raise SpecializationLoadError(
-                f"{source}: handover field {field_name!r} must be a mapping or a type-string"
-            )
+            raise SpecializationLoadError(f"{source}: handover field {field_name!r} must be a mapping or a type-string")
 
         unknown = set(field_def.keys()) - _ALLOWED_HANDOVER_KEYS
         if unknown:
@@ -207,9 +203,7 @@ def discover_specializations(directory: str | Path) -> dict[str, Specialization]
                 if s.name == spec.name:
                     other = p
                     break
-            raise SpecializationLoadError(
-                f"duplicate specialization name {spec.name!r} (in {path} and {other})"
-            )
+            raise SpecializationLoadError(f"duplicate specialization name {spec.name!r} (in {path} and {other})")
         out[spec.name] = spec
     for path in sorted(d.rglob("*.yml")):
         if path.name.startswith("_"):

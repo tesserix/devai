@@ -67,9 +67,7 @@ def _deps(llm) -> StageDeps:
 async def test_strict_handover_raises_on_missing_required_field():
     # Model returns prose with no `summary` → required field missing.
     llm = _ScriptedLLM([LLMResponse(text="no json here")])
-    stage = run_specialization_stage(
-        _deps(llm), {"specialization": "edge_agent", "strict_handover": "true"}
-    )
+    stage = run_specialization_stage(_deps(llm), {"specialization": "edge_agent", "strict_handover": "true"})
     with pytest.raises(HandoverValidationError):
         await stage.execute(DevAITask(intent="x"))
 

@@ -43,9 +43,7 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
             return self._client
         from temporalio.client import Client  # lazy
 
-        host = getattr(
-            self._settings, "temporal_host", "localhost:7233"
-        )
+        host = getattr(self._settings, "temporal_host", "localhost:7233")
         namespace = getattr(self._settings, "temporal_namespace", "default")
         tls = bool(getattr(self._settings, "temporal_tls_enabled", False))
         self._client = await Client.connect(host, namespace=namespace, tls=tls)
@@ -70,9 +68,7 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
             return await self._fallback.run_blueprint(blueprint, task)
 
         task_queue = getattr(self._settings, "temporal_task_queue", "devai")
-        default_timeout = int(
-            getattr(self._settings, "pipeline_default_stage_timeout", 900)
-        )
+        default_timeout = int(getattr(self._settings, "pipeline_default_stage_timeout", 900))
         max_attempts = int(getattr(self._settings, "temporal_max_stage_attempts", 3))
         payload = {
             "blueprint": blueprint_to_dict(blueprint),
@@ -99,9 +95,7 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
 
         return task_from_dict(result)
 
-    async def signal(
-        self, task_id: str, signal_name: str, args: list | None = None
-    ) -> bool:
+    async def signal(self, task_id: str, signal_name: str, args: list | None = None) -> bool:
         """Deliver a durable Signal to the run's BlueprintWorkflow.
 
         The workflow id mirrors run_blueprint: ``devai-bp-{task_id}``. Returns
@@ -114,9 +108,7 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
             await handle.signal(signal_name, *(args or []))
             return True
         except Exception:  # noqa: BLE001
-            logger.warning(
-                "Temporal signal %s failed for task %s", signal_name, task_id, exc_info=True
-            )
+            logger.warning("Temporal signal %s failed for task %s", signal_name, task_id, exc_info=True)
             return False
 
     async def health_check(self) -> bool:

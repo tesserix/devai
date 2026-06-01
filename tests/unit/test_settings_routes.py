@@ -122,9 +122,7 @@ def test_secret_write_blocked_when_readonly():
 
 def test_unknown_connector_rejected():
     client = TestClient(_app(ALICE))
-    r = client.post(
-        "/api/settings/connectors", json={"connector_key": "nope", "provider": "x", "scope": "user"}
-    )
+    r = client.post("/api/settings/connectors", json={"connector_key": "nope", "provider": "x", "scope": "user"})
     assert r.status_code == 400
 
 

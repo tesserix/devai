@@ -191,9 +191,7 @@ class StateManager:
     # Temporal backend these become workflow Signals (later phase); this
     # Redis flag drives the default in-process path.
 
-    async def set_pipeline_control(
-        self, task_id: str, value: str, *, ttl: int = 86400
-    ) -> None:
+    async def set_pipeline_control(self, task_id: str, value: str, *, ttl: int = 86400) -> None:
         """Set the run-control flag. `running`/`resume`/empty clears it."""
         key = self.PIPELINE_CONTROL_KEY.format(task_id=task_id)
         if value in ("", "running", "resume"):
@@ -230,13 +228,9 @@ class StateManager:
             ids = await self.redis.zrevrange("_devai:pipeline:_tmpfilter", 0, limit - 1)
             await self.redis.delete("_devai:pipeline:_tmpfilter")
         elif blueprint:
-            ids = await self.redis.zrevrange(
-                self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint), 0, limit - 1
-            )
+            ids = await self.redis.zrevrange(self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint), 0, limit - 1)
         elif repo:
-            ids = await self.redis.zrevrange(
-                self.PIPELINE_BY_REPO_KEY.format(repo=repo), 0, limit - 1
-            )
+            ids = await self.redis.zrevrange(self.PIPELINE_BY_REPO_KEY.format(repo=repo), 0, limit - 1)
         else:
             ids = await self.redis.zrevrange(self.PIPELINE_RECENT_KEY, 0, limit - 1)
 

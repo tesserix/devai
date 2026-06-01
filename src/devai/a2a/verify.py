@@ -45,9 +45,7 @@ def verify_card_signature(card: AgentCard, signing_key: dict[str, Any] | None) -
     sig_b64 = prov.get("signature")
     digest = prov.get("digest")
     if not sig_b64 or not digest:
-        raise A2AError(
-            f"a2a: card for {card.name!r} carries no registry signature/digest; refusing to trust it"
-        )
+        raise A2AError(f"a2a: card for {card.name!r} carries no registry signature/digest; refusing to trust it")
 
     pub_b64 = signing_key.get("publicKey")
     if not pub_b64:
@@ -57,9 +55,7 @@ def verify_card_signature(card: AgentCard, signing_key: dict[str, Any] | None) -
     # key this registry doesn't publish is not trustworthy.
     signed_by, key_id = prov.get("signedBy"), signing_key.get("keyId")
     if signed_by and key_id and signed_by != key_id:
-        raise A2AError(
-            f"a2a: card {card.name!r} signed by key {signed_by!r}, but the registry publishes {key_id!r}"
-        )
+        raise A2AError(f"a2a: card {card.name!r} signed by key {signed_by!r}, but the registry publishes {key_id!r}")
 
     try:
         from cryptography.exceptions import InvalidSignature
@@ -100,12 +96,7 @@ def check_service_url(url: str, allowed_suffixes: list[str]) -> None:
     except ValueError:
         ip = None
     if ip is not None and (
-        ip.is_loopback
-        or ip.is_link_local
-        or ip.is_private
-        or ip.is_unspecified
-        or ip.is_reserved
-        or ip.is_multicast
+        ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_unspecified or ip.is_reserved or ip.is_multicast
     ):
         raise A2AError(f"a2a: refusing to call non-routable address {host} (SSRF guard)")
 

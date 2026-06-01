@@ -28,11 +28,13 @@ def test_a2a_url_and_request_shape():
 def test_create_kagent_client_disabled_when_no_url():
     class S:
         kagent_url = ""
+
     assert create_kagent_client(S()) is None
 
     class S2:
         kagent_url = "http://kagent:8083"
         kagent_default_namespace = "kagent-system"
+
     assert isinstance(create_kagent_client(S2()), KagentClient)
 
 
@@ -101,7 +103,9 @@ async def test_dispatch_http_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_dispatch_jsonrpc_error(monkeypatch):
-    _install_fake_httpx(monkeypatch, _FakeResponse(200, {"jsonrpc": "2.0", "error": {"code": -32000, "message": "nope"}}))
+    _install_fake_httpx(
+        monkeypatch, _FakeResponse(200, {"jsonrpc": "2.0", "error": {"code": -32000, "message": "nope"}})
+    )
     c = KagentClient("http://kagent:8083")
     with pytest.raises(KagentError):
         await c.dispatch("reviewer", "x")

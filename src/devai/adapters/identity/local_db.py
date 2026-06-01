@@ -71,8 +71,7 @@ class LocalDBIdentityAdapter(IdentityAdapter):
         if self._pool is not None:
             try:
                 row = await self._pool.fetchrow(
-                    "SELECT username, password, email, name, roles "
-                    "FROM devai_local_users WHERE username = $1",
+                    "SELECT username, password, email, name, roles FROM devai_local_users WHERE username = $1",
                     username,
                 )
             except Exception:  # noqa: BLE001 — DB hiccup never crashes login

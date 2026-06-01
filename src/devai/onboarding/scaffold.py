@@ -56,9 +56,7 @@ def default_scaffold_files(
         ScaffoldFile("README.md", _readme(name, repo, desc, tech_stack), "docs: add README"),
         ScaffoldFile(".gitignore", _GITIGNORE, "chore: add .gitignore"),
         ScaffoldFile(".editorconfig", _EDITORCONFIG, "chore: add .editorconfig"),
-        ScaffoldFile(
-            ".github/pull_request_template.md", _PR_TEMPLATE, "chore: add pull request template"
-        ),
+        ScaffoldFile(".github/pull_request_template.md", _PR_TEMPLATE, "chore: add pull request template"),
         ScaffoldFile(".github/CODEOWNERS", _codeowners(repo), "chore: add CODEOWNERS"),
         ScaffoldFile(".github/dependabot.yml", _DEPENDABOT, "chore: enable Dependabot updates"),
         ScaffoldFile(".github/workflows/ci.yml", _CI_WORKFLOW, "ci: add CI quality gates"),

@@ -121,9 +121,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 continue
 
             # Stream response chunks
-            async for chunk in agent.stream_chat(
-                user_message, session_id, principal=principal, trace_id=trace_id
-            ):
+            async for chunk in agent.stream_chat(user_message, session_id, principal=principal, trace_id=trace_id):
                 await websocket.send_json({"type": "chunk", "text": chunk})
 
             await websocket.send_json({"type": "done"})

@@ -23,9 +23,7 @@ sdk_app = typer.Typer(
 console = Console()
 
 
-def _client(
-    registry_url: str = "", api_url: str = "", token: str = ""
-) -> DevAI:
+def _client(registry_url: str = "", api_url: str = "", token: str = "") -> DevAI:
     return DevAI(
         registry_url=registry_url or settings.registry_url,
         registry_token=token or settings.registry_token,
@@ -76,9 +74,7 @@ def list_agents(
     items = devai.agents()
     table = Table("name", "version", "model", "framework")
     for a in items:
-        table.add_row(
-            a.name, a.version, f"{a.model_provider}/{a.model_name}", a.framework
-        )
+        table.add_row(a.name, a.version, f"{a.model_provider}/{a.model_name}", a.framework)
     console.print(table)
     console.print(f"[dim]{len(items)} agent(s)[/]")
 

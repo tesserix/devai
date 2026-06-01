@@ -97,9 +97,7 @@ class RedisMemoryAdapter(MemoryAdapter):
     ) -> list[MemoryRecord]:
         # AgentMemory does keyword-based scoring inside `recall(query=...)` —
         # closest thing this backend has to semantic search.
-        return await self.recall(
-            query=query, agent=agent, repo=repo, memory_type=memory_type, limit=k
-        )
+        return await self.recall(query=query, agent=agent, repo=repo, memory_type=memory_type, limit=k)
 
     # ── Delete ────────────────────────────────────────────────────────
 

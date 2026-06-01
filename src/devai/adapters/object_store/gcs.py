@@ -24,9 +24,7 @@ class GCSObjectStoreAdapter(ObjectStoreAdapter):
         try:
             from google.cloud import storage  # noqa: F401
         except ImportError as e:
-            raise AdapterNotInstalled(
-                "gcs object_store requires `pip install google-cloud-storage`"
-            ) from e
+            raise AdapterNotInstalled("gcs object_store requires `pip install google-cloud-storage`") from e
         from google.cloud import storage
 
         self._bucket_name = bucket

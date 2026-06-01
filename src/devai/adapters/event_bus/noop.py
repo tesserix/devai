@@ -101,9 +101,7 @@ class NoopEventBusAdapter(EventBusAdapter):
         try:
             await handler(msg)
         except Exception:
-            logger.exception(
-                "noop event bus: handler crashed on subject=%s", msg.subject
-            )
+            logger.exception("noop event bus: handler crashed on subject=%s", msg.subject)
 
     async def subscribe(
         self,
@@ -124,9 +122,7 @@ class NoopEventBusAdapter(EventBusAdapter):
         )
         async with self._lock:
             self._subs.setdefault(subject, []).append((sub, handler))
-        logger.info(
-            "noop event bus: subscribed subject=%s durable=%s", subject, durable_name
-        )
+        logger.info("noop event bus: subscribed subject=%s durable=%s", subject, durable_name)
         return sub
 
     async def _unsubscribe(self, sub: Subscription) -> None:

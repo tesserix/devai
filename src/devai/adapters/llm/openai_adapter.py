@@ -57,15 +57,11 @@ class OpenAILLMAdapter(LLMAdapter):
         timeout_seconds: float | None = None,
     ) -> None:
         if not api_key:
-            raise AdapterNotConfigured(
-                "openai adapter requires DEVAI_OPENAI_API_KEY"
-            )
+            raise AdapterNotConfigured("openai adapter requires DEVAI_OPENAI_API_KEY")
         try:
             from openai import AsyncOpenAI  # type: ignore[import-untyped]
         except ImportError as e:
-            raise AdapterNotInstalled(
-                "openai adapter requires `pip install openai` — falling back to Noop"
-            ) from e
+            raise AdapterNotInstalled("openai adapter requires `pip install openai` — falling back to Noop") from e
 
         kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
@@ -214,8 +210,7 @@ class OpenAILLMAdapter(LLMAdapter):
             usage.prompt_tokens = int(getattr(usage_raw, "prompt_tokens", 0) or 0)
             usage.completion_tokens = int(getattr(usage_raw, "completion_tokens", 0) or 0)
             usage.total_tokens = int(
-                getattr(usage_raw, "total_tokens", usage.prompt_tokens + usage.completion_tokens)
-                or 0
+                getattr(usage_raw, "total_tokens", usage.prompt_tokens + usage.completion_tokens) or 0
             )
 
         return LLMResponse(

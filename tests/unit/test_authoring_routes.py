@@ -12,9 +12,7 @@ from devai.specializations.registry import SpecializationRegistry
 
 def _client() -> TestClient:
     app = FastAPI()
-    app.state.authoring_service = create_authoring_service(
-        redis=None, spec_registry=SpecializationRegistry()
-    )
+    app.state.authoring_service = create_authoring_service(redis=None, spec_registry=SpecializationRegistry())
     app.include_router(router)
     return TestClient(app)
 

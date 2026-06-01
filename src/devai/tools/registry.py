@@ -108,7 +108,9 @@ def register(
     if name in _REGISTRY and not overwrite:
         return
     _REGISTRY[name] = RegisteredTool(
-        spec=ToolSpec(name=name, description=description, parameters=parameters or {"type": "object", "properties": {}}),
+        spec=ToolSpec(
+            name=name, description=description, parameters=parameters or {"type": "object", "properties": {}}
+        ),
         factory=factory,
     )
 

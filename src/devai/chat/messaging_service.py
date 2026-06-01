@@ -59,9 +59,7 @@ class MessagingService:
         self.state_manager = state_manager
         self.database = database
         self.event_bus_adapter = event_bus_adapter
-        self.gateway = ConversationGateway(
-            config, state_manager, database=database, settings_service=settings_service
-        )
+        self.gateway = ConversationGateway(config, state_manager, database=database, settings_service=settings_service)
         self.channels: dict[str, MessagingChannel] = {}
         self._subscription: Any = None
         self._bg_tasks: set[asyncio.Task[Any]] = set()
@@ -81,9 +79,7 @@ class MessagingService:
             logger.info("messaging worker: no event bus — turns run in-process")
             return
         try:
-            await self.event_bus_adapter.ensure_stream(
-                "DEVAI_CHAT", [f"{self._subject}.>", self._subject]
-            )
+            await self.event_bus_adapter.ensure_stream("DEVAI_CHAT", [f"{self._subject}.>", self._subject])
             self._subscription = await self.event_bus_adapter.subscribe(
                 self._subject,
                 self._on_turn_message,
@@ -108,9 +104,7 @@ class MessagingService:
 
     # --- inline path (remote URL, MCP) -----------------------------------
 
-    async def dispatch_inline(
-        self, channel_name: str, raw: Any
-    ) -> ConversationReply | None:
+    async def dispatch_inline(self, channel_name: str, raw: Any) -> ConversationReply | None:
         """Run a turn synchronously and return the reply (request/response)."""
         channel = self.channels.get(channel_name)
         if channel is None:

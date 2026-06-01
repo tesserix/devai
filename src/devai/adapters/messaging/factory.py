@@ -50,12 +50,8 @@ def create_messaging_channels(
             logger.exception("mcp channel construction failed — skipping")
 
     if getattr(settings, "slack_enabled", False):
-        if not getattr(settings, "slack_signing_secret", "") or not getattr(
-            settings, "slack_bot_token", ""
-        ):
-            logger.warning(
-                "slack_enabled but bot token / signing secret missing — skipping Slack channel"
-            )
+        if not getattr(settings, "slack_signing_secret", "") or not getattr(settings, "slack_bot_token", ""):
+            logger.warning("slack_enabled but bot token / signing secret missing — skipping Slack channel")
         else:
             try:
                 from devai.adapters.messaging.slack import SlackChannel

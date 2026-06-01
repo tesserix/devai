@@ -51,9 +51,7 @@ def test_noop_satisfies_abc_and_is_empty():
 
 
 def test_tesserix_builds_with_url_and_exposes_discover():
-    adapter = create_registry_adapter(
-        SimpleNamespace(registry_provider="tesserix", registry_url="http://localhost:9")
-    )
+    adapter = create_registry_adapter(SimpleNamespace(registry_provider="tesserix", registry_url="http://localhost:9"))
     # Built (not Noop), and discover degrades to [] when the endpoint is down.
     assert adapter.provider_name == "tesserix"
     assert adapter.discover("skills", "language=go") == []

@@ -123,12 +123,14 @@ def blueprint_to_blueprint_envelope(
     edges: list[dict[str, Any]] = []
     for st in stages:
         sid = getattr(st, "name", "") or ""
-        nodes.append({
-            "id": sid,
-            "label": getattr(st, "display_title", None) and st.display_title() or sid,
-            "type": getattr(st, "type", "") or "task",
-        })
-        for dep in (getattr(st, "depends_on", None) or []):
+        nodes.append(
+            {
+                "id": sid,
+                "label": getattr(st, "display_title", None) and st.display_title() or sid,
+                "type": getattr(st, "type", "") or "task",
+            }
+        )
+        for dep in getattr(st, "depends_on", None) or []:
             edges.append({"from": dep, "to": sid})
 
     return {
@@ -180,11 +182,13 @@ def mcp_fields_to_mcpserver_envelope(
         "description": fields.get("description", "") or "",
     }
     if fields.get("url"):
-        spec["remotes"] = [{
-            "type": fields.get("transport", "streamableHttp"),
-            "url": fields["url"],
-            **({"headers": fields["headers"]} if fields.get("headers") else {}),
-        }]
+        spec["remotes"] = [
+            {
+                "type": fields.get("transport", "streamableHttp"),
+                "url": fields["url"],
+                **({"headers": fields["headers"]} if fields.get("headers") else {}),
+            }
+        ]
         spec["type"] = "remote"
     if fields.get("image"):
         spec["image"] = fields["image"]

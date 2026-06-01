@@ -46,9 +46,7 @@ class StageRegistry:
             factory = self._factories[key]
         except KeyError as e:
             available = ", ".join(sorted(self._factories.keys()))
-            raise StageRegistryError(
-                f"unknown stage {key!r}. Known stages: {available}"
-            ) from e
+            raise StageRegistryError(f"unknown stage {key!r}. Known stages: {available}") from e
         return factory(deps, config)
 
     def has(self, key: str) -> bool:

@@ -62,9 +62,7 @@ async def test_create_and_onboard_seeds_marker_and_records_onboarded() -> None:
     store = InMemoryOnboardingStore()
     svc = OnboardingService(scm=scm, store=store, org="tesserix")
 
-    result = await svc.create_and_onboard(
-        "widget", description="A widget service", onboarded_by="alice@example.com"
-    )
+    result = await svc.create_and_onboard("widget", description="A widget service", onboarded_by="alice@example.com")
 
     assert result["ok"] is True
     assert result["repo"] == "tesserix/widget"
@@ -78,9 +76,7 @@ async def test_create_and_onboard_seeds_marker_and_records_onboarded() -> None:
     assert create[2]["auto_init"] is False
 
     # The marker was committed with valid onboarding metadata.
-    marker_writes = [
-        c for c in scm.calls if c[0] == "create_or_update_file" and c[2].get("path") == MARKER_PATH
-    ]
+    marker_writes = [c for c in scm.calls if c[0] == "create_or_update_file" and c[2].get("path") == MARKER_PATH]
     assert len(marker_writes) == 1
 
     # Branch protection was applied to the default branch.

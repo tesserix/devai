@@ -47,9 +47,7 @@ def topological_levels(stages: list[StageSpec]) -> list[list[StageSpec]]:
             indegree[s.name] += 1
             dependents[dep].append(s.name)
 
-    ready = sorted(
-        (name for name, d in indegree.items() if d == 0), key=order.__getitem__
-    )
+    ready = sorted((name for name, d in indegree.items() if d == 0), key=order.__getitem__)
     levels: list[list[StageSpec]] = []
     seen = 0
     while ready:

@@ -96,9 +96,7 @@ async def get_run(request: Request, task_id: str) -> dict[str, Any]:
 
 
 @router.get("/events/recent")
-async def recent_events(
-    request: Request, limit: int = Query(100, ge=1, le=1000)
-) -> list[dict[str, Any]]:
+async def recent_events(request: Request, limit: int = Query(100, ge=1, le=1000)) -> list[dict[str, Any]]:
     """Return the last `limit` stage events from the ring buffer."""
     return _service(request).recent_events(limit=limit)
 

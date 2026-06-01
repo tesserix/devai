@@ -38,11 +38,7 @@ def create_onboarding_service(
     pool: Any | None = None,
     store: OnboardingStore | None = None,
 ) -> OnboardingService:
-    org = (
-        getattr(settings, "scm_organization", "")
-        or getattr(settings, "github_org", "")
-        or "tesserix"
-    )
+    org = getattr(settings, "scm_organization", "") or getattr(settings, "github_org", "") or "tesserix"
     return OnboardingService(
         scm=scm,
         store=store or create_onboarding_store(pool),

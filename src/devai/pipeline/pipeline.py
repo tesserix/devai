@@ -89,9 +89,7 @@ class Pipeline:
         # wraps the executor above and behaves identically; with =temporal it
         # routes runs through the generic BlueprintWorkflow. Blueprints/agents
         # are unaware of which backend is active.
-        self._workflow_adapter = create_workflow_adapter(
-            deps.config, executor=self._executor
-        )
+        self._workflow_adapter = create_workflow_adapter(deps.config, executor=self._executor)
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -192,9 +190,7 @@ class Pipeline:
     def list_tasks(self) -> list[DevAITask]:
         return list(self._tasks.values())
 
-    async def signal_run(
-        self, task_id: str, signal_name: str, args: list[Any] | None = None
-    ) -> bool:
+    async def signal_run(self, task_id: str, signal_name: str, args: list[Any] | None = None) -> bool:
         """Send a control signal to a run via the workflow backend.
 
         Returns True only when the backend delivered it (Temporal). The

@@ -58,11 +58,7 @@ def _org(request: Request) -> str:
     settings.scm_organization (if set) or settings.github_org."""
     from devai.config import settings
 
-    return (
-        getattr(settings, "scm_organization", "")
-        or getattr(settings, "github_org", "")
-        or "tesserix"
-    )
+    return getattr(settings, "scm_organization", "") or getattr(settings, "github_org", "") or "tesserix"
 
 
 # --------------------------------------------------------------------------- #
@@ -105,7 +101,7 @@ async def list_repos(
     initialised: str = Query(
         "",
         description="Filter by DevAI init status: 'true' = only repos with .platform/devai.yaml; "
-                    "'false' = only repos without it; empty = all repos (no probe).",
+        "'false' = only repos without it; empty = all repos (no probe).",
     ),
 ) -> list[dict[str, Any]]:
     """List repos the configured PAT / installation can see.
@@ -245,12 +241,7 @@ async def _seed_repo(client, full: str) -> None:
         "- Conventional commits (feat / fix / chore / refactor / docs / test).\n"
         "- One feature → one PR; rebase before merge.\n"
     )
-    pr_template = (
-        "## Summary\n\n"
-        "## Test plan\n- [ ] ...\n\n"
-        "## Risk\n\n"
-        "_DevAI · auto-opened_\n"
-    )
+    pr_template = "## Summary\n\n## Test plan\n- [ ] ...\n\n## Risk\n\n_DevAI · auto-opened_\n"
     for path, content in (
         (".github/workflows/ci.yaml", workflow),
         ("CLAUDE.md", claude_md),
@@ -273,11 +264,11 @@ async def _seed_repo(client, full: str) -> None:
 # Lane → labels. Each lane shows issues whose labels match. Multi-label
 # issues land in the first lane that matches (priority left-to-right).
 _LANE_LABELS: dict[str, tuple[str, ...]] = {
-    "queued":      ("queued", "todo", "backlog"),
+    "queued": ("queued", "todo", "backlog"),
     "in_progress": ("in-progress", "wip", "doing"),
-    "review":      ("review", "in-review"),
-    "deployed":    ("deployed", "staging", "in-staging"),
-    "shipped":     ("shipped", "released", "production"),
+    "review": ("review", "in-review"),
+    "deployed": ("deployed", "staging", "in-staging"),
+    "shipped": ("shipped", "released", "production"),
 }
 
 
@@ -516,22 +507,31 @@ def _classify_stack(found: dict[str, str]) -> dict[str, Any]:
         languages.append("typescript" if "typescript" in found["package.json"].lower() else "javascript")
         package_managers.append("npm")
         pj = found["package.json"].lower()
-        if '"next"' in pj: frameworks.append("next.js")
-        if '"react"' in pj: frameworks.append("react")
-        if '"vite"' in pj: frameworks.append("vite")
-        if '"express"' in pj: frameworks.append("express")
+        if '"next"' in pj:
+            frameworks.append("next.js")
+        if '"react"' in pj:
+            frameworks.append("react")
+        if '"vite"' in pj:
+            frameworks.append("vite")
+        if '"express"' in pj:
+            frameworks.append("express")
     if "pyproject.toml" in found or "requirements.txt" in found:
         languages.append("python")
         package_managers.append("pip" if "requirements.txt" in found else "poetry/pip")
         body = (found.get("pyproject.toml", "") + found.get("requirements.txt", "")).lower()
-        if "fastapi" in body: frameworks.append("fastapi")
-        if "django" in body: frameworks.append("django")
-        if "flask" in body: frameworks.append("flask")
-        if "langchain" in body or "langgraph" in body: frameworks.append("langchain/langgraph")
+        if "fastapi" in body:
+            frameworks.append("fastapi")
+        if "django" in body:
+            frameworks.append("django")
+        if "flask" in body:
+            frameworks.append("flask")
+        if "langchain" in body or "langgraph" in body:
+            frameworks.append("langchain/langgraph")
     if "go.mod" in found:
         languages.append("go")
         package_managers.append("go modules")
-        if "gin-gonic" in found["go.mod"]: frameworks.append("gin")
+        if "gin-gonic" in found["go.mod"]:
+            frameworks.append("gin")
     if "Cargo.toml" in found:
         languages.append("rust")
         package_managers.append("cargo")
@@ -583,7 +583,7 @@ async def scan_repo(request: Request, owner: str, name: str) -> ScanResponse:
             continue
         # Cap at 16 KB per file — README/Dockerfile can be long; we
         # only need the first few KB for classification.
-        found[path] = content[:16 * 1024]
+        found[path] = content[: 16 * 1024]
 
     stack = _classify_stack(found)
     readme_lead = ""

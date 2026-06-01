@@ -320,9 +320,7 @@ class PipelineService:
         # subscriber that's listening for task.* without subject wildcards
         # gets a definitive end-of-run signal.
         terminal_kind = (
-            "failed" if result.state in FAILURE_STATES
-            else "completed" if result.state == TaskState.COMPLETED
-            else None
+            "failed" if result.state in FAILURE_STATES else "completed" if result.state == TaskState.COMPLETED else None
         )
         if terminal_kind:
             await self._publish_task_event(terminal_kind, result)
@@ -471,15 +469,11 @@ class PipelineService:
         redis = getattr(sm, "redis", None)
         if redis is not None:
             try:
-                await redis.set(
-                    f"devai:pipeline:gate:{task_id}:{gate}", decision, ex=86400
-                )
+                await redis.set(f"devai:pipeline:gate:{task_id}:{gate}", decision, ex=86400)
             except Exception:  # noqa: BLE001
                 logger.debug("gate marker write failed", exc_info=True)
         if self._pipeline is not None:
-            await self._pipeline.signal_run(
-                task_id, "approve" if decision == "approved" else "reject", [gate]
-            )
+            await self._pipeline.signal_run(task_id, "approve" if decision == "approved" else "reject", [gate])
         return True
 
     async def list_gates(self, task_id: str) -> list[dict[str, Any]]:
@@ -531,14 +525,9 @@ class PipelineService:
     # ── SSE event stream ────────────────────────────────────────────
 
     def recent_events(self, limit: int = 200) -> list[dict[str, Any]]:
-        return [
-            {"timestamp": ts, "task_id": tid, **payload}
-            for ts, tid, payload in list(self._ring)[-limit:]
-        ]
+        return [{"timestamp": ts, "task_id": tid, **payload} for ts, tid, payload in list(self._ring)[-limit:]]
 
-    async def event_stream(
-        self, *, replay: int = 0
-    ) -> AsyncIterator[tuple[float, str, dict[str, Any]]]:
+    async def event_stream(self, *, replay: int = 0) -> AsyncIterator[tuple[float, str, dict[str, Any]]]:
         """Async generator yielding live stage events.
 
         `replay` — emit the last N events from the ring buffer before
@@ -595,9 +584,7 @@ class PipelineService:
 
         if self.state_manager is not None:
             try:
-                asyncio.create_task(
-                    self.state_manager.persist_task(task.to_dict(), ttl=self.config.pipeline_task_ttl)
-                )
+                asyncio.create_task(self.state_manager.persist_task(task.to_dict(), ttl=self.config.pipeline_task_ttl))
             except RuntimeError:
                 # No running loop (test context) — skip persistence.
                 pass
@@ -684,9 +671,7 @@ class PipelineService:
             try:
                 await adapter.publish(subject, payload)
             except Exception:  # noqa: BLE001
-                logger.warning(
-                    "event_bus publish failed: subject=%s", subject, exc_info=True
-                )
+                logger.warning("event_bus publish failed: subject=%s", subject, exc_info=True)
 
         asyncio.create_task(_pub())
 

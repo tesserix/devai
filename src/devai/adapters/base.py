@@ -81,9 +81,7 @@ class AdapterRegistry(Generic[T]):
 
     def register(self, name: str, factory: Callable[[Any], T]) -> None:
         if name in self._factories:
-            raise AdapterError(
-                f"{self.family}: provider {name!r} already registered"
-            )
+            raise AdapterError(f"{self.family}: provider {name!r} already registered")
         self._factories[name] = factory
 
     def register_or_replace(self, name: str, factory: Callable[[Any], T]) -> None:
@@ -93,9 +91,7 @@ class AdapterRegistry(Generic[T]):
     def resolve(self, name: str, settings: Any) -> T:
         if name not in self._factories:
             known = ", ".join(sorted(self._factories.keys()))
-            raise AdapterError(
-                f"{self.family}: unknown provider {name!r}. Known: {known}"
-            )
+            raise AdapterError(f"{self.family}: unknown provider {name!r}. Known: {known}")
         return self._factories[name](settings)
 
     def known(self) -> list[str]:

@@ -88,9 +88,7 @@ class Database:
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 8.0)
-        raise RuntimeError(
-            f"PostgreSQL pool init failed after {attempts} attempts: {last}"
-        )
+        raise RuntimeError(f"PostgreSQL pool init failed after {attempts} attempts: {last}")
 
     async def close(self) -> None:
         if self._pool:

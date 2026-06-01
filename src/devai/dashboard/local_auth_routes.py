@@ -78,8 +78,12 @@ async def auth_login(request: Request, body: LoginBody) -> dict:
     )
     # secure=True: local sandbox is served over TLS (https://…:8443).
     response.set_cookie(
-        "devai_session", session_id,
-        httponly=True, secure=True, samesite="lax", max_age=_SESSION_TTL,
+        "devai_session",
+        session_id,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=_SESSION_TTL,
     )
     logger.info("local_db login: %s (roles=%s)", result.login, result.roles)
     return response

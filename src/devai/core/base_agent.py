@@ -142,9 +142,7 @@ class BaseAgent(ABC):
         # on outbound messages.
         principal = state.get("principal") or {}
         triggered_by = (
-            state.get("trigger_actor")
-            or (principal.get("email") if isinstance(principal, dict) else "")
-            or ""
+            state.get("trigger_actor") or (principal.get("email") if isinstance(principal, dict) else "") or ""
         )
         trace_id = state.get("trace_id", "") or ""
 
@@ -234,9 +232,7 @@ class BaseAgent(ABC):
         if not self.event_bus:
             raise RuntimeError(f"Agent {self.name}: event_bus required for NATS mode")
         if not self.subscribe_subject:
-            raise RuntimeError(
-                f"Agent {self.name}: subscribe_subject is empty — agent has no inbound subject"
-            )
+            raise RuntimeError(f"Agent {self.name}: subscribe_subject is empty — agent has no inbound subject")
         await self.event_bus.subscribe(
             self.subscribe_subject,
             self._handle_message,

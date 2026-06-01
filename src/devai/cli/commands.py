@@ -622,9 +622,7 @@ def specializations_show(
             table.add_row(fname, fld.type, "yes" if fld.required else "no", fld.description[:60])
         console.print(table)
 
-    console.print(
-        Panel(spec.system_prompt or "(empty)", title="system_prompt", border_style="dim")
-    )
+    console.print(Panel(spec.system_prompt or "(empty)", title="system_prompt", border_style="dim"))
 
 
 @specializations_app.command("validate")
@@ -738,9 +736,7 @@ def start_agent(
         return
 
     if name not in registry:
-        console.print(
-            f"[red]Unknown agent {name!r}.[/red] Known: {', '.join(sorted(registry))}"
-        )
+        console.print(f"[red]Unknown agent {name!r}.[/red] Known: {', '.join(sorted(registry))}")
         raise typer.Exit(1)
 
     asyncio.run(_start_agent_async(name, registry[name]))

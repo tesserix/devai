@@ -20,9 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _MCP_NAME_RE = re.compile(r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$")
-_MCP_SCHEMA_URL = (
-    "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json"
-)
+_MCP_SCHEMA_URL = "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json"
 _MCP_DESCRIPTION_MAX = 100
 
 
@@ -209,18 +207,14 @@ class McpServer:
         if self._type == "remote" and self._url:
             transport: dict[str, Any] = {"type": "streamable-http", "url": self._url}
             if self._headers:
-                transport["headers"] = [
-                    {"name": k, "value": v} for k, v in self._headers.items()
-                ]
+                transport["headers"] = [{"name": k, "value": v} for k, v in self._headers.items()]
             body["remotes"] = [transport]
         elif self._type == "container" and self._image:
             pkg: dict[str, Any] = {"registryType": "oci", "identifier": self._image}
             if self._args:
                 pkg["runtimeArguments"] = [{"type": "positional", "value": a} for a in self._args]
             if self._env:
-                pkg["environmentVariables"] = [
-                    {"name": k, "value": v} for k, v in self._env.items()
-                ]
+                pkg["environmentVariables"] = [{"name": k, "value": v} for k, v in self._env.items()]
             body["packages"] = [pkg]
         return body
 

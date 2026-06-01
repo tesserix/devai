@@ -214,9 +214,7 @@ class EventBusAdapter(Adapter):
         Backends that support it (NATS) override. Callers should treat
         a None return as "no responder available".
         """
-        raise NotImplementedError(
-            f"{self.provider_name} does not support request/reply"
-        )
+        raise NotImplementedError(f"{self.provider_name} does not support request/reply")
 
     # ──────────────────────────────────────────────────────────────────
     # Adapter contract — defaults so subclasses can stay terse.

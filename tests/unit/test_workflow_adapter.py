@@ -116,9 +116,7 @@ def test_topo_linear():
 
 
 def test_topo_diamond():
-    levels = topological_levels(
-        _specs(("a", []), ("b", ["a"]), ("c", ["a"]), ("d", ["b", "c"]))
-    )
+    levels = topological_levels(_specs(("a", []), ("b", ["a"]), ("c", ["a"]), ("d", ["b", "c"])))
     names = [[s.name for s in lvl] for lvl in levels]
     assert names[0] == ["a"]
     assert sorted(names[1]) == ["b", "c"]

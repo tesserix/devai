@@ -138,9 +138,7 @@ class GitHubSCMClient(SCMClient):
 
     # --- Repositories ---
 
-    async def list_installation_repos(
-        self, per_page: int = 100, org: str = ""
-    ) -> list[dict[str, Any]]:
+    async def list_installation_repos(self, per_page: int = 100, org: str = "") -> list[dict[str, Any]]:
         """List repos the configured token can see, scoped to ``org``.
 
         The endpoint differs by auth method:
@@ -169,8 +167,9 @@ class GitHubSCMClient(SCMClient):
             # Org-scoped — the common case for an org-bound platform.
             try:
                 return await self._paginate_repos(
-                    lambda page: f"/orgs/{org}/repos"
-                    f"?per_page={per_page}&page={page}&type=all&sort=pushed&direction=desc",
+                    lambda page: (
+                        f"/orgs/{org}/repos?per_page={per_page}&page={page}&type=all&sort=pushed&direction=desc"
+                    ),
                     per_page,
                 )
             except httpx.HTTPStatusError as e:
@@ -183,9 +182,11 @@ class GitHubSCMClient(SCMClient):
 
         if use_token_endpoint:
             repos = await self._paginate_repos(
-                lambda page: f"/user/repos"
-                f"?per_page={per_page}&page={page}&sort=pushed&direction=desc"
-                "&affiliation=owner,collaborator,organization_member",
+                lambda page: (
+                    f"/user/repos"
+                    f"?per_page={per_page}&page={page}&sort=pushed&direction=desc"
+                    "&affiliation=owner,collaborator,organization_member"
+                ),
                 per_page,
             )
             # A broad token spans orgs — keep only the bound org's repos when set.
@@ -535,9 +536,7 @@ class GitHubSCMClient(SCMClient):
             """,
             {"owner": owner, "name": name, "number": pr_id},
         )
-        pr_node_id = (
-            node.get("repository", {}).get("pullRequest", {}) or {}
-        ).get("id", "")
+        pr_node_id = (node.get("repository", {}).get("pullRequest", {}) or {}).get("id", "")
         if not pr_node_id:
             raise ValueError(f"PR #{pr_id} not found in {repo}")
         result = await self._graphql(
@@ -550,9 +549,7 @@ class GitHubSCMClient(SCMClient):
             """,
             {"id": pr_node_id},
         )
-        pr = (
-            result.get("markPullRequestReadyForReview", {}).get("pullRequest", {}) or {}
-        )
+        pr = result.get("markPullRequestReadyForReview", {}).get("pullRequest", {}) or {}
         return {"number": pr.get("number", pr_id), "is_draft": pr.get("isDraft", False)}
 
     async def get_pull_request(self, repo: str, pr_id: int) -> dict[str, Any]:
@@ -584,9 +581,7 @@ class GitHubSCMClient(SCMClient):
         resp = await self._request("PUT", f"/repos/{repo}/pulls/{pr_id}/merge", json={"merge_method": method})
         return resp.json()
 
-    async def request_reviewers(
-        self, repo: str, pr_id: int, reviewers: list[str]
-    ) -> dict[str, Any]:
+    async def request_reviewers(self, repo: str, pr_id: int, reviewers: list[str]) -> dict[str, Any]:
         """Request reviewers on a PR. Splits team handles (``org/team``)
         from individual logins, matching GitHub's two-list payload."""
         users: list[str] = []
@@ -604,9 +599,7 @@ class GitHubSCMClient(SCMClient):
             payload["reviewers"] = users
         if teams:
             payload["team_reviewers"] = teams
-        resp = await self._request(
-            "POST", f"/repos/{repo}/pulls/{pr_id}/requested_reviewers", json=payload
-        )
+        resp = await self._request("POST", f"/repos/{repo}/pulls/{pr_id}/requested_reviewers", json=payload)
         data = resp.json()
         return {"requested": [u.get("login") for u in data.get("requested_reviewers", [])]}
 
@@ -719,9 +712,7 @@ class GitHubSCMClient(SCMClient):
             raise RuntimeError(f"GraphQL error: {data['errors']}")
         return data.get("data", {})
 
-    async def probe_markers(
-        self, repos: list[tuple[str, str, str]], marker_path: str
-    ) -> dict[str, bool]:
+    async def probe_markers(self, repos: list[tuple[str, str, str]], marker_path: str) -> dict[str, bool]:
         """Batch-probe marker presence across many repos in one GraphQL call.
 
         Aliases each repo as ``r0, r1, …`` and asks for
@@ -746,12 +737,9 @@ class GitHubSCMClient(SCMClient):
                 variables[nv] = name
                 variables[ev] = f"{ref or 'HEAD'}:{marker_path}"
                 fields.append(
-                    f'{alias}: repository(owner: ${ov}, name: ${nv}) '
-                    f'{{ object(expression: ${ev}) {{ __typename }} }}'
+                    f"{alias}: repository(owner: ${ov}, name: ${nv}) {{ object(expression: ${ev}) {{ __typename }} }}"
                 )
-            var_decls = ", ".join(
-                f"${k}: String!" for k in variables
-            )
+            var_decls = ", ".join(f"${k}: String!" for k in variables)
             query = f"query({var_decls}) {{ {' '.join(fields)} }}"
             try:
                 data = await self._graphql(query, variables)

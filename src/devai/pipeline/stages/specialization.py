@@ -43,9 +43,7 @@ class _RunSpecializationStage(PipelineStage):
         self.config = config
         self.spec_name = config.get("specialization") or config.get("name") or ""
         if not self.spec_name:
-            raise ValueError(
-                "run_specialization requires `config.specialization: <name>` in the blueprint YAML"
-            )
+            raise ValueError("run_specialization requires `config.specialization: <name>` in the blueprint YAML")
         # Optional handover-validation strictness (defaults to logging the
         # violations without raising — keeps the pipeline flowing while we
         # debug schema mismatches).
@@ -67,9 +65,7 @@ class _RunSpecializationStage(PipelineStage):
             )
 
         # Validate that prior stages wrote the keys this role expects.
-        missing_inputs = [
-            key for key in spec.context_keys if key not in task.agent_context and key != "requirements"
-        ]
+        missing_inputs = [key for key in spec.context_keys if key not in task.agent_context and key != "requirements"]
         if missing_inputs:
             logger.warning(
                 "specialization %s: missing expected context_keys %s",
@@ -228,9 +224,7 @@ class _RunSpecializationStage(PipelineStage):
                 messages.append(LLMMessage(role=LLMRole.ASSISTANT, content=resp.text or ""))
                 for call in resp.tool_calls:
                     result = await dispatcher.execute(call.name, call.arguments)
-                    messages.append(
-                        LLMMessage(role=LLMRole.TOOL, content=result, name=call.name, tool_call_id=call.id)
-                    )
+                    messages.append(LLMMessage(role=LLMRole.TOOL, content=result, name=call.name, tool_call_id=call.id))
                 continue
             final_text = resp.text or ""
             break

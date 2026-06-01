@@ -80,11 +80,7 @@ class SettingsService:
 
     async def _load_rows(self, scope: Scope, scope_id: str) -> list[Connector]:
         if self._pool is None:
-            return [
-                c
-                for c in self._mem.values()
-                if c.scope == scope and c.scope_id == scope_id
-            ]
+            return [c for c in self._mem.values() if c.scope == scope and c.scope_id == scope_id]
         try:
             rows = await self._pool.fetch(
                 f"""SELECT scope, scope_id, connector_key, instance_id, provider,
@@ -97,9 +93,7 @@ class SettingsService:
             return [_row_to_connector(r) for r in rows]
         except Exception:
             logger.exception("settings: DB load failed (%s:%s) — using memory", scope.value, scope_id)
-            return [
-                c for c in self._mem.values() if c.scope == scope and c.scope_id == scope_id
-            ]
+            return [c for c in self._mem.values() if c.scope == scope and c.scope_id == scope_id]
 
     # ── public API ───────────────────────────────────────────────────────
 
@@ -146,9 +140,7 @@ class SettingsService:
             secret_refs[fkey] = ref.name
 
         # Non-secret prefs (drop any secret-keyed values that slipped in).
-        clean_prefs = {
-            k: v for k, v in (prefs or {}).items() if k not in secret_field_keys
-        }
+        clean_prefs = {k: v for k, v in (prefs or {}).items() if k not in secret_field_keys}
 
         connector = Connector(
             scope=scope,
@@ -180,8 +172,7 @@ class SettingsService:
             return self._mem.pop(key, None) is not None
         try:
             await self._pool.execute(
-                f"DELETE FROM {_TABLE} WHERE scope=$1 AND scope_id=$2 "
-                f"AND connector_key=$3 AND instance_id=$4",
+                f"DELETE FROM {_TABLE} WHERE scope=$1 AND scope_id=$2 AND connector_key=$3 AND instance_id=$4",
                 scope.value,
                 scope_id,
                 connector_key,
@@ -198,9 +189,7 @@ class SettingsService:
             return None
         return await self._secrets.get_secret(ref_name)
 
-    async def _get(
-        self, scope: Scope, scope_id: str, connector_key: str, instance_id: str
-    ) -> Connector | None:
+    async def _get(self, scope: Scope, scope_id: str, connector_key: str, instance_id: str) -> Connector | None:
         for c in await self._load_rows(scope, scope_id):
             if c.connector_key == connector_key and c.instance_id == instance_id:
                 return c

@@ -27,7 +27,9 @@ def _signing_key(pub_b64: str, *, enabled: bool = True) -> dict:
     return {"enabled": enabled, "algorithm": "ed25519", "keyId": "k1", "publicKey": pub_b64, "signs": "digest"}
 
 
-def _signed_card(priv: Ed25519PrivateKey, *, url: str = "https://oncall.sre.svc.cluster.local/a2a/v1", digest: str = _DIGEST) -> AgentCard:
+def _signed_card(
+    priv: Ed25519PrivateKey, *, url: str = "https://oncall.sre.svc.cluster.local/a2a/v1", digest: str = _DIGEST
+) -> AgentCard:
     return AgentCard.from_dict(
         {
             "name": "oncall",
@@ -139,8 +141,9 @@ def test_check_url_wildcard_allows_public_but_still_blocks_private_ip() -> None:
 def test_send_message_secure_verifies_then_calls() -> None:
     priv, pub = _keypair()
     card = _signed_card(priv)
-    client = A2AClient(SigningRegistry(_signing_key(pub), card), verify_cards=True,
-                       allowed_url_suffixes=[".svc.cluster.local"])
+    client = A2AClient(
+        SigningRegistry(_signing_key(pub), card), verify_cards=True, allowed_url_suffixes=[".svc.cluster.local"]
+    )
     called = {}
     client._rpc = lambda url, method, params: called.setdefault("url", url) or {"ok": True}  # type: ignore[method-assign]
     client.send_message(card, "hello")
@@ -163,8 +166,9 @@ def test_send_message_secure_refuses_unsigned_card_before_calling() -> None:
 def test_send_message_secure_refuses_disallowed_url_even_if_signed() -> None:
     priv, pub = _keypair()
     card = _signed_card(priv, url="https://evil.example.com/a2a")
-    client = A2AClient(SigningRegistry(_signing_key(pub), card), verify_cards=True,
-                       allowed_url_suffixes=[".svc.cluster.local"])
+    client = A2AClient(
+        SigningRegistry(_signing_key(pub), card), verify_cards=True, allowed_url_suffixes=[".svc.cluster.local"]
+    )
     client._rpc = lambda *a, **k: pytest.fail("must not call a disallowed url")  # type: ignore[method-assign]
     with pytest.raises(A2AError, match="allowed suffix"):
         client.send_message(card, "hello")

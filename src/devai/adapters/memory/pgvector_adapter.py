@@ -129,8 +129,7 @@ class PgVectorMemoryAdapter(MemoryAdapter):
             clauses.append(f"content ILIKE ${len(params)}")
         params.append(limit)
         sql = (
-            f"SELECT * FROM agent_memories WHERE {' AND '.join(clauses)}"
-            f" ORDER BY created_at DESC LIMIT ${len(params)}"
+            f"SELECT * FROM agent_memories WHERE {' AND '.join(clauses)} ORDER BY created_at DESC LIMIT ${len(params)}"
         )
         rows = await self._db.pool.fetch(sql, *params)
         return [self._row_to_record(dict(r)) for r in rows]

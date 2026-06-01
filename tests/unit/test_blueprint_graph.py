@@ -51,9 +51,7 @@ def test_resolved_agent_falls_back_to_config() -> None:
     spec = StageSpec(name="impl", stage="implement_code", config={"agent": "senior_developer"})
     assert spec.resolved_agent() == "senior_developer"
     # explicit agent: wins over config
-    spec2 = StageSpec(
-        name="impl", stage="implement_code", agent="staff_dev", config={"agent": "senior_developer"}
-    )
+    spec2 = StageSpec(name="impl", stage="implement_code", agent="staff_dev", config={"agent": "senior_developer"})
     assert spec2.resolved_agent() == "staff_dev"
 
 

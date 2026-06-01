@@ -95,9 +95,7 @@ class Settings(BaseSettings):
     # Host suffixes a verified card's service URL may target. Defaults to
     # in-cluster service DNS; add public A2A agent hosts explicitly. A single
     # "*" entry disables the allowlist (still blocks private/link-local IPs).
-    a2a_allowed_url_suffixes: list[str] = Field(
-        default_factory=lambda: [".svc.cluster.local", ".svc"]
-    )
+    a2a_allowed_url_suffixes: list[str] = Field(default_factory=lambda: [".svc.cluster.local", ".svc"])
 
     # --- GitHub OAuth (for dashboard) ---
     github_oauth_client_id: str = ""

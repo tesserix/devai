@@ -56,8 +56,7 @@ async def lifespan(app: FastAPI):
         app.state.db = db
     except Exception:
         logger.exception(
-            "SRE database connection failed at startup — running without DB; "
-            "the scanner will retry per its schedule"
+            "SRE database connection failed at startup — running without DB; the scanner will retry per its schedule"
         )
         app.state.db = None
 
@@ -409,17 +408,15 @@ async def _run_single_scan(
                 agent_context={"cluster_id": cluster_id, "trigger": trigger, "scan_id": scan_id},
             )
             findings = task.agent_context.get("correlated_findings", []) or []
-            apps = task.agent_context.get("discovery_output", {}).get("apps", []) if isinstance(
-                task.agent_context.get("discovery_output"), dict
-            ) else []
-            response = task.agent_context.get("incident_responder_output") or {}
-            incidents_created = (
-                response.get("incidents_created", 0) if isinstance(response, dict) else 0
+            apps = (
+                task.agent_context.get("discovery_output", {}).get("apps", [])
+                if isinstance(task.agent_context.get("discovery_output"), dict)
+                else []
             )
+            response = task.agent_context.get("incident_responder_output") or {}
+            incidents_created = response.get("incidents_created", 0) if isinstance(response, dict) else 0
             agent_timings = {
-                ev.stage: ev.duration_ms / 1000.0
-                for ev in task.stage_events
-                if ev.phase.value == "completed"
+                ev.stage: ev.duration_ms / 1000.0 for ev in task.stage_events if ev.phase.value == "completed"
             }
             actual_scan_id = scan_id or task.id
 

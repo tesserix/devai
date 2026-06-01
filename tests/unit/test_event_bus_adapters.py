@@ -127,9 +127,7 @@ async def test_contract_wildcard_one_token(noop_adapter):
     async def handler(msg: EventMessage) -> None:
         received.append(msg.subject)
 
-    await noop_adapter.subscribe(
-        "devai.pipeline.task.*", handler, durable_name="t-onestar"
-    )
+    await noop_adapter.subscribe("devai.pipeline.task.*", handler, durable_name="t-onestar")
 
     await noop_adapter.publish("devai.pipeline.task.created", b"x")
     await noop_adapter.publish("devai.pipeline.task.completed", b"x")
@@ -169,9 +167,7 @@ async def test_contract_unsubscribe_stops_delivery(noop_adapter):
     async def handler(msg: EventMessage) -> None:
         received.append(msg.subject)
 
-    sub = await noop_adapter.subscribe(
-        "devai.test.unsub", handler, durable_name="t-unsub"
-    )
+    sub = await noop_adapter.subscribe("devai.test.unsub", handler, durable_name="t-unsub")
     await noop_adapter.publish("devai.test.unsub", b"first")
     await _drain()
     assert len(received) == 1
@@ -271,9 +267,7 @@ _NATS_URL = os.environ.get("DEVAI_TEST_NATS_URL", "")
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not _NATS_URL, reason="DEVAI_TEST_NATS_URL not set — skipping live NATS tests"
-)
+@pytest.mark.skipif(not _NATS_URL, reason="DEVAI_TEST_NATS_URL not set — skipping live NATS tests")
 async def test_nats_adapter_publish_subscribe_roundtrip():
     """Exercise the JetStream adapter against a real broker.
 
@@ -301,9 +295,7 @@ async def test_nats_adapter_publish_subscribe_roundtrip():
             durable_name="pytest-roundtrip",
         )
 
-        await adapter.publish(
-            "devai.pytest.task.created", {"task_id": "live-1"}
-        )
+        await adapter.publish("devai.pytest.task.created", {"task_id": "live-1"})
         # Allow JetStream to deliver
         for _ in range(20):
             if received:

@@ -63,7 +63,9 @@ class CrewSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CrewSpec:
         raw_members = data.get("members") or []
-        members = [CrewMember.from_dict(m) if isinstance(m, dict) else CrewMember(specialization=str(m)) for m in raw_members]
+        members = [
+            CrewMember.from_dict(m) if isinstance(m, dict) else CrewMember(specialization=str(m)) for m in raw_members
+        ]
         return cls(
             name=str(data.get("name") or ""),
             members=members,

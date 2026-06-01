@@ -35,8 +35,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_CATALOG_TTL = 300.0      # 5 min — org repo list cache
-_MARKER_TTL = 300.0       # 5 min — marker-presence probe cache
+_CATALOG_TTL = 300.0  # 5 min — org repo list cache
+_MARKER_TTL = 300.0  # 5 min — marker-presence probe cache
 _ONBOARD_BRANCH = "devai/onboard-platform"
 _MAX_CONCURRENCY = 8
 
@@ -163,9 +163,7 @@ class OnboardingService:
         if markers:
             snaps_by_full = {s.full_name: s for s in page_items}
             try:
-                resolved = await self._refresh_states(
-                    markers, rows, snaps_by_full, adopt_new=True
-                )
+                resolved = await self._refresh_states(markers, rows, snaps_by_full, adopt_new=True)
             except Exception:  # noqa: BLE001
                 logger.warning("catalog cache refresh failed (non-fatal)", exc_info=True)
 
@@ -216,9 +214,7 @@ class OnboardingService:
             async with sem:
                 return await self._onboard_one(owner, name, onboarded_by, base_branch, description, dry_run)
 
-        results = await asyncio.gather(
-            *(_one(o, n) for o, n in repos), return_exceptions=True
-        )
+        results = await asyncio.gather(*(_one(o, n) for o, n in repos), return_exceptions=True)
 
         succeeded: list[dict[str, Any]] = []
         failed: list[dict[str, Any]] = []
@@ -431,9 +427,7 @@ class OnboardingService:
     async def get(self, owner: str, name: str) -> OnboardedRepo | None:
         return await self._store.get(owner, name)
 
-    async def list_onboarded(
-        self, state: OnboardingState | str | None = None
-    ) -> list[OnboardedRepo]:
+    async def list_onboarded(self, state: OnboardingState | str | None = None) -> list[OnboardedRepo]:
         return await self._store.list(state=state)
 
     async def mark_ready(self, owner: str, name: str) -> OnboardedRepo:
@@ -464,9 +458,7 @@ class OnboardingService:
         self._marker_cache[row.full_name] = _CacheEntry(True, time.monotonic() + _MARKER_TTL)
         return await self._store.upsert(row)
 
-    async def assign_reviewer(
-        self, owner: str, name: str, reviewers: list[str]
-    ) -> dict[str, Any]:
+    async def assign_reviewer(self, owner: str, name: str, reviewers: list[str]) -> dict[str, Any]:
         row = await self._store.get(owner, name)
         if row is None or not row.pr_number:
             raise ValueError(f"no open onboarding PR recorded for {owner}/{name}")
@@ -534,12 +526,8 @@ class OnboardingService:
                         continue
                     owner, _, name = full.partition("/")
                     snap = snaps_by_full.get(full)
-                    base = (row.default_base_branch if row else "") or (
-                        snap.default_branch if snap else "main"
-                    )
-                    desc = (row.description if row else "") or (
-                        snap.description if snap else ""
-                    )
+                    base = (row.default_base_branch if row else "") or (snap.default_branch if snap else "main")
+                    desc = (row.description if row else "") or (snap.description if snap else "")
                     by = row.onboarded_by if row else ""
                     resolved[full] = await self._record_onboarded(owner, name, base, desc, by)
                     if report is not None:

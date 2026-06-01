@@ -88,9 +88,7 @@ class JobRunnerStage(PipelineStage):
         watcher = self._watcher()
 
         if runtime is None or watcher is None:
-            return self._stub_result(
-                task, "K8s runtime not available — stage skipped (will run inline)"
-            )
+            return self._stub_result(task, "K8s runtime not available — stage skipped (will run inline)")
 
         agent_name = str(self.config.get("agent", self._stage_name))
         # Single round-trip to aregistry: pick the image AND capture the
@@ -116,9 +114,7 @@ class JobRunnerStage(PipelineStage):
             repo=task.repo,
             intent=task.intent,
             blueprint=blueprint,
-            extra_env={
-                k: str(v) for k, v in self.config.items() if not k.startswith("__")
-            },
+            extra_env={k: str(v) for k, v in self.config.items() if not k.startswith("__")},
             triggered_by=task.triggered_by or "",
             trace_id=task.trace_id or "",
             agent_profile=agent_profile,
@@ -162,16 +158,12 @@ class JobRunnerStage(PipelineStage):
 
         outcome = watcher.consume(created_name)
         if outcome is None:
-            raise RuntimeError(
-                f"job {created_name} completed but no outcome was parked — watcher bug"
-            )
+            raise RuntimeError(f"job {created_name} completed but no outcome was parked — watcher bug")
 
         if not outcome.succeeded:
             tail = outcome.logs_tail.strip()
             tail = tail[-2048:] if tail else ""
-            raise RuntimeError(
-                f"{self._stage_name} failed: {outcome.message}\n--- pod logs ---\n{tail}"
-            )
+            raise RuntimeError(f"{self._stage_name} failed: {outcome.message}\n--- pod logs ---\n{tail}")
 
         # Parse the runner's RESULT line — the runner entrypoint writes a
         # JSON blob on a single line prefixed `RESULT::` so we don't need
@@ -263,16 +255,12 @@ class JobRunnerStage(PipelineStage):
         try:
             return TaskState(raw)
         except ValueError:
-            logger.warning(
-                "stage %s: unknown next_state %r — ignoring", self._stage_name, raw
-            )
+            logger.warning("stage %s: unknown next_state %r — ignoring", self._stage_name, raw)
             return None
 
     def _stub_result(self, task: DevAITask, message: str) -> StageResult:
         if self.config.get("runner_required"):
-            raise RuntimeError(
-                f"{self._stage_name}: K8s runtime is required but not available"
-            )
+            raise RuntimeError(f"{self._stage_name}: K8s runtime is required but not available")
         logger.info("stage %s: %s", self._stage_name, message)
         return StageResult(
             next_state=None,
@@ -306,7 +294,7 @@ def _parse_runner_result(logs: str) -> dict[str, Any]:
         line = line.strip()
         if not line.startswith(_RESULT_PREFIX):
             continue
-        payload = line[len(_RESULT_PREFIX):].strip()
+        payload = line[len(_RESULT_PREFIX) :].strip()
         if not payload:
             continue
         try:

@@ -79,9 +79,7 @@ def build_mcp_server(service: MessagingService) -> Any:
     async def chat(message: str, conversation_id: str | None = None) -> str:
         """Hold a conversation with DevAI. Ask about pipelines, runs, repos,
         SRE incidents, security findings, or instruct it to act."""
-        reply = await service.dispatch_inline(
-            "mcp", {"message": message, "conversation_id": conversation_id}
-        )
+        reply = await service.dispatch_inline("mcp", {"message": message, "conversation_id": conversation_id})
         return reply.text if reply else ""
 
     @mcp.tool()
@@ -104,10 +102,7 @@ def build_mcp_server(service: MessagingService) -> Any:
         reply = await service.dispatch_inline(
             "mcp",
             {
-                "message": (
-                    f"Trigger a pipeline for repository {repo} with these "
-                    f"requirements: {requirements}"
-                ),
+                "message": (f"Trigger a pipeline for repository {repo} with these requirements: {requirements}"),
                 "conversation_id": f"trigger-{repo}",
             },
         )

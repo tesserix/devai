@@ -103,9 +103,7 @@ async def stream_thread_message(thread_id: str, request: Request) -> StreamingRe
 
     async def event_stream():
         try:
-            async for chunk in agent.stream_chat(
-                text, session_id, principal=principal, trace_id=trace_id
-            ):
+            async for chunk in agent.stream_chat(text, session_id, principal=principal, trace_id=trace_id):
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
         except Exception as exc:  # never break the stream mid-flight
             logger.exception("remote stream failed for thread %s", thread_id)

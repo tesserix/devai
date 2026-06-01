@@ -26,8 +26,7 @@ def _card_dict(name: str, *, url: str = "https://agent.svc/a2a/v1", skills=None)
                 }
             ],
         },
-        "skills": skills
-        or [{"id": "triage", "name": "Triage", "description": "triages incidents", "tags": ["sre"]}],
+        "skills": skills or [{"id": "triage", "name": "Triage", "description": "triages incidents", "tags": ["sre"]}],
     }
 
 
@@ -98,9 +97,7 @@ def test_discover_filters_by_capability() -> None:
     reg = FakeRegistry(
         {
             "oncall": _card_dict("oncall"),
-            "writer": _card_dict(
-                "writer", skills=[{"id": "draft", "name": "Draft", "tags": ["docs"]}]
-            ),
+            "writer": _card_dict("writer", skills=[{"id": "draft", "name": "Draft", "tags": ["docs"]}]),
         }
     )
     client = A2AClient(reg)

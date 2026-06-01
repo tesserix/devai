@@ -79,11 +79,7 @@ class NoopMemoryAdapter(MemoryAdapter):
         # in the content). This mirrors the existing AgentMemory keyword
         # scoring and makes Noop a useful test fake without overstating
         # what it can do — there's still no embedding-based similarity.
-        query_tokens = (
-            {tok for tok in query.lower().split() if len(tok) > 2}
-            if query
-            else set()
-        )
+        query_tokens = {tok for tok in query.lower().split() if len(tok) > 2} if query else set()
 
         out: list[MemoryRecord] = []
         for record in reversed(self._store):  # newest first
@@ -114,9 +110,7 @@ class NoopMemoryAdapter(MemoryAdapter):
         memory_type: MemoryType | str | None = None,
     ) -> list[MemoryRecord]:
         # No embeddings — degrade to substring recall
-        return await self.recall(
-            query=query, agent=agent, repo=repo, memory_type=memory_type, limit=k
-        )
+        return await self.recall(query=query, agent=agent, repo=repo, memory_type=memory_type, limit=k)
 
     async def forget(self, provider_id: str) -> bool:
         if not self._keep:
