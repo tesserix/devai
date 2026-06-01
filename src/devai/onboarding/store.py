@@ -9,14 +9,36 @@ it never loses onboarded state.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
+from typing import Any
 
 from devai.onboarding.models import OnboardedRepo, OnboardingState
 
 logger = logging.getLogger(__name__)
+
+# Errors that mean "the pooled connection was dropped underneath us" — almost
+# always ambient ztunnel resetting an idle TCP connection in the mesh. Discard
+# the dead connection and retry on a fresh one. Resolved lazily so importing
+# this module never forces the asyncpg dependency to load.
+_DROPPED_CONN_ERRORS: tuple[type[Exception], ...] = ()
+
+
+def _dropped_conn_errors() -> tuple[type[Exception], ...]:
+    global _DROPPED_CONN_ERRORS
+    if not _DROPPED_CONN_ERRORS:
+        import asyncpg
+
+        _DROPPED_CONN_ERRORS = (
+            asyncpg.exceptions.ConnectionDoesNotExistError,
+            asyncpg.exceptions.InterfaceError,
+            ConnectionResetError,
+            OSError,
+        )
+    return _DROPPED_CONN_ERRORS
 
 
 def _utcnow() -> datetime:
@@ -106,6 +128,33 @@ class PostgresOnboardingStore(OnboardingStore):
     def __init__(self, pool: object) -> None:
         self._pool = pool
 
+    async def _call(self, method: str, *args: Any) -> Any:
+        """Run a pool operation, retrying when the mesh drops a pooled
+        connection.
+
+        Ambient ztunnel resets idle TCP connections; asyncpg can then hand out
+        a dead connection that raises ConnectionDoesNotExistError on first use.
+        The pool discards a broken connection on release, so simply retrying
+        acquires (or dials) a fresh one. This is what stops a single reset from
+        surfacing as a 502 on the Repos page.
+        """
+        errors = _dropped_conn_errors()
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                return await getattr(self._pool, method)(*args)  # type: ignore[attr-defined]
+            except errors as e:
+                last = e
+                logger.warning(
+                    "onboarding DB %s hit a dropped connection (attempt %d/3): %s",
+                    method,
+                    attempt + 1,
+                    e,
+                )
+                await asyncio.sleep(0.2 * (attempt + 1))
+        assert last is not None
+        raise last
+
     @staticmethod
     def _row_to_model(row: object) -> OnboardedRepo:
         r = dict(row)  # type: ignore[arg-type]
@@ -133,7 +182,8 @@ class PostgresOnboardingStore(OnboardingStore):
         )
 
     async def upsert(self, repo: OnboardedRepo) -> OnboardedRepo:
-        row = await self._pool.fetchrow(  # type: ignore[attr-defined]
+        row = await self._call(
+            "fetchrow",
             """
             INSERT INTO repo_onboarding
                 (owner, name, state, pr_number, pr_url, default_base_branch,
@@ -169,8 +219,11 @@ class PostgresOnboardingStore(OnboardingStore):
         return self._row_to_model(row)
 
     async def get(self, owner: str, name: str) -> OnboardedRepo | None:
-        row = await self._pool.fetchrow(  # type: ignore[attr-defined]
-            "SELECT * FROM repo_onboarding WHERE owner = $1 AND name = $2", owner, name
+        row = await self._call(
+            "fetchrow",
+            "SELECT * FROM repo_onboarding WHERE owner = $1 AND name = $2",
+            owner,
+            name,
         )
         return self._row_to_model(row) if row else None
 
@@ -178,22 +231,25 @@ class PostgresOnboardingStore(OnboardingStore):
         self, state: OnboardingState | str | None = None, include_archived: bool = False
     ) -> list[OnboardedRepo]:
         if state is not None:
-            rows = await self._pool.fetch(  # type: ignore[attr-defined]
+            rows = await self._call(
+                "fetch",
                 "SELECT * FROM repo_onboarding WHERE state = $1 ORDER BY updated_at DESC",
                 str(state),
             )
         elif include_archived:
-            rows = await self._pool.fetch(  # type: ignore[attr-defined]
-                "SELECT * FROM repo_onboarding ORDER BY updated_at DESC"
+            rows = await self._call(
+                "fetch", "SELECT * FROM repo_onboarding ORDER BY updated_at DESC"
             )
         else:
-            rows = await self._pool.fetch(  # type: ignore[attr-defined]
-                "SELECT * FROM repo_onboarding WHERE state <> 'archived' ORDER BY updated_at DESC"
+            rows = await self._call(
+                "fetch",
+                "SELECT * FROM repo_onboarding WHERE state <> 'archived' ORDER BY updated_at DESC",
             )
         return [self._row_to_model(r) for r in rows]
 
     async def archive(self, owner: str, name: str) -> OnboardedRepo | None:
-        row = await self._pool.fetchrow(  # type: ignore[attr-defined]
+        row = await self._call(
+            "fetchrow",
             """UPDATE repo_onboarding SET state = 'archived', updated_at = NOW()
                WHERE owner = $1 AND name = $2 RETURNING *""",
             owner,

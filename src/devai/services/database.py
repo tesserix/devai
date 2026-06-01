@@ -57,6 +57,13 @@ class Database:
                     max_size=10,
                     timeout=10.0,
                     command_timeout=30.0,
+                    # Ambient ztunnel resets idle TCP connections, leaving the
+                    # pool holding dead sockets that raise
+                    # ConnectionDoesNotExistError on next use. Recycle idle
+                    # connections well before that window so the pool rarely
+                    # hands out a reset connection. Paired with per-query
+                    # reconnect retries in the call sites.
+                    max_inactive_connection_lifetime=30.0,
                 )
                 logger.info(
                     "PostgreSQL pool ready: %s (attempt %d/%d)",
