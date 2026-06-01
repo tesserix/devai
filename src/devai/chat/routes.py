@@ -46,7 +46,11 @@ async def chat_message(request: Request) -> dict[str, str]:
         response = await agent.chat(message, session_id, principal=principal, trace_id=trace_id)
     except Exception as exc:
         logger.exception("Chat failed for session %s (user=%s)", session_id, principal.email)
-        response = f"Sorry, I encountered an error: {exc}"
+        # Don't echo raw exception text to the client — it can carry
+        # connection strings or tokens. The full error is in the logs.
+        from devai.services.redact import redact_secrets
+
+        response = f"Sorry, I encountered an error: {redact_secrets(str(exc))[:200]}"
 
     return {"response": response, "session_id": session_id}
 

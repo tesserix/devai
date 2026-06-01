@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
 
+from devai.services.redact import redact_secrets
+
 logger = logging.getLogger(__name__)
 
 SECURITY_TOOLS: list[dict[str, Any]] = [
@@ -725,7 +727,7 @@ class SecurityToolExecutor:
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            logger.error("Clone failed: %s", stderr.decode()[:500])
+            logger.error("Clone failed: %s", redact_secrets(stderr.decode())[:500])
             return False
         return True
 

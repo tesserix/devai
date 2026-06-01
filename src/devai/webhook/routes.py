@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from devai.identity import Principal, new_trace_id
+from devai.services.redact import redact_secrets
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -544,7 +545,7 @@ async def _run_pipeline(
                 await scm.add_comment(
                     repo,
                     int(trigger_ref),
-                    f"## Pipeline Failed\n\n:x: Error: `{str(e)[:200]}`\n\nCheck the DevAI dashboard for details.",
+                    f"## Pipeline Failed\n\n:x: Error: `{redact_secrets(str(e))[:200]}`\n\nCheck the DevAI dashboard for details.",
                 )
 
     finally:

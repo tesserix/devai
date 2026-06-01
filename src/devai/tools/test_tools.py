@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
 
+from devai.services.redact import redact_secrets
+
 logger = logging.getLogger(__name__)
 
 TEST_TOOLS: list[dict[str, Any]] = [
@@ -83,7 +85,7 @@ class TestToolExecutor:
             )
             _, stderr = await clone_proc.communicate()
             if clone_proc.returncode != 0:
-                return {"success": False, "error": f"Clone failed: {stderr.decode()}"}
+                return {"success": False, "error": f"Clone failed: {redact_secrets(stderr.decode())}"}
 
             # Install dependencies
             install_proc = await asyncio.create_subprocess_exec(

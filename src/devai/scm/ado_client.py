@@ -354,10 +354,12 @@ class AzureDevOpsSCMClient(SCMClient):
     # --- Webhooks ---
 
     def verify_webhook_signature(self, body: bytes, signature: str, secret: str) -> bool:
-        # ADO uses Basic Auth or shared secret for webhook validation
-        # In practice, ADO service hooks use a configurable shared secret
-        if not secret:
-            return True  # No secret configured — accept all
+        # ADO service hooks use a configurable shared secret signed as
+        # HMAC-SHA256 over the body. Fail closed: a missing secret or
+        # signature means we cannot authenticate the delivery, so reject
+        # it rather than accept every unauthenticated request.
+        if not secret or not signature:
+            return False
         expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
 

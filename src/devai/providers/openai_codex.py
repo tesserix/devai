@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
 
+from devai.services.redact import redact_secrets
+
 if TYPE_CHECKING:
     from devai.config import Settings
 
@@ -97,7 +99,7 @@ class CodexSandboxProvider:
             if clone_result.returncode != 0:
                 return {
                     "success": False,
-                    "error": f"Failed to clone: {clone_result.stderr}",
+                    "error": f"Failed to clone: {redact_secrets(clone_result.stderr or '')}",
                     "output": "",
                 }
 
@@ -118,7 +120,7 @@ class CodexSandboxProvider:
                 return {
                     "success": result.returncode == 0,
                     "output": result.stdout,
-                    "error": result.stderr if result.returncode != 0 else "",
+                    "error": redact_secrets(result.stderr) if result.returncode != 0 else "",
                 }
             except subprocess.TimeoutExpired:
                 return {
