@@ -17,6 +17,8 @@ from devai.authoring.store import (
 )
 
 if TYPE_CHECKING:
+    from devai.config import Settings
+    from devai.registry.client import RegistryClient
     from devai.specializations.registry import SpecializationRegistry
 
 
@@ -24,16 +26,25 @@ def create_authoring_service(
     *,
     redis: Any | None = None,
     spec_registry: SpecializationRegistry | None = None,
+    registry_client: RegistryClient | None = None,
+    settings: Settings | None = None,
 ) -> AuthoringService:
     """Build the service with a Redis-backed store, falling back to in-memory.
 
     Never raises — an unreachable Redis degrades to the in-memory store so
     the authoring API still works (definitions just don't survive a restart).
+    When a ``registry_client`` + ``settings`` are supplied (and publishing is
+    enabled), authored artifacts are also published to the shared registry.
     """
     store: DefinitionStore = (
         RedisDefinitionStore(redis) if redis is not None else InMemoryDefinitionStore()
     )
-    return AuthoringService(store, spec_registry=spec_registry)
+    return AuthoringService(
+        store,
+        spec_registry=spec_registry,
+        registry_client=registry_client,
+        settings=settings,
+    )
 
 
 __all__ = [

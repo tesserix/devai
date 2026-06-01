@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, Check, Loader2 } from "lucide-react";
 
-import { api, type CatalogTool } from "@/lib/api";
+import { api, type CatalogTool, type RegistryItem } from "@/lib/api";
 
-const PROVIDERS = ["auto", "anthropic", "openai", "groq", "gemini", "nemoclaw"];
+const PROVIDERS = ["auto", "claude", "openai", "codex", "groq", "gemini", "nemoclaw"];
 const CATEGORIES = ["planning", "coding", "review", "orchestration", "sre", "specialist"];
 const RISK_LEVELS = ["low", "medium", "high", "critical"];
 
@@ -24,12 +24,20 @@ export default function NewAgentPage() {
   const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("specialist");
-  const [provider, setProvider] = useState("anthropic");
+  const [provider, setProvider] = useState("claude");
   const [model, setModel] = useState("");
   const [risk, setRisk] = useState("medium");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
   const [toolFilter, setToolФильтр] = useState(""); // search box
+
+  // Registry catalog — skills/prompts/MCP servers composed into this agent.
+  const [skillsCat, setSkillsCat] = useState<RegistryItem[]>([]);
+  const [promptsCat, setPromptsCat] = useState<RegistryItem[]>([]);
+  const [mcpCat, setMcpCat] = useState<RegistryItem[]>([]);
+  const [selSkills, setSelSkills] = useState<Set<string>>(new Set());
+  const [selPrompts, setSelPrompts] = useState<Set<string>>(new Set());
+  const [selMcp, setSelMcp] = useState<Set<string>>(new Set());
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +48,11 @@ export default function NewAgentPage() {
       .listCatalogTools()
       .then(setTools)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    // Registry catalog is best-effort — a registry-less dev cluster just
+    // shows empty pickers (built-in tools still work).
+    api.listRegistrySkills().then(setSkillsCat).catch(() => {});
+    api.listRegistryPrompts().then(setPromptsCat).catch(() => {});
+    api.listRegistryMcpServers().then(setMcpCat).catch(() => {});
   }, []);
 
   const filteredTools = useMemo(() => {
@@ -81,6 +94,9 @@ export default function NewAgentPage() {
         risk_level: risk,
         system_prompt: systemPrompt,
         allowed_tools: [...selectedTools],
+        skills: [...selSkills],
+        prompts: [...selPrompts],
+        mcp_servers: [...selMcp],
       });
       setDone(res.name);
       setTimeout(() => router.push("/agents"), 900);
@@ -208,6 +224,35 @@ export default function NewAgentPage() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <CatalogPicker
+          label="Skills"
+          items={skillsCat}
+          selected={selSkills}
+          onToggle={(n) => toggleIn(setSelSkills, n)}
+          emptyHint="No skills in the registry."
+        />
+        <CatalogPicker
+          label="Prompts"
+          items={promptsCat}
+          selected={selPrompts}
+          onToggle={(n) => toggleIn(setSelPrompts, n)}
+          emptyHint="No prompts in the registry."
+        />
+        <CatalogPicker
+          label="MCP Servers"
+          items={mcpCat}
+          selected={selMcp}
+          onToggle={(n) => toggleIn(setSelMcp, n)}
+          emptyHint="No MCP servers in the registry."
+        />
+      </div>
+
+      <p className="text-[11px] text-[var(--ink-500)]">
+        Skills, prompts and MCP servers are pulled from the shared registry and published back with this
+        agent, so it’s discoverable and runnable across the platform.
+      </p>
+
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -239,5 +284,73 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="label-eyebrow">{label}</span>
       {children}
     </label>
+  );
+}
+
+function toggleIn(setter: React.Dispatch<React.SetStateAction<Set<string>>>, name: string) {
+  setter((prev) => {
+    const next = new Set(prev);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    return next;
+  });
+}
+
+/** A compact multi-select list backed by a registry collection. */
+function CatalogPicker({
+  label,
+  items,
+  selected,
+  onToggle,
+  emptyHint,
+}: {
+  label: string;
+  items: RegistryItem[];
+  selected: Set<string>;
+  onToggle: (name: string) => void;
+  emptyHint: string;
+}) {
+  return (
+    <div>
+      <label className="label-eyebrow">
+        {label} ({selected.size})
+      </label>
+      <div className="panel p-2 mt-2 max-h-56 overflow-y-auto space-y-1">
+        {items.length === 0 ? (
+          <div className="text-xs text-[var(--ink-500)] p-2">{emptyHint}</div>
+        ) : (
+          items.map((it) => {
+            const on = selected.has(it.name);
+            const title = it.title || it.display_name || it.name;
+            return (
+              <button
+                key={it.name}
+                type="button"
+                onClick={() => onToggle(it.name)}
+                className={
+                  "w-full text-left px-2.5 py-1.5 rounded-md border transition-colors " +
+                  (on
+                    ? "border-indigo-500/60 bg-indigo-500/10"
+                    : "border-[var(--surface-border)] hover:border-[var(--surface-border-strong)]")
+                }
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={
+                      "w-3 h-3 rounded-sm border " +
+                      (on ? "bg-indigo-500 border-indigo-500" : "border-[var(--ink-500)]")
+                    }
+                  />
+                  <span className="font-mono text-xs text-[var(--ink-100)] truncate">{it.name}</span>
+                </div>
+                {title !== it.name && (
+                  <p className="text-[11px] text-[var(--ink-400)] mt-0.5 line-clamp-1">{title}</p>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }

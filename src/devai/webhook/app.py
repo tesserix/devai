@@ -131,10 +131,23 @@ def create_app(
 
             spec_registry = getattr(spec_service, "registry", None) if spec_service else None
             redis = getattr(state, "redis", None)
-            authoring_service = create_authoring_service(redis=redis, spec_registry=spec_registry)
+            authoring_service = create_authoring_service(
+                redis=redis,
+                spec_registry=spec_registry,
+                registry_client=_registry_client,
+                settings=config,
+            )
             await authoring_service.load_into_registry()
+            if getattr(config, "registry_publish_on_boot", False):
+                published = await authoring_service.republish_all()
+                if published:
+                    logger.info("Authoring: republished %d artifact(s) to the registry on boot", published)
             app.state.authoring_service = authoring_service
-            logger.info("Authoring service ready (store=%s)", "redis" if redis else "in-memory")
+            logger.info(
+                "Authoring service ready (store=%s, publish=%s)",
+                "redis" if redis else "in-memory",
+                "on" if getattr(config, "registry_publish_enabled", False) else "off",
+            )
         except Exception:
             logger.exception("Authoring service failed to start — authoring API will 503")
             app.state.authoring_service = None

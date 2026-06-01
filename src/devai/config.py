@@ -355,6 +355,20 @@ class Settings(BaseSettings):
     registry_scopes: str = "registry:read registry:write"
     registry_audience: str = ""
 
+    # --- Publish-on-author (devai-authored artifacts -> shared registry) ---
+    # When an operator composes an agent/skill/tool/blueprint in the dashboard,
+    # publish it to the shared registry so it's discoverable, A2A-carded and
+    # signed alongside the rest of the catalog. Best-effort: a publish failure
+    # never breaks the local hot-register (the author still gets a runnable
+    # agent). Default off so a registry-less dev cluster behaves exactly as
+    # before; tesserix-k8s flips this on in prod.
+    registry_publish_enabled: bool = False
+    # Namespace/tenant authored artifacts land under in the registry.
+    registry_default_tenant: str = "devai"
+    # On boot, re-publish every stored authored artifact (reconciles the
+    # registry after a registry wipe or a devai redeploy). Off by default.
+    registry_publish_on_boot: bool = False
+
     # --- Agent control plane (agentgateway + kagent) ---
     # When set, the runner routes MCP traffic through agentgateway
     # (solo.io) instead of dialing each MCP server's Service directly.

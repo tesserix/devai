@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,13 @@ class Agent:
     framework: str = ""
     model_provider: str = ""
     model_name: str = ""
+    system_prompt: str = ""
+    title: str = ""
     skills: list[Any] = field(default_factory=list)
+    tools: list[Any] = field(default_factory=list)
     prompts: list[Any] = field(default_factory=list)
     mcp_servers: list[Any] = field(default_factory=list)
+    a2a: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -112,6 +116,7 @@ class RegistryClient:
         *,
         base_url: str,
         token: str = "",
+        token_provider: "Callable[[], str] | None" = None,
         timeout_seconds: float = 5.0,
         ttl_seconds: float = 30.0,
     ) -> None:
@@ -119,9 +124,22 @@ class RegistryClient:
             raise RegistryError("registry: base_url is required")
         self._base_url = base_url.rstrip("/")
         self._token = token
+        # Per-request bearer resolver (OIDC client-credentials, self-caching).
+        # Falls back to the static token when unset or it returns empty.
+        self._token_provider = token_provider
         self._timeout = timeout_seconds
         self._ttl = ttl_seconds
         self._cache: dict[str, tuple[float, Any]] = {}
+
+    def _bearer(self) -> str:
+        if self._token_provider is not None:
+            try:
+                tok = self._token_provider()
+                if tok:
+                    return tok
+            except Exception:  # noqa: BLE001 — never let auth break a read
+                logger.warning("registry: token provider failed; falling back", exc_info=True)
+        return self._token
 
     # ---- public API -------------------------------------------------------
 
@@ -237,6 +255,18 @@ class RegistryClient:
     def publish_agent(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/agents", body)
 
+    def publish_blueprint(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/blueprints", body)
+
+    def publish_workflow(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/workflows", body)
+
+    def publish_tool(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/tools", body)
+
+    def delete(self, plural: str, name: str, tag: str = "latest") -> None:
+        self._request("DELETE", f"/v0/{plural}/{name}/{tag}", body=None, raise_on_error=True)
+
     # ---- private ----------------------------------------------------------
 
     def _get(self, path: str, *, use_cache: bool = True) -> dict[str, Any]:
@@ -251,19 +281,27 @@ class RegistryClient:
 
     def _get_collection(self, path: str, item_key: str) -> list[dict[str, Any]]:
         data = self._get(path)
-        # aregistry returns {"<kind>": [...], "metadata": {"count": N}}.
-        # Tolerate missing keys so the dashboard renders an empty list
-        # rather than crashing if a future API trims the envelope.
-        items = data.get(item_key) or []
+        # aregistry's /v0 list returns a BARE JSON array of Kubernetes-style
+        # envelopes. Older/compat responses may wrap as {"<kind>": [...]}.
+        # Accept both so the dashboard never crashes on a shape change.
+        if isinstance(data, list):
+            items: Any = data
+        elif isinstance(data, dict):
+            items = data.get(item_key) or data.get("items") or []
+        else:
+            items = []
         if not isinstance(items, list):
             logger.warning("registry: %s did not return a list under %r", path, item_key)
             return []
         return items
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        return self._request("POST", path, body=body)
+        # Publishes must surface 4xx (conflict/forbidden) — unlike read fallbacks.
+        return self._request("POST", path, body=body, raise_on_error=True)
 
-    def _request(self, method: str, path: str, *, body: dict[str, Any] | None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, *, body: dict[str, Any] | None, raise_on_error: bool = False
+    ) -> dict[str, Any]:
         # Lazy-imported so a pod that never talks to the registry (e.g.
         # local unit tests) doesn't pay the httpx import cost.
         try:
@@ -273,8 +311,9 @@ class RegistryClient:
 
         url = f"{self._base_url}{path}"
         headers: dict[str, str] = {"Accept": "application/json"}
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
+        bearer = self._bearer()
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
         if body is not None:
             headers["Content-Type"] = "application/json"
         try:
@@ -290,7 +329,7 @@ class RegistryClient:
 
         if r.status_code >= 500:
             raise RegistryError(f"registry: {r.status_code} on {method} {path}: {r.text[:200]}")
-        if r.status_code >= 400 and method != "POST":
+        if r.status_code >= 400 and (raise_on_error or method != "POST"):
             raise RegistryError(f"registry: {r.status_code} on {method} {path}: {r.text[:200]}")
 
         if r.headers.get("content-type", "").startswith("application/json") and r.text:
@@ -320,15 +359,28 @@ class RegistryClient:
 
 
 def _unwrap(item: dict[str, Any], key: str) -> dict[str, Any]:
-    """aregistry wraps each list entry in a {<kind>: {...}, _meta: ...}
-    envelope. Return the inner record so the parsers see the flat
-    schema they expect. Tolerates already-flat records too (older
-    responses or future API changes)."""
+    """Flatten a catalog list entry into the flat record the parsers expect.
+
+    aregistry returns Kubernetes-style envelopes
+    ``{apiVersion, kind, metadata:{name,tag,...}, spec:{...}}``. We project
+    ``metadata.name``/``tag`` and the spec fields up to the top level. Also
+    tolerates the older ``{<kind>: {...}}`` wrap and already-flat records.
+    """
     if not isinstance(item, dict):
         return {}
     inner = item.get(key)
     if isinstance(inner, dict):
         return inner
+    spec = item.get("spec")
+    if isinstance(spec, dict):
+        meta = item.get("metadata") or {}
+        flat: dict[str, Any] = {**spec}
+        if isinstance(meta, dict):
+            if meta.get("name") and "name" not in flat:
+                flat["name"] = meta["name"]
+            if meta.get("tag") and "version" not in flat:
+                flat["version"] = meta["tag"]
+        return flat
     return item
 
 
@@ -375,6 +427,20 @@ def _parse_mcp_server(d: dict[str, Any]) -> McpServer:
 
 
 def _parse_agent(d: dict[str, Any]) -> Agent:
+    # Composition shape: spec.model.{provider,name}. Legacy/seed shapes used
+    # top-level modelProvider/modelName or an `llm` block — accept all.
+    model = d.get("model") if isinstance(d.get("model"), dict) else {}
+    llm = d.get("llm") if isinstance(d.get("llm"), dict) else {}
+    provider = model.get("provider") or d.get("modelProvider") or llm.get("provider") or ""
+    name_field = model.get("name") or d.get("modelName") or llm.get("model") or ""
+    # The seed agents use spec.skill (singular) + spec.promptRef; the new
+    # composition shape uses skills[]/prompts[]/mcpServers[].
+    skills = d.get("skills")
+    if skills is None and d.get("skill"):
+        skills = [d["skill"]]
+    prompts = d.get("prompts")
+    if prompts is None and d.get("promptRef"):
+        prompts = [d["promptRef"]]
     return Agent(
         name=d.get("name", ""),
         description=d.get("description", "") or "",
@@ -382,11 +448,15 @@ def _parse_agent(d: dict[str, Any]) -> Agent:
         image=d.get("image", "") or "",
         language=d.get("language", "") or "",
         framework=d.get("framework", "") or "",
-        model_provider=d.get("modelProvider", "") or "",
-        model_name=d.get("modelName", "") or "",
-        skills=list(d.get("skills") or []),
-        prompts=list(d.get("prompts") or []),
+        model_provider=str(provider or ""),
+        model_name=str(name_field or ""),
+        system_prompt=d.get("systemPrompt", "") or "",
+        title=d.get("title", "") or "",
+        skills=list(skills or []),
+        tools=list(d.get("tools") or []),
+        prompts=list(prompts or []),
         mcp_servers=list(d.get("mcpServers") or []),
+        a2a=dict(d.get("a2a") or {}),
         raw=d,
     )
 
@@ -410,9 +480,22 @@ def create_registry_client(settings: Any) -> RegistryClient | None:
     token = getattr(settings, "registry_token", "") or ""
     timeout = float(getattr(settings, "registry_timeout_seconds", 5.0) or 5.0)
     ttl = float(getattr(settings, "registry_cache_ttl_seconds", 30.0) or 30.0)
+
+    # Prefer an OIDC client-credentials provider (short-lived, self-caching,
+    # scoped) for the WRITE path; the static token is the fallback for reads.
+    token_provider: Callable[[], str] | None = None
+    if getattr(settings, "registry_oidc_token_url", "") or getattr(settings, "registry_client_id", ""):
+        try:
+            from devai.adapters.registry.oidc import resolve_registry_token  # type: ignore
+
+            token_provider = lambda: resolve_registry_token(settings) or token  # noqa: E731
+        except Exception:  # noqa: BLE001
+            logger.warning("registry: OIDC token provider unavailable; using static token", exc_info=True)
+
     try:
         return RegistryClient(
-            base_url=base_url, token=token, timeout_seconds=timeout, ttl_seconds=ttl
+            base_url=base_url, token=token, token_provider=token_provider,
+            timeout_seconds=timeout, ttl_seconds=ttl,
         )
     except RegistryError as e:
         logger.warning("registry: client construction failed: %s", e)

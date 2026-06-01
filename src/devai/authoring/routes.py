@@ -68,6 +68,11 @@ class CreateAgentBody(BaseModel):
     handover_schema: dict[str, HandoverFieldSpec] = Field(default_factory=dict)
     risk_level: str = ""
     output_key: str = ""
+    # Registry-composition picks from the shared catalog (names). These ride
+    # along on the spec's metadata and become the published Agent's ref lists.
+    skills: list[str] = Field(default_factory=list, max_length=100)
+    prompts: list[str] = Field(default_factory=list, max_length=100)
+    mcp_servers: list[str] = Field(default_factory=list, max_length=100)
 
 
 @router.get("/specializations")
@@ -144,6 +149,78 @@ async def delete_blueprint(request: Request, name: str) -> dict[str, Any]:
     deleted = await _service(request).delete_blueprint(name)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"blueprint {name!r} not found")
+    return {"deleted": name}
+
+
+# ── Skills ────────────────────────────────────────────────────────────
+
+
+class CreateSkillBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    title: str = Field("", max_length=200)
+    description: str = Field("", max_length=2000)
+    category: str = ""
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    repository: str = Field("", max_length=500)
+
+
+@router.get("/skills")
+async def list_skills(request: Request) -> list[dict[str, Any]]:
+    return await _service(request).list_skills()
+
+
+@router.post("/skills", status_code=201)
+async def create_skill(request: Request, body: CreateSkillBody) -> dict[str, Any]:
+    try:
+        return await _service(request).create_skill(body.model_dump(), created_by=await _principal(request))
+    except AuthoringError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.delete("/skills/{name}")
+async def delete_skill(request: Request, name: str) -> dict[str, Any]:
+    if not await _service(request).delete_skill(name):
+        raise HTTPException(status_code=404, detail=f"skill {name!r} not found")
+    return {"deleted": name}
+
+
+# ── Custom tools (MCP servers) ────────────────────────────────────────
+
+
+class CreateMcpServerBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    version: str = Field("1.0.0", max_length=50)
+    description: str = Field("", max_length=2000)
+    # Remote mode: a reachable MCP endpoint.
+    url: str = Field("", max_length=1000)
+    transport: str = "streamableHttp"
+    headers: dict[str, str] = Field(default_factory=dict)
+    # Image mode: a container the platform runs in the MCP sandbox.
+    image: str = Field("", max_length=500)
+    command: str = Field("", max_length=500)
+    args: list[str] = Field(default_factory=list, max_length=100)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+@router.get("/mcp-servers")
+async def list_mcp_servers(request: Request) -> list[dict[str, Any]]:
+    return await _service(request).list_mcp_servers()
+
+
+@router.post("/mcp-servers", status_code=201)
+async def create_mcp_server(request: Request, body: CreateMcpServerBody) -> dict[str, Any]:
+    if not body.url and not body.image:
+        raise HTTPException(status_code=422, detail="one of 'url' (remote) or 'image' (container) is required")
+    try:
+        return await _service(request).create_mcp_server(body.model_dump(), created_by=await _principal(request))
+    except AuthoringError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.delete("/mcp-servers/{name}")
+async def delete_mcp_server(request: Request, name: str) -> dict[str, Any]:
+    if not await _service(request).delete_mcp_server(name):
+        raise HTTPException(status_code=404, detail=f"mcp server {name!r} not found")
     return {"deleted": name}
 
 

@@ -259,6 +259,32 @@ export const api = {
   listCatalogTools: (category?: string) =>
     apiFetch<CatalogTool[]>(`/catalog/tools${category ? `?category=${encodeURIComponent(category)}` : ""}`),
 
+  // ── Registry catalog (skills/prompts/MCP servers to compose into an agent) ──
+  listRegistrySkills: () => apiFetch<RegistryItem[]>("/registry/skills"),
+  listRegistryPrompts: () => apiFetch<RegistryItem[]>("/registry/prompts"),
+  listRegistryMcpServers: () => apiFetch<RegistryItem[]>("/registry/mcp-servers"),
+  listRegistryAgents: () => apiFetch<RegistryItem[]>("/registry/agents"),
+
+  // ── Authoring: custom skills ──────────────────────────────────────
+  createSkill: (input: CreateSkillInput) =>
+    apiFetch<{ name: string; title?: string }>("/authoring/skills", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listAuthoredSkills: () => apiFetch<AuthoredDefinition[]>("/authoring/skills"),
+  deleteSkill: (name: string) =>
+    apiFetch<{ deleted: string }>(`/authoring/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  // ── Authoring: custom tools (MCP servers) ─────────────────────────
+  createMcpServer: (input: CreateMcpServerInput) =>
+    apiFetch<{ name: string; type?: string }>("/authoring/mcp-servers", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listAuthoredMcpServers: () => apiFetch<AuthoredDefinition[]>("/authoring/mcp-servers"),
+  deleteMcpServer: (name: string) =>
+    apiFetch<{ deleted: string }>(`/authoring/mcp-servers/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
   // ── Authoring: custom agents (specializations) ────────────────────
   listAuthoredAgents: () => apiFetch<AuthoredDefinition[]>("/authoring/specializations"),
 
@@ -317,6 +343,43 @@ export interface CreateAgentInput {
   handover_schema?: Record<string, HandoverFieldInput>;
   risk_level?: string;
   output_key?: string;
+  // Registry-composition picks from the shared catalog.
+  skills?: string[];
+  prompts?: string[];
+  mcp_servers?: string[];
+}
+
+// A registry catalog item (skill/prompt/mcp-server/agent) as flattened by
+// the /api/registry/* routes — name + a human label + description.
+export interface RegistryItem {
+  name: string;
+  title?: string;
+  display_name?: string;
+  description?: string;
+  version?: string;
+  [key: string]: unknown;
+}
+
+export interface CreateSkillInput {
+  name: string;
+  title?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  repository?: string;
+}
+
+export interface CreateMcpServerInput {
+  name: string;
+  version?: string;
+  description?: string;
+  url?: string;
+  transport?: string;
+  headers?: Record<string, string>;
+  image?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
 }
 
 export interface AuthoredDefinition {
