@@ -15,6 +15,7 @@ import {
   Layers,
   Lightbulb,
   LineChart,
+  LogOut,
   MessageSquareText,
   Moon,
   PackageOpen,
@@ -231,13 +232,18 @@ export function MissionControlNav({
         <NavSection items={MID} pathname={pathname} label="Platform" />
       </div>
 
-      {/* Meta + theme toggle */}
+      {/* Meta + theme toggle + sign out */}
       <div className="px-2 pb-1">
         <NavSection items={BOTTOM} pathname={pathname} />
         <button type="button" onClick={toggleDark} className="btn-ghost !justify-start w-full mt-0.5 !text-[13px]">
           {dark ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           <span>{dark ? "Dark" : "Light"}</span>
         </button>
+        {/* Sign out — clears the auth-bff session cookie and returns to login. */}
+        <a href="/auth/logout" className="btn-ghost !justify-start w-full mt-0.5 !text-[13px]">
+          <LogOut className="w-4 h-4" />
+          <span>Sign out</span>
+        </a>
       </div>
 
       {/* Primary CTA — ink button (mark8ly admin pattern). */}

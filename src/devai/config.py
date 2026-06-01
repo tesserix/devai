@@ -188,6 +188,13 @@ class Settings(BaseSettings):
     # closing header-spoofing if the pod is ever reachable without the edge.
     auth_bff_shared_secret: str = ""
 
+    # Shared AES-GCM key (16/24/32 bytes) the auth-bff uses to encrypt the
+    # devai_session cookie (services/auth-bff/internal/session/cookie.go). The
+    # dashboard proxies /api straight to devai-api, bypassing the bff, so
+    # devai-api decrypts this cookie itself to authenticate the caller. Same
+    # value as the bff's DEVAI_BFF_SESSION_ENCRYPT_KEY. Empty disables it.
+    bff_session_encrypt_key: str = ""
+
     # When set, the document-ingestion agent tools (doc_read_pdf /
     # doc_read_markdown / doc_parse_openapi) may only read files resolving
     # inside this directory. Empty = no confinement (today's behavior).

@@ -27,6 +27,7 @@ Use::
 
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import logging
@@ -203,7 +204,71 @@ async def extract_principal(request: Request) -> Principal | None:
             # Session lookup must never block a request — degrade to None.
             logger.debug("session lookup failed for cookie", exc_info=True)
 
+    # 3. auth-bff encrypted session cookie. The bff stores the whole session in
+    #    an AES-GCM cookie (services/auth-bff/internal/session/cookie.go) — NOT
+    #    a Redis id — so the Redis lookup above misses it. In prod the dashboard
+    #    proxies /api straight to devai-api (bypassing the bff), so this is the
+    #    only identity present. Decrypt it with the shared key.
+    if session_id:  # same devai_session cookie value, re-used as the bff blob
+        principal = _principal_from_bff_cookie(session_id, request)
+        if principal is not None:
+            await _enrich_teams(principal, request)
+            return principal
+
     return None
+
+
+def _principal_from_bff_cookie(cookie_value: str, request: Request) -> Principal | None:
+    """Decrypt an auth-bff AES-GCM session cookie into a Principal, or None.
+
+    Mirrors the bff's encode (base64url(nonce || ciphertext), AES-GCM, JSON
+    payload {uid, email, tenant_id, pool, iat, exp}). Requires the same
+    DEVAI_BFF_SESSION_ENCRYPT_KEY the bff uses. Never raises."""
+    cfg = getattr(getattr(request, "app", None), "state", None)
+    key = getattr(getattr(cfg, "config", None), "bff_session_encrypt_key", "") if cfg else ""
+    if not key:
+        return None
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        key_bytes = key.encode("utf-8")
+        if len(key_bytes) not in (16, 24, 32):
+            return None
+        raw = base64.urlsafe_b64decode(cookie_value + "=" * (-len(cookie_value) % 4))
+        if len(raw) < 12:
+            return None
+        nonce, ciphertext = raw[:12], raw[12:]
+        plaintext = AESGCM(key_bytes).decrypt(nonce, ciphertext, None)
+        data = json.loads(plaintext)
+    except Exception:
+        # Wrong key, tampered cookie, or a real Redis session id (not a bff
+        # blob) — either way, not a valid bff session. Degrade to None.
+        return None
+
+    exp = data.get("exp", "")
+    if exp:
+        try:
+            from datetime import datetime, timezone
+
+            when = datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > when:
+                return None  # expired
+        except Exception:
+            pass
+    email = data.get("email", "")
+    uid = data.get("uid", "")
+    if not (email or uid):
+        return None
+    return Principal(
+        email=email or uid,
+        uid=uid,
+        tenant_id=data.get("tenant_id", ""),
+        pool=data.get("pool", ""),
+        auth_provider="auth-bff",
+        display_name=email or uid,
+    )
 
 
 async def _enrich_teams(principal: Principal, request: Request) -> None:
