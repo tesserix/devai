@@ -381,6 +381,10 @@ class Settings(BaseSettings):
     # explicitly tries to hand off to another runner pod).
     agentgateway_url: str = ""
     kagent_url: str = ""
+    # Namespace the kagent controller serves A2A agents under
+    # ({kagent_url}/api/a2a/{namespace}/{agent}); matches the kagent-agent-sync
+    # targetNamespace. Only consulted when dispatching to a kagent-managed agent.
+    kagent_default_namespace: str = "kagent-system"
 
     # --- LLM adapter ---
     # Single switch picks the default LLM backend; specialization YAMLs

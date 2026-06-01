@@ -16,6 +16,7 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from devai.agentic.status import fetch_agentic_status, to_dict
 
@@ -88,6 +89,43 @@ async def llm_probe(request: Request) -> dict[str, Any]:
             "output": resp.usage.output_tokens,
         },
     }
+
+
+class KagentDispatchBody(BaseModel):
+    message: str = Field(..., min_length=1, description="Task/intent to hand the kagent agent")
+    namespace: str = Field("", description="Override the kagent namespace (default from settings)")
+
+
+@router.post("/kagent/{agent}/dispatch")
+async def kagent_dispatch(request: Request, agent: str, body: KagentDispatchBody) -> dict[str, Any]:
+    """Hand a task to a kagent-managed (long-lived) agent over A2A.
+
+    Additive to the default Job-dispatch path — used for agents the kagent
+    agent-sync has reconciled into managed Deployments. 503s cleanly when
+    kagent isn't wired (no kagent_url)."""
+    from devai.agentic.kagent_client import KagentError, create_kagent_client
+    from devai.config import settings
+    from devai.identity import extract_principal, trace_id_from_request
+
+    client = create_kagent_client(settings)
+    if client is None:
+        raise HTTPException(status_code=503, detail="kagent is not configured (no kagent_url)")
+
+    principal = await extract_principal(request)
+    triggered_by = ""
+    if principal is not None:
+        triggered_by = str(getattr(principal, "email", "") or getattr(principal, "uid", "") or "")
+    try:
+        result = await client.dispatch(
+            agent,
+            body.message,
+            namespace=body.namespace or None,
+            triggered_by=triggered_by,
+            trace_id=trace_id_from_request(request) or "",
+        )
+    except KagentError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"agent": agent, "result": result}
 
 
 def _default(url: str) -> str:
