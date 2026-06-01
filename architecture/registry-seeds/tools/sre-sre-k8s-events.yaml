@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sre-sre-k8s-events
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sre-mcp
+    devai.io/domain: sre
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: sre_k8s_events
+spec:
+  displayName: Sre K8S Events
+  description: "Sre K8S Events \u2014 tool served by the sre MCP server."
+  version: '1'
+  server: sre-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - mcp-tool
+  - sre

@@ -1,0 +1,46 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-commit-file
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: scm_commit_file
+spec:
+  displayName: Scm Commit File
+  description: Create or update a file in a repository by committing it to a branch.
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      path:
+        type: string
+        description: File path within the repo
+      content:
+        type: string
+        description: File content
+      message:
+        type: string
+        description: Commit message
+      branch:
+        type: string
+        description: Branch to commit to
+    required:
+    - repo
+    - path
+    - content
+    - message
+    - branch
+  tags:
+  - mcp-tool
+  - scm

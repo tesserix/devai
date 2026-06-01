@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-get-workflow-runs
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: scm_get_workflow_runs
+spec:
+  displayName: Scm Get Workflow Runs
+  description: "Scm Get Workflow Runs \u2014 tool served by the scm MCP server."
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - mcp-tool
+  - scm

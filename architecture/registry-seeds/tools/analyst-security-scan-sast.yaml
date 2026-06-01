@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: analyst-security-scan-sast
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: analyst-mcp
+    devai.io/domain: security
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: security_scan_sast
+spec:
+  displayName: Security Scan Sast
+  description: "Security Scan Sast \u2014 tool served by the analyst MCP server."
+  version: '1'
+  server: analyst-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - analyst
+  - mcp-tool
+  - security

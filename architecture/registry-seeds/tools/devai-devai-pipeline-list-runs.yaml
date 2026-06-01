@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: devai-devai-pipeline-list-runs
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: devai-mcp
+    devai.io/domain: pipeline
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: devai_pipeline_list_runs
+spec:
+  displayName: Devai Pipeline List Runs
+  description: "Devai Pipeline List Runs \u2014 tool served by the devai MCP server."
+  version: '1'
+  server: devai-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - devai
+  - mcp-tool
+  - pipeline

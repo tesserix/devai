@@ -9,12 +9,14 @@ metadata:
     devai.io/lifecycle: test
 spec:
   displayName: Sample MCP (test fixture)
-  description: >-
-    Test fixture used to verify the registry-seed CronJob, the aregistry
-    /v0/servers endpoint, and the dashboard's MCP Servers tile. Safe to
-    delete once verified — no real backend; the endpoint is a placeholder.
+  description: "Test fixture used to verify the registry-seed CronJob, the aregistry /v0/servers endpoint,\
+    \ and the dashboard's MCP Servers tile. Safe to delete once verified \u2014 no real backend; the endpoint\
+    \ is a placeholder."
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/sample
   authMode: none
   tools:
-    - sample_ping
-    - sample_echo
+  - sample_ping
+  - sample_echo
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: sample-mcp

@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: devai-devai-specializations-list
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: devai-mcp
+    devai.io/domain: catalog
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: devai_specializations_list
+spec:
+  displayName: Devai Specializations List
+  description: "Devai Specializations List \u2014 tool served by the devai MCP server."
+  version: '1'
+  server: devai-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - catalog
+  - devai
+  - mcp-tool

@@ -1,0 +1,43 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-create-issue
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: scm_create_issue
+spec:
+  displayName: Scm Create Issue
+  description: Create a new issue or work item with title, body, and optional labels.
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      title:
+        type: string
+        description: Issue/work item title
+      body:
+        type: string
+        description: Issue/work item body in Markdown
+      labels:
+        type: array
+        items:
+          type: string
+        description: Labels or tags to apply
+    required:
+    - repo
+    - title
+    - body
+  tags:
+  - mcp-tool
+  - scm

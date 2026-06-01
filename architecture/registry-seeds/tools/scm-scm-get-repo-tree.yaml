@@ -1,0 +1,33 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-get-repo-tree
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: scm_get_repo_tree
+spec:
+  displayName: Scm Get Repo Tree
+  description: Get the complete file tree of a repository. Returns all file paths.
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      ref:
+        type: string
+        description: Branch or commit SHA (optional)
+    required:
+    - repo
+  tags:
+  - mcp-tool
+  - scm

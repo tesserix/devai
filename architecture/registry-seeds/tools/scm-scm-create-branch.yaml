@@ -1,0 +1,37 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-create-branch
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: scm_create_branch
+spec:
+  displayName: Scm Create Branch
+  description: Create a new branch in a repository.
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      branch_name:
+        type: string
+        description: New branch name
+      from_branch:
+        type: string
+        description: Base branch (defaults to default branch)
+    required:
+    - repo
+    - branch_name
+  tags:
+  - mcp-tool
+  - scm

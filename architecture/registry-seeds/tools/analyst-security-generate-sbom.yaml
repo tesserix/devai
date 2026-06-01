@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: analyst-security-generate-sbom
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: analyst-mcp
+    devai.io/domain: security
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: security_generate_sbom
+spec:
+  displayName: Security Generate Sbom
+  description: "Security Generate Sbom \u2014 tool served by the analyst MCP server."
+  version: '1'
+  server: analyst-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - analyst
+  - mcp-tool
+  - security

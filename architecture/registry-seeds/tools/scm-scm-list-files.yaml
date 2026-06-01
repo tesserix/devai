@@ -1,0 +1,36 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-list-files
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: scm_list_files
+spec:
+  displayName: Scm List Files
+  description: List files in a directory of a repository.
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      path:
+        type: string
+        description: Directory path (empty for root)
+      ref:
+        type: string
+        description: Branch or commit SHA (optional)
+    required:
+    - repo
+  tags:
+  - mcp-tool
+  - scm

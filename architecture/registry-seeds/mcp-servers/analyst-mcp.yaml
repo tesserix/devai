@@ -8,30 +8,28 @@ metadata:
     devai.io/category: analyst
 spec:
   displayName: DevAI Analyst MCP
-  description: >-
-    Security + quality scanners. Each scanner returns a normalized
-    Finding[] envelope {file, line, rule, severity, message, suggestion}.
-    LLM-only findings live under namespaced rule prefixes
-    (security:llm-, ux:llm-) so dedupe by (file, rule, line) doesn't
-    collide tool output with model output.
+  description: Security + quality scanners. Each scanner returns a normalized Finding[] envelope {file,
+    line, rule, severity, message, suggestion}. LLM-only findings live under namespaced rule prefixes
+    (security:llm-, ux:llm-) so dedupe by (file, rule, line) doesn't collide tool output with model output.
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/analyst
   authMode: jwt
   tools:
-    # Security scanners
-    - security_scan_sast
-    - security_scan_dependencies
-    - security_scan_secrets
-    - security_scan_container
-    - security_check_owasp
-    - security_generate_sbom
-    # Quality scanners
-    - validate_compile
-    - validate_lint
-    - validate_unit_tests
-    - validate_format
-    - validate_e2e_playwright
-    - validate_e2e_cypress
-    - validate_dockerfile
-    - validate_helm_lint
-    - validate_yaml
-    - validate_sql
+  - security_scan_sast
+  - security_scan_dependencies
+  - security_scan_secrets
+  - security_scan_container
+  - security_check_owasp
+  - security_generate_sbom
+  - validate_compile
+  - validate_lint
+  - validate_unit_tests
+  - validate_format
+  - validate_e2e_playwright
+  - validate_e2e_cypress
+  - validate_dockerfile
+  - validate_helm_lint
+  - validate_yaml
+  - validate_sql
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: analyst-mcp
