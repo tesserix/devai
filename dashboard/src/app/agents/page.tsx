@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Users } from "lucide-react";
+import { ExternalLink, Plus, Users } from "lucide-react";
+import { aregistryUrl } from "@/lib/aregistry";
 
 type Agent = {
   name: string;
@@ -82,12 +83,19 @@ export default function AgentsPage() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filtered.map((a) => (
-            <article
+            <a
               key={a.name}
-              className="panel p-4 hover:border-[var(--surface-border-strong)] transition-colors"
+              href={aregistryUrl("agents", a.name)}
+              target="_blank"
+              rel="noreferrer"
+              title="Open in the agent registry"
+              className="panel p-4 block hover:border-[var(--surface-border-strong)] transition-colors group"
             >
               <div className="flex items-baseline justify-between gap-2">
-                <h2 className="text-sm font-mono font-semibold text-[var(--ink-50)]">{a.name}</h2>
+                <h2 className="text-sm font-mono font-semibold text-[var(--ink-50)] flex items-center gap-1.5">
+                  {a.name}
+                  <ExternalLink className="w-3.5 h-3.5 text-[var(--ink-500)] opacity-0 group-hover:opacity-100" />
+                </h2>
                 <span className="text-[11px] font-mono text-[var(--ink-500)]">v{a.version}</span>
               </div>
               <p className="text-sm text-[var(--ink-300)] mt-1">{a.description}</p>
@@ -99,7 +107,7 @@ export default function AgentsPage() {
                 <dt className="label-eyebrow">Language</dt>
                 <dd className="text-[var(--ink-100)]">{a.language}</dd>
               </dl>
-            </article>
+            </a>
           ))}
         </div>
       )}

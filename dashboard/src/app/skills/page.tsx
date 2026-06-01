@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Sparkles } from "lucide-react";
+import { ExternalLink, Plus, Sparkles } from "lucide-react";
 
 import { api, type RegistryItem } from "@/lib/api";
+import { aregistryUrl } from "@/lib/aregistry";
 
 /**
  * Skills — reusable capabilities in the shared registry. Compose them into
@@ -71,15 +72,25 @@ export default function SkillsPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map((it) => (
-            <div key={it.name} className="panel p-4">
-              <div className="font-mono text-sm text-[var(--ink-50)]">{it.name}</div>
+            <a
+              key={it.name}
+              href={aregistryUrl("skills", it.name)}
+              target="_blank"
+              rel="noreferrer"
+              title="Open in the agent registry"
+              className="panel p-4 block transition-colors hover:border-indigo-500/40 group"
+            >
+              <div className="font-mono text-sm text-[var(--ink-50)] flex items-center justify-between gap-2">
+                <span className="truncate">{it.name}</span>
+                <ExternalLink className="w-3.5 h-3.5 text-[var(--ink-500)] opacity-0 group-hover:opacity-100 shrink-0" />
+              </div>
               {(it.title || it.display_name) && (
                 <div className="text-xs text-[var(--ink-300)] mt-0.5">{it.title || it.display_name}</div>
               )}
               {it.description && (
                 <p className="text-[11px] text-[var(--ink-400)] mt-2 line-clamp-2">{it.description}</p>
               )}
-            </div>
+            </a>
           ))}
         </div>
       )}
