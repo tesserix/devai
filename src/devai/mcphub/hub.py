@@ -180,7 +180,10 @@ class MCPHub:
         self._tools, self._prompts, self._resources = tools, prompts, resources
         logger.info(
             "mcphub: aggregate rebuilt — %d tools, %d prompts, %d resources across %d leg(s)",
-            len(tools), len(prompts), len(resources), len(healthy),
+            len(tools),
+            len(prompts),
+            len(resources),
+            len(healthy),
         )
 
     def _registry_tool_catalog(self) -> dict[tuple[str, str], dict[str, Any]]:

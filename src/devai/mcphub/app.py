@@ -97,9 +97,7 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
         except Exception:
             logger.exception("mcphub: MCP mount failed — Hub disabled")
 
-        app.state._refresh_task = asyncio.create_task(
-            _periodic_refresh(hub, settings.mcp_hub_refresh_seconds)
-        )
+        app.state._refresh_task = asyncio.create_task(_periodic_refresh(hub, settings.mcp_hub_refresh_seconds))
         try:
             yield
         finally:

@@ -77,7 +77,7 @@ def route_uri(uri: str) -> tuple[str, str]:
     """Reverse :func:`namespaced_uri` → ``(server, original_uri)``."""
     if not uri.startswith(URI_SCHEME_PREFIX):
         raise RouteError(f"route_uri: {uri!r} is not a hub resource URI")
-    rest = uri[len(URI_SCHEME_PREFIX):]
+    rest = uri[len(URI_SCHEME_PREFIX) :]
     server, sep, original = rest.partition("+")
     if not sep or not server or not original:
         raise RouteError(f"route_uri: malformed hub URI {uri!r}")
@@ -113,9 +113,14 @@ class DownstreamSpec:
 
     def is_servable(self) -> bool:
         """A spec the Hub can actually connect to over a network transport."""
-        return bool(self.name) and bool(self.endpoint) and self.transport in (
-            "streamable-http",
-            "sse",
+        return (
+            bool(self.name)
+            and bool(self.endpoint)
+            and self.transport
+            in (
+                "streamable-http",
+                "sse",
+            )
         )
 
 

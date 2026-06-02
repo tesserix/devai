@@ -53,7 +53,9 @@ def spec_from_record(record: McpServer) -> DownstreamSpec:
     """
     raw = getattr(record, "raw", None) or {}
     endpoint = (raw.get("endpoint") if isinstance(raw, dict) else "") or getattr(record, "url", "") or ""
-    transport = (raw.get("transport") if isinstance(raw, dict) else "") or getattr(record, "type", "") or "streamable-http"
+    transport = (
+        (raw.get("transport") if isinstance(raw, dict) else "") or getattr(record, "type", "") or "streamable-http"
+    )
     auth_mode = (raw.get("authMode") if isinstance(raw, dict) else "") or "none"
     return DownstreamSpec(
         name=getattr(record, "name", "") or "",
@@ -83,7 +85,9 @@ def discover(client: RegistryClient) -> list[DownstreamSpec]:
         if not spec.is_servable():
             logger.info(
                 "mcphub: skipping non-servable downstream %r (transport=%s endpoint=%s)",
-                spec.name, spec.transport, spec.endpoint or "<none>",
+                spec.name,
+                spec.transport,
+                spec.endpoint or "<none>",
             )
             continue
         out.append(spec)
@@ -111,8 +115,8 @@ def downstream_headers(spec: DownstreamSpec, *, service_token: str = "") -> dict
             headers["Authorization"] = f"Bearer {service_token}"
         else:
             logger.warning(
-                "mcphub: downstream %r is authMode=jwt but no service token configured; "
-                "calls may be rejected", spec.name,
+                "mcphub: downstream %r is authMode=jwt but no service token configured; calls may be rejected",
+                spec.name,
             )
     elif mode == "mtls":
         # Certificate is presented by the HTTP client/transport, not a header.

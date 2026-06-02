@@ -80,7 +80,9 @@ def build_hub_server(hub: MCPHub) -> Any:
     async def _list_tools() -> list[Any]:
         budget = hub.list_tools(current_profile())
         if budget.truncated:
-            logger.info("mcphub: served %d tools (%d cut to budget)", len(budget.selected), len(budget.dropped_by_budget))
+            logger.info(
+                "mcphub: served %d tools (%d cut to budget)", len(budget.selected), len(budget.dropped_by_budget)
+            )
         return [
             t.Tool(name=ft.name, description=ft.description, inputSchema=ft.input_schema or {"type": "object"})
             for ft in budget.selected
@@ -103,7 +105,9 @@ def build_hub_server(hub: MCPHub) -> Any:
                 name=fp.name,
                 description=fp.description,
                 arguments=[
-                    t.PromptArgument(name=a.get("name", ""), description=a.get("description", ""), required=a.get("required", False))
+                    t.PromptArgument(
+                        name=a.get("name", ""), description=a.get("description", ""), required=a.get("required", False)
+                    )
                     for a in fp.arguments
                 ],
             )

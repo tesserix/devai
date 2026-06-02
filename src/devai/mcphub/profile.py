@@ -90,9 +90,7 @@ def select(tools: list[FederatedTool], profile: ToolProfile) -> BudgetResult:
     for t in tools:
         if profile.allow:
             keep = t.name in profile.allow  # explicit pin wins, bypasses tiers
-        elif (profile.servers and t.server not in profile.servers) or (
-            profile.tiers and t.tier not in profile.tiers
-        ):
+        elif (profile.servers and t.server not in profile.servers) or (profile.tiers and t.tier not in profile.tiers):
             keep = False  # excluded by server restriction or tier filter
         else:
             keep = True
@@ -111,7 +109,10 @@ def select(tools: list[FederatedTool], profile: ToolProfile) -> BudgetResult:
         logger.warning(
             "mcphub: profile %r truncated tool surface to budget: kept %d, dropped %d over the "
             "%d-tool ceiling (%s). Narrow the profile or raise max_tools.",
-            profile.name, len(eligible), len(dropped_budget), cap,
+            profile.name,
+            len(eligible),
+            len(dropped_budget),
+            cap,
             ", ".join(dropped_budget[:8]) + ("…" if len(dropped_budget) > 8 else ""),
         )
 
