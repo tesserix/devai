@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     slack_signing_secret: str = ""  # request-signature verification
     slack_allowed_channels: str = ""  # csv of channel IDs; empty = all
 
+    # --- MCP Hub (devai-mcp-hub) ---
+    # The Agentic MCP: one /mcp surface that multiplexes every registry-declared
+    # downstream MCP (docs/agentic/MCP-HUB.md). Discovery is registry-driven, so
+    # there is nothing to hardcode here — only operational knobs.
+    mcp_hub_enabled: bool = True
+    # Service token the Hub presents DOWNSTREAM for authMode=jwt servers (the
+    # caller's identity is terminated at the Hub; callers never hold this).
+    # Empty → no bearer injected (fine for authMode=none/header downstreams).
+    mcp_hub_service_token: str = ""
+    # How often the Hub re-discovers the registry + reconnects legs (seconds).
+    mcp_hub_refresh_seconds: float = 60.0
+    # Per-downstream connect timeout (seconds).
+    mcp_hub_connect_timeout: float = 15.0
+
     # --- Redis ---
     redis_url: str = "redis://localhost:6379"
     redis_result_ttl: int = 86400 * 30  # 30 days

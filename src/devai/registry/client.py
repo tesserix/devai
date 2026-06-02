@@ -198,6 +198,23 @@ class RegistryClient:
         raw = self._get_collection(self._ns("/v0/agents"), "agents")
         return [_parse_agent(_unwrap(d, "agent")) for d in raw]
 
+    def list_tool_artifacts(self) -> list[dict[str, Any]]:
+        """Raw ``kind:Tool`` envelopes (metadata.labels/annotations preserved).
+
+        Unlike the typed list helpers, this returns the unflattened Kubernetes
+        -style envelopes so callers that need ``metadata.labels`` /
+        ``metadata.annotations`` (e.g. the MCP Hub, which reads the
+        ``mcp.devai.io/server`` + ``devai.io/tier`` labels and the
+        ``mcp.devai.io/wire-name`` annotation) get them intact. ``_unwrap``
+        would drop them. Best-effort: returns [] on any registry error so a
+        consumer degrades rather than crashes.
+        """
+        try:
+            return self._get_collection(self._ns("/v0/tools"), "tools")
+        except RegistryError:
+            logger.warning("registry: list_tool_artifacts failed", exc_info=True)
+            return []
+
     def get_skill(self, name: str) -> Skill | None:
         for s in self.list_skills():
             if s.name == name:

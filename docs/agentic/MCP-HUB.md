@@ -333,10 +333,22 @@ caller.
 | Phase | Deliverable | Acceptance |
 |---|---|---|
 | **1 — Tools first-class ✅ DONE** | `kind:Tool` artifacts generated from each MCPServer's tool list + devai `ToolSpec` schemas, labelled `mcp.devai.io/server`; `toolSelector` added to all 5 MCPServers. Generator: `_import/generate_tools.py`. | **Met:** `/v0/tools` → 53 (UI Tools tab populated); `labelSelector=devai.io/domain=security` → 6; each Tool has inputSchema + server label + wire-name annotation. |
-| **2 — Selector + operator + resolver (registry tier)** | `spec.toolSelector` on the 5 MCPServers (done); reconciler validates, resolves selector → `.status.tools`, health-probes, and runs the resolution chain's **registry tier** with **NOTIFY** on miss (status condition + event). | Adding a labelled Tool auto-appears in its server's `.status.tools`; an unresolved tool surfaces a clear `Resolved=False` message; invalid specs warned in `.status`. |
-| **3 — Upstream sources + pull-through cache** | `internal/resolve` Source adapters (`officialskills`, `mcp-registry`, `github`, `generic-http`); upstream hit → **write-through** `kind:Tool` (cache labels) → bind; periodic revalidate (etag/TTL). | A tool absent locally but present upstream is fetched, **persisted to the registry**, and served; second resolve is a registry hit; vanished-upstream entries flagged. |
-| **4 — The Hub** | `devai-mcp-hub`: registry discovery, downstream federation, namespacing, profile budgeting, auth termination/injection. Replace the single `/mcp` FastMCP mount. | One `/mcp` lists a scoped, namespaced tool set; `tools/call` routes to the right downstream with correct auth; a downstream outage degrades gracefully. |
+| **2 — Selector + operator + resolver (registry tier) ✅ DONE** | `spec.toolSelector` on the 5 MCPServers; `resolveMCPServerTools` validates + resolves selector → `.status.tools`, with **NOTIFY** on miss (`Resolved=False` condition). Endpoint: `/v0/servers/{name}/resolved`. | **Met:** a labelled Tool auto-appears in its server's resolved set; an unresolved tool surfaces a clear `Resolved=False` message. |
+| **3 — Upstream sources + pull-through cache ✅ DONE** | `agentic-registry/internal/resolve`: `Source` chain + `Resolver` with **write-through** caching; generic HTTP source (`TOOL_SOURCE_URLS`); unresolved refs try upstream before NOTIFY. | **Met:** a tool absent locally but present upstream is fetched, **persisted as `kind:Tool`** (cache labels + provenance annotations), and bound; second resolve is a registry hit. Tests: `internal/resolve/resolve_test.go`. |
+| **4 — The Hub ✅ DONE** | `devai-mcp-hub` (`src/devai/mcphub/`): registry discovery, downstream federation, collision-free namespacing (`server__tool`), per-caller profile budgeting, auth termination + downstream injection, graceful degradation, periodic refresh + `list_changed`. Dedicated ASGI app + `devai-mcp-hub` entrypoint. | **Met:** one `/mcp` lists a scoped, namespaced tool set; `tools/call` routes to the right downstream with injected auth; an unreachable leg is dropped from the aggregate and in-flight calls error cleanly. Tests: `tests/unit/test_mcphub.py` (20). |
 | **5 — Gateway + scale** | Route `…/mcp` → Hub via agentgateway; onboard ≥2 new external MCPs via registry only; `tools/list_changed` on registry/cache change. | New MCP onboarded with zero Hub code change; declaring a tool not yet in the registry auto-pulls + caches it; surface stays within the per-caller budget. |
+
+### 8.1 Deploying the Hub (Phase 4)
+
+The Hub **shares the `devai` image** (decision §9.2) — no new image. It runs as
+a dedicated Deployment whose container command is the `devai-mcp-hub` console
+script (an ASGI app; run with uvicorn/gunicorn like the other services). Config
+is the standard `DEVAI_*` env: `DEVAI_REGISTRY_URL` (discovery source),
+`DEVAI_MCP_HUB_SERVICE_TOKEN` (downstream `authMode=jwt` injection),
+`DEVAI_MCP_HUB_REFRESH_SECONDS`, `DEVAI_MCP_HUB_CONNECT_TIMEOUT`. The chart +
+ArgoCD app live in `tesserix-k8s` (per repo policy: charts there, ArgoCD-only),
+mirroring the `devai-sre` deployment; `/healthz` exposes the live downstream
+roster + tool/prompt/resource counts.
 
 ## 9. Decisions (locked)
 

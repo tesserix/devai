@@ -93,6 +93,7 @@ dev = [
 devai = "devai.cli.commands:app"
 devai-sre = "devai.sre.server:create_sre_app"
 devai-worker = "devai.orchestration.worker:main"
+devai-mcp-hub = "devai.mcphub:create_hub_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/devai"]
