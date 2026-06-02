@@ -57,6 +57,14 @@ type Config struct {
 	// Trusted-host enforcement on the proxy paths. Blank = disabled.
 	KagentHost    string // e.g. kagent.tesserix.app
 	AregistryHost string // e.g. aregistry.tesserix.app
+
+	// Live preview reverse-proxy. PreviewDomain is the apex preview hosts
+	// live under (e.g. tesserix.app → preview-<id>.tesserix.app /
+	// api-<id>.tesserix.app); PreviewNamespace is the in-cluster namespace
+	// the per-session Services live in (e.g. devai-previews). Both blank =
+	// preview proxy disabled.
+	PreviewDomain    string
+	PreviewNamespace string
 }
 
 // Load reads env vars into a Config. Returns an error listing every missing
@@ -80,6 +88,8 @@ func Load() (*Config, error) {
 		AregistryUpstreamURL: os.Getenv("DEVAI_BFF_AREGISTRY_UPSTREAM_URL"),
 		KagentHost:           os.Getenv("DEVAI_BFF_KAGENT_HOST"),
 		AregistryHost:        os.Getenv("DEVAI_BFF_AREGISTRY_HOST"),
+		PreviewDomain:        os.Getenv("DEVAI_BFF_PREVIEW_DOMAIN"),
+		PreviewNamespace:     os.Getenv("DEVAI_BFF_PREVIEW_NAMESPACE"),
 	}
 	// Hostname → pool routing. ALM pool always covers the ALM dashboard.
 	// The kagent / aregistry reverse-proxy hostnames are opt-in via the

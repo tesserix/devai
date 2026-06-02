@@ -35,20 +35,29 @@ const LoginURL = "https://devai.tesserix.app/login"
 // Handler is the reverse-proxy entrypoint mounted as the default handler
 // on hostnames that should be gated by the BFF.
 type Handler struct {
-	session       *session.Manager
-	kagentProxy   *httputil.ReverseProxy
+	session        *session.Manager
+	kagentProxy    *httputil.ReverseProxy
 	aregistryProxy *httputil.ReverseProxy
-	kagentHost    string
-	aregistryHost string
+	previewProxy   *httputil.ReverseProxy
+	kagentHost     string
+	aregistryHost  string
+	previewDomain  string // e.g. tesserix.app — gates which hosts the preview proxy serves
 }
 
 // Config holds Handler dependencies.
 type Config struct {
-	Session        *session.Manager
-	KagentUpstream string // e.g. http://kagent-ui.kagent-system.svc.cluster.local:8080 (blank = disabled)
+	Session           *session.Manager
+	KagentUpstream    string // e.g. http://kagent-ui.kagent-system.svc.cluster.local:8080 (blank = disabled)
 	AregistryUpstream string // e.g. http://agentregistry.agentregistry-system.svc.cluster.local:12121 (blank = disabled)
-	KagentHost     string // e.g. kagent.tesserix.app (blank = no public exposure)
-	AregistryHost  string // e.g. aregistry.tesserix.app (blank = no public exposure)
+	KagentHost        string // e.g. kagent.tesserix.app (blank = no public exposure)
+	AregistryHost     string // e.g. aregistry.tesserix.app (blank = no public exposure)
+	// Live preview proxy. PreviewDomain is the apex the preview hosts live
+	// under (e.g. "tesserix.app", matching preview-<id>.tesserix.app /
+	// api-<id>.tesserix.app). PreviewNamespace is the in-cluster namespace the
+	// per-session Services live in (e.g. "devai-previews"). Both blank =
+	// preview proxy disabled.
+	PreviewDomain    string
+	PreviewNamespace string
 }
 
 // New constructs a Handler.
@@ -61,13 +70,18 @@ func New(cfg Config) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Handler{
+	h := &Handler{
 		session:        cfg.Session,
 		kagentProxy:    newSingleHostReverseProxy(kagentURL),
 		aregistryProxy: newSingleHostReverseProxy(aregistryURL),
 		kagentHost:     cfg.KagentHost,
 		aregistryHost:  cfg.AregistryHost,
-	}, nil
+		previewDomain:  strings.ToLower(cfg.PreviewDomain),
+	}
+	if cfg.PreviewDomain != "" && cfg.PreviewNamespace != "" {
+		h.previewProxy = newDynamicPreviewProxy(cfg.PreviewNamespace)
+	}
+	return h, nil
 }
 
 // ServeHTTP routes by Host header to the right upstream. Any host that
@@ -87,6 +101,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		target = h.kagentProxy
 	case h.aregistryHost != "" && host == h.aregistryHost:
 		target = h.aregistryProxy
+	case h.previewProxy != nil && h.isPreviewHost(host):
+		// Live preview hosts (preview-<id>.<domain> / api-<id>.<domain>).
+		// The dynamic proxy derives the in-cluster Service from the host
+		// label on each request. WebSocket/HMR upgrades pass through
+		// because httputil.ReverseProxy handles 101 Switching Protocols.
+		target = h.previewProxy
 	default:
 		http.NotFound(w, r)
 		return
@@ -132,4 +152,57 @@ func stripPort(host string) string {
 		return host[:i]
 	}
 	return host
+}
+
+// isPreviewHost reports whether host is a preview host this BFF should serve:
+// a single-level subdomain of previewDomain whose label is prefixed
+// "preview-" or "api-". The prefix allowlist bounds the proxy so an
+// authenticated user can't turn the BFF into a catch-all SSRF into the
+// preview namespace — only Services named preview-*/api-* are reachable.
+func (h *Handler) isPreviewHost(host string) bool {
+	if h.previewDomain == "" {
+		return false
+	}
+	suffix := "." + h.previewDomain
+	if !strings.HasSuffix(host, suffix) {
+		return false
+	}
+	label := host[:len(host)-len(suffix)]
+	if label == "" || strings.Contains(label, ".") { // single-level only
+		return false
+	}
+	return strings.HasPrefix(label, "preview-") || strings.HasPrefix(label, "api-")
+}
+
+// previewServiceName maps a preview host to its in-cluster Service name. By
+// convention the leftmost DNS label IS the Service name (preview-<id> /
+// api-<id>), so routing needs no session→service lookup for the spike. Owner
+// scoping (session email == preview owner) is layered on in Phase 1 once the
+// preview_sessions map is wired.
+func previewServiceName(host, domain string) string {
+	return strings.TrimSuffix(host, "."+domain)
+}
+
+// newDynamicPreviewProxy builds one ReverseProxy whose director resolves the
+// upstream per request from the inbound Host — so a single proxy serves every
+// ephemeral preview Service in namespace ns. WebSocket/HMR upgrades work
+// automatically (ReverseProxy proxies the Upgrade since Go 1.12). The preview
+// Service exposes port 80 → the dev/app port.
+func newDynamicPreviewProxy(ns string) *httputil.ReverseProxy {
+	rp := &httputil.ReverseProxy{}
+	rp.Director = func(req *http.Request) {
+		host := strings.ToLower(stripPort(req.Host))
+		// domain = everything after the first label.
+		domain := host
+		if i := strings.IndexByte(host, '.'); i >= 0 {
+			domain = host[i+1:]
+		}
+		svc := previewServiceName(host, domain)
+		req.Header.Set("X-Forwarded-Host", req.Host)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.URL.Scheme = "http"
+		req.URL.Host = svc + "." + ns + ".svc.cluster.local:80"
+		req.Host = req.URL.Host
+	}
+	return rp
 }

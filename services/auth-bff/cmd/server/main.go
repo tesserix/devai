@@ -83,6 +83,8 @@ func main() {
 		AregistryUpstream: cfg.AregistryUpstreamURL,
 		KagentHost:        cfg.KagentHost,
 		AregistryHost:     cfg.AregistryHost,
+		PreviewDomain:     cfg.PreviewDomain,
+		PreviewNamespace:  cfg.PreviewNamespace,
 	})
 	if err != nil {
 		logger.Fatalf("proxy: %v", err)
