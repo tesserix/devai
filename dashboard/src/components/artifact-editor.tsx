@@ -60,6 +60,22 @@ function labelsObject(rows: [string, string][]): Record<string, string> {
   return out;
 }
 
+// Team is OPTIONAL metadata — a label, never part of the artifact's identity.
+// The tenant (namespace) is the uniqueness boundary; team just groups/filters
+// within it. Mirrors the seed convention (community seeds use devai.io/team).
+const TEAM_LABEL = "devai.io/team";
+function teamOf(rows: [string, string][]): string {
+  return rows.find(([k]) => k === TEAM_LABEL)?.[1] ?? "";
+}
+function withTeam(rows: [string, string][], team: string): [string, string][] {
+  const rest = rows.filter(([k]) => k !== TEAM_LABEL);
+  return team.trim() ? [...rest, [TEAM_LABEL, team.trim()]] : rest;
+}
+// A 409 from the publish path means the name is already taken in the tenant.
+function isConflict(msg: string): boolean {
+  return /\b409\b/.test(msg) || /already exists/i.test(msg);
+}
+
 export default function ArtifactEditor({
   kind,
   open,
@@ -80,6 +96,8 @@ export default function ArtifactEditor({
   const [parseErr, setParseErr] = useState<string | null>(null);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [teamOptions, setTeamOptions] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -90,13 +108,31 @@ export default function ArtifactEditor({
     setLabelRows(rowsFromDoc(d));
     setParseErr(null);
     setSubmitErr(null);
+    setConflict(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, kind]);
+
+  // The user's teams — optional grouping. Free-text is still allowed, so a
+  // catalog blip never blocks authoring.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    api
+      .listTeams()
+      .then((ts) => {
+        if (!cancelled) setTeamOptions(ts.map((t) => t.name).filter(Boolean));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   function applyDoc(next: Doc) {
     setDoc(next);
     setRaw(serialize(next, format));
     setParseErr(null);
+    setConflict(false);
   }
   function onField(path: string, value: string) {
     applyDoc(setPath(doc, path, value));
@@ -153,16 +189,23 @@ export default function ArtifactEditor({
   const lintWarnings = lint.filter((i) => i.level === "warning");
   const canSubmit = !!name && !parseErr && lintErrors.length === 0 && !submitting;
 
-  async function submit() {
+  const team = teamOf(labelRows);
+  function onTeam(value: string) {
+    onLabels(withTeam(labelRows, value));
+  }
+
+  async function submit(overwrite = false) {
     if (!canSubmit) return;
     setSubmitting(true);
     setSubmitErr(null);
     const clean = setPath(doc, "metadata.labels", labelsObject(labelRows));
     try {
-      await api.publishArtifact(plural, clean);
+      await api.publishArtifact(plural, clean, overwrite);
       onCreated(name);
     } catch (e) {
-      setSubmitErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setSubmitErr(msg);
+      setConflict(isConflict(msg));
     } finally {
       setSubmitting(false);
     }
@@ -238,6 +281,29 @@ export default function ArtifactEditor({
                 />
               );
             })}
+
+            {/* Team — optional grouping within the tenant (a label, not identity) */}
+            <div>
+              <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ink-soft)" }}>
+                Team <span style={{ color: "var(--ink-muted)" }}>· optional</span>
+              </label>
+              <input
+                className="field w-full"
+                list="artifact-team-list"
+                placeholder="e.g. platform — leave blank for the whole tenant"
+                value={team}
+                onChange={(e) => onTeam(e.target.value)}
+              />
+              <datalist id="artifact-team-list">
+                {teamOptions.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+              <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
+                Stored as the <span className="font-mono">{TEAM_LABEL}</span> label for filtering. The name must be
+                unique across the whole tenant regardless of team.
+              </p>
+            </div>
 
             {/* Labels */}
             <div>
@@ -339,11 +405,21 @@ export default function ArtifactEditor({
               ? submitErr
               : lintErrors.length
                 ? `${lintErrors.length} validation ${lintErrors.length === 1 ? "issue" : "issues"} — fix before publishing`
-                : `POST /api/registry/${plural}`}
+                : "Published to your tenant · the name must be unique within it"}
           </span>
           <div className="flex items-center gap-2">
             <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button className="btn-primary" disabled={!canSubmit} style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={submit}>
+            {conflict && (
+              <button
+                className="btn-secondary"
+                disabled={submitting}
+                onClick={() => submit(true)}
+                title="The name is taken — publish a new version of the existing artifact instead"
+              >
+                Publish as new version
+              </button>
+            )}
+            <button className="btn-primary" disabled={!canSubmit} style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={() => submit()}>
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               Publish {kind}
             </button>

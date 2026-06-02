@@ -367,12 +367,14 @@ export const api = {
 
   // Publish a registry CR manifest (skills/agents/prompts/mcp-servers/…). The
   // backend stamps the tenant namespace and forwards to the registry, so the
-  // artifact reflects in both DevAI and the aregistry marketplace.
-  publishArtifact: (plural: string, manifest: unknown) =>
-    apiFetch<{ name?: string; status?: string }>(`/registry/${plural}`, {
-      method: "POST",
-      body: JSON.stringify(manifest),
-    }),
+  // artifact reflects in both DevAI and the aregistry marketplace. Names are
+  // unique within the tenant: a create that collides returns 409 — pass
+  // overwrite to publish a new version of the existing artifact on purpose.
+  publishArtifact: (plural: string, manifest: unknown, overwrite = false) =>
+    apiFetch<{ name?: string; status?: string }>(
+      `/registry/${plural}${overwrite ? "?overwrite=true" : ""}`,
+      { method: "POST", body: JSON.stringify(manifest) }
+    ),
 
   // ── Authoring: custom skills ──────────────────────────────────────
   createSkill: (input: CreateSkillInput) =>

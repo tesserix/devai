@@ -287,6 +287,35 @@ class RegistryClient:
     def publish_tool(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/tools", body)
 
+    def artifact_exists(self, plural: str, name: str) -> bool | None:
+        """Does ``name`` already exist in this client's tenant namespace?
+
+        Returns True (200), False (404), or None when undetermined (network
+        error / unexpected status) so the caller can fail open rather than
+        block a publish on a transient blip. Scoped to the tenant namespace —
+        the registry enforces name uniqueness per namespace across all kinds.
+        """
+        path = f"/v0/{plural}/{name}"
+        if self._namespace:
+            path += f"?namespace={self._namespace}"
+        try:
+            import httpx  # type: ignore[import-untyped]
+        except ImportError:
+            return None
+        headers: dict[str, str] = {"Accept": "application/json"}
+        bearer = self._bearer()
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+        try:
+            r = httpx.get(f"{self._base_url}{path}", headers=headers, timeout=self._timeout)
+        except httpx.HTTPError:
+            return None
+        if r.status_code == 200:
+            return True
+        if r.status_code == 404:
+            return False
+        return None
+
     def delete(self, plural: str, name: str, tag: str = "latest") -> None:
         self._request("DELETE", f"/v0/{plural}/{name}/{tag}", body=None, raise_on_error=True)
 

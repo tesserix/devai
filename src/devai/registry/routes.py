@@ -191,8 +191,14 @@ _PUBLISH_METHOD: dict[str, str] = {
 async def publish(request: Request, plural: str) -> dict[str, Any]:
     """Publish a registry CR manifest (apiVersion/kind/metadata/spec) — the
     write path behind the dashboard's artifact editor. Mirrors aregistry's
-    POST /v0/{plural}. The manifest is stamped with the tenant namespace so it
-    lands where the catalog lives and the dashboard (and aregistry) read it."""
+    POST /v0/{plural}.
+
+    Tenancy: every artifact is stamped with the tenant namespace, which is the
+    isolation + uniqueness boundary. Within a tenant the registry enforces name
+    uniqueness across all kinds, so on CREATE we reject a name that already
+    exists (a silent same-name publish would otherwise version-bump an existing
+    artifact). Pass ``?overwrite=true`` to publish a new version on purpose.
+    Team is optional metadata (a label), never part of the identity."""
     method = _PUBLISH_METHOD.get(plural)
     if method is None:
         raise HTTPException(status_code=404, detail=f"unknown registry kind: {plural}")
@@ -204,15 +210,45 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="manifest must be a JSON object")
     # Stamp the tenant namespace (the editor doesn't set it) so the artifact is
-    # visible to the same scoped reads the catalog uses.
+    # visible to the same scoped reads the catalog uses. An explicit namespace
+    # in the manifest must equal the tenant — cross-tenant writes are refused.
     ns = getattr(client, "_namespace", "") or ""
     meta = body.get("metadata")
-    if ns and isinstance(meta, dict) and not meta.get("namespace"):
+    if not isinstance(meta, dict):
+        raise HTTPException(status_code=400, detail="manifest.metadata is required")
+    requested_ns = (meta.get("namespace") or "").strip()
+    if ns and requested_ns and requested_ns != ns:
+        raise HTTPException(
+            status_code=403,
+            detail=f"cannot publish into tenant '{requested_ns}' — this DevAI is scoped to '{ns}'",
+        )
+    if ns:
         meta["namespace"] = ns
+
+    # Enforce name uniqueness within the tenant on create. Skip when the caller
+    # explicitly opts into versioning an existing artifact.
+    name = (meta.get("name") or "").strip()
+    overwrite = request.query_params.get("overwrite", "").lower() in ("1", "true", "yes")
+    if name and not overwrite:
+        exists = await asyncio.to_thread(client.artifact_exists, plural, name)
+        if exists:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"'{name}' already exists in tenant '{ns or 'default'}'. "
+                    "Names are unique within a tenant — pick a different name, "
+                    "or republish with overwrite to version the existing artifact."
+                ),
+            )
+
     try:
         result = await asyncio.to_thread(getattr(client, method), body)
     except RegistryError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        # The registry's own cross-kind name guard surfaces here as a 4xx in the
+        # message; relay it as a conflict so the editor shows a clean error.
+        detail = str(e)
+        status = 409 if "409" in detail or "conflict" in detail.lower() else 502
+        raise HTTPException(status_code=status, detail=detail) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"publish: {e}") from e
     client.refresh()
