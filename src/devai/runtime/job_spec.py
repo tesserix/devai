@@ -250,8 +250,13 @@ def build_preview_manifests(
     `editor-<run_id>.devai.tesserix.app` → the bridge port.
     """
     name_frag = _dns_safe(inputs.run_id, max_len=24)
-    name = f"devai-preview-{name_frag}"
+    # The Service name == the leftmost DNS label of the preview host, which is
+    # the convention the devai-auth-bff preview proxy resolves on
+    # (preview-<id>.tesserix.app → Service preview-<id> in the previews ns).
+    name = f"preview-{name_frag}"
+    ns = cfg.preview_namespace
     workspace = "workspace"
+    pvc_name = f"{name}-work"
 
     labels = {
         "app.kubernetes.io/managed-by": "devai",
@@ -261,9 +266,22 @@ def build_preview_manifests(
         "devai.tesserix.app/repo": _dns_safe(inputs.repo, max_len=48),
     }
 
+    # A PVC (not emptyDir) so the workspace + node_modules survive pod
+    # restarts and the editor-bridge edits persist — the basis for the
+    # hot-edit loop and edit→git.
     pod_volumes = [
-        {"name": workspace, "emptyDir": {"sizeLimit": "8Gi"}},
+        {"name": workspace, "persistentVolumeClaim": {"claimName": pvc_name}},
     ]
+    pvc = {
+        "apiVersion": "v1",
+        "kind": "PersistentVolumeClaim",
+        "metadata": {"name": pvc_name, "namespace": ns, "labels": labels},
+        "spec": {
+            "accessModes": ["ReadWriteOnce"],
+            "storageClassName": "standard-rwo",
+            "resources": {"requests": {"storage": "10Gi"}},
+        },
+    }
 
     init_containers = [
         {
@@ -354,7 +372,7 @@ def build_preview_manifests(
     deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
-        "metadata": {"name": name, "namespace": cfg.namespace, "labels": labels},
+        "metadata": {"name": name, "namespace": ns, "labels": labels},
         "spec": {
             "replicas": 1,
             "selector": {"matchLabels": {"app.kubernetes.io/name": name}},
@@ -375,62 +393,51 @@ def build_preview_manifests(
     service = {
         "apiVersion": "v1",
         "kind": "Service",
-        "metadata": {"name": name, "namespace": cfg.namespace, "labels": labels},
+        "metadata": {"name": name, "namespace": ns, "labels": labels},
         "spec": {
             "selector": {"app.kubernetes.io/name": name},
+            # Port 80 is what the BFF preview proxy dials (preview-<id> → :80).
             "ports": [
                 {"name": "dev", "port": 80, "targetPort": inputs.dev_port},
-                {
-                    "name": "editor",
-                    "port": 81,
-                    "targetPort": inputs.editor_bridge_port,
-                },
+                {"name": "editor", "port": 81, "targetPort": inputs.editor_bridge_port},
             ],
         },
     }
 
-    preview_host = f"preview-{name_frag}.{cfg.preview_domain}"
-    editor_host = f"editor-{name_frag}.{cfg.preview_domain}"
+    preview_host = f"{name}.{cfg.preview_domain}"  # preview-<id>.tesserix.app
+    # Route the preview host to the devai-auth-bff (NOT the Service directly) so
+    # the devai_session check gates it; the BFF then proxies to this Service.
+    # Gateway is the live tesseract-gateway; the *.tesserix.app wildcard cert
+    # covers the single-level preview host.
     virtualservice = {
         "apiVersion": "networking.istio.io/v1beta1",
         "kind": "VirtualService",
-        "metadata": {"name": name, "namespace": cfg.namespace, "labels": labels},
+        "metadata": {"name": name, "namespace": ns, "labels": labels},
         "spec": {
-            "hosts": [preview_host, editor_host],
-            "gateways": ["istio-ingress/devai-gateway"],
+            "hosts": [preview_host],
+            "gateways": ["istio-ingress/tesseract-gateway"],
             "http": [
                 {
-                    "match": [{"authority": {"exact": preview_host}}],
                     "route": [
                         {
                             "destination": {
-                                "host": f"{name}.{cfg.namespace}.svc.cluster.local",
-                                "port": {"number": 80},
+                                "host": "devai-auth-bff.devai.svc.cluster.local",
+                                "port": {"number": 8090},
                             }
                         }
                     ],
-                },
-                {
-                    "match": [{"authority": {"exact": editor_host}}],
-                    "route": [
-                        {
-                            "destination": {
-                                "host": f"{name}.{cfg.namespace}.svc.cluster.local",
-                                "port": {"number": 81},
-                            }
-                        }
-                    ],
-                },
+                    "timeout": "0s",  # HMR WebSocket is long-lived
+                }
             ],
         },
     }
 
     return {
+        "pvc": pvc,
         "deployment": deployment,
         "service": service,
         "virtualservice": virtualservice,
         "preview_host": preview_host,  # type: ignore[dict-item]
-        "editor_host": editor_host,  # type: ignore[dict-item]
     }
 
 

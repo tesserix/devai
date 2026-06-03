@@ -50,6 +50,7 @@ class RuntimeConfig:
     runner_image: str
     runner_image_per_stack: dict[str, str]
     preview_domain: str
+    preview_namespace: str
     registry_url: str
     pull_secret_name: str | None
     service_account_name: str
@@ -83,10 +84,19 @@ class RuntimeConfig:
                 "ghcr.io/tesserix/devai/devai-runner:main",
             ),
             runner_image_per_stack=per_stack,
+            # Single-level subdomain so the *.tesserix.app wildcard cert covers
+            # preview-<id>.tesserix.app (a 2nd-level host would have no TLS).
             preview_domain=getattr(
                 settings,
                 "preview_domain",
-                "preview.devai.tesserix.app",
+                "tesserix.app",
+            ),
+            # Dedicated namespace for ephemeral preview workloads (quota +
+            # deny-all-egress NetworkPolicy live here, not the app namespace).
+            preview_namespace=getattr(
+                settings,
+                "preview_namespace",
+                "devai-previews",
             ),
             registry_url=getattr(settings, "registry_url", "") or "",
             pull_secret_name=getattr(settings, "k8s_pull_secret_name", None) or None,
@@ -270,7 +280,19 @@ class K8sJobRuntime:
         dep = manifests["deployment"]
         svc = manifests["service"]
         vs = manifests["virtualservice"]
-        ns = self._config.namespace
+        pvc = manifests.get("pvc")
+        # Previews live in their own namespace (carried on each manifest), not
+        # the runner namespace.
+        ns = dep["metadata"].get("namespace") or self._config.namespace
+
+        # PVC first — the Deployment mounts it. PVCs are effectively immutable,
+        # so AlreadyExists is fine (reuse the existing workspace) and we don't patch.
+        if pvc is not None:
+            try:
+                await self._core_v1.create_namespaced_persistent_volume_claim(namespace=ns, body=pvc)
+            except Exception as e:  # noqa: BLE001
+                if "AlreadyExists" not in str(e) and " 409 " not in str(e):
+                    raise JobDispatchFailed(f"create pvc: {e}") from e
 
         try:
             await self._apps_v1.create_namespaced_deployment(namespace=ns, body=dep)
@@ -328,11 +350,10 @@ class K8sJobRuntime:
 
         name = dep["metadata"]["name"]
         logger.info(
-            "k8s runtime: applied preview %s/%s (preview_host=%s editor_host=%s)",
+            "k8s runtime: applied preview %s/%s (preview_host=%s)",
             ns,
             name,
             manifests.get("preview_host"),
-            manifests.get("editor_host"),
         )
         return {
             "deployment_name": name,
@@ -350,7 +371,7 @@ class K8sJobRuntime:
         deleting the others — a half-cleaned preview is worse than no
         cleanup attempt.
         """
-        ns = self._config.namespace
+        ns = self._config.preview_namespace
         # VirtualService first so traffic stops flowing before the pod dies.
         try:
             await self._custom_objects.delete_namespaced_custom_object(
@@ -370,6 +391,11 @@ class K8sJobRuntime:
             await self._apps_v1.delete_namespaced_deployment(name=name, namespace=ns)
         except Exception:
             logger.debug("delete deployment %s skipped/failed", name, exc_info=True)
+        # The PVC last — its name is "<deployment>-work".
+        try:
+            await self._core_v1.delete_namespaced_persistent_volume_claim(name=f"{name}-work", namespace=ns)
+        except Exception:
+            logger.debug("delete pvc %s-work skipped/failed", name, exc_info=True)
         logger.info("k8s runtime: deleted preview %s/%s", ns, name)
 
     async def find_pod_for_job(self, job_name: str) -> str | None:

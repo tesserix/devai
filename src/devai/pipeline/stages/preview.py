@@ -113,6 +113,10 @@ class PreviewSpinnerStage(PipelineStage):
         task.agent_context["preview_url"] = preview_url
         task.agent_context["editor_url"] = editor_url
         task.agent_context["preview_deployment_name"] = applied["deployment_name"]
+        # Populate the first-class task fields so cleanup + the dashboard can
+        # resolve the preview without parsing the handover bag.
+        task.sandbox_pod = applied["deployment_name"]
+        task.dev_server_port = int(self.config.get("dev_port", _DEFAULT_DEV_PORT))
 
         logger.info(
             "spin_preview_pod: applied %s — preview=%s editor=%s",
