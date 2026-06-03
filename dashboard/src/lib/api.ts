@@ -473,7 +473,33 @@ export const api = {
         { method: "POST" }
       ),
   },
+
+  // ── Live preview: on-demand ephemeral preview environments ──────
+  // preview_url is the unique forwarded host (preview-<id>.tesserix.app) —
+  // the same URL the dashboard iframes AND opens in a new tab.
+  preview: {
+    start: (repo: string, ref = "main") =>
+      apiFetch<PreviewSession>("/preview/start", {
+        method: "POST",
+        body: JSON.stringify({ repo, ref }),
+      }),
+    get: (id: string) => apiFetch<PreviewSession>(`/preview/${encodeURIComponent(id)}`),
+    list: (mine = false) => apiFetch<PreviewSession[]>(`/preview${mine ? "?mine=true" : ""}`),
+    stop: (id: string) =>
+      apiFetch<{ stopped: string }>(`/preview/${encodeURIComponent(id)}/stop`, { method: "POST" }),
+  },
 };
+
+export interface PreviewSession {
+  session_id: string;
+  repo: string;
+  ref: string;
+  owner?: string;
+  fe_url: string;
+  preview_url: string;
+  deployment?: string;
+  status: "starting" | "running" | "failed" | "stopped";
+}
 
 // ── SRE Studio types ──────────────────────────────────────────────
 export interface SREDraft {

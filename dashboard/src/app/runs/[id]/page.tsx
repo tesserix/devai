@@ -150,12 +150,20 @@ export default function RunDetailPage() {
           </div>
         )}
         {tab === "chat" && (
-          <div className="h-full">
-            <ChatPanel runId={runId} repo={run?.repo} stage={run?.stage} />
+          // Chat on the left, live preview on the right — edits made in chat
+          // hot-reload the preview beside it.
+          <div className="h-full flex">
+            <div className="flex-1 min-w-0">
+              <ChatPanel runId={runId} repo={run?.repo} stage={run?.stage} />
+            </div>
+            <div className="w-px shrink-0" style={{ background: "var(--border)" }} />
+            <div className="flex-1 min-w-0">
+              <PreviewPane url={previewUrl} editorUrl={editorUrl} repo={run?.repo} />
+            </div>
           </div>
         )}
         {tab === "preview" && (
-          <PreviewPane url={previewUrl} editorUrl={editorUrl} />
+          <PreviewPane url={previewUrl} editorUrl={editorUrl} repo={run?.repo} />
         )}
         {tab === "repo" && <RepoPanel runId={runId} />}
       </div>
@@ -163,14 +171,45 @@ export default function RunDetailPage() {
   );
 }
 
-function PreviewPane({ url, editorUrl }: { url: string; editorUrl: string }) {
-  if (!url) {
+function PreviewPane({ url, editorUrl, repo }: { url: string; editorUrl: string; repo?: string }) {
+  // The pipeline-run URL (from spin_preview_pod) takes precedence; otherwise
+  // the user can start an on-demand preview for this repo. Both resolve to the
+  // same unique forwarded host (preview-<id>.tesserix.app).
+  const [liveUrl, setLiveUrl] = useState(url);
+  const [starting, setStarting] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (url) setLiveUrl(url);
+  }, [url]);
+
+  async function start() {
+    if (!repo) return;
+    setStarting(true);
+    setErr("");
+    try {
+      const s = await api.preview.start(repo, "main");
+      setLiveUrl(s.preview_url || s.fe_url || "");
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  if (!liveUrl) {
     return (
       <div
-        className="h-full flex items-center justify-center text-sm"
+        className="h-full flex flex-col items-center justify-center gap-3 text-sm"
         style={{ color: "var(--ink-muted)" }}
       >
-        Preview not available yet — the <code>spin_preview_pod</code> stage hasn&apos;t completed.
+        <p>No live preview yet for {repo || "this run"}.</p>
+        {repo && (
+          <button className="btn-primary !py-1.5 text-xs" disabled={starting} onClick={start}>
+            {starting ? "Starting…" : "Start preview"}
+          </button>
+        )}
+        {err && <p style={{ color: "var(--error)" }}>{err}</p>}
       </div>
     );
   }
@@ -181,22 +220,32 @@ function PreviewPane({ url, editorUrl }: { url: string; editorUrl: string }) {
         style={{ borderBottom: "1px solid var(--border)", background: "var(--surface-muted)" }}
       >
         <span style={{ color: "var(--ink-muted)" }}>preview:</span>
-        <a href={url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-          {url}
+        <a
+          href={liveUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="truncate"
+          style={{ color: "var(--accent)" }}
+        >
+          {liveUrl}
         </a>
         {editorUrl && (
-          <>
-            <span style={{ color: "var(--ink-muted)" }} className="ml-4">
-              editor:
-            </span>
-            <a href={editorUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-              {editorUrl}
-            </a>
-          </>
+          <a href={editorUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+            editor
+          </a>
         )}
+        {/* Open the SAME unique forwarded URL standalone in a new tab. */}
+        <a
+          href={liveUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-auto shrink-0 btn-secondary !py-1 !px-2"
+        >
+          Open in new tab ↗
+        </a>
       </div>
       <iframe
-        src={url}
+        src={liveUrl}
         className="flex-1 w-full"
         style={{ border: "none", background: "white" }}
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
