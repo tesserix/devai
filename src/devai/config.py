@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     # downstream MCP (docs/agentic/MCP-HUB.md). Discovery is registry-driven, so
     # there is nothing to hardcode here — only operational knobs.
     mcp_hub_enabled: bool = True
+    # Port the Hub's ASGI app listens on (its own Deployment, not devai-api).
+    mcp_hub_port: int = 8095
     # Service token the Hub presents DOWNSTREAM for authMode=jwt servers (the
     # caller's identity is terminated at the Hub; callers never hold this).
     # Empty → no bearer injected (fine for authMode=none/header downstreams).
