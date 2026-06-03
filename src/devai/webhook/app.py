@@ -217,6 +217,23 @@ def create_app(
             logger.exception("SRE Studio service failed to start — sre-studio API will 503")
             app.state.sre_studio_service = None
 
+        # Live preview service — on-demand ephemeral preview environments.
+        # Reuses the SRE Studio DB pool + the pipeline's connected K8s runtime.
+        app.state.preview_service = None
+        try:
+            from devai.preview import PreviewService
+
+            if app.state.sre_studio_db is not None:
+                app.state.preview_service = PreviewService(
+                    app.state.sre_studio_db,
+                    pipeline=app.state.pipeline_service,
+                    settings=config,
+                )
+                logger.info("Preview service ready")
+        except Exception:
+            logger.exception("Preview service failed to start — preview API will 503")
+            app.state.preview_service = None
+
         # Repo onboarding service (Repos page). Independent of the
         # pipeline runtime: build an SCM client (reuse the pipeline's if
         # one exists) + a best-effort Postgres pool, and fall back to the
@@ -492,6 +509,12 @@ def create_app(
     from devai.sre_studio.routes import router as sre_studio_router
 
     app.include_router(sre_studio_router)
+
+    # Live preview routes (/api/preview/*) — start/inspect/stop on-demand
+    # preview environments. 503s until preview_service is wired (lifespan).
+    from devai.preview.routes import router as preview_router
+
+    app.include_router(preview_router)
 
     # Teams routes (/api/teams/*) — human teams + the AI crews they own.
     # Always mounted; returns 503 until team_service is wired (lifespan).

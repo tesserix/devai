@@ -693,3 +693,70 @@ class Database:
     async def delete_schedule(self, schedule_id: str) -> bool:
         result = await self.pool.execute("DELETE FROM sre_schedules WHERE id = $1", schedule_id)
         return result.split()[-1] != "0"
+
+    # =========================================================================
+    # Live previews — per-task ephemeral preview environments
+    #
+    # DDL lives in tesserix-k8s db-schema-bootstrap (preview_sessions). One row
+    # per running preview; the runtime resources (PVC/Deployment/Service/VS)
+    # live in the devai-previews namespace and are named after `deployment`.
+    # =========================================================================
+
+    async def create_preview_session(
+        self,
+        session_id: str,
+        repo: str,
+        ref: str,
+        owner: str,
+        fe_url: str,
+        deployment: str,
+        status: str = "starting",
+    ) -> None:
+        await self.pool.execute(
+            """INSERT INTO preview_sessions
+                 (id, repo, ref, owner, fe_url, deployment, status)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+            session_id,
+            repo,
+            ref,
+            owner,
+            fe_url,
+            deployment,
+            status,
+        )
+
+    async def get_preview_session(self, session_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow("SELECT * FROM preview_sessions WHERE id = $1", session_id)
+        return dict(row) if row else None
+
+    async def list_preview_sessions(self, owner: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        if owner:
+            rows = await self.pool.fetch(
+                "SELECT * FROM preview_sessions WHERE owner = $1 ORDER BY created_at DESC LIMIT $2",
+                owner,
+                limit,
+            )
+        else:
+            rows = await self.pool.fetch("SELECT * FROM preview_sessions ORDER BY created_at DESC LIMIT $1", limit)
+        return [dict(r) for r in rows]
+
+    async def find_live_preview(self, repo: str, ref: str, owner: str) -> dict[str, Any] | None:
+        """Reuse an existing non-stopped preview for the same (repo, ref, owner)."""
+        row = await self.pool.fetchrow(
+            "SELECT * FROM preview_sessions WHERE repo = $1 AND ref = $2 AND owner = $3 "
+            "AND status <> 'stopped' ORDER BY created_at DESC LIMIT 1",
+            repo,
+            ref,
+            owner,
+        )
+        return dict(row) if row else None
+
+    async def touch_preview_session(self, session_id: str) -> None:
+        await self.pool.execute("UPDATE preview_sessions SET last_access_at = NOW() WHERE id = $1", session_id)
+
+    async def set_preview_session_status(self, session_id: str, status: str) -> None:
+        await self.pool.execute(
+            "UPDATE preview_sessions SET status = $2, updated_at = NOW() WHERE id = $1",
+            session_id,
+            status,
+        )

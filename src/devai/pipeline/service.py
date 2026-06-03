@@ -332,6 +332,15 @@ class PipelineService:
 
     # ── Read surface ─────────────────────────────────────────────────
 
+    @property
+    def k8s_runtime(self) -> Any:
+        """The shared K8sJobRuntime (or None if the runtime didn't start).
+
+        Lets on-demand consumers like the PreviewService reuse the same
+        connected client + RuntimeConfig instead of building their own.
+        """
+        return getattr(self, "_k8s_runtime", None)
+
     def register_blueprint(self, bp: Any) -> bool:
         """Hot-register an already-loaded Blueprint so it's immediately
         runnable. Used by the authoring service when a user publishes a
