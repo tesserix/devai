@@ -405,7 +405,14 @@ class Settings(BaseSettings):
     # agent). Default off so a registry-less dev cluster behaves exactly as
     # before; tesserix-k8s flips this on in prod.
     registry_publish_enabled: bool = False
-    # Namespace/tenant authored artifacts land under in the registry.
+    # Registry tenant (namespace) authored artifacts are published under and
+    # read back from — the uniqueness + isolation boundary in the catalog.
+    # Deployment-configurable via DEVAI_REGISTRY_DEFAULT_TENANT (the devai-api
+    # chart sets it from agenticControlPlane.registryDefaultTenant); NOT a code
+    # constant. This is the ORG/registry tenant and is intentionally distinct
+    # from Principal.tenant_id, which is the GIP auth pool (alm vs sre) — do NOT
+    # wire the pool id here. Per-org derivation belongs here once real org
+    # tenants exist; until then this single configured value is correct.
     registry_default_tenant: str = "devai"
     # On boot, re-publish every stored authored artifact (reconciles the
     # registry after a registry wipe or a devai redeploy). Off by default.
