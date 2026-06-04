@@ -438,6 +438,89 @@ class K8sJobRuntime:
             logger.debug("delete pvc %s-work skipped/failed", name, exc_info=True)
         logger.info("k8s runtime: deleted preview %s/%s", ns, name)
 
+    # ── Preview verify & self-heal helpers ───────────────────────────
+    #
+    # The healer (devai.preview.verify) reads pod status + per-container logs
+    # from the *previews* namespace (not the runner namespace) and patches the
+    # preview Deployment/Service in place to recover from common bring-up
+    # failures (OOM, install, port drift, CORS).
+
+    async def get_preview_pod(self, name: str) -> dict[str, Any] | None:
+        """Newest pod backing preview Deployment ``name`` (as a plain dict).
+
+        Selects on the same label the manifest builders stamp
+        (``app.kubernetes.io/name=<name>``) in the previews namespace.
+        Returns None when no pod has scheduled yet.
+        """
+        try:
+            pods = await self._core_v1.list_namespaced_pod(
+                namespace=self._config.preview_namespace,
+                label_selector=f"app.kubernetes.io/name={name}",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("k8s runtime: list preview pods for %s failed", name, exc_info=True)
+            return None
+        if not pods.items:
+            return None
+        # Most-recently-created first so heal acts on the live ReplicaSet's pod.
+        newest = max(
+            pods.items,
+            key=lambda p: (p.metadata.creation_timestamp.timestamp() if p.metadata.creation_timestamp else 0),
+        )
+        return newest.to_dict()
+
+    async def preview_pod_logs(self, pod_name: str, *, container: str | None = None, tail_lines: int = 300) -> str:
+        """Per-container stdout from a preview pod (best-effort, '' on error)."""
+        try:
+            return await self._core_v1.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=self._config.preview_namespace,
+                container=container,
+                tail_lines=tail_lines,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("k8s runtime: preview_pod_logs(%s/%s) failed: %s", pod_name, container, e)
+            return ""
+
+    async def get_preview_deployment(self, name: str) -> dict[str, Any] | None:
+        try:
+            dep = await self._apps_v1.read_namespaced_deployment(name=name, namespace=self._config.preview_namespace)
+            return dep.to_dict()
+        except Exception:  # noqa: BLE001
+            logger.debug("k8s runtime: get_preview_deployment(%s) failed", name, exc_info=True)
+            return None
+
+    async def get_preview_service(self, name: str) -> dict[str, Any] | None:
+        try:
+            svc = await self._core_v1.read_namespaced_service(name=name, namespace=self._config.preview_namespace)
+            return svc.to_dict()
+        except Exception:  # noqa: BLE001
+            logger.debug("k8s runtime: get_preview_service(%s) failed", name, exc_info=True)
+            return None
+
+    async def patch_preview_deployment(self, name: str, patch: dict[str, Any]) -> bool:
+        """Strategic-merge patch a preview Deployment (triggers a rollout)."""
+        try:
+            await self._apps_v1.patch_namespaced_deployment(
+                name=name, namespace=self._config.preview_namespace, body=patch
+            )
+            logger.info("k8s runtime: heal-patched deployment %s/%s", self._config.preview_namespace, name)
+            return True
+        except Exception:  # noqa: BLE001
+            logger.warning("k8s runtime: patch_preview_deployment(%s) failed", name, exc_info=True)
+            return False
+
+    async def patch_preview_service(self, name: str, patch: dict[str, Any]) -> bool:
+        try:
+            await self._core_v1.patch_namespaced_service(
+                name=name, namespace=self._config.preview_namespace, body=patch
+            )
+            logger.info("k8s runtime: heal-patched service %s/%s", self._config.preview_namespace, name)
+            return True
+        except Exception:  # noqa: BLE001
+            logger.warning("k8s runtime: patch_preview_service(%s) failed", name, exc_info=True)
+            return False
+
     async def find_pod_for_job(self, job_name: str) -> str | None:
         """First pod matching `job-name=<job_name>`. None if the Job hasn't
         scheduled a pod yet (or already cleaned up)."""

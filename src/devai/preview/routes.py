@@ -72,6 +72,18 @@ async def get_preview(request: Request, session_id: str) -> dict[str, Any]:
     return row
 
 
+@router.post("/{session_id}/verify")
+async def verify_preview(request: Request, session_id: str, heal: bool = True) -> dict[str, Any]:
+    """Diagnose (and by default self-heal) a preview's bring-up failures."""
+    try:
+        res = await _service(request).verify(session_id, heal=heal)
+    except PreviewError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if res is None:
+        raise HTTPException(status_code=404, detail=f"preview {session_id!r} not found")
+    return res
+
+
 @router.post("/{session_id}/stop")
 async def stop_preview(request: Request, session_id: str) -> dict[str, Any]:
     if not await _service(request).stop(session_id):

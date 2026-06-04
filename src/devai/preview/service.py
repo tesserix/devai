@@ -171,6 +171,42 @@ class PreviewService:
     async def list(self, owner: str | None = None) -> list[dict[str, Any]]:
         return [_public(r) for r in await self._db.list_preview_sessions(owner=owner)]
 
+    async def verify(self, session_id: str, *, heal: bool = True) -> dict[str, Any] | None:
+        """Diagnose a preview and (optionally) apply safe in-place fixes.
+
+        Returns the VerifyReport dict (status + per-container diagnoses + the
+        list of heals applied), or None when the session is unknown. Reflects
+        the resolved status back onto the session row for the dashboard.
+        """
+        row = await self._db.get_preview_session(session_id)
+        if row is None:
+            return None
+        runtime = self._runtime()
+        if runtime is None:
+            raise PreviewError("preview runtime unavailable (pipeline/k8s not started)")
+        name = row.get("deployment")
+        if not name:
+            raise PreviewError("preview has no deployment to verify")
+
+        from devai.preview.verify import PreviewHealer
+
+        report = await PreviewHealer(runtime).verify(name, heal=heal, web_origin=row.get("fe_url", ""))
+        # Map the verify status onto the session lifecycle status.
+        mapped = {
+            "healthy": "running",
+            "healing": "starting",
+            "pending": "starting",
+            "degraded": "degraded",
+            "error": "degraded",
+        }.get(report.status, row.get("status", "starting"))
+        try:
+            await self._db.set_preview_session_status(session_id, mapped)
+        except Exception:  # noqa: BLE001 — status reflection is best-effort
+            logger.debug("preview: status reflect failed for %s", session_id, exc_info=True)
+        out = report.as_dict()
+        out["session_id"] = session_id
+        return out
+
     async def stop(self, session_id: str) -> bool:
         row = await self._db.get_preview_session(session_id)
         if row is None:
