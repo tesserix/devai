@@ -176,7 +176,12 @@ async def mount_domain_servers(app: Any, settings: Settings) -> list[Any]:
     for segment, tools in build_domains(settings).items():
         try:
             server = build_domain_server(segment, tools)
-            manager = StreamableHTTPSessionManager(app=server)
+            # stateless=True: devai-api runs multiple replicas with no session
+            # affinity, so a stateful streamable-HTTP session would break when a
+            # follow-up request lands on a different pod ("Session terminated").
+            # These domains are pure request/response (no reverse-path), so each
+            # call being self-contained is exactly right.
+            manager = StreamableHTTPSessionManager(app=server, stateless=True)
             cm = manager.run()
             await cm.__aenter__()
             entered.append(cm)
