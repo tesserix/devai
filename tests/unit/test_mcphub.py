@@ -316,3 +316,55 @@ async def test_hub_on_changed_fires(hub):
     hub.on_changed = _on_changed
     await hub.refresh()
     assert fired == [True]
+
+
+# --------------------------------------------------------------------------- #
+# Phase 6 — per-domain downstream tool servers (real runnable tools)
+# --------------------------------------------------------------------------- #
+
+
+async def test_sample_domain_runs():
+    from devai.mcphub.tool_server import sample_domain
+
+    tools = {t.name: t for t in sample_domain()}
+    assert set(tools) == {"sample_ping", "sample_echo"}
+    assert await tools["sample_ping"].handler({}) == "pong"
+    assert await tools["sample_echo"].handler({"text": "hi"}) == "hi"
+
+
+def test_scm_domain_binds_real_tools(monkeypatch):
+    import devai.scm.factory as scm_factory
+    from devai.config import Settings
+    from devai.mcphub import tool_server
+
+    monkeypatch.setattr(scm_factory, "create_scm_client", lambda _cfg: object())
+    tools = tool_server.scm_domain(Settings())
+    names = {t.name for t in tools}
+    # Every exposed name is a real registry scm_* tool with a bound handler.
+    assert names and all(n.startswith("scm_") for n in names)
+    assert "scm_get_file_content" in names
+    assert "scm_create_pull_request" in names
+    assert all(callable(t.handler) for t in tools)
+
+
+def test_scm_domain_degrades_without_client(monkeypatch):
+    import devai.scm.factory as scm_factory
+    from devai.config import Settings
+    from devai.mcphub import tool_server
+
+    def _boom(_cfg):
+        raise RuntimeError("no creds")
+
+    monkeypatch.setattr(scm_factory, "create_scm_client", _boom)
+    assert tool_server.scm_domain(Settings()) == []
+
+
+def test_build_domains_includes_sample(monkeypatch):
+    import devai.scm.factory as scm_factory
+    from devai.config import Settings
+    from devai.mcphub import tool_server
+
+    monkeypatch.setattr(scm_factory, "create_scm_client", lambda _cfg: object())
+    domains = tool_server.build_domains(Settings())
+    assert "sample" in domains and "scm" in domains
+    assert len(domains["scm"]) >= 10

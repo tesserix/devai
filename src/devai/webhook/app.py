@@ -357,12 +357,26 @@ def create_app(
             logger.exception("MessagingService failed to start — remote channels disabled")
             app.state.messaging_service = None
 
+        # Per-domain downstream MCP servers (/mcp/scm, /mcp/sample) the MCP Hub
+        # federates. Flag-gated; additive; failure here never blocks startup.
+        app.state._domain_mcp_cms = []
+        if getattr(config, "mcp_downstream_servers_enabled", False):
+            try:
+                from devai.mcphub.tool_server import mount_domain_servers
+
+                app.state._domain_mcp_cms = await mount_domain_servers(app, config)
+            except Exception:
+                logger.exception("downstream domain MCP mount failed — skipped")
+
         try:
             yield
         finally:
             if getattr(app.state, "_mcp_session_cm", None) is not None:
                 with suppress(Exception):
                     await app.state._mcp_session_cm.__aexit__(None, None, None)
+            for cm in getattr(app.state, "_domain_mcp_cms", []) or []:
+                with suppress(Exception):
+                    await cm.__aexit__(None, None, None)
             if messaging_service is not None:
                 with suppress(Exception):
                     await messaging_service.stop()

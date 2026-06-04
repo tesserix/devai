@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # downstream MCP (docs/agentic/MCP-HUB.md). Discovery is registry-driven, so
     # there is nothing to hardcode here — only operational knobs.
     mcp_hub_enabled: bool = True
+    # Mount per-domain downstream MCP servers (/mcp/scm, /mcp/sample) on devai-api
+    # so the Hub federates REAL runnable tools. Off by default until verified;
+    # the devai-api chart enables it in-cluster. Only genuinely standalone tools
+    # are served (SCM ops, sample) — pipeline-stage tools are not (MCP-HUB.md §8).
+    mcp_downstream_servers_enabled: bool = False
     # Port the Hub's ASGI app listens on (its own Deployment, not devai-api).
     mcp_hub_port: int = 8095
     # Service token the Hub presents DOWNSTREAM for authMode=jwt servers (the
@@ -291,9 +296,12 @@ class Settings(BaseSettings):
         }
     )
 
-    # Live preview pods route at `preview-<run_id>.<preview_domain>` and
-    # the Claude-Code editor bridge at `editor-<run_id>.<preview_domain>`.
-    preview_domain: str = "devai.tesserix.app"
+    # Live preview pods route at `preview-<run_id>.<preview_domain>` (a
+    # single-level subdomain so the *.tesserix.app wildcard cert covers it),
+    # behind the devai-auth-bff session gate. Per-session Services live in
+    # `preview_namespace`.
+    preview_domain: str = "tesserix.app"
+    preview_namespace: str = "devai-previews"
     editor_bridge_image: str = "ghcr.io/tesserix/devai/devai-editor-bridge:main"
 
     # --- Monitoring ---
