@@ -327,6 +327,21 @@ def create_app(
                 _reconcile_poller(app.state.onboarding_service, reconcile_interval)
             )
 
+        # Per-domain downstream MCP servers (/mcp/scm, /mcp/sample) the MCP Hub
+        # federates. Mounted BEFORE the messaging /mcp mount: Starlette is
+        # first-match-wins and Mount("/mcp") greedily matches "/mcp/scm" as a
+        # prefix, so these more-specific mounts must register first or they're
+        # shadowed (the request would 404 inside the messaging app). Flag-gated;
+        # additive; a failure here never blocks startup.
+        app.state._domain_mcp_cms = []
+        if getattr(config, "mcp_downstream_servers_enabled", False):
+            try:
+                from devai.mcphub.tool_server import mount_domain_servers
+
+                app.state._domain_mcp_cms = await mount_domain_servers(app, config)
+            except Exception:
+                logger.exception("downstream domain MCP mount failed — skipped")
+
         # Messaging service — remote conversational channels (Slack, remote
         # URL/thread, MCP server). All three are thin transports over one
         # ConversationGateway; the service owns the channel map + the NATS turn
@@ -367,17 +382,6 @@ def create_app(
         except Exception:
             logger.exception("MessagingService failed to start — remote channels disabled")
             app.state.messaging_service = None
-
-        # Per-domain downstream MCP servers (/mcp/scm, /mcp/sample) the MCP Hub
-        # federates. Flag-gated; additive; failure here never blocks startup.
-        app.state._domain_mcp_cms = []
-        if getattr(config, "mcp_downstream_servers_enabled", False):
-            try:
-                from devai.mcphub.tool_server import mount_domain_servers
-
-                app.state._domain_mcp_cms = await mount_domain_servers(app, config)
-            except Exception:
-                logger.exception("downstream domain MCP mount failed — skipped")
 
         try:
             yield
