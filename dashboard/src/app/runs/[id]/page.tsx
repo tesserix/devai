@@ -17,7 +17,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api, type PipelineRun } from "@/lib/api";
+import { api, type PipelineRun, type PreviewDiagnosis, type PreviewVerifyReport } from "@/lib/api";
 import { A2AFeed } from "@/components/a2a-feed";
 import { ChatPanel } from "@/components/chat-panel";
 import { RepoPanel } from "@/components/repo-panel";
@@ -178,6 +178,7 @@ function PreviewPane({ url, editorUrl, repo }: { url: string; editorUrl: string;
   const [liveUrl, setLiveUrl] = useState(url);
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState("");
+  const [sessionId, setSessionId] = useState("");
 
   useEffect(() => {
     if (url) setLiveUrl(url);
@@ -190,6 +191,7 @@ function PreviewPane({ url, editorUrl, repo }: { url: string; editorUrl: string;
     try {
       const s = await api.preview.start(repo, "main");
       setLiveUrl(s.preview_url || s.fe_url || "");
+      setSessionId(s.session_id || "");
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -234,6 +236,9 @@ function PreviewPane({ url, editorUrl, repo }: { url: string; editorUrl: string;
             editor
           </a>
         )}
+        {/* Full-stack health: web ● api ● db ● + verify/heal. Only when we
+            own the session id (on-demand starts), since verify targets it. */}
+        {sessionId && <ServiceHealthStrip sessionId={sessionId} />}
         {/* Open the SAME unique forwarded URL standalone in a new tab. */}
         <a
           href={liveUrl}
@@ -251,6 +256,87 @@ function PreviewPane({ url, editorUrl, repo }: { url: string; editorUrl: string;
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
         title="Live preview"
       />
+    </div>
+  );
+}
+
+// Per-service health dots (web ● api ● db ●) + verify/heal button. Polls the
+// verify endpoint (heal off) every 6s for status; the button runs an active
+// heal pass. This is what makes the full-stack preview legible — you can see
+// the backend + db come up, not just the FE iframe.
+const HEALTH_COLOR: Record<PreviewDiagnosis["class"], string> = {
+  healthy: "var(--success, #16a34a)",
+  pending: "var(--warning, #d97706)",
+  oom: "var(--error, #dc2626)",
+  port_mismatch: "var(--warning, #d97706)",
+  cors: "var(--warning, #d97706)",
+  install_failed: "var(--error, #dc2626)",
+  image_pull: "var(--error, #dc2626)",
+  crashloop: "var(--error, #dc2626)",
+  unknown: "var(--ink-muted)",
+};
+
+function ServiceHealthStrip({ sessionId }: { sessionId: string }) {
+  const [report, setReport] = useState<PreviewVerifyReport | null>(null);
+  const [healing, setHealing] = useState(false);
+
+  // Passive poll (no heal) so the dots stay live without mutating the preview.
+  useEffect(() => {
+    let alive = true;
+    async function poll() {
+      try {
+        const r = await api.preview.verify(sessionId, false);
+        if (alive) setReport(r);
+      } catch {
+        /* transient — keep last known */
+      }
+    }
+    poll();
+    const t = setInterval(poll, 6000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [sessionId]);
+
+  async function heal() {
+    setHealing(true);
+    try {
+      setReport(await api.preview.verify(sessionId, true));
+    } catch {
+      /* surfaced via unchanged report */
+    } finally {
+      setHealing(false);
+    }
+  }
+
+  const diags = report?.diagnoses ?? [];
+  return (
+    <div className="flex items-center gap-2">
+      {diags.map((d) => (
+        <span
+          key={d.container}
+          className="inline-flex items-center gap-1"
+          title={`${d.container}: ${d.class}${d.detail ? ` — ${d.detail}` : ""}`}
+          style={{ color: "var(--ink-muted)" }}
+        >
+          <span
+            className="inline-block rounded-full"
+            style={{ width: 7, height: 7, background: HEALTH_COLOR[d.class] }}
+          />
+          {d.container}
+        </span>
+      ))}
+      {report?.healable && (
+        <button className="btn-secondary !py-0.5 !px-2 text-[11px]" disabled={healing} onClick={heal}>
+          {healing ? "Healing…" : "Verify / Heal"}
+        </button>
+      )}
+      {report?.healed && report.healed.length > 0 && (
+        <span title={report.healed.join("\n")} style={{ color: "var(--success, #16a34a)" }}>
+          ✓ {report.healed.length} fix{report.healed.length > 1 ? "es" : ""}
+        </span>
+      )}
     </div>
   );
 }

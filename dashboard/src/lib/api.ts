@@ -487,6 +487,12 @@ export const api = {
     list: (mine = false) => apiFetch<PreviewSession[]>(`/preview${mine ? "?mine=true" : ""}`),
     stop: (id: string) =>
       apiFetch<{ stopped: string }>(`/preview/${encodeURIComponent(id)}/stop`, { method: "POST" }),
+    // Diagnose + (by default) self-heal a preview's bring-up failures.
+    verify: (id: string, heal = true) =>
+      apiFetch<PreviewVerifyReport>(
+        `/preview/${encodeURIComponent(id)}/verify?heal=${heal ? "true" : "false"}`,
+        { method: "POST" },
+      ),
   },
 };
 
@@ -498,7 +504,33 @@ export interface PreviewSession {
   fe_url: string;
   preview_url: string;
   deployment?: string;
-  status: "starting" | "running" | "failed" | "stopped";
+  status: "starting" | "running" | "failed" | "stopped" | "degraded";
+}
+
+export interface PreviewDiagnosis {
+  container: string;
+  class:
+    | "healthy"
+    | "pending"
+    | "oom"
+    | "port_mismatch"
+    | "cors"
+    | "install_failed"
+    | "image_pull"
+    | "crashloop"
+    | "unknown";
+  detail: string;
+  action: { type: string; [k: string]: unknown };
+  healable: boolean;
+}
+
+export interface PreviewVerifyReport {
+  session_id?: string;
+  name: string;
+  status: "healthy" | "healing" | "degraded" | "pending" | "error";
+  diagnoses: PreviewDiagnosis[];
+  healed: string[];
+  healable: boolean;
 }
 
 // ── SRE Studio types ──────────────────────────────────────────────
