@@ -224,10 +224,21 @@ def create_app(
             from devai.preview import PreviewService
 
             if app.state.sre_studio_db is not None:
+                # An SCM client lets the resolver read the repo tree + key files
+                # to detect the stack (FE+BE+DB); falls back to a Node FE default
+                # when absent or detection fails.
+                preview_scm = None
+                try:
+                    from devai.scm import create_scm_client
+
+                    preview_scm = create_scm_client(config)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Preview: SCM client unavailable (%s); detection degrades to FE default", e)
                 app.state.preview_service = PreviewService(
                     app.state.sre_studio_db,
                     pipeline=app.state.pipeline_service,
                     settings=config,
+                    scm=preview_scm,
                 )
                 logger.info("Preview service ready")
         except Exception:

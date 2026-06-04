@@ -28,13 +28,58 @@ class PreviewService:
     """Reuses the pipeline's connected K8sJobRuntime + RuntimeConfig so it
     routes/persists previews identically to the spin_preview_pod stage."""
 
-    def __init__(self, db: Database, *, pipeline: Any | None = None, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        db: Database,
+        *,
+        pipeline: Any | None = None,
+        settings: Settings | None = None,
+        scm: Any | None = None,
+    ) -> None:
         self._db = db
         self._pipeline = pipeline
         self._settings = settings
+        self._scm = scm
 
     def _runtime(self) -> Any | None:
         return getattr(self._pipeline, "k8s_runtime", None) if self._pipeline is not None else None
+
+    # Candidate workdirs probed for stack markers (mirror profile resolver).
+    _MARKER_DIRS = (
+        "", "apps/web", "apps/frontend", "web", "frontend", "client", "packages/web",
+        "apps/api", "apps/backend", "api", "backend", "server", "services/api",
+    )
+    _MARKER_FILES = ("package.json", "pyproject.toml", "requirements.txt", "go.mod")
+
+    async def _resolve_repo(self, repo: str, ref: str) -> Any | None:
+        """Fetch the repo tree + key files via SCM and resolve a PreviewProfile.
+
+        Returns None on any SCM failure so start() falls back to the default
+        FE-only preview rather than erroring.
+        """
+        if self._scm is None:
+            return None
+        try:
+            tree = await self._scm.get_repo_tree(repo, ref)
+        except Exception:  # noqa: BLE001
+            logger.warning("preview: get_repo_tree(%s@%s) failed — falling back to FE default", repo, ref, exc_info=True)
+            return None
+        files = {e.get("path", "") for e in (tree or []) if e.get("path")}
+        contents: dict[str, str] = {}
+        wanted: set[str] = set()
+        for d in self._MARKER_DIRS:
+            for k in self._MARKER_FILES:
+                p = f"{d}/{k}" if d else k
+                if p in files:
+                    wanted.add(p)
+        for p in wanted:
+            try:
+                contents[p] = await self._scm.get_file_content(repo, p, ref)
+            except Exception:  # noqa: BLE001
+                continue
+        from devai.preview.profile import resolve_profile
+
+        return resolve_profile(files, contents)
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
@@ -56,23 +101,46 @@ class PreviewService:
         if runtime is None:
             raise PreviewError("preview runtime unavailable (pipeline/k8s not started)")
 
-        from devai.runtime.job_spec import PreviewInputs, build_preview_manifests
+        from devai.runtime.job_spec import (
+            PreviewInputs,
+            build_fullstack_preview_manifests,
+            build_preview_manifests,
+        )
 
         sid = uuid.uuid4().hex[:12]
         bridge_image = getattr(self._settings, "editor_bridge_image", "ghcr.io/tesserix/devai/devai-editor-bridge:main")
-        inputs = PreviewInputs(
-            run_id=sid,
-            repo=repo,
-            branch=ref,
-            image=_DEFAULT_DEV_IMAGE,
-            dev_command=list(_DEFAULT_DEV_COMMAND),
-            dev_port=_DEFAULT_DEV_PORT,
-            editor_bridge_image=bridge_image,
-            editor_bridge_port=_DEFAULT_BRIDGE_PORT,
-        )
+
+        # Detect the stack → full-stack (FE + BE + DB) when resolvable; else a
+        # plain Node FE default. Detection failures degrade to the default.
+        profile = await self._resolve_repo(repo, ref)
+        api_url = ""
         try:
-            manifests = build_preview_manifests(runtime.config, inputs)
-            applied = await runtime.apply_preview(manifests)
+            if profile is not None and profile.services:
+                manifests = build_fullstack_preview_manifests(
+                    runtime.config, profile, run_id=sid, repo=repo, branch=ref, editor_bridge_image=bridge_image
+                )
+                applied = await runtime.apply_preview(manifests)
+                if manifests.get("api_host"):
+                    api_url = f"https://{manifests['api_host']}"
+                logger.info(
+                    "preview %s: resolved profile (%s) -> full-stack",
+                    sid,
+                    ", ".join(s.name for s in profile.services),
+                )
+            else:
+                inputs = PreviewInputs(
+                    run_id=sid,
+                    repo=repo,
+                    branch=ref,
+                    image=_DEFAULT_DEV_IMAGE,
+                    dev_command=list(_DEFAULT_DEV_COMMAND),
+                    dev_port=_DEFAULT_DEV_PORT,
+                    editor_bridge_image=bridge_image,
+                    editor_bridge_port=_DEFAULT_BRIDGE_PORT,
+                )
+                manifests = build_preview_manifests(runtime.config, inputs)
+                applied = await runtime.apply_preview(manifests)
+                logger.info("preview %s: no stack resolved — FE default", sid)
         except Exception as e:  # noqa: BLE001 — surface a clean error to the route
             raise PreviewError(f"failed to start preview: {e}") from e
 
@@ -87,6 +155,7 @@ class PreviewService:
             "ref": ref,
             "owner": owner,
             "fe_url": fe_url,
+            "api_url": api_url,
             "preview_url": fe_url,  # alias the dashboard's PreviewPane reads
             "deployment": applied["deployment_name"],
             "status": "starting",
