@@ -441,9 +441,214 @@ def build_preview_manifests(
     }
 
 
+def build_fullstack_preview_manifests(
+    cfg: RuntimeConfig,
+    profile: Any,
+    *,
+    run_id: str,
+    repo: str,
+    branch: str,
+    editor_bridge_image: str = "ghcr.io/tesserix/devai/devai-editor-bridge:main",
+    editor_bridge_port: int = 7681,
+) -> dict[str, Any]:
+    """Materialize a Phase-2 PreviewProfile into a single full-stack pod.
+
+    One pod, one shared PVC workspace, N containers from ``profile.services``
+    (frontend + optional backend + optional ephemeral postgres) plus a
+    git-clone init and the editor-bridge. Frontend → Service ``preview-<id>``
+    (BFF host ``preview-<id>.tesserix.app``); backend → Service ``api-<id>``
+    (``api-<id>.tesserix.app``). Both VirtualServices route to devai-auth-bff.
+    ${API_PUBLIC_URL}/${WEB_PUBLIC_URL} placeholders in the profile env are
+    resolved to the per-session hosts here (the auto API↔UI wiring).
+    """
+    frag = _dns_safe(run_id, max_len=24)
+    web_name = f"preview-{frag}"
+    api_name = f"api-{frag}"
+    ns = cfg.preview_namespace
+    pvc_name = f"{web_name}-work"
+    web_host = f"{web_name}.{cfg.preview_domain}"
+    api_host = f"{api_name}.{cfg.preview_domain}"
+    web_public = f"https://{web_host}"
+    api_public = f"https://{api_host}"
+
+    base_labels = {
+        "app.kubernetes.io/managed-by": "devai",
+        "app.kubernetes.io/name": web_name,
+        "devai.tesserix.app/run-id": frag,
+        "devai.tesserix.app/role": "preview",
+        "devai.tesserix.app/repo": _dns_safe(repo, max_len=48),
+    }
+
+    def _resolve(v: str) -> str:
+        return v.replace("${API_PUBLIC_URL}", api_public).replace("${WEB_PUBLIC_URL}", web_public)
+
+    volumes = [{"name": "workspace", "persistentVolumeClaim": {"claimName": pvc_name}}]
+    init_containers = [
+        {
+            "name": "git-clone",
+            "image": "alpine/git:2.43.0",
+            "command": [
+                "sh",
+                "-lc",
+                "test -d /work/.git || git clone --branch ${BRANCH} --depth 1 "
+                "https://x-access-token:${DEVAI_SCM_TOKEN}@github.com/${REPO}.git /work; "
+                "chown -R 1000:1000 /work",
+            ],
+            "env": [
+                {"name": "REPO", "value": repo},
+                {"name": "BRANCH", "value": branch},
+                {
+                    "name": "DEVAI_SCM_TOKEN",
+                    "valueFrom": {"secretKeyRef": {"name": "devai-github-pat", "key": "token", "optional": True}},
+                },
+            ],
+            "volumeMounts": [{"name": "workspace", "mountPath": "/work"}],
+        }
+    ]
+
+    containers: list[dict[str, Any]] = []
+    fe_port = 3000
+    be_port = 0
+    has_db = False
+    for s in profile.services:
+        env = [{"name": k, "value": _resolve(v)} for k, v in (s.env or {}).items()]
+        if s.role == "database":
+            has_db = True
+            containers.append(
+                {
+                    "name": s.name,
+                    "image": s.image,
+                    "env": env,
+                    "ports": [{"name": "db", "containerPort": s.port}],
+                    "volumeMounts": [{"name": "pgdata", "mountPath": "/var/lib/postgresql/data"}],
+                    "resources": {"requests": {"memory": "256Mi"}, "limits": {"memory": "1Gi"}},
+                }
+            )
+            continue
+        wd = f"/work/{s.workdir}" if s.workdir else "/work"
+        install_cmd = s.install[-1] if s.install else "true"
+        run_cmd = s.run[-1] if s.run else "true"
+        containers.append(
+            {
+                "name": s.name,
+                "image": s.image,
+                "imagePullPolicy": "IfNotPresent",
+                "workingDir": wd,
+                "command": ["sh", "-lc", f"cd {wd} && {install_cmd} && exec {run_cmd}"],
+                "env": env + [{"name": "HOST", "value": "0.0.0.0"}, {"name": "PORT", "value": str(s.port)}],
+                "ports": [{"name": s.role[:15], "containerPort": s.port}],
+                "volumeMounts": [{"name": "workspace", "mountPath": "/work"}],
+                "readinessProbe": {"tcpSocket": {"port": s.port}, "initialDelaySeconds": 10, "periodSeconds": 5, "failureThreshold": 60},
+                "resources": {"requests": {"memory": "768Mi"}, "limits": {"memory": "3Gi"}},
+            }
+        )
+        if s.role == "frontend":
+            fe_port = s.port
+        elif s.role == "backend":
+            be_port = s.port
+
+    if has_db:
+        volumes.append({"name": "pgdata", "emptyDir": {"sizeLimit": "4Gi"}})
+
+    # Editor-bridge (shared workspace) for the chat hot-edit loop.
+    containers.append(
+        {
+            "name": "editor-bridge",
+            "image": editor_bridge_image,
+            "imagePullPolicy": "IfNotPresent",
+            "workingDir": "/work",
+            "command": ["/usr/local/bin/start-bridge.sh"],
+            "env": [{"name": "EDITOR_PORT", "value": str(editor_bridge_port)}],
+            "ports": [{"name": "editor", "containerPort": editor_bridge_port}],
+            "volumeMounts": [{"name": "workspace", "mountPath": "/work"}],
+            "resources": {"requests": {"memory": "256Mi"}, "limits": {"memory": "1Gi"}},
+        }
+    )
+
+    deployment = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": web_name, "namespace": ns, "labels": base_labels},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": {"app.kubernetes.io/name": web_name}},
+            "template": {
+                "metadata": {"labels": base_labels},
+                "spec": {
+                    "serviceAccountName": cfg.service_account_name,
+                    "securityContext": cfg.pod_security_context,
+                    "initContainers": init_containers,
+                    "containers": containers,
+                    "volumes": volumes,
+                    **({"imagePullSecrets": [{"name": cfg.pull_secret_name}]} if cfg.pull_secret_name else {}),
+                },
+            },
+        },
+    }
+
+    pvc = {
+        "apiVersion": "v1",
+        "kind": "PersistentVolumeClaim",
+        "metadata": {"name": pvc_name, "namespace": ns, "labels": base_labels},
+        "spec": {
+            "accessModes": ["ReadWriteOnce"],
+            "storageClassName": "standard-rwo",
+            "resources": {"requests": {"storage": "12Gi"}},
+        },
+    }
+
+    def _svc(name: str, target: int) -> dict[str, Any]:
+        return {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {"name": name, "namespace": ns, "labels": {"app.kubernetes.io/name": web_name}},
+            "spec": {
+                "selector": {"app.kubernetes.io/name": web_name},
+                "ports": [{"name": "http", "port": 80, "targetPort": target}],
+            },
+        }
+
+    def _vs(name: str, host: str) -> dict[str, Any]:
+        return {
+            "apiVersion": "networking.istio.io/v1beta1",
+            "kind": "VirtualService",
+            "metadata": {"name": name, "namespace": ns, "labels": base_labels},
+            "spec": {
+                "hosts": [host],
+                "gateways": ["istio-ingress/tesseract-gateway"],
+                "http": [
+                    {
+                        "route": [
+                            {"destination": {"host": "devai-auth-bff.devai.svc.cluster.local", "port": {"number": 8090}}}
+                        ],
+                        "timeout": "0s",
+                    }
+                ],
+            },
+        }
+
+    # The web Service must front the FE if present, else the BE (backend-only repos).
+    services = [_svc(web_name, fe_port if profile.frontend() else be_port or fe_port)]
+    virtualservices = [_vs(web_name, web_host)]
+    if be_port and profile.frontend():
+        services.append(_svc(api_name, be_port))
+        virtualservices.append(_vs(api_name, api_host))
+
+    return {
+        "pvc": pvc,
+        "deployment": deployment,
+        "services": services,
+        "virtualservices": virtualservices,
+        "web_host": web_host,
+        "api_host": api_host if (be_port and profile.frontend()) else "",
+        "preview_host": web_host,  # alias for apply_preview compatibility
+    }
+
+
 __all__ = [
     "PreviewInputs",
     "RunnerJobInputs",
+    "build_fullstack_preview_manifests",
     "build_job_spec",
     "build_preview_manifests",
 ]

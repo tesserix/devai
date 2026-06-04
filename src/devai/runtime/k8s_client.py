@@ -278,8 +278,10 @@ class K8sJobRuntime:
         from devai.runtime.errors import JobDispatchFailed
 
         dep = manifests["deployment"]
-        svc = manifests["service"]
-        vs = manifests["virtualservice"]
+        # Accept both the single-service (FE-only) shape and the multi-service
+        # (full-stack: web + api) shape.
+        svcs = manifests.get("services") or ([manifests["service"]] if manifests.get("service") else [])
+        vss = manifests.get("virtualservices") or ([manifests["virtualservice"]] if manifests.get("virtualservice") else [])
         pvc = manifests.get("pvc")
         # Previews live in their own namespace (carried on each manifest), not
         # the runner namespace.
@@ -310,43 +312,49 @@ class K8sJobRuntime:
             else:
                 raise JobDispatchFailed(f"create deployment: {e}") from e
 
-        try:
-            await self._core_v1.create_namespaced_service(namespace=ns, body=svc)
-        except Exception as e:
-            if "AlreadyExists" in str(e) or " 409 " in str(e):
-                try:
-                    await self._core_v1.patch_namespaced_service(name=svc["metadata"]["name"], namespace=ns, body=svc)
-                except Exception as patch_err:
-                    raise JobDispatchFailed(f"patch service: {patch_err}") from patch_err
-            else:
-                raise JobDispatchFailed(f"create service: {e}") from e
+        for svc in svcs:
+            try:
+                await self._core_v1.create_namespaced_service(namespace=ns, body=svc)
+            except Exception as e:
+                if "AlreadyExists" in str(e) or " 409 " in str(e):
+                    try:
+                        await self._core_v1.patch_namespaced_service(
+                            name=svc["metadata"]["name"], namespace=ns, body=svc
+                        )
+                    except Exception as patch_err:
+                        raise JobDispatchFailed(f"patch service: {patch_err}") from patch_err
+                else:
+                    raise JobDispatchFailed(f"create service: {e}") from e
 
-        try:
-            await self._custom_objects.create_namespaced_custom_object(
-                group="networking.istio.io",
-                version="v1beta1",
-                namespace=ns,
-                plural="virtualservices",
-                body=vs,
-            )
-        except Exception as e:
-            if "AlreadyExists" in str(e) or " 409 " in str(e):
-                try:
-                    await self._custom_objects.patch_namespaced_custom_object(
-                        group="networking.istio.io",
-                        version="v1beta1",
-                        namespace=ns,
-                        plural="virtualservices",
-                        name=vs["metadata"]["name"],
-                        body=vs,
+        for vs in vss:
+            try:
+                await self._custom_objects.create_namespaced_custom_object(
+                    group="networking.istio.io",
+                    version="v1beta1",
+                    namespace=ns,
+                    plural="virtualservices",
+                    body=vs,
+                )
+            except Exception as e:
+                if "AlreadyExists" in str(e) or " 409 " in str(e):
+                    try:
+                        await self._custom_objects.patch_namespaced_custom_object(
+                            group="networking.istio.io",
+                            version="v1beta1",
+                            namespace=ns,
+                            plural="virtualservices",
+                            name=vs["metadata"]["name"],
+                            body=vs,
+                        )
+                    except Exception as patch_err:
+                        raise JobDispatchFailed(f"patch virtualservice: {patch_err}") from patch_err
+                else:
+                    # Istio might not be installed in dev clusters — surface a
+                    # warning but don't fail the whole preview. The Service
+                    # still lets a port-forward work for local testing.
+                    logger.warning(
+                        "k8s runtime: virtualservice create failed (%s) — preview reachable only by Service", e
                     )
-                except Exception as patch_err:
-                    raise JobDispatchFailed(f"patch virtualservice: {patch_err}") from patch_err
-            else:
-                # Istio might not be installed in dev clusters — surface a
-                # warning but don't fail the whole preview. The Service
-                # still lets a port-forward work for local testing.
-                logger.warning("k8s runtime: virtualservice create failed (%s) — preview reachable only by Service", e)
 
         name = dep["metadata"]["name"]
         logger.info(
@@ -391,6 +399,21 @@ class K8sJobRuntime:
             await self._apps_v1.delete_namespaced_deployment(name=name, namespace=ns)
         except Exception:
             logger.debug("delete deployment %s skipped/failed", name, exc_info=True)
+        # Full-stack previews also have a backend Service + VirtualService
+        # named "api-<frag>" (preview-<frag> → api-<frag>). Best-effort cleanup.
+        if name.startswith("preview-"):
+            api_name = "api-" + name[len("preview-") :]
+            try:
+                await self._custom_objects.delete_namespaced_custom_object(
+                    group="networking.istio.io", version="v1beta1", namespace=ns,
+                    plural="virtualservices", name=api_name,
+                )
+            except Exception:
+                logger.debug("delete vs %s skipped/failed", api_name, exc_info=True)
+            try:
+                await self._core_v1.delete_namespaced_service(name=api_name, namespace=ns)
+            except Exception:
+                logger.debug("delete service %s skipped/failed", api_name, exc_info=True)
         # The PVC last — its name is "<deployment>-work".
         try:
             await self._core_v1.delete_namespaced_persistent_volume_claim(name=f"{name}-work", namespace=ns)
