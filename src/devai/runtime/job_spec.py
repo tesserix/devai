@@ -547,8 +547,18 @@ def build_fullstack_preview_manifests(
         elif s.role == "backend":
             be_port = s.port
 
+    configmaps: list[dict[str, Any]] = []
     if has_db:
         volumes.append({"name": "pgdata", "emptyDir": {"sizeLimit": "4Gi"}})
+        # Mock-data seeding: a ConfigMap with the schema-aware seeder + a sidecar
+        # that waits for the backend to migrate, then inserts realistic fake rows
+        # so end-to-end flows return data. Best-effort; never blocks the pod.
+        from devai.preview.seeder import seed_configmap, seed_sidecar
+
+        cm = seed_configmap(web_name, ns, base_labels)
+        configmaps.append(cm)
+        volumes.append({"name": "seed-script", "configMap": {"name": cm["metadata"]["name"]}})
+        containers.append(seed_sidecar(cm["metadata"]["name"]))
 
     # Editor-bridge (shared workspace) for the chat hot-edit loop.
     containers.append(
@@ -636,6 +646,7 @@ def build_fullstack_preview_manifests(
 
     return {
         "pvc": pvc,
+        "configmaps": configmaps,
         "deployment": deployment,
         "services": services,
         "virtualservices": virtualservices,

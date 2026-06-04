@@ -19,6 +19,7 @@ because cluster access isn't available.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from dataclasses import dataclass
@@ -296,6 +297,19 @@ class K8sJobRuntime:
                 if "AlreadyExists" not in str(e) and " 409 " not in str(e):
                     raise JobDispatchFailed(f"create pvc: {e}") from e
 
+        # ConfigMaps (e.g. the mock-data seeder script) the pod mounts.
+        for cm in manifests.get("configmaps") or []:
+            try:
+                await self._core_v1.create_namespaced_config_map(namespace=ns, body=cm)
+            except Exception as e:  # noqa: BLE001
+                if "AlreadyExists" in str(e) or " 409 " in str(e):
+                    with contextlib.suppress(Exception):
+                        await self._core_v1.patch_namespaced_config_map(
+                            name=cm["metadata"]["name"], namespace=ns, body=cm
+                        )
+                else:
+                    raise JobDispatchFailed(f"create configmap: {e}") from e
+
         try:
             await self._apps_v1.create_namespaced_deployment(namespace=ns, body=dep)
         except Exception as e:
@@ -414,6 +428,9 @@ class K8sJobRuntime:
                 await self._core_v1.delete_namespaced_service(name=api_name, namespace=ns)
             except Exception:
                 logger.debug("delete service %s skipped/failed", api_name, exc_info=True)
+        # Seeder ConfigMap (full-stack previews with a DB).
+        with contextlib.suppress(Exception):
+            await self._core_v1.delete_namespaced_config_map(name=f"{name}-seed", namespace=ns)
         # The PVC last — its name is "<deployment>-work".
         try:
             await self._core_v1.delete_namespaced_persistent_volume_claim(name=f"{name}-work", namespace=ns)
