@@ -10,19 +10,19 @@ requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "anthropic>=0.52.0",
-    "openai>=1.82.0",
+    "openai>=2.41.0",
     "nats-py>=2.9.0",
-    "redis[hiredis]>=5.2.0",
+    "redis[hiredis]>=8.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "typer[all]>=0.15.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
     "PyGithub>=2.6.0",
-    "httpx>=0.28.0",
-    "structlog>=24.4.0",
+    "httpx>=0.28.1",
+    "structlog>=26.1.0",
     "opentelemetry-api>=1.29.0",
-    "opentelemetry-sdk>=1.29.0",
+    "opentelemetry-sdk>=1.42.1",
     "python-ulid>=3.0.0",
     "rich>=13.9.0",
     "playwright>=1.49.0",
@@ -35,10 +35,10 @@ dependencies = [
     # Google Gemini
     "google-generativeai>=0.8.0",
     # GCP monitoring and management (exact pins to avoid resolution-too-deep)
-    "google-cloud-monitoring==2.24.0",
+    "google-cloud-monitoring==2.31.0",
     "google-cloud-logging==3.11.4",
     "google-cloud-recommender==2.16.1",
-    "google-cloud-resource-manager==1.13.1",
+    "google-cloud-resource-manager==1.17.0",
     "google-auth==2.38.0",
     "google-api-core[grpc]==2.24.2",
     "grpcio==1.68.1",
@@ -67,7 +67,7 @@ dependencies = [
     # Slack Events API channel. Both are imported lazily inside their channels,
     # so a deployment with those channels disabled never loads them.
     "mcp>=1.9,<2",
-    "slack-sdk>=3.33,<4",
+    "slack-sdk>=3.42.0,<4",
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
     # provisions per-user/per-tenant secrets into Google Secret Manager.
     # Imported lazily inside the gcp_sm adapter only.
@@ -82,12 +82,12 @@ dependencies = [
 [project.optional-dependencies]
 docs = [
     "pypdf>=5.0.0",
-    "pdfplumber>=0.11.0",
+    "pdfplumber>=0.11.9",
     "pyyaml>=6.0",
 ]
 dev = [
     "pytest>=8.3.0",
-    "pytest-asyncio>=0.24.0",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "pytest-cov>=6.0.0",

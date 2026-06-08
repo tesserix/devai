@@ -1,24 +1,16 @@
 import type { NextConfig } from "next";
-import { createHash } from "crypto";
-import { THEME_INIT_SCRIPT } from "./src/lib/theme-script";
 
 // ── Security response headers (DASH-3) ──────────────────────────────────────
-// Neither dashboard set any headers(). Both render chat markdown via
-// dangerouslySetInnerHTML, so a strict CSP is the containment layer if the
-// (now sanitized) renderer ever regresses, and frame-ancestors blocks
-// clickjacking of the session-bearing UI.
+// Both dashboards render chat markdown via dangerouslySetInnerHTML, so a CSP is
+// the containment layer if the (now sanitized) renderer ever regresses, and
+// frame-ancestors blocks clickjacking of the session-bearing UI.
 //
-// script-src: we pin the SHA-256 hash of the inline theme-init script so it is
-// explicitly allowed. Next.js (App Router, no middleware here) also emits inline
-// hydration/route-data scripts; without a per-request nonce those need
-// 'unsafe-inline'. Browsers ignore 'unsafe-inline' once a hash/nonce is present,
-// so to keep the app working we currently rely on 'unsafe-inline' for the Next
-// runtime AND list the theme hash for documentation/forward-compat. The harder
-// lock-down (drop 'unsafe-inline', add a middleware nonce) is the planned next
-// step — tracked alongside the auth hardening.
-const THEME_SCRIPT_HASH = `'sha256-${createHash("sha256")
-  .update(THEME_INIT_SCRIPT, "utf8")
-  .digest("base64")}'`;
+// script-src uses 'unsafe-inline' and NO hash: Next.js App Router emits inline
+// hydration/route-data scripts (self.__next_f.push) plus our inline theme-init
+// script. A hash/nonce in script-src makes browsers IGNORE 'unsafe-inline' —
+// which previously blocked Next's inline scripts and left the app a blank
+// screen. Hardening to a per-request middleware nonce (then dropping
+// 'unsafe-inline') is the planned next step.
 
 // Hosts the app legitimately talks to / frames. Firebase + Google Identity for
 // sign-in; the preview hosts for the run Preview iframe.
@@ -37,9 +29,10 @@ const FRAME_SRC = ["'self'", "https://*.tesserix.app"].join(" ");
 
 const CSP = [
   "default-src 'self'",
-  // 'unsafe-inline' kept for Next's inline runtime (see note above); theme hash
-  // listed for the eventual nonce-based hardening. 'unsafe-eval' is NOT allowed.
-  `script-src 'self' 'unsafe-inline' ${THEME_SCRIPT_HASH}`,
+  // 'unsafe-inline' for Next's inline runtime + the theme script (see note
+  // above). No hash/nonce here or it would disable 'unsafe-inline'. 'unsafe-eval'
+  // is NOT allowed.
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
