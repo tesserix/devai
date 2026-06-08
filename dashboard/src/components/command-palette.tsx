@@ -110,30 +110,38 @@ export function CommandPalette({
   }, [open]);
 
   // Fetch the onboarded repos the first time the user enters repo mode.
+  // NOTE: deps are [open, repoMode, reposLoaded] ONLY — never repoLoading. An
+  // earlier version listed repoLoading and aborted the fetch in cleanup, so
+  // setRepoLoading(true) re-ran the effect, the cleanup aborted the in-flight
+  // request, the AbortError skipped setReposLoaded, and it looped forever
+  // ("Loading…" that never resolves). We guard re-entry with reposLoaded and
+  // use a `cancelled` flag (not AbortController) so a successful response is
+  // always read to completion.
   useEffect(() => {
-    if (!open || !repoMode || reposLoaded || repoLoading) return;
-    const controller = new AbortController();
+    if (!open || !repoMode || reposLoaded) return;
+    let cancelled = false;
     setRepoLoading(true);
     setRepoError(null);
     (async () => {
       try {
-        const res = await fetch("/api/scm/onboarded?state=onboarded", {
-          signal: controller.signal,
-        });
+        const res = await fetch("/api/scm/onboarded?state=onboarded");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as RepoOption[];
+        if (cancelled) return;
         setAllRepos(Array.isArray(data) ? data : []);
         setReposLoaded(true);
       } catch (err) {
-        if ((err as { name?: string }).name === "AbortError") return;
+        if (cancelled) return;
         setRepoError(err instanceof Error ? err.message : "fetch failed");
         setAllRepos([]);
       } finally {
-        setRepoLoading(false);
+        if (!cancelled) setRepoLoading(false);
       }
     })();
-    return () => controller.abort();
-  }, [open, repoMode, reposLoaded, repoLoading]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, repoMode, reposLoaded]);
 
   const commands: Command[] = useMemo(
     () => [
