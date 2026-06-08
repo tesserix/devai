@@ -276,6 +276,13 @@ class Settings(BaseSettings):
     pipeline_sre_blueprint: str = "sre-monitor"
     pipeline_concurrency: int = 4
     pipeline_default_stage_timeout: int = 900  # 15 min — Fiber default
+    # Durable work queue. When True (default) the pipeline's queue lives in
+    # Redis (reliable-queue pattern) so runs survive pod rolls / scale events
+    # and any replica can pick them up — no more orphaned PENDING runs. Set
+    # False to fall back to the legacy per-pod in-memory asyncio.Queue.
+    pipeline_durable_queue: bool = True
+    pipeline_reaper_interval: int = 30  # seconds between stale-claim sweeps
+    pipeline_claim_ttl: int = 180  # seconds; refreshed every claim_ttl/4 while running
     pipeline_event_ring_size: int = 1000  # SSE replay buffer
     pipeline_task_ttl: int = 86400 * 30  # 30 days — keep parity with redis_result_ttl
 

@@ -163,6 +163,22 @@ class StageEvent:
             "checkpoint": self.checkpoint,
         }
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> StageEvent:
+        """Inverse of :meth:`to_dict` — used when a worker rebuilds a task
+        from its Redis snapshot (durable-queue resume on another pod)."""
+        return cls(
+            stage=d.get("stage", ""),
+            phase=StageEventPhase(d.get("phase", "started")),
+            timestamp=d.get("timestamp", time.time()),
+            duration_ms=d.get("duration_ms", 0.0),
+            message=d.get("message", ""),
+            error=d.get("error"),
+            stage_type=d.get("type", ""),
+            gate=bool(d.get("gate", False)),
+            checkpoint=d.get("checkpoint"),
+        )
+
 
 @dataclass(slots=True)
 class StageResult:
@@ -368,3 +384,56 @@ class DevAITask:
             "team_id": self.team_id,
             "crew_id": self.crew_id,
         }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> DevAITask:
+        """Rebuild a DevAITask from a :meth:`to_dict` snapshot.
+
+        The durable work queue (StateManager reliable-queue) only stores the
+        task *id* on the Redis list; a worker on any pod reconstructs the full
+        task from its persisted snapshot via this method before executing. The
+        executor then resumes — `stages_completed` is honored so already-done
+        stages are skipped (see BlueprintExecutor._run_one), making a reclaimed
+        run safe to re-run.
+
+        Tolerant of partial/legacy snapshots: unknown keys are ignored and
+        missing keys fall back to the dataclass defaults.
+        """
+        task = cls(
+            id=d.get("id") or f"devai-{uuid.uuid4().hex[:12]}",
+            intent=d.get("intent", ""),
+            blueprint=d.get("blueprint", "alm-pipeline"),
+            repo=d.get("repo", ""),
+            trigger_type=d.get("trigger_type", "manual"),
+        )
+        try:
+            task.state = TaskState(d.get("state", "pending"))
+        except ValueError:
+            task.state = TaskState.PENDING
+        task.created_at = d.get("created_at", task.created_at)
+        task.updated_at = d.get("updated_at", task.updated_at)
+        task.started_at = d.get("started_at")
+        task.finished_at = d.get("finished_at")
+        task.stages_completed = list(d.get("stages_completed") or [])
+        task.stages_skipped = list(d.get("stages_skipped") or [])
+        task.stages_failed = list(d.get("stages_failed") or [])
+        task.stage_events = [StageEvent.from_dict(e) for e in (d.get("stage_events") or [])]
+        task.current_stage = d.get("current_stage", "")
+        task.agent_context = dict(d.get("agent_context") or {})
+        task.issue_number = d.get("issue_number")
+        task.pr_number = d.get("pr_number")
+        task.branch_name = d.get("branch_name")
+        task.epic_issue_number = d.get("epic_issue_number")
+        task.story_issue_numbers = list(d.get("story_issue_numbers") or [])
+        task.sandbox_pod = d.get("sandbox_pod")
+        task.dev_server_port = d.get("dev_server_port")
+        task.error = d.get("error")
+        task.failed_stage = d.get("failed_stage")
+        task.label = d.get("label", "")
+        task.checkpoints = list(d.get("checkpoints") or [])
+        task.principal = dict(d["principal"]) if d.get("principal") else None
+        task.trace_id = d.get("trace_id")
+        task.triggered_by = d.get("triggered_by")
+        task.team_id = d.get("team_id", "")
+        task.crew_id = d.get("crew_id", "")
+        return task

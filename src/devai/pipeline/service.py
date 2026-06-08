@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from devai.pipeline.types import (
     FAILURE_STATES,
+    HUMAN_GATE_STATES,
     TERMINAL_STATES,
     DevAITask,
     StageEvent,
@@ -187,6 +188,49 @@ class PipelineService:
             len(self._pipeline.list_blueprints()),
             len(self._pipeline._registry.known_stages()),  # noqa: SLF001
         )
+
+        # Resume-on-boot: re-enqueue runs that were orphaned by a previous pod
+        # roll (queued/running in Redis but in no live pod's queue — including
+        # any stranded BEFORE the durable queue existed). enqueue_task is
+        # idempotent, so all replicas booting at once converge to one enqueue.
+        await self._reconcile_orphans()
+
+    async def _reconcile_orphans(self) -> None:
+        """Find non-terminal persisted runs that no worker owns and re-enqueue
+        them onto the durable queue. Safe no-op outside durable mode.
+
+        Resumable = not terminal, not failed, not waiting on a human gate, and
+        not already active (queued/processing). The executor skips completed
+        stages on the re-run, so a mid-flight orphan resumes from where it
+        stopped instead of re-doing finished work.
+        """
+        pipe = self._pipeline
+        sm = self.state_manager
+        if pipe is None or sm is None or not getattr(pipe, "_durable", False):
+            return
+        try:
+            tasks = await self.list_persisted_tasks(limit=500)
+        except Exception:  # noqa: BLE001
+            logger.exception("reconcile: failed to list persisted tasks")
+            return
+
+        skip_states = TERMINAL_STATES | FAILURE_STATES | HUMAN_GATE_STATES
+        resumed = 0
+        for td in tasks:
+            try:
+                state = TaskState(td.get("state", "pending"))
+            except ValueError:
+                state = TaskState.PENDING
+            if state in skip_states:
+                continue
+            if await sm.is_task_active(td["id"]):
+                continue  # already queued or executing on a live worker
+            if await pipe.resubmit_persisted(td):
+                resumed += 1
+        if resumed:
+            logger.warning("reconcile: resumed %d orphaned run(s) on boot", resumed)
+        else:
+            logger.info("reconcile: no orphaned runs to resume")
 
     async def stop(self) -> None:
         if not self._started or self._pipeline is None:
@@ -542,6 +586,15 @@ class PipelineService:
             self._pipeline.remove_task(task_id)
         sm = self.state_manager
         if sm is not None:
+            # Evict from the durable work queue first so the reaper can't
+            # resurrect a deleted run (drops it from queue/processing/active +
+            # clears its claim). No-op if it was never on the durable queue.
+            ack = getattr(sm, "ack_task", None)
+            if ack is not None:
+                try:
+                    await ack(task_id)
+                except Exception:  # noqa: BLE001
+                    logger.debug("ack_task on delete failed for %s", task_id, exc_info=True)
             for method in ("delete_pipeline_task", "delete_run"):
                 fn = getattr(sm, method, None)
                 if fn is not None:

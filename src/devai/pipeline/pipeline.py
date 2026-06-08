@@ -18,7 +18,10 @@ after each transition; if state_manager is None it's a pure in-memory run
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -74,9 +77,28 @@ class Pipeline:
         self._task_done: dict[str, asyncio.Event] = {}
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._workers: list[asyncio.Task[None]] = []
+        self._reaper: asyncio.Task[None] | None = None
         self._concurrency = concurrency
         self._stop_event = asyncio.Event()
         self._event_callbacks: list[EventCallback] = list(event_callbacks or [])
+
+        # Durable work queue. Enabled when (a) a StateManager exposing the
+        # reliable-queue API is wired and (b) config.pipeline_durable_queue is
+        # on. In durable mode the queue lives in Redis so runs survive pod
+        # rolls and any replica can execute them; otherwise we fall back to the
+        # per-pod in-memory asyncio.Queue (tests, CLI, single-process dev).
+        sm = deps.state_manager
+        cfg = deps.config
+        self._durable = bool(
+            getattr(cfg, "pipeline_durable_queue", True)
+            and sm is not None
+            and hasattr(sm, "claim_next_task")
+        )
+        self._claim_ttl = int(getattr(cfg, "pipeline_claim_ttl", 180))
+        self._reaper_interval = int(getattr(cfg, "pipeline_reaper_interval", 30))
+        # Unique per pod (HOSTNAME is the pod name in K8s) + per Pipeline so the
+        # reaper can distinguish this owner's live claims from a dead pod's.
+        self._owner = f"{os.environ.get('HOSTNAME', 'local')}-{uuid.uuid4().hex[:6]}"
 
         self._executor = BlueprintExecutor(
             self._registry,
@@ -139,17 +161,40 @@ class Pipeline:
         self._event_callbacks.append(cb)
 
     async def start(self) -> None:
-        """Spin up worker coroutines."""
+        """Spin up worker coroutines (+ the reaper in durable mode)."""
         if self._workers:
             return
         for i in range(self._concurrency):
             self._workers.append(asyncio.create_task(self._worker_loop(i), name=f"pipeline-worker-{i}"))
+        if self._durable:
+            self._reaper = asyncio.create_task(self._reaper_loop(), name="pipeline-reaper")
+            logger.info(
+                "pipeline durable queue ENABLED (owner=%s, %d workers, reaper@%ds, claim_ttl=%ds)",
+                self._owner,
+                self._concurrency,
+                self._reaper_interval,
+                self._claim_ttl,
+            )
+        else:
+            logger.info("pipeline durable queue DISABLED — in-memory queue, %d workers", self._concurrency)
 
     async def stop(self) -> None:
-        """Drain the queue and stop workers."""
+        """Drain the queue and stop workers.
+
+        In durable mode the queue is in Redis, so any task still executing here
+        is simply left claimed — if this pod is going away the claim expires and
+        the reaper on a surviving replica requeues it (resume-on-reclaim). We do
+        NOT delete the durable queue; remaining ids persist for the next pod.
+        """
         self._stop_event.set()
-        for _ in self._workers:
-            self._queue.put_nowait("__STOP__")
+        if not self._durable:
+            for _ in self._workers:
+                self._queue.put_nowait("__STOP__")
+        if self._reaper is not None:
+            self._reaper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._reaper
+            self._reaper = None
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
 
@@ -165,9 +210,38 @@ class Pipeline:
             task.label = (task.intent[:60] or task.blueprint).strip()
         self._tasks[task.id] = task
         self._task_done[task.id] = asyncio.Event()
-        await self._queue.put(task.id)
+        if self._durable:
+            # Persist the snapshot FIRST so whichever replica claims the id can
+            # rebuild the task from Redis, then enqueue durably (idempotent).
+            await self._persist(task)
+            await self.deps.state_manager.enqueue_task(task.id)  # type: ignore[union-attr]
+        else:
+            await self._queue.put(task.id)
         logger.info("queued task %s blueprint=%s repo=%s", task.id, task.blueprint, task.repo)
         return task.id
+
+    async def resubmit_persisted(self, task_dict: dict[str, Any]) -> str | None:
+        """Re-enqueue a previously-persisted run (durable mode only).
+
+        Used by the boot-time reconciler to pick up runs that were orphaned by
+        a pod roll BEFORE the durable queue existed (or that fell through the
+        reclaim gap). Idempotent — `enqueue_task` no-ops if the run is already
+        active, so all replicas reconciling at once converge to one enqueue.
+        Returns the task id if (re)enqueued, else None.
+        """
+        if not self._durable:
+            return None
+        task_id = task_dict.get("id")
+        if not task_id:
+            return None
+        if task_dict.get("blueprint") not in self._blueprints:
+            logger.warning("resubmit %s: unknown blueprint %r — skipped", task_id, task_dict.get("blueprint"))
+            return None
+        newly = await self.deps.state_manager.enqueue_task(task_id)  # type: ignore[union-attr]
+        if newly:
+            logger.info("reconcile: re-enqueued orphaned run %s (state=%s)", task_id, task_dict.get("state"))
+            return task_id
+        return None
 
     async def run_once(self, task: DevAITask) -> DevAITask:
         """Synchronous helper: submit, wait, return.
@@ -217,6 +291,9 @@ class Pipeline:
     # ── Worker internals ────────────────────────────────────────────
 
     async def _worker_loop(self, worker_id: int) -> None:
+        if self._durable:
+            await self._durable_worker_loop(worker_id)
+            return
         logger.debug("pipeline worker %d started", worker_id)
         while not self._stop_event.is_set():
             task_id = await self._queue.get()
@@ -231,6 +308,92 @@ class Pipeline:
                     await self._execute_task(task)
                 except Exception:  # noqa: BLE001
                     logger.exception("worker %d: task %s crashed", worker_id, task_id)
+
+    async def _durable_worker_loop(self, worker_id: int) -> None:
+        """Claim tasks from the Redis queue and execute them.
+
+        BLMOVE gives exactly-once delivery across all replicas. The task is
+        rebuilt from its Redis snapshot if it wasn't submitted on this pod. A
+        heartbeat keeps the claim alive while running; `ack` clears it on exit
+        (success, failure or cancel). If this pod dies mid-run the claim
+        expires and the reaper on another replica requeues it — the executor
+        skips completed stages, so the run resumes."""
+        sm = self.deps.state_manager
+        worker_name = f"{self._owner}-w{worker_id}"
+        logger.debug("durable worker %s started", worker_name)
+        while not self._stop_event.is_set():
+            try:
+                task_id = await sm.claim_next_task(  # type: ignore[union-attr]
+                    worker_name, timeout=5, claim_ttl=self._claim_ttl
+                )
+            except Exception:  # noqa: BLE001 — Redis blip shouldn't kill the worker
+                logger.exception("worker %s: claim_next_task failed", worker_name)
+                await asyncio.sleep(1.0)
+                continue
+            if task_id is None:
+                continue  # BLMOVE timed out — loop to re-check stop_event
+
+            task = self._tasks.get(task_id)
+            if task is None:
+                snapshot = await self._load_snapshot(task_id)
+                if snapshot is None:
+                    logger.warning("worker %s: no snapshot for %s — dropping", worker_name, task_id)
+                    await sm.ack_task(task_id)  # type: ignore[union-attr]
+                    continue
+                task = DevAITask.from_dict(snapshot)
+                self._tasks[task.id] = task
+                self._task_done.setdefault(task.id, asyncio.Event())
+
+            if task.is_terminal:
+                # Already finished (e.g. acked elsewhere) — clear and move on.
+                await sm.ack_task(task_id)  # type: ignore[union-attr]
+                continue
+
+            hb = asyncio.create_task(self._heartbeat(task_id, worker_name), name=f"hb-{task_id}")
+            try:
+                async with self._semaphore:
+                    await self._execute_task(task)
+            except Exception:  # noqa: BLE001
+                logger.exception("worker %s: task %s crashed", worker_name, task_id)
+            finally:
+                hb.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await hb
+                with contextlib.suppress(Exception):
+                    await sm.ack_task(task_id)  # type: ignore[union-attr]
+
+    async def _heartbeat(self, task_id: str, worker_name: str) -> None:
+        """Refresh the task's liveness claim while it executes, at a quarter of
+        the TTL so a transient stall doesn't trip a false reclaim."""
+        interval = max(5.0, self._claim_ttl / 4.0)
+        sm = self.deps.state_manager
+        while True:
+            await asyncio.sleep(interval)
+            with contextlib.suppress(Exception):
+                await sm.heartbeat_task(task_id, worker_name, claim_ttl=self._claim_ttl)  # type: ignore[union-attr]
+
+    async def _reaper_loop(self) -> None:
+        """Periodically requeue tasks whose owning pod died (claim expired)."""
+        sm = self.deps.state_manager
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.sleep(self._reaper_interval)
+                reclaimed = await sm.reclaim_stale_tasks()  # type: ignore[union-attr]
+                if reclaimed:
+                    logger.warning("reaper requeued %d orphaned run(s): %s", len(reclaimed), reclaimed)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("reaper sweep failed")
+
+    async def _load_snapshot(self, task_id: str) -> dict[str, Any] | None:
+        sm = self.deps.state_manager
+        getter = getattr(sm, "get_pipeline_task", None)
+        if getter is None:
+            return None
+        with contextlib.suppress(Exception):
+            return await getter(task_id)
+        return None
 
     async def _execute_task(self, task: DevAITask) -> None:
         blueprint = self._blueprints[task.blueprint]

@@ -164,6 +164,29 @@ class StateManager:
     PIPELINE_BY_REPO_KEY = "devai:pipeline:tasks:by_repo:{repo}"
     PIPELINE_CONTROL_KEY = "devai:pipeline:control:{task_id}"
 
+    # --- Durable work queue (reliable-queue pattern) ---
+    #
+    # The pipeline's work queue lives in Redis, NOT in any single pod's RAM,
+    # so a task survives pod rolls / scale events and is executed by whichever
+    # replica claims it. Three structures cooperate:
+    #
+    #   QUEUE      (LIST)  — task ids waiting to be picked up (LPUSH head,
+    #                        BLMOVE from tail → FIFO).
+    #   PROCESSING (LIST)  — task ids a worker has claimed and is executing.
+    #   ACTIVE     (SET)   — task ids currently queued-or-processing; the
+    #                        SADD guard makes enqueue idempotent so the same
+    #                        run is never queued twice (3 replicas reconciling
+    #                        on boot all converge to one enqueue).
+    #   CLAIM:{id} (STRING+TTL) — liveness heartbeat of the owning worker.
+    #                        Refreshed while executing; if it expires the
+    #                        owner died and the reaper moves the id back to
+    #                        QUEUE. The executor skips completed stages on the
+    #                        re-run, so reclaim resumes rather than duplicates.
+    PIPELINE_QUEUE_KEY = "devai:pipeline:queue"
+    PIPELINE_PROCESSING_KEY = "devai:pipeline:processing"
+    PIPELINE_ACTIVE_KEY = "devai:pipeline:active"
+    PIPELINE_CLAIM_KEY = "devai:pipeline:claim:{task_id}"
+
     async def persist_task(self, task_dict: dict[str, Any], *, ttl: int | None = None) -> None:
         """Write a DevAITask dict to Redis.
 
@@ -280,6 +303,82 @@ class StateManager:
             if repo:
                 pipe.zrem(self.PIPELINE_BY_REPO_KEY.format(repo=repo), task_id)
         await pipe.execute()
+
+    async def enqueue_task(self, task_id: str) -> bool:
+        """Add a task to the durable work queue. Idempotent.
+
+        Returns True if the task was newly enqueued, False if it was already
+        active (queued or processing). The SADD guard is what makes this safe
+        to call from every replica on boot — only the first call enqueues.
+        """
+        added = await self.redis.sadd(self.PIPELINE_ACTIVE_KEY, task_id)
+        if added:
+            await self.redis.lpush(self.PIPELINE_QUEUE_KEY, task_id)
+        return bool(added)
+
+    async def claim_next_task(
+        self, worker_id: str, *, timeout: int = 5, claim_ttl: int = 180
+    ) -> str | None:
+        """Block up to `timeout`s for the next task; atomically move it to the
+        processing list and stamp a liveness claim. Returns the id or None.
+
+        BLMOVE guarantees exactly one worker across all replicas gets a given
+        id. The claim key (refreshed by `heartbeat_task`) lets the reaper tell
+        a live owner from a dead one.
+        """
+        task_id = await self.redis.blmove(
+            self.PIPELINE_QUEUE_KEY,
+            self.PIPELINE_PROCESSING_KEY,
+            timeout,
+            "RIGHT",
+            "LEFT",
+        )
+        if task_id is None:
+            return None
+        await self.redis.set(
+            self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl
+        )
+        return task_id
+
+    async def heartbeat_task(self, task_id: str, worker_id: str, *, claim_ttl: int = 180) -> None:
+        """Refresh the liveness claim on a task we're executing. Called on a
+        timer so a long-running (but alive) stage isn't falsely reclaimed."""
+        await self.redis.set(
+            self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl
+        )
+
+    async def ack_task(self, task_id: str) -> None:
+        """Mark a task done: drop it from processing, active and clear its
+        claim. Called whether the run completed, failed or was cancelled — the
+        task's terminal state is recorded separately in its snapshot."""
+        pipe = self.redis.pipeline()
+        pipe.lrem(self.PIPELINE_PROCESSING_KEY, 0, task_id)
+        pipe.srem(self.PIPELINE_ACTIVE_KEY, task_id)
+        pipe.delete(self.PIPELINE_CLAIM_KEY.format(task_id=task_id))
+        await pipe.execute()
+
+    async def reclaim_stale_tasks(self) -> list[str]:
+        """Move every processing task whose owner died (claim expired) back to
+        the queue so a live worker picks it up. Returns the reclaimed ids.
+
+        Race-safe across replicas: `LREM` is atomic and returns the count it
+        removed, so for a given id exactly one reaper sees count>0 and requeues
+        it; the others see 0 and skip. The id stays in the ACTIVE set the whole
+        time (it's being re-run, not newly added)."""
+        ids = await self.redis.lrange(self.PIPELINE_PROCESSING_KEY, 0, -1)
+        reclaimed: list[str] = []
+        for task_id in ids:
+            if await self.redis.exists(self.PIPELINE_CLAIM_KEY.format(task_id=task_id)):
+                continue  # owner still alive
+            removed = await self.redis.lrem(self.PIPELINE_PROCESSING_KEY, 0, task_id)
+            if removed:
+                await self.redis.lpush(self.PIPELINE_QUEUE_KEY, task_id)
+                reclaimed.append(task_id)
+        return reclaimed
+
+    async def is_task_active(self, task_id: str) -> bool:
+        """True if the task is currently queued or processing."""
+        return bool(await self.redis.sismember(self.PIPELINE_ACTIVE_KEY, task_id))
 
     # --- Cleanup ---
 
