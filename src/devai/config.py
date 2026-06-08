@@ -283,6 +283,7 @@ class Settings(BaseSettings):
     pipeline_durable_queue: bool = True
     pipeline_reaper_interval: int = 30  # seconds between stale-claim sweeps
     pipeline_claim_ttl: int = 180  # seconds; refreshed every claim_ttl/4 while running
+    pipeline_queue_poll_interval: float = 1.0  # seconds workers wait when the queue is empty
     pipeline_event_ring_size: int = 1000  # SSE replay buffer
     pipeline_task_ttl: int = 86400 * 30  # 30 days — keep parity with redis_result_ttl
 
@@ -326,18 +327,22 @@ class Settings(BaseSettings):
     k8s_job_backoff_limit: int = 0
 
     # Runner base image — entrypoint resolves agent + skills from registry.
-    runner_image: str = "ghcr.io/tesserix/devai/devai-runner:main"
+    # MUST be the asia-south1 GAR mirror, never ghcr.io: the runner Job pods
+    # have no ghcr pull secret and pull via the node's GCP SA, which can pull
+    # GAR (same project) but not ghcr.io — a ghcr image silently ImagePullBackOffs
+    # and the stage times out. (Prod overrides this via DEVAI_RUNNER_IMAGE.)
+    runner_image: str = "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-runner:main"
 
     # Per-stack runner images. The scaffold + preview stages pick a
     # stack-specific image (Next.js, Vite, Go, …) so dev-server frameworks
-    # don't bloat the base runner.
+    # don't bloat the base runner. All GAR-mirrored (see runner_image note).
     runner_image_per_stack: dict[str, str] = Field(
         default_factory=lambda: {
-            "default": "ghcr.io/tesserix/devai/devai-runner:main",
-            "nextjs": "ghcr.io/tesserix/devai/devai-runner-nextjs:main",
-            "vite": "ghcr.io/tesserix/devai/devai-runner-vite:main",
-            "go": "ghcr.io/tesserix/devai/devai-runner-go:main",
-            "python": "ghcr.io/tesserix/devai/devai-runner-python:main",
+            "default": "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-runner:main",
+            "nextjs": "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-runner-nextjs:main",
+            "vite": "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-runner-vite:main",
+            "go": "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-runner-go:main",
+            "python": "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-runner-python:main",
         }
     )
 
@@ -347,7 +352,9 @@ class Settings(BaseSettings):
     # `preview_namespace`.
     preview_domain: str = "tesserix.app"
     preview_namespace: str = "devai-previews"
-    editor_bridge_image: str = "ghcr.io/tesserix/devai/devai-editor-bridge:main"
+    editor_bridge_image: str = (
+        "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-editor-bridge:main"
+    )
 
     # --- Monitoring ---
     prometheus_url: str = "http://prometheus-server.monitoring.svc.cluster.local:80"

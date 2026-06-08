@@ -94,6 +94,7 @@ class Pipeline:
         )
         self._claim_ttl = int(getattr(cfg, "pipeline_claim_ttl", 180))
         self._reaper_interval = int(getattr(cfg, "pipeline_reaper_interval", 30))
+        self._poll_interval = float(getattr(cfg, "pipeline_queue_poll_interval", 1.0))
         # Unique per pod (HOSTNAME is the pod name in K8s) + per Pipeline so the
         # reaper can distinguish this owner's live claims from a dead pod's.
         self._owner = f"{os.environ.get('HOSTNAME', 'local')}-{uuid.uuid4().hex[:6]}"
@@ -322,14 +323,15 @@ class Pipeline:
         while not self._stop_event.is_set():
             try:
                 task_id = await sm.claim_next_task(  # type: ignore[union-attr]
-                    worker_name, timeout=5, claim_ttl=self._claim_ttl
+                    worker_name, claim_ttl=self._claim_ttl
                 )
             except Exception:  # noqa: BLE001 — Redis blip shouldn't kill the worker
                 logger.exception("worker %s: claim_next_task failed", worker_name)
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(self._poll_interval)
                 continue
             if task_id is None:
-                continue  # BLMOVE timed out — loop to re-check stop_event
+                await asyncio.sleep(self._poll_interval)  # queue empty — poll again
+                continue
 
             task = self._tasks.get(task_id)
             if task is None:

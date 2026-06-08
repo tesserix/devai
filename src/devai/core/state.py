@@ -316,18 +316,20 @@ class StateManager:
             await self.redis.lpush(self.PIPELINE_QUEUE_KEY, task_id)
         return bool(added)
 
-    async def claim_next_task(self, worker_id: str, *, timeout: int = 5, claim_ttl: int = 180) -> str | None:
-        """Block up to `timeout`s for the next task; atomically move it to the
-        processing list and stamp a liveness claim. Returns the id or None.
+    async def claim_next_task(self, worker_id: str, *, claim_ttl: int = 180) -> str | None:
+        """Atomically move the next queued task to the processing list and
+        stamp a liveness claim. Returns the id, or None if the queue is empty.
 
-        BLMOVE guarantees exactly one worker across all replicas gets a given
-        id. The claim key (refreshed by `heartbeat_task`) lets the reaper tell
-        a live owner from a dead one.
+        Non-blocking on purpose: a *blocking* BLMOVE conflicts with the shared
+        client's socket read timeout (the read times out mid-block and raises
+        redis.TimeoutError), so workers poll with this instead. LMOVE is still
+        atomic — exactly one worker across all replicas gets a given id. The
+        claim key (refreshed by `heartbeat_task`) lets the reaper tell a live
+        owner from a dead one.
         """
-        task_id = await self.redis.blmove(
+        task_id = await self.redis.lmove(
             self.PIPELINE_QUEUE_KEY,
             self.PIPELINE_PROCESSING_KEY,
-            timeout,
             "RIGHT",
             "LEFT",
         )

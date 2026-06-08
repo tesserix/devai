@@ -79,23 +79,23 @@ async def test_enqueue_is_idempotent():
     assert await sm.is_task_active("devai-1") is True
 
 
-async def test_claim_is_exactly_once_then_times_out():
+async def test_claim_is_exactly_once_then_empty():
     sm = _state_manager()
     await sm.enqueue_task("devai-1")
     await sm.enqueue_task("devai-2")
 
-    r1 = await sm.claim_next_task("workerA", timeout=1)
-    r2 = await sm.claim_next_task("workerB", timeout=1)
+    r1 = await sm.claim_next_task("workerA")
+    r2 = await sm.claim_next_task("workerB")
     assert {r1, r2} == {"devai-1", "devai-2"}
 
-    # Queue drained — a further claim blocks briefly then returns None.
-    assert await sm.claim_next_task("workerC", timeout=1) is None
+    # Queue drained — a further (non-blocking) claim returns None immediately.
+    assert await sm.claim_next_task("workerC") is None
 
 
 async def test_claim_stamps_liveness_and_ack_clears_everything():
     sm = _state_manager()
     await sm.enqueue_task("devai-1")
-    claimed = await sm.claim_next_task("workerA", timeout=1, claim_ttl=50)
+    claimed = await sm.claim_next_task("workerA", claim_ttl=50)
     assert claimed == "devai-1"
     assert await sm.redis.exists("devai:pipeline:claim:devai-1")
 
@@ -109,8 +109,8 @@ async def test_reaper_requeues_dead_owner_only():
     sm = _state_manager()
     await sm.enqueue_task("alive")
     await sm.enqueue_task("dead")
-    await sm.claim_next_task("workerA", timeout=1)  # alive
-    await sm.claim_next_task("workerB", timeout=1)  # dead
+    await sm.claim_next_task("workerA")  # alive
+    await sm.claim_next_task("workerB")  # dead
 
     # Both claims live → nothing reclaimed.
     assert await sm.reclaim_stale_tasks() == []
@@ -121,13 +121,13 @@ async def test_reaper_requeues_dead_owner_only():
 
     # It's back on the queue, still active, and claimable again.
     assert await sm.is_task_active("dead") is True
-    assert await sm.claim_next_task("workerC", timeout=1) == "dead"
+    assert await sm.claim_next_task("workerC") == "dead"
 
 
 async def test_double_reap_does_not_duplicate():
     sm = _state_manager()
     await sm.enqueue_task("dead")
-    await sm.claim_next_task("workerA", timeout=1)
+    await sm.claim_next_task("workerA")
     await sm.redis.delete("devai:pipeline:claim:dead")
 
     first = await sm.reclaim_stale_tasks()
