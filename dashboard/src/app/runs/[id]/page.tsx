@@ -193,6 +193,11 @@ export default function RunDetailPage() {
   // no longer active, the control is disabled with an explanation rather than
   // silently no-opping.
   const [blueprintHasReplanner, setBlueprintHasReplanner] = useState<boolean | null>(null);
+  // Does this blueprint spin up a LIVE app preview (a "Spin Preview Pod" stage)?
+  // app-scaffold does; pure-pipeline blueprints (alm-pipeline, crew-task) don't.
+  // Used to tell the Preview tab to explain itself instead of just offering a
+  // generic on-demand preview.
+  const [blueprintHasPreview, setBlueprintHasPreview] = useState<boolean | null>(null);
   useEffect(() => {
     if (!blueprint) return;
     let cancelled = false;
@@ -200,14 +205,26 @@ export default function RunDetailPage() {
       .getBlueprintGraph(blueprint)
       .then((g) => {
         if (cancelled) return;
-        const has = g.nodes.some((n) => {
-          const a = (n.agent || "").toLowerCase();
-          const t = (n.type || "").toLowerCase();
-          return a.includes("supervisor") || a.includes("crew") || t.includes("crew") || t.includes("supervisor");
-        });
-        setBlueprintHasReplanner(has);
+        setBlueprintHasReplanner(
+          g.nodes.some((n) => {
+            const a = (n.agent || "").toLowerCase();
+            const t = (n.type || "").toLowerCase();
+            return a.includes("supervisor") || a.includes("crew") || t.includes("crew") || t.includes("supervisor");
+          }),
+        );
+        setBlueprintHasPreview(
+          g.nodes.some((n) => {
+            const blob = `${n.name || ""} ${n.stage || ""} ${n.title || ""} ${n.type || ""}`.toLowerCase();
+            return blob.includes("preview");
+          }),
+        );
       })
-      .catch(() => !cancelled && setBlueprintHasReplanner(null));
+      .catch(() => {
+        if (!cancelled) {
+          setBlueprintHasReplanner(null);
+          setBlueprintHasPreview(null);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -457,7 +474,13 @@ export default function RunDetailPage() {
         )}
 
         {tab === "preview" && (
-          <PreviewTab runId={runId} repo={run?.repo} pipelineUrl={previewUrl} />
+          <PreviewTab
+            runId={runId}
+            repo={run?.repo}
+            pipelineUrl={previewUrl}
+            blueprint={blueprint}
+            blueprintHasPreview={blueprintHasPreview}
+          />
         )}
 
         {tab === "repo" && <RepoPanel runId={runId} />}
@@ -657,10 +680,15 @@ function PreviewTab({
   runId,
   repo,
   pipelineUrl,
+  blueprint,
+  blueprintHasPreview,
 }: {
   runId: string;
   repo?: string;
   pipelineUrl: string;
+  blueprint?: string;
+  /** true = blueprint has a Spin-Preview-Pod stage; false = it doesn't; null = unknown. */
+  blueprintHasPreview?: boolean | null;
 }) {
   // The pipeline-provisioned URL (spin_preview_pod) takes precedence. Otherwise
   // the user can start an on-demand preview for this run's repo. Both resolve to
@@ -772,20 +800,40 @@ function PreviewTab({
 
   // No preview yet — offer to start one (or explain it isn't available).
   if (!liveUrl) {
+    // Blueprints without a Spin-Preview-Pod stage (alm-pipeline, crew-task, …)
+    // don't produce a live app preview as part of the run — say so plainly so
+    // this "Preview" (the running app) isn't confused with the blueprint "Flow"
+    // (the stages). You can still spin an on-demand preview for the repo.
+    const noBlueprintPreview = blueprintHasPreview === false;
     return (
       <div className="h-full flex items-center justify-center p-6">
         <div className="max-w-md w-full">
           <GuidancePanel id="preview" className="mb-5" />
           <EmptyState
-            title={repo ? "No live preview yet" : "No preview available"}
+            title={
+              !repo
+                ? "No preview available"
+                : noBlueprintPreview
+                  ? "This blueprint has no live preview"
+                  : "No live preview yet"
+            }
             description={
-              repo
-                ? "Spin up an ephemeral environment for this repo. It clones, installs and boots a dev server — which can take a few minutes."
-                : "This run has no repository to preview."
+              !repo
+                ? "This run has no repository to preview."
+                : noBlueprintPreview
+                  ? `The ${blueprint || "selected"} blueprint runs its work through the pipeline (issues → code → review → PR) but doesn't spin up a live app — only app-building blueprints like app-scaffold do (they have a "Spin Preview Pod" stage). You can still boot an on-demand preview of the repo below.`
+                  : "Spin up an ephemeral environment for this repo. It clones, installs and boots a dev server — which can take a few minutes."
             }
             action={
               repo
-                ? { label: starting ? "Starting…" : "Start preview", onClick: () => start() }
+                ? {
+                    label: starting
+                      ? "Starting…"
+                      : noBlueprintPreview
+                        ? "Start preview anyway"
+                        : "Start preview",
+                    onClick: () => start(),
+                  }
                 : undefined
             }
           />
