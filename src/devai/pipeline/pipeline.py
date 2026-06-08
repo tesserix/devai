@@ -90,9 +90,7 @@ class Pipeline:
         sm = deps.state_manager
         cfg = deps.config
         self._durable = bool(
-            getattr(cfg, "pipeline_durable_queue", True)
-            and sm is not None
-            and hasattr(sm, "claim_next_task")
+            getattr(cfg, "pipeline_durable_queue", True) and sm is not None and hasattr(sm, "claim_next_task")
         )
         self._claim_ttl = int(getattr(cfg, "pipeline_claim_ttl", 180))
         self._reaper_interval = int(getattr(cfg, "pipeline_reaper_interval", 30))

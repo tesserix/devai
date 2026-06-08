@@ -316,9 +316,7 @@ class StateManager:
             await self.redis.lpush(self.PIPELINE_QUEUE_KEY, task_id)
         return bool(added)
 
-    async def claim_next_task(
-        self, worker_id: str, *, timeout: int = 5, claim_ttl: int = 180
-    ) -> str | None:
+    async def claim_next_task(self, worker_id: str, *, timeout: int = 5, claim_ttl: int = 180) -> str | None:
         """Block up to `timeout`s for the next task; atomically move it to the
         processing list and stamp a liveness claim. Returns the id or None.
 
@@ -335,17 +333,13 @@ class StateManager:
         )
         if task_id is None:
             return None
-        await self.redis.set(
-            self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl
-        )
+        await self.redis.set(self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl)
         return task_id
 
     async def heartbeat_task(self, task_id: str, worker_id: str, *, claim_ttl: int = 180) -> None:
         """Refresh the liveness claim on a task we're executing. Called on a
         timer so a long-running (but alive) stage isn't falsely reclaimed."""
-        await self.redis.set(
-            self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl
-        )
+        await self.redis.set(self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl)
 
     async def ack_task(self, task_id: str) -> None:
         """Mark a task done: drop it from processing, active and clear its
