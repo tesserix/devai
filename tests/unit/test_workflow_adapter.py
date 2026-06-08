@@ -375,6 +375,11 @@ class _FakePipelineSig:
     def __init__(self) -> None:
         self.signals: list = []
 
+    def get_task(self, task_id: str):
+        # No live in-memory task — set_run_control still sets the flag + signals,
+        # and (for a real run) would reflect the control onto the snapshot.
+        return None
+
     async def signal_run(self, task_id: str, name: str, args=None) -> bool:
         self.signals.append((task_id, name, args))
         return True
