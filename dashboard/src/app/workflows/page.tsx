@@ -267,7 +267,7 @@ function BlueprintCard({
           <BlueprintDAG graph={graph} dense />
         ) : graphErr ? (
           <p className="text-[12px] px-1 py-3" style={{ color: "var(--ink-muted)" }}>
-            Preview unavailable for <span className="font-mono">{blueprint.name}</span>.
+            Flow unavailable for <span className="font-mono">{blueprint.name}</span>.
           </p>
         ) : (
           <div

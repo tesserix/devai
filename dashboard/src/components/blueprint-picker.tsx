@@ -16,7 +16,7 @@
  * the picker stays decoupled from api.ts wiring.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { GitBranch, Layers } from "lucide-react";
 import type { BlueprintGraph, BlueprintSummary } from "@/lib/api";
@@ -47,9 +47,18 @@ export function BlueprintPicker({
   const [graphErr, setGraphErr] = useState<string | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
 
-  // Lazily preview the selected blueprint's DAG.
+  // Hold loadGraph in a ref so the fetch effect does NOT depend on it. Parents
+  // pass it inline (`(n) => api.getBlueprintGraph(n)`), so a new identity is
+  // created every render — depending on it made the effect re-fire on every
+  // parent re-render (e.g. each keystroke in Requirements), which reset the DAG
+  // to "Loading…" and made the preview flaky/stuck. Now it fetches once per
+  // selected blueprint and always uses the latest loadGraph.
+  const loadGraphRef = useRef(loadGraph);
+  loadGraphRef.current = loadGraph;
+
   useEffect(() => {
-    if (!value || !loadGraph) {
+    const lg = loadGraphRef.current;
+    if (!value || !lg) {
       setGraph(null);
       return;
     }
@@ -57,14 +66,14 @@ export function BlueprintPicker({
     setGraph(null);
     setGraphErr(null);
     setGraphLoading(true);
-    loadGraph(value)
+    lg(value)
       .then((g) => !cancelled && setGraph(g))
       .catch((e) => !cancelled && setGraphErr(String(e?.message ?? e)))
       .finally(() => !cancelled && setGraphLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [value, loadGraph]);
+  }, [value]);
 
   if (loading) {
     return (
@@ -159,10 +168,18 @@ export function BlueprintPicker({
         </p>
       )}
 
-      {/* Selected-blueprint mini DAG preview */}
+      {/* Selected-blueprint mini DAG — labelled "Flow" (the stages this
+          blueprint runs), NOT "Preview". The live running-app preview is a
+          different thing (the run's Preview tab / preview-<id>.tesserix.app);
+          re-using "Preview" here was confusing. */}
       {value && loadGraph && (
         <div className="panel-muted p-3">
-          <div className="label-eyebrow mb-2">Preview</div>
+          <div className="flex items-baseline gap-1.5 mb-2">
+            <span className="label-eyebrow">Flow</span>
+            <span className="text-[10px]" style={{ color: "var(--ink-muted)" }}>
+              · stages this blueprint runs
+            </span>
+          </div>
           {graphLoading && (
             <p className="text-[12px] animate-pulse" style={{ color: "var(--ink-muted)" }}>
               Loading {value} flow…
@@ -170,7 +187,7 @@ export function BlueprintPicker({
           )}
           {graphErr && (
             <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>
-              Preview unavailable for <span className="font-mono">{value}</span>.
+              Flow unavailable for <span className="font-mono">{value}</span>.
             </p>
           )}
           {graph && <BlueprintDAG graph={graph} dense />}
