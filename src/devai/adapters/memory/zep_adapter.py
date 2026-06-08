@@ -238,7 +238,7 @@ class ZepMemoryAdapter(MemoryAdapter):
 def _parse_created(value: Any) -> float | None:
     if value is None:
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     try:
         from datetime import datetime as _dt

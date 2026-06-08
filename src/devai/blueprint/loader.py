@@ -56,7 +56,7 @@ def _parse_duration(value: Any, *, default: float | None = None) -> float | None
     """
     if value is None or value == "":
         return default
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     if not isinstance(value, str):
         raise BlueprintLoadError(f"timeout must be string or number, got {type(value).__name__}")

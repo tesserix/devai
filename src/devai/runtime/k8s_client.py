@@ -286,7 +286,9 @@ class K8sJobRuntime:
         # Accept both the single-service (FE-only) shape and the multi-service
         # (full-stack: web + api) shape.
         svcs = manifests.get("services") or ([manifests["service"]] if manifests.get("service") else [])
-        vss = manifests.get("virtualservices") or ([manifests["virtualservice"]] if manifests.get("virtualservice") else [])
+        vss = manifests.get("virtualservices") or (
+            [manifests["virtualservice"]] if manifests.get("virtualservice") else []
+        )
         pvc = manifests.get("pvc")
         # Previews live in their own namespace (carried on each manifest), not
         # the runner namespace.
@@ -426,8 +428,11 @@ class K8sJobRuntime:
             api_name = "api-" + name[len("preview-") :]
             try:
                 await self._custom_objects.delete_namespaced_custom_object(
-                    group="networking.istio.io", version="v1beta1", namespace=ns,
-                    plural="virtualservices", name=api_name,
+                    group="networking.istio.io",
+                    version="v1beta1",
+                    namespace=ns,
+                    plural="virtualservices",
+                    name=api_name,
                 )
             except Exception:
                 logger.debug("delete vs %s skipped/failed", api_name, exc_info=True)

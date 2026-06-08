@@ -252,7 +252,7 @@ def _to_epoch(value: Any) -> float:
     """Convert a Postgres TIMESTAMP / datetime / float to epoch seconds."""
     if value is None:
         return time.time()
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     try:
         return float(value.timestamp())  # type: ignore[attr-defined]

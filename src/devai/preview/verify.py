@@ -222,9 +222,7 @@ def diagnose(
     declared = _declared_ports(deployment)
     diags: list[Diagnosis] = []
     for cs in _container_statuses(pod):
-        diags.append(
-            classify(cs, logs_by_container.get(cs["name"], ""), declared_port=declared.get(cs["name"]))
-        )
+        diags.append(classify(cs, logs_by_container.get(cs["name"], ""), declared_port=declared.get(cs["name"])))
     if not diags:
         phase = (pod.get("status") or {}).get("phase", "")
         return [Diagnosis("*", PENDING, f"pod phase={phase or 'Unknown'}")]
@@ -235,8 +233,15 @@ def diagnose(
 
 _MEM_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([KMGT]i?)?\s*$")
 _MEM_UNITS = {
-    "": 1, "Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4,
-    "K": 1000, "M": 1000**2, "G": 1000**3, "T": 1000**4,
+    "": 1,
+    "Ki": 1024,
+    "Mi": 1024**2,
+    "Gi": 1024**3,
+    "Ti": 1024**4,
+    "K": 1000,
+    "M": 1000**2,
+    "G": 1000**3,
+    "T": 1000**4,
 }
 
 
@@ -304,7 +309,7 @@ def build_heal_patches(
         kind = d.action["type"]
 
         if kind == "bump_memory":
-            lim = (((cur.get("resources") or {}).get("limits") or {}).get("memory"))
+            lim = ((cur.get("resources") or {}).get("limits") or {}).get("memory")
             cur_b = _parse_mem(lim) or (768 * 1024**2)
             new_b = min(cur_b * 2, _MEM_CAP_BYTES)
             if new_b <= cur_b:
@@ -330,11 +335,15 @@ def build_heal_patches(
             cp["env"] = env
             # Re-point the Service whose targetPort matched the old port.
             for svc in services:
-                for sp in ((svc.get("spec") or {}).get("ports") or []):
+                for sp in (svc.get("spec") or {}).get("ports") or []:
                     tp = sp.get("target_port") or sp.get("targetPort")
                     if old_port and tp == old_port:
                         service_patches.append(
-                            {"name": svc["metadata"]["name"], "targetPort": new_port, "portName": sp.get("name", "http")}
+                            {
+                                "name": svc["metadata"]["name"],
+                                "targetPort": new_port,
+                                "portName": sp.get("name", "http"),
+                            }
                         )
             applied.append(f"{d.container}: re-point port {old_port} -> {new_port}")
 
@@ -352,7 +361,9 @@ def build_heal_patches(
             cmd = cur.get("command") or []
             # The full-stack builder shapes this as ["sh","-lc","cd <wd> && <install> && exec <run>"].
             if len(cmd) == 3 and cmd[0] == "sh":
-                clean = "rm -rf node_modules .next dist .vite 2>/dev/null; npm cache clean --force 2>/dev/null || true; "
+                clean = (
+                    "rm -rf node_modules .next dist .vite 2>/dev/null; npm cache clean --force 2>/dev/null || true; "
+                )
                 if "rm -rf node_modules" not in cmd[2]:
                     cp = _cp(d.container)
                     cp["command"] = [cmd[0], cmd[1], clean + cmd[2]]
@@ -404,7 +415,7 @@ class PreviewHealer:
                     logs[cs["name"]] = await self._rt.preview_pod_logs(pod_name, container=cs["name"])
         # Web + api Services (api-<frag> exists only for full-stack).
         services: list[dict] = []
-        for svc_name in (name, "api-" + name[len("preview-"):]) if name.startswith("preview-") else (name,):
+        for svc_name in (name, "api-" + name[len("preview-") :]) if name.startswith("preview-") else (name,):
             svc = await self._rt.get_preview_service(svc_name)
             if svc:
                 services.append(svc)

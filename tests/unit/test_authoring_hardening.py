@@ -105,9 +105,7 @@ async def test_mcp_image_untrusted_rejected(image):
 
 async def test_mcp_image_trusted_accepted():
     svc = AuthoringService(InMemoryDefinitionStore())
-    out = await svc.create_mcp_server(
-        {"name": "t", "image": "ghcr.io/tesserix/devai/mytool:main"}, created_by="alice"
-    )
+    out = await svc.create_mcp_server({"name": "t", "image": "ghcr.io/tesserix/devai/mytool:main"}, created_by="alice")
     assert out["name"] == "t"
 
 

@@ -60,7 +60,7 @@ class NewRelicAdapter(ObservabilityAdapter):
         for row in results:
             ts = float(row.get("beginTimeSeconds", row.get("timestamp", 0)) or 0)
             val = next(
-                (float(v) for k, v in row.items() if isinstance(v, (int, float)) and k != "beginTimeSeconds"), None
+                (float(v) for k, v in row.items() if isinstance(v, int | float) and k != "beginTimeSeconds"), None
             )
             if val is not None:
                 points.append((ts, val))

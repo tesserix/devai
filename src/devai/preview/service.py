@@ -72,8 +72,19 @@ class PreviewService:
 
     # Candidate workdirs probed for stack markers (mirror profile resolver).
     _MARKER_DIRS = (
-        "", "apps/web", "apps/frontend", "web", "frontend", "client", "packages/web",
-        "apps/api", "apps/backend", "api", "backend", "server", "services/api",
+        "",
+        "apps/web",
+        "apps/frontend",
+        "web",
+        "frontend",
+        "client",
+        "packages/web",
+        "apps/api",
+        "apps/backend",
+        "api",
+        "backend",
+        "server",
+        "services/api",
     )
     _MARKER_FILES = ("package.json", "pyproject.toml", "requirements.txt", "go.mod")
 
@@ -88,7 +99,9 @@ class PreviewService:
         try:
             tree = await self._scm.get_repo_tree(repo, ref)
         except Exception:  # noqa: BLE001
-            logger.warning("preview: get_repo_tree(%s@%s) failed — falling back to FE default", repo, ref, exc_info=True)
+            logger.warning(
+                "preview: get_repo_tree(%s@%s) failed — falling back to FE default", repo, ref, exc_info=True
+            )
             return None
         files = {e.get("path", "") for e in (tree or []) if e.get("path")}
         contents: dict[str, str] = {}
@@ -207,9 +220,7 @@ class PreviewService:
             logger.error("preview %s: apply_preview returned no deployment_name (%r)", sid, applied)
             raise PreviewError("failed to start preview — see server logs")
         fe_url = f"https://{applied['preview_host']}" if applied.get("preview_host") else ""
-        await self._db.create_preview_session(
-            sid, repo, ref, owner, fe_url, deployment_name, status="starting"
-        )
+        await self._db.create_preview_session(sid, repo, ref, owner, fe_url, deployment_name, status="starting")
         logger.info("preview: started %s for %s@%s (owner=%s) -> %s", sid, repo, ref, owner, fe_url)
         return {
             "session_id": sid,

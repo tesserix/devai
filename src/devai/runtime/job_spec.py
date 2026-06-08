@@ -84,27 +84,27 @@ def _validate_ref(ref: str) -> str:
 # `.git/config` remote URL on the shared PVC (CODE-9): the remote stays a
 # bare https URL, credentials are provided out-of-band per fetch.
 _GIT_CLONE_SCRIPT = (
-    'set -eu; '
+    "set -eu; "
     # Reject a leading '-' defensively (env could be tampered with).
     'case "${REPO}" in -*) echo "bad repo" >&2; exit 1;; esac; '
     'case "${BRANCH}" in -*) echo "bad branch" >&2; exit 1;; esac; '
-    'export GIT_TERMINAL_PROMPT=0; '
+    "export GIT_TERMINAL_PROMPT=0; "
     # askpass feeds the token to git without persisting it in .git/config.
     'printf "#!/bin/sh\\nexec echo \\"${DEVAI_SCM_TOKEN}\\"\\n" > /tmp/askpass.sh; '
-    'chmod 700 /tmp/askpass.sh; '
-    'export GIT_ASKPASS=/tmp/askpass.sh; '
-    'git -c protocol.allow=never -c protocol.https.allow=always '
-    '-c credential.helper= '
+    "chmod 700 /tmp/askpass.sh; "
+    "export GIT_ASKPASS=/tmp/askpass.sh; "
+    "git -c protocol.allow=never -c protocol.https.allow=always "
+    "-c credential.helper= "
     'clone --branch "${BRANCH}" --depth 1 -- '
     '"https://x-access-token@github.com/${REPO}.git" /work; '
     # Belt-and-braces: scrub any credential that a future git version might
     # cache in the cloned config, and reset the remote to a bare URL.
     'git -C /work remote set-url origin "https://github.com/${REPO}.git" || true; '
-    'git -C /work config --unset-all credential.helper 2>/dev/null || true; '
-    'chown -R 1000:1000 /work'
+    "git -C /work config --unset-all credential.helper 2>/dev/null || true; "
+    "chown -R 1000:1000 /work"
 )
 
-_GIT_CLONE_SCRIPT_IF_MISSING = 'test -d /work/.git || { ' + _GIT_CLONE_SCRIPT + '; }; chown -R 1000:1000 /work'
+_GIT_CLONE_SCRIPT_IF_MISSING = "test -d /work/.git || { " + _GIT_CLONE_SCRIPT + "; }; chown -R 1000:1000 /work"
 
 
 def _dns_safe(value: str, *, max_len: int = 63) -> str:
@@ -608,7 +608,12 @@ def build_fullstack_preview_manifests(
                 "env": env + [{"name": "HOST", "value": "0.0.0.0"}, {"name": "PORT", "value": str(s.port)}],
                 "ports": [{"name": s.role[:15], "containerPort": s.port}],
                 "volumeMounts": [{"name": "workspace", "mountPath": "/work"}],
-                "readinessProbe": {"tcpSocket": {"port": s.port}, "initialDelaySeconds": 10, "periodSeconds": 5, "failureThreshold": 60},
+                "readinessProbe": {
+                    "tcpSocket": {"port": s.port},
+                    "initialDelaySeconds": 10,
+                    "periodSeconds": 5,
+                    "failureThreshold": 60,
+                },
                 "resources": {"requests": {"memory": "768Mi"}, "limits": {"memory": "3Gi"}},
             }
         )
@@ -699,7 +704,12 @@ def build_fullstack_preview_manifests(
                 "http": [
                     {
                         "route": [
-                            {"destination": {"host": "devai-auth-bff.devai.svc.cluster.local", "port": {"number": 8090}}}
+                            {
+                                "destination": {
+                                    "host": "devai-auth-bff.devai.svc.cluster.local",
+                                    "port": {"number": 8090},
+                                }
+                            }
                         ],
                         "timeout": "0s",
                     }

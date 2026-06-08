@@ -280,8 +280,7 @@ class JobRunnerStage(PipelineStage):
             if _image_is_allowed(str(override), runtime):
                 return str(override)
             logger.warning(
-                "stage %s: rejecting untrusted stage.config.image %r — "
-                "falling back to trusted runner image",
+                "stage %s: rejecting untrusted stage.config.image %r — " "falling back to trusted runner image",
                 self._stage_name,
                 override,
             )
@@ -295,8 +294,7 @@ class JobRunnerStage(PipelineStage):
             if _image_is_allowed(prof_image, runtime):
                 return prof_image
             logger.warning(
-                "stage %s: rejecting untrusted agent-profile image %r — "
-                "falling back to default runner image",
+                "stage %s: rejecting untrusted agent-profile image %r — " "falling back to default runner image",
                 self._stage_name,
                 prof_image,
             )

@@ -134,7 +134,7 @@ def validate_handover(
 def _is_empty(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip() == ""
-    if isinstance(value, (list, dict, tuple, set)):
+    if isinstance(value, list | dict | tuple | set):
         return len(value) == 0
     return False
 

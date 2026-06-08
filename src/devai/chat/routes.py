@@ -134,9 +134,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
             # Stream response chunks, redacting each — tool output / error
             # text can carry connection strings or bare provider keys.
             try:
-                async for chunk in agent.stream_chat(
-                    user_message, session_id, principal=principal, trace_id=trace_id
-                ):
+                async for chunk in agent.stream_chat(user_message, session_id, principal=principal, trace_id=trace_id):
                     await websocket.send_json({"type": "chunk", "text": redact_secrets(chunk)})
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Chat WS turn failed for session %s (user=%s)", session_id, principal.email)

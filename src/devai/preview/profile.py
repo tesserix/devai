@@ -146,9 +146,15 @@ def _detect_backend(files: set[str], contents: dict[str, str]) -> tuple[ServiceS
             install = "pip install -e . 2>/dev/null || pip install -r requirements.txt 2>/dev/null || true"
             return (
                 ServiceSpec(
-                    name="api", role="backend", workdir=wd, image=_PY_IMAGE,
-                    install=["sh", "-lc", install], run=["sh", "-lc", run], port=8000,
-                    hot_reload="reload", depends_on=["db"] if needs_db else [],
+                    name="api",
+                    role="backend",
+                    workdir=wd,
+                    image=_PY_IMAGE,
+                    install=["sh", "-lc", install],
+                    run=["sh", "-lc", run],
+                    port=8000,
+                    hot_reload="reload",
+                    depends_on=["db"] if needs_db else [],
                 ),
                 needs_db,
             )
@@ -159,9 +165,15 @@ def _detect_backend(files: set[str], contents: dict[str, str]) -> tuple[ServiceS
             run = "go run ./... 2>/dev/null || go run ."
             return (
                 ServiceSpec(
-                    name="api", role="backend", workdir=wd, image=_GO_IMAGE,
-                    install=["sh", "-lc", "go mod download"], run=["sh", "-lc", run], port=8080,
-                    hot_reload="restart", depends_on=["db"] if needs_db else [],
+                    name="api",
+                    role="backend",
+                    workdir=wd,
+                    image=_GO_IMAGE,
+                    install=["sh", "-lc", "go mod download"],
+                    run=["sh", "-lc", run],
+                    port=8080,
+                    hot_reload="restart",
+                    depends_on=["db"] if needs_db else [],
                 ),
                 needs_db,
             )
@@ -176,9 +188,15 @@ def _detect_backend(files: set[str], contents: dict[str, str]) -> tuple[ServiceS
                 run = "npm run dev 2>/dev/null || npx tsx watch src/index.ts 2>/dev/null || node ."
                 return (
                     ServiceSpec(
-                        name="api", role="backend", workdir=wd, image=_NODE_IMAGE,
-                        install=["sh", "-lc", install], run=["sh", "-lc", run], port=8080,
-                        hot_reload="restart", depends_on=["db"] if needs_db else [],
+                        name="api",
+                        role="backend",
+                        workdir=wd,
+                        image=_NODE_IMAGE,
+                        install=["sh", "-lc", install],
+                        run=["sh", "-lc", run],
+                        port=8080,
+                        hot_reload="restart",
+                        depends_on=["db"] if needs_db else [],
                     ),
                     needs_db,
                 )
@@ -187,8 +205,14 @@ def _detect_backend(files: set[str], contents: dict[str, str]) -> tuple[ServiceS
 
 def _database_service() -> ServiceSpec:
     return ServiceSpec(
-        name="db", role="database", workdir="", image="postgres:16-alpine",
-        install=[], run=[], port=5432, engine="postgres",
+        name="db",
+        role="database",
+        workdir="",
+        image="postgres:16-alpine",
+        install=[],
+        run=[],
+        port=5432,
+        engine="postgres",
         env={"POSTGRES_USER": "preview", "POSTGRES_PASSWORD": "preview", "POSTGRES_DB": "app"},
     )
 
@@ -239,9 +263,7 @@ def apply_wiring(profile: PreviewProfile) -> None:
         be.env.setdefault("CORS_ORIGINS", "${WEB_PUBLIC_URL}")
         be.env.setdefault("ALLOWED_ORIGINS", "${WEB_PUBLIC_URL}")
     if be and db:
-        be.env.setdefault(
-            "DATABASE_URL", "postgresql://preview:preview@localhost:5432/app"
-        )
+        be.env.setdefault("DATABASE_URL", "postgresql://preview:preview@localhost:5432/app")
 
 
 def _parse_json(text: str) -> dict:

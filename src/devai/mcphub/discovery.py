@@ -46,9 +46,7 @@ class EndpointGuardError(ValueError):
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """SSRF-prone address space: loopback/link-local (incl. 169.254.169.254 GKE
     metadata)/private/unspecified/reserved/multicast."""
-    return (
-        ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_unspecified or ip.is_reserved or ip.is_multicast
-    )
+    return ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_unspecified or ip.is_reserved or ip.is_multicast
 
 
 def check_endpoint_url(url: str, allowed_suffixes: list[str], *, resolve: bool = True) -> None:
@@ -108,9 +106,7 @@ def check_endpoint_url(url: str, allowed_suffixes: list[str], *, resolve: bool =
             except ValueError:
                 continue
             if _is_blocked_ip(resolved):
-                raise EndpointGuardError(
-                    f"mcphub: endpoint host {host!r} resolves to non-routable {addr} (SSRF guard)"
-                )
+                raise EndpointGuardError(f"mcphub: endpoint host {host!r} resolves to non-routable {addr} (SSRF guard)")
 
 
 def endpoint_allowed(spec: DownstreamSpec, allowed_suffixes: list[str], *, resolve: bool = True) -> bool:

@@ -113,7 +113,7 @@ class HandoverField:
         if self.type == "integer":
             return isinstance(value, bool) is False and isinstance(value, int)
         if self.type == "number":
-            return isinstance(value, (int, float)) and not isinstance(value, bool)
+            return isinstance(value, int | float) and not isinstance(value, bool)
         if self.type == "boolean":
             return isinstance(value, bool)
         if self.type == "array":

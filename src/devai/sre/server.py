@@ -369,7 +369,7 @@ def create_sre_app() -> FastAPI:
         )
 
         def _parse_jsonb(value: Any) -> Any:
-            if value is None or isinstance(value, (dict, list)):
+            if value is None or isinstance(value, dict | list):
                 return value
             try:
                 return json.loads(value)

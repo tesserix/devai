@@ -250,9 +250,7 @@ class Settings(BaseSettings):
     # Authoring guardrails (CODE-21). Trusted registries an authored MCP-server
     # image may reference; per-principal / per-kind creation caps + rate limit
     # (0 = unlimited, today's behavior).
-    authoring_trusted_image_registries: list[str] = Field(
-        default_factory=lambda: ["ghcr.io/tesserix/"]
-    )
+    authoring_trusted_image_registries: list[str] = Field(default_factory=lambda: ["ghcr.io/tesserix/"])
     authoring_per_kind_cap: int = 0
     authoring_per_principal_quota: int = 0
     authoring_rate_limit_per_minute: int = 0

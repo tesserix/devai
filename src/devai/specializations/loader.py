@@ -85,7 +85,7 @@ def _parse_timeout(value: Any, *, default: int = 900) -> int:
     """Parse Fiber-style duration. Returns seconds (int)."""
     if value is None or value == "":
         return default
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return int(value)
     if not isinstance(value, str):
         raise SpecializationLoadError(f"timeout must be string or number, got {type(value).__name__}")
@@ -138,9 +138,7 @@ def _parse_handover_schema(raw: Any, *, source: str) -> dict[str, HandoverField]
     return out
 
 
-def load_specialization_from_string(
-    text: str, *, source: str = "<inline>", authored: bool = False
-) -> Specialization:
+def load_specialization_from_string(text: str, *, source: str = "<inline>", authored: bool = False) -> Specialization:
     """Parse a specialization YAML string into a Specialization.
 
     ``authored=True`` marks the input as coming from the user-authoring API

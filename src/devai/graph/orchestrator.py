@@ -625,9 +625,7 @@ class ALMOrchestrator:
                     reason,
                 )
                 self._report_progress(state, node_name, "failed", str(e)[:200])
-                await self.state_manager.set_agent_status(
-                    state.get("run_id", ""), agent.name, "failed", str(e)[:500]
-                )
+                await self.state_manager.set_agent_status(state.get("run_id", ""), agent.name, "failed", str(e)[:500])
                 await self._record_failure(agent.name, state, str(e))
                 raise
             logger.warning(

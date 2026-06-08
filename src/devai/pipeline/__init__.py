@@ -28,9 +28,10 @@ from devai.pipeline.types import (
     StageResult,
     TaskState,
 )
+from devai.pipeline.pipeline import Pipeline, PipelineError
 
 if TYPE_CHECKING:
-    from devai.pipeline.pipeline import Pipeline, PipelineError  # noqa: F401
+    pass  # noqa: F401
 
 
 def __getattr__(name: str) -> Any:

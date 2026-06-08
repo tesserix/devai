@@ -439,9 +439,7 @@ async def approve(request: Request, task_id: str, gate: str) -> dict[str, str]:
     # Human-in-the-loop guardrail: an approval must come from an authenticated
     # team member, and we record who approved (CODE-2).
     principal = await _authorize_run(request, task)
-    await svc.approve_gate(
-        task_id, gate, "approved", approver=principal.to_dict() if principal else None
-    )
+    await svc.approve_gate(task_id, gate, "approved", approver=principal.to_dict() if principal else None)
     return {"status": "approved", "gate": gate, "run_id": task_id}
 
 
@@ -453,9 +451,7 @@ async def reject(request: Request, task_id: str, gate: str) -> dict[str, str]:
     if task is None:
         raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
     principal = await _authorize_run(request, task)
-    await svc.approve_gate(
-        task_id, gate, "rejected", approver=principal.to_dict() if principal else None
-    )
+    await svc.approve_gate(task_id, gate, "rejected", approver=principal.to_dict() if principal else None)
     return {"status": "rejected", "gate": gate, "run_id": task_id}
 
 
