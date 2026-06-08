@@ -20,8 +20,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    # Type-only: Pipeline / PipelineError are provided LAZILY at runtime via
+    # __getattr__ (below) so importing `devai.pipeline` doesn't eagerly load
+    # `devai.pipeline.pipeline` -> `devai.blueprint` (circular import). ruff's
+    # TC004 is a false positive here — it doesn't model the __getattr__ lazy path.
+    from devai.pipeline.pipeline import Pipeline, PipelineError  # noqa: F401, TC004
+
 from devai.pipeline.interfaces import PipelineStage, StageDeps, StageFactory
-from devai.pipeline.pipeline import Pipeline, PipelineError
 from devai.pipeline.types import (
     DevAITask,
     StageEvent,
