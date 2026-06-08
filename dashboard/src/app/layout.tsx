@@ -3,6 +3,7 @@ import { Inter, IBM_Plex_Mono, Source_Serif_4, Syne } from "next/font/google";
 import "./globals.css";
 import { MissionControlShell } from "@/components/mission-control-shell";
 import { ToastProvider } from "@/components/toast";
+import { ConfirmProvider } from "@/components/confirm-dialog";
 import { THEME_INIT_SCRIPT } from "@/lib/theme-script";
 
 // Fonts mirror PLATFORM.md §14 (Tactical Monospace). We load only the
@@ -48,7 +49,9 @@ export default function RootLayout({
          * 'devai-theme' localStorage key before first paint). The old
          * ThemeProvider used a different, dead 'theme' key and is removed. */}
         <ToastProvider>
-          <MissionControlShell>{children}</MissionControlShell>
+          <ConfirmProvider>
+            <MissionControlShell>{children}</MissionControlShell>
+          </ConfirmProvider>
         </ToastProvider>
       </body>
     </html>

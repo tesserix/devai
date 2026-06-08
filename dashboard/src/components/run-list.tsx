@@ -6,6 +6,7 @@ import Link from "next/link";
 import { clsx } from "clsx";
 import type { PipelineRun } from "@/lib/api";
 import { RunStateBadge, normalizeRunState } from "@/components/run-state-badge";
+import { useConfirm } from "@/components/confirm-dialog";
 
 /**
  * RunList — the recent-runs list.
@@ -62,6 +63,7 @@ export function RunList({
   onDelete,
 }: RunListProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const handleControl = async (
     runId: string,
@@ -76,11 +78,15 @@ export function RunList({
     }
   };
 
-  const handleDelete = (runId: string) => {
+  const handleDelete = async (runId: string) => {
     if (!onDelete || busyId === runId) return;
-    if (typeof window !== "undefined" && !window.confirm(`Delete run ${runId.slice(0, 8)}? This removes it permanently.`)) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete run ${runId.slice(0, 8)}?`,
+      message: "This permanently removes the run and its history. This can't be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     void handleControl(runId, onDelete);
   };
 

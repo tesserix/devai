@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   api,
   type DelegationPlan,
@@ -43,6 +44,7 @@ import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/components/toast";
 import {
   AlertTriangle,
+  ArrowLeft,
   ExternalLink,
   GitBranch,
   Layers,
@@ -261,8 +263,16 @@ export default function RunDetailPage() {
         className="px-6 pt-4 pb-3 shrink-0"
         style={{ background: "var(--surface)", borderBottom: "1px solid var(--border-subtle)" }}
       >
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium mb-2 transition-colors hover:underline underline-offset-2"
+          style={{ color: "var(--ink-muted)" }}
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to Fleet
+        </Link>
         <Breadcrumbs
           items={[
+            { label: "Fleet", href: "/" },
             { label: "Runs", href: "/runs" },
             { label: run?.repo || runId },
           ]}
