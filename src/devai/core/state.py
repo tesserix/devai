@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 import redis.asyncio as redis
+from redis.exceptions import WatchError
 
 from devai.models import AgentResult, PipelineContext
 
@@ -188,12 +189,19 @@ class StateManager:
     PIPELINE_CLAIM_KEY = "devai:pipeline:claim:{task_id}"
 
     async def persist_task(self, task_dict: dict[str, Any], *, ttl: int | None = None) -> None:
-        """Write a DevAITask dict to Redis.
+        """Write a DevAITask dict to Redis, last-writer-wins by `updated_at`.
 
-        Idempotent — the Pipeline calls this after every state mutation,
-        so the latest snapshot always wins. The recent / by_blueprint /
-        by_repo indices are upserted on first persist; later persists
-        just overwrite the snapshot.
+        The Pipeline persists after every state mutation, but some of those
+        writes are fire-and-forget (the per-stage event callback schedules a
+        persist of the snapshot captured at emit time). The executor emits the
+        final stage event *before* the terminal transition, so a late-landing
+        event persist could otherwise clobber a finished run's snapshot back to
+        a running state — and the boot reconciler would then resurrect a run
+        that already completed/failed. Guard with an optimistic WATCH/MULTI on
+        the snapshot key: a persist whose `updated_at` is older than what's
+        already stored is dropped, so the newest mutation always wins
+        regardless of the order persists actually land. The recent /
+        by_blueprint / by_repo indices are updated only when we write.
         """
         task_id = task_dict.get("id")
         if not task_id:
@@ -203,20 +211,38 @@ class StateManager:
         blueprint = task_dict.get("blueprint", "unknown")
         repo = task_dict.get("repo", "")
         ttl = ttl if ttl is not None else self.result_ttl
-        now = time.time()
-
+        incoming_ts = float(task_dict.get("updated_at") or 0.0)
         payload = json.dumps(task_dict)
-        pipe = self.redis.pipeline()
-        pipe.set(self.PIPELINE_TASK_KEY.format(task_id=task_id), payload, ex=ttl)
-        # Sorted set keyed by updated_at so we can list "most recent"
-        pipe.zadd(self.PIPELINE_RECENT_KEY, {task_id: task_dict.get("updated_at", now)})
-        # Cap the recent index at 1000 entries
-        pipe.zremrangebyrank(self.PIPELINE_RECENT_KEY, 0, -1001)
-        if blueprint:
-            pipe.zadd(self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint), {task_id: now})
-        if repo:
-            pipe.zadd(self.PIPELINE_BY_REPO_KEY.format(repo=repo), {task_id: now})
-        await pipe.execute()
+        key = self.PIPELINE_TASK_KEY.format(task_id=task_id)
+
+        async with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    await pipe.watch(key)
+                    current = await pipe.get(key)  # immediate read under WATCH
+                    if current:
+                        try:
+                            stored_ts = float(json.loads(current).get("updated_at") or 0.0)
+                        except (ValueError, TypeError):
+                            stored_ts = 0.0
+                        if incoming_ts < stored_ts:
+                            await pipe.unwatch()
+                            return  # stale — a newer snapshot already stored
+                    now = time.time()
+                    pipe.multi()
+                    pipe.set(key, payload, ex=ttl)
+                    # Sorted set keyed by updated_at so we can list "most recent"
+                    pipe.zadd(self.PIPELINE_RECENT_KEY, {task_id: task_dict.get("updated_at", now)})
+                    # Cap the recent index at 1000 entries
+                    pipe.zremrangebyrank(self.PIPELINE_RECENT_KEY, 0, -1001)
+                    if blueprint:
+                        pipe.zadd(self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint), {task_id: now})
+                    if repo:
+                        pipe.zadd(self.PIPELINE_BY_REPO_KEY.format(repo=repo), {task_id: now})
+                    await pipe.execute()
+                    return
+                except WatchError:
+                    continue  # snapshot changed under us — re-read and retry
 
     async def get_pipeline_task(self, task_id: str) -> dict[str, Any] | None:
         """Read back a previously-persisted task dict."""

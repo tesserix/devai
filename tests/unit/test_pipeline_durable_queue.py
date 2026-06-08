@@ -13,6 +13,8 @@ work is reclaimed and resumed (the executor skips already-completed stages).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from devai.pipeline.types import DevAITask, StageEvent, StageEventPhase, TaskState
@@ -122,6 +124,27 @@ async def test_reaper_requeues_dead_owner_only():
     # It's back on the queue, still active, and claimable again.
     assert await sm.is_task_active("dead") is True
     assert await sm.claim_next_task("workerC") == "dead"
+
+
+async def test_persist_task_is_monotonic_by_updated_at():
+    """A late-landing older snapshot must not clobber a newer one — this is what
+    stops the boot reconciler from resurrecting a run that already finished."""
+    sm = _state_manager()
+    key = "devai:pipeline:task:devai-x"
+
+    # Newer (terminal) snapshot lands first.
+    await sm.persist_task({"id": "devai-x", "blueprint": "alm-pipeline", "state": "completed", "updated_at": 200.0})
+    # A stale fire-and-forget progress persist lands afterwards.
+    await sm.persist_task({"id": "devai-x", "blueprint": "alm-pipeline", "state": "implementing", "updated_at": 100.0})
+
+    stored = json.loads(await sm.redis.get(key))
+    assert stored["state"] == "completed"  # stale write dropped
+    assert stored["updated_at"] == 200.0
+
+    # A genuinely newer snapshot still wins.
+    await sm.persist_task({"id": "devai-x", "blueprint": "alm-pipeline", "state": "cancelled", "updated_at": 300.0})
+    stored = json.loads(await sm.redis.get(key))
+    assert stored["state"] == "cancelled"
 
 
 async def test_double_reap_does_not_duplicate():
