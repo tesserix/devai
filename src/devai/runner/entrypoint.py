@@ -109,10 +109,12 @@ async def _run() -> int:
         )
 
     # Stage handlers fall into a few buckets. Most run a Specialization
-    # (YAML) or a legacy Python agent. A small set of stages have
-    # special semantics (scaffold a real Next.js app, spin a preview
-    # pod, …); they map by stage name.
-    handler = _STAGE_HANDLERS.get(stage)
+    # (YAML) or a legacy Python agent. A small set have special semantics
+    # (scan a repo, scaffold a real app, spin a preview pod, …). These are
+    # keyed by the *agent* name (e.g. scan_repo) since one stage type
+    # (run_as_job) hosts many such agents; fall back to the stage name for
+    # handlers that are genuinely stage-scoped.
+    handler = _STAGE_HANDLERS.get(agent_name) or _STAGE_HANDLERS.get(stage)
     if handler is None:
         handler = _run_agent
 

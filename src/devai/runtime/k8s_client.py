@@ -477,7 +477,7 @@ class K8sJobRuntime:
         # Most-recently-created first so heal acts on the live ReplicaSet's pod.
         newest = max(
             pods.items,
-            key=lambda p: (p.metadata.creation_timestamp.timestamp() if p.metadata.creation_timestamp else 0),
+            key=lambda p: p.metadata.creation_timestamp.timestamp() if p.metadata.creation_timestamp else 0,
         )
         return newest.to_dict()
 

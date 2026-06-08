@@ -248,6 +248,13 @@ def build_job_spec(
     pod_spec: dict[str, Any] = {
         "restartPolicy": "Never",
         "serviceAccountName": cfg.service_account_name,
+        # Disable K8s service-link env injection. Otherwise the in-namespace
+        # devai-mcp-hub Service injects DEVAI_MCP_HUB_PORT=tcp://<ip>:8095, which
+        # collides with the pydantic `mcp_hub_port: int` setting (DEVAI_ prefix)
+        # and makes Settings() raise — degrading the runner to config=None
+        # (registry disabled, no agent resolves). The api Deployment already
+        # sets this; the runner Job must match.
+        "enableServiceLinks": False,
         "securityContext": cfg.pod_security_context,
         "containers": [container],
         "volumes": [
