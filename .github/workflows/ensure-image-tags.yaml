@@ -1,0 +1,91 @@
+name: Ensure image tags
+
+# Kargo discovers the newest build from the GIT commit graph (immune to the
+# registry tag-list pagination that broke NewestBuild image discovery once a
+# repo accrued >100 tags). The prod Stage then deploys main-<sha7> for EVERY
+# devai image. But CI is path-filtered, so a given commit only builds the
+# images whose sources changed — the rest never get a main-<sha> tag and would
+# ImagePullBackOff.
+#
+# This job closes that gap: on every push to main it waits for this commit's
+# image-build workflows to finish, then tags each image's freshly-built
+# `:latest` as `main-<sha7>`. Changed images get their new build's :latest;
+# unchanged images get their current :latest (the correct version at this
+# commit). Tagging on GHCR is enough — the GAR pull-through mirrors the tag the
+# first time a pod pulls it. Lightweight: `crane tag` adds a tag pointer, no
+# image rebuild or layer copy.
+on:
+  push:
+    branches: [main]
+    # No paths filter — must run for EVERY commit so every image is tagged.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ensure-image-tags-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  OWNER_REPO: ${{ github.repository }} # tesserix/devai
+
+jobs:
+  ensure-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for this commit's image builds to finish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The image-build workflows. Any that were triggered for this SHA
+          # (path-filtered) must reach a terminal state before we read :latest,
+          # so we never tag a stale pre-build image.
+          BUILD_WFS="ci.yaml runner-build.yaml dashboard-build.yaml sre-build.yaml sre-dashboard-build.yaml auth-bff-build.yaml"
+          SHA="${{ github.sha }}"
+          for i in $(seq 1 60); do   # up to ~30 min
+            pending=0
+            for wf in $BUILD_WFS; do
+              # runs of THIS workflow for THIS commit still in flight
+              n=$(gh run list --repo "$OWNER_REPO" --workflow "$wf" --limit 30 \
+                    --json headSha,status \
+                    -q "[.[] | select(.headSha==\"$SHA\" and (.status==\"in_progress\" or .status==\"queued\"))] | length" 2>/dev/null || echo 0)
+              pending=$((pending + n))
+            done
+            if [ "$pending" -eq 0 ]; then echo "all builds settled"; break; fi
+            echo "  $pending build run(s) still in flight — waiting ($((i*30))s)"
+            sleep 30
+          done
+
+      - name: Install crane
+        run: |
+          set -euo pipefail
+          VER=v0.20.2
+          curl -sSL "https://github.com/google/go-containerregistry/releases/download/${VER}/go-containerregistry_Linux_x86_64.tar.gz" \
+            | tar -xz -C /usr/local/bin crane
+          crane version
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag :latest as main-<sha7> for every image
+        run: |
+          set -euo pipefail
+          SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          IMAGES="devai devai-sre devai-dashboard devai-sre-dashboard devai-auth-bff devai-runner"
+          for img in $IMAGES; do
+            REPO="${REGISTRY}/${OWNER_REPO}/${img}"
+            if crane manifest "${REPO}:latest" >/dev/null 2>&1; then
+              echo "tag ${REPO}:latest -> main-${SHA}"
+              crane tag "${REPO}:latest" "main-${SHA}"
+            else
+              echo "skip ${REPO} (no :latest yet)"
+            fi
+          done
