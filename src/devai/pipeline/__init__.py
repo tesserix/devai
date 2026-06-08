@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps, StageFactory
+from devai.pipeline.pipeline import Pipeline, PipelineError
 from devai.pipeline.types import (
     DevAITask,
     StageEvent,
@@ -28,10 +29,6 @@ from devai.pipeline.types import (
     StageResult,
     TaskState,
 )
-from devai.pipeline.pipeline import Pipeline, PipelineError
-
-if TYPE_CHECKING:
-    pass  # noqa: F401
 
 
 def __getattr__(name: str) -> Any:
