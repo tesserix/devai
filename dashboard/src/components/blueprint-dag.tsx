@@ -247,22 +247,26 @@ export function BlueprintDAG({
           const isGatePending = state === "gate-pending";
           const skipped = state === "skipped";
 
+          const running = state === "running";
+          const done = state === "done";
+
           return (
             <g key={n.name} opacity={skipped ? 0.5 : 1}>
-              {/* active ring */}
-              {state === "running" && (
+              {/* RUNNING: an obvious pulsing glow ring so in-progress stages
+                  clearly "blink" (opacity + width both animate, fast cadence). */}
+              {running && (
                 <rect
-                  x={n.x - 3}
-                  y={n.y - 3}
-                  width={NODE_W + 6}
-                  height={NODE_H + 6}
-                  rx={11}
+                  x={n.x - 4}
+                  y={n.y - 4}
+                  width={NODE_W + 8}
+                  height={NODE_H + 8}
+                  rx={12}
                   fill="none"
                   stroke={stroke}
-                  strokeWidth={1}
-                  opacity={0.35}
+                  strokeWidth={2}
                 >
-                  <animate attributeName="opacity" values="0.15;0.4;0.15" dur="1.6s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.75;0.08;0.75" dur="1.05s" repeatCount="indefinite" />
+                  <animate attributeName="stroke-width" values="1.5;4;1.5" dur="1.05s" repeatCount="indefinite" />
                 </rect>
               )}
               <rect
@@ -271,11 +275,17 @@ export function BlueprintDAG({
                 width={NODE_W}
                 height={NODE_H}
                 rx={9}
-                fill="var(--surface-raised)"
+                // DONE gets a faint green tint so "completed" reads at a glance.
+                fill={done ? "rgba(16,185,129,0.12)" : "var(--surface-raised)"}
                 stroke={stroke}
-                strokeWidth={state === "pending" || state === "skipped" ? 1.5 : 2}
+                strokeWidth={running || done || state === "failed" ? 2.25 : state === "pending" || state === "skipped" ? 1.5 : 2}
                 strokeDasharray={skipped ? "4 3" : undefined}
-              />
+              >
+                {/* the border itself also pulses while running */}
+                {running && (
+                  <animate attributeName="stroke-opacity" values="1;0.3;1" dur="1.05s" repeatCount="indefinite" />
+                )}
+              </rect>
               {/* lane accent bar */}
               <rect x={n.x} y={n.y} width={4} height={NODE_H} rx={2} fill={color} />
 

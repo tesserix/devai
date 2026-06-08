@@ -241,6 +241,7 @@ export default function DashboardPage() {
             >
               <PipelineFlow
                 currentStage={selectedRun.stage}
+                run={selectedRun as any}
                 agentTimings={(selectedRun as any)?.context?.agent_timings}
               />
             </div>

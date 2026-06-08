@@ -188,12 +188,17 @@ interface PipelineFlowProps {
   agentTimings?: Record<string, number>;
   /** Which blueprint to render. Defaults to the ALM pipeline. */
   blueprint?: string;
+  /** Full run record — when given, the overlay uses the richer
+   *  stages_completed / current_stage / stages_failed projection (accurate
+   *  multi-stage state) instead of the single-currentStage heuristic. */
+  run?: (PipelineRun & RunStageShape) | null;
 }
 
 export function PipelineFlow({
   currentStage,
   agentTimings = {},
   blueprint = "alm-pipeline",
+  run,
 }: PipelineFlowProps) {
   const [graph, setGraph] = useState<BlueprintGraph | null>(null);
   const [error, setError] = useState<string>("");
@@ -216,6 +221,12 @@ export function PipelineFlow({
   // failed), everything after is pending. Durations come from agentTimings.
   const overlay = useMemo<RunStateOverlay>(() => {
     if (!graph) return {};
+    // Prefer the run's recorded per-stage progress (accurate: multiple done
+    // stages, the active one running, failures) when we have the full record.
+    if (run && (run.stages_completed?.length || run.current_stage || run.stage)) {
+      return buildRunOverlay(run, graph);
+    }
+    // Fallback: position-based from a single currentStage.
     const idx = graph.nodes.findIndex(
       (n) => n.name === currentStage || n.stage === currentStage,
     );
@@ -233,7 +244,7 @@ export function PipelineFlow({
       };
     });
     return o;
-  }, [graph, currentStage, agentTimings]);
+  }, [graph, currentStage, agentTimings, run]);
 
   if (error) {
     return (
