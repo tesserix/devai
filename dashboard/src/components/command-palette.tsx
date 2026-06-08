@@ -6,19 +6,17 @@ import {
   ArrowRight,
   AtSign,
   Boxes,
-  CheckCircle2,
+  FolderGit2,
   FolderKanban,
-  GitBranch,
-  GitMerge,
   Layers,
   ListChecks,
   Loader2,
+  Lock,
   PackageOpen,
   Plus,
   Radio,
   Search,
   Settings,
-  ShieldCheck,
   Users,
   Workflow,
   Wrench,
@@ -32,6 +30,12 @@ import {
  * Solution: type any fragment of a panel name and jump there with
  * Enter. Same surface bundles the high-frequency actions (New task,
  * Toggle dark mode) so the keyboard does everything.
+ *
+ * Typing `@` switches to repo mode: it lists only the repos already
+ * ONBOARDED to DevAI (onboarding store, state="onboarded") and Enter
+ * opens the chosen one in Compose, pre-selected, ready to point a crew
+ * at. Onboarding a *new* repo is a deliberate, separate step on /Repos —
+ * the palette is for jumping to what's already enrolled, not enrolling.
  *
  * Mounting: rendered once at layout level; opens on the global
  * keyboard shortcut and is dismissable with Esc or clicking the
@@ -51,17 +55,8 @@ type RepoOption = {
   name: string;
   owner: string;
   description?: string | null;
-  default_branch?: string | null;
-  language?: string | null;
-  private?: boolean;
+  tags?: string[] | null;
 };
-
-type InitState =
-  | { phase: "idle" }
-  | { phase: "confirm"; repo: RepoOption }
-  | { phase: "running"; repo: RepoOption; step: "init" | "scan" }
-  | { phase: "done"; repo: RepoOption; prUrl?: string | null; alreadyInitialised?: boolean }
-  | { phase: "error"; repo: RepoOption; message: string };
 
 export function CommandPalette({
   toggleDark,
@@ -75,15 +70,16 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
-  // Repo-picker mode kicks in the moment the query starts with `@`.
-  // Triggers a debounced fetch of repos that are NOT yet enrolled
-  // (no .platform/devai.yaml). Selecting one opens an init flow.
+  // Repo-picker mode kicks in the moment the query starts with `@`. It lists the
+  // onboarded repos; Enter opens the active one in Compose. The list is small
+  // and the onboarding endpoint has no server-side search, so we fetch it once
+  // and filter client-side as the user types.
   const repoMode = query.startsWith("@");
   const repoQuery = repoMode ? query.slice(1).trim() : "";
-  const [repos, setRepos] = useState<RepoOption[]>([]);
+  const [allRepos, setAllRepos] = useState<RepoOption[]>([]);
+  const [reposLoaded, setReposLoaded] = useState(false);
   const [repoLoading, setRepoLoading] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
-  const [init, setInit] = useState<InitState>({ phase: "idle" });
 
   // Global hotkey: ⌘K / Ctrl+K toggles; Esc closes.
   useEffect(() => {
@@ -107,44 +103,37 @@ export function CommandPalette({
     if (!open) {
       setQuery("");
       setActive(0);
-      setRepos([]);
+      setAllRepos([]);
+      setReposLoaded(false);
       setRepoError(null);
-      setInit({ phase: "idle" });
     }
   }, [open]);
 
-  // Debounced fetch for repo-picker mode. We hit the SCM router with
-  // initialised=false so the backend only returns repos that don't
-  // already have .platform/devai.yaml on their default branch.
+  // Fetch the onboarded repos the first time the user enters repo mode.
   useEffect(() => {
-    if (!open || !repoMode) {
-      setRepos([]);
-      setRepoError(null);
-      return;
-    }
+    if (!open || !repoMode || reposLoaded || repoLoading) return;
     const controller = new AbortController();
     setRepoLoading(true);
     setRepoError(null);
-    const handle = window.setTimeout(async () => {
+    (async () => {
       try {
-        const url = `/api/scm/repos?initialised=false${repoQuery ? `&q=${encodeURIComponent(repoQuery)}` : ""}`;
-        const res = await fetch(url, { signal: controller.signal });
+        const res = await fetch("/api/scm/onboarded?state=onboarded", {
+          signal: controller.signal,
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as RepoOption[];
-        setRepos(Array.isArray(data) ? data : []);
+        setAllRepos(Array.isArray(data) ? data : []);
+        setReposLoaded(true);
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
         setRepoError(err instanceof Error ? err.message : "fetch failed");
-        setRepos([]);
+        setAllRepos([]);
       } finally {
         setRepoLoading(false);
       }
-    }, 180);
-    return () => {
-      controller.abort();
-      window.clearTimeout(handle);
-    };
-  }, [open, repoMode, repoQuery]);
+    })();
+    return () => controller.abort();
+  }, [open, repoMode, reposLoaded, repoLoading]);
 
   const commands: Command[] = useMemo(
     () => [
@@ -152,6 +141,7 @@ export function CommandPalette({
       { id: "nav-workflows", label: "Workflows", hint: "Browse blueprints → run → observe", Icon: Workflow, group: "Navigate", run: () => router.push("/workflows") },
       { id: "nav-runs", label: "Runs", hint: "Every blueprint execution", Icon: ListChecks, group: "Navigate", run: () => router.push("/runs") },
       { id: "nav-board", label: "Board", hint: "GitHub issue Kanban", Icon: FolderKanban, group: "Navigate", run: () => router.push("/board") },
+      { id: "nav-repos", label: "Repos", hint: "Onboard repos to DevAI", Icon: FolderGit2, group: "Navigate", run: () => router.push("/repos") },
       { id: "nav-blueprint", label: "Blueprints", hint: "Build + publish DAGs", Icon: Layers, group: "Navigate", run: () => router.push("/blueprint") },
       { id: "nav-agents", label: "Agents", hint: "Catalogued agents", Icon: Users, group: "Navigate", run: () => router.push("/agents") },
       { id: "nav-registry", label: "Registry", hint: "Skills / prompts / MCP / agents", Icon: PackageOpen, group: "Navigate", run: () => router.push("/registry") },
@@ -174,6 +164,16 @@ export function CommandPalette({
     );
   }, [commands, query]);
 
+  const repos = useMemo(() => {
+    const q = repoQuery.toLowerCase();
+    if (!q) return allRepos;
+    return allRepos.filter(
+      (r) =>
+        r.full_name.toLowerCase().includes(q) ||
+        (r.description?.toLowerCase().includes(q) ?? false)
+    );
+  }, [allRepos, repoQuery]);
+
   // Keep the active index inside bounds when filtering changes the list.
   useEffect(() => {
     const len = repoMode ? repos.length : filtered.length;
@@ -186,55 +186,14 @@ export function CommandPalette({
     if (repoMode) {
       const repo = repos[active];
       if (!repo) return;
-      setInit({ phase: "confirm", repo });
+      setOpen(false);
+      router.push(`/compose?repo=${encodeURIComponent(repo.full_name)}`);
       return;
     }
     const cmd = filtered[active];
     if (!cmd) return;
     setOpen(false);
     cmd.run();
-  }
-
-  async function runInit(repo: RepoOption) {
-    setInit({ phase: "running", repo, step: "init" });
-    try {
-      const initRes = await fetch(
-        `/api/scm/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/initialise`,
-        { method: "POST" }
-      );
-      if (!initRes.ok) {
-        const detail = await initRes.text();
-        throw new Error(detail || `init HTTP ${initRes.status}`);
-      }
-      const initBody = (await initRes.json()) as {
-        already_initialised?: boolean;
-        pull_request_url?: string | null;
-      };
-
-      // Fire scan even when already initialised so the profile is fresh.
-      setInit({ phase: "running", repo, step: "scan" });
-      try {
-        await fetch(
-          `/api/scm/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/scan`,
-          { method: "POST" }
-        );
-      } catch {
-        /* scan is best-effort — init success still matters */
-      }
-
-      setInit({
-        phase: "done",
-        repo,
-        prUrl: initBody.pull_request_url ?? null,
-        alreadyInitialised: initBody.already_initialised ?? false,
-      });
-    } catch (err) {
-      setInit({
-        phase: "error",
-        repo,
-        message: err instanceof Error ? err.message : "init failed",
-      });
-    }
   }
 
   const listLength = repoMode ? repos.length : filtered.length;
@@ -247,7 +206,6 @@ export function CommandPalette({
         role="dialog"
         aria-modal="true"
         onKeyDown={(e) => {
-          if (init.phase !== "idle" && init.phase !== "confirm") return;
           if (e.key === "ArrowDown") {
             e.preventDefault();
             setActive((i) => Math.min(Math.max(listLength - 1, 0), i + 1));
@@ -278,12 +236,11 @@ export function CommandPalette({
             }}
             placeholder={
               repoMode
-                ? "Find an un-enrolled repo to initialise…"
-                : "Jump to a panel · type @ to enrol a repo…"
+                ? "Jump to an onboarded repo…"
+                : "Jump to a panel · type @ for onboarded repos…"
             }
             className="flex-1 bg-transparent text-sm outline-none"
             style={{ color: "var(--ink)" }}
-            disabled={init.phase !== "idle" && init.phase !== "confirm"}
           />
           <kbd
             className="font-mono text-[10px] px-1.5 py-0.5 rounded border"
@@ -298,20 +255,15 @@ export function CommandPalette({
         </header>
 
         <div className="max-h-[55vh] overflow-y-auto py-1">
-          {init.phase === "confirm" && renderConfirm(init.repo, () => runInit(init.repo), () => setInit({ phase: "idle" }))}
-          {init.phase === "running" && renderRunning(init.repo, init.step)}
-          {init.phase === "done" && renderDone(init.repo, init.prUrl, init.alreadyInitialised, () => { setOpen(false); router.push("/workflows"); })}
-          {init.phase === "error" && renderError(init.repo, init.message, () => setInit({ phase: "confirm", repo: init.repo }))}
-          {init.phase === "idle" &&
-            (repoMode
-              ? renderRepoList(repos, active, setActive, runActive, repoLoading, repoError, repoQuery)
-              : filtered.length === 0
-                ? (
-                  <div className="px-4 py-6 text-sm" style={{ color: "var(--ink-muted)" }}>
-                    No matches.
-                  </div>
-                )
-                : renderGroups(filtered, active, setActive, runActive))}
+          {repoMode
+            ? renderRepoList(repos, active, setActive, runActive, repoLoading, repoError, repoQuery)
+            : filtered.length === 0
+              ? (
+                <div className="px-4 py-6 text-sm" style={{ color: "var(--ink-muted)" }}>
+                  No matches.
+                </div>
+              )
+              : renderGroups(filtered, active, setActive, runActive)}
         </div>
 
         <footer
@@ -319,11 +271,11 @@ export function CommandPalette({
           style={{ borderColor: "var(--border-subtle)", color: "var(--ink-muted)" }}
         >
           <span>
-            {repoMode ? "↑↓ to move · ↵ to initialise" : "↑↓ to move · ↵ to open · @ for repos"}
+            {repoMode ? "↑↓ to move · ↵ to open in Compose" : "↑↓ to move · ↵ to open · @ for repos"}
           </span>
           <span>
             {repoMode
-              ? `${repos.length} repo${repos.length === 1 ? "" : "s"}`
+              ? `${repos.length} onboarded repo${repos.length === 1 ? "" : "s"}`
               : `${filtered.length} command${filtered.length === 1 ? "" : "s"}`}
           </span>
         </footer>
@@ -353,22 +305,29 @@ function renderRepoList(
     return (
       <div className="px-4 py-6 text-sm flex items-center gap-2" style={{ color: "var(--ink-muted)" }}>
         <Loader2 className="w-4 h-4 animate-spin" />
-        <span>Searching un-enrolled repos…</span>
+        <span>Loading onboarded repos…</span>
       </div>
     );
   }
   if (repos.length === 0) {
     return (
       <div className="px-4 py-6 text-sm" style={{ color: "var(--ink-muted)" }}>
-        {q
-          ? `No un-enrolled repo matches "${q}".`
-          : "All accessible repos are already enrolled. Type to narrow the search."}
+        {q ? (
+          `No onboarded repo matches "${q}".`
+        ) : (
+          <>
+            No repos onboarded to DevAI yet.{" "}
+            <a href="/repos" className="font-medium hover:underline" style={{ color: "var(--accent)" }}>
+              Onboard one in Repos →
+            </a>
+          </>
+        )}
       </div>
     );
   }
   return (
     <section>
-      <div className="px-4 pt-2 pb-1 label-eyebrow">Un-enrolled repos</div>
+      <div className="px-4 pt-2 pb-1 label-eyebrow">Onboarded repos</div>
       <ul>
         {repos.map((r, idx) => {
           const isActive = idx === active;
@@ -384,25 +343,16 @@ function renderRepoList(
                   color: isActive ? "var(--accent-soft-ink)" : "var(--ink)",
                 }}
               >
-                <GitBranch
-                  className="w-4 h-4"
+                <FolderGit2
+                  className="w-4 h-4 shrink-0"
                   style={{ color: isActive ? "var(--accent)" : "var(--ink-muted)" }}
                 />
                 <span className="flex-1 truncate">
                   <span style={{ color: "var(--ink-muted)" }}>{r.owner}/</span>
                   <span>{r.name}</span>
                 </span>
-                {r.language && (
-                  <span
-                    className="text-[10px] px-1.5 py-0.5 rounded border font-mono"
-                    style={{
-                      color: "var(--ink-muted)",
-                      borderColor: "var(--border-subtle)",
-                      background: "var(--surface-muted)",
-                    }}
-                  >
-                    {r.language}
-                  </span>
+                {r.tags?.includes("private") && (
+                  <Lock className="w-3 h-3 shrink-0" style={{ color: "var(--ink-muted)" }} />
                 )}
                 {isActive && (
                   <ArrowRight className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />
@@ -413,141 +363,6 @@ function renderRepoList(
         })}
       </ul>
     </section>
-  );
-}
-
-function renderConfirm(repo: RepoOption, onConfirm: () => void, onCancel: () => void) {
-  return (
-    <div className="px-5 py-5 flex flex-col gap-4">
-      <div className="flex items-center gap-2 text-sm">
-        <GitMerge className="w-4 h-4" style={{ color: "var(--accent)" }} />
-        <span style={{ color: "var(--ink)" }}>
-          Initialise <strong>{repo.full_name}</strong> for DevAI?
-        </span>
-      </div>
-      <p className="text-xs leading-relaxed" style={{ color: "var(--ink-muted)" }}>
-        We&apos;ll branch from <code>{repo.default_branch ?? "main"}</code>, drop a{" "}
-        <code>.platform/devai.yaml</code> with the default 5-lane workflow, and open a pull request.
-        Then an agent will scan the repo so DevAI knows the tech stack before any run starts.
-      </p>
-      <div className="flex items-center gap-2 justify-end">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-3 py-1.5 text-xs rounded border"
-          style={{
-            color: "var(--ink-muted)",
-            borderColor: "var(--border-subtle)",
-            background: "var(--surface)",
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={onConfirm}
-          autoFocus
-          className="px-3 py-1.5 text-xs rounded font-medium"
-          style={{
-            color: "var(--surface)",
-            background: "var(--accent)",
-          }}
-        >
-          Open enrolment PR
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function renderRunning(repo: RepoOption, step: "init" | "scan") {
-  return (
-    <div className="px-5 py-6 flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-sm" style={{ color: "var(--ink)" }}>
-        <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--accent)" }} />
-        <span>
-          {step === "init"
-            ? `Creating devai/init-platform on ${repo.full_name}…`
-            : `Scanning ${repo.full_name} for stack + structure…`}
-        </span>
-      </div>
-      <p className="text-[11px]" style={{ color: "var(--ink-muted)" }}>
-        Keep this open — both steps usually finish in a few seconds.
-      </p>
-    </div>
-  );
-}
-
-function renderDone(
-  repo: RepoOption,
-  prUrl: string | null | undefined,
-  alreadyInitialised: boolean | undefined,
-  onClose: () => void
-) {
-  return (
-    <div className="px-5 py-5 flex flex-col gap-3">
-      <div className="flex items-center gap-2 text-sm" style={{ color: "var(--ink)" }}>
-        <CheckCircle2 className="w-4 h-4" style={{ color: "var(--accent)" }} />
-        <span>
-          {alreadyInitialised
-            ? `${repo.full_name} is already enrolled — profile refreshed.`
-            : `Enrolment PR opened for ${repo.full_name}.`}
-        </span>
-      </div>
-      <div className="flex items-center gap-2 text-[11px]" style={{ color: "var(--ink-muted)" }}>
-        <ShieldCheck className="w-3.5 h-3.5" />
-        <span>Repo profile cached in memory for future pipeline runs.</span>
-      </div>
-      <div className="flex items-center gap-2 justify-end">
-        {prUrl && (
-          <a
-            href={prUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="px-3 py-1.5 text-xs rounded border"
-            style={{
-              color: "var(--ink)",
-              borderColor: "var(--border-subtle)",
-              background: "var(--surface)",
-            }}
-          >
-            View PR
-          </a>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-3 py-1.5 text-xs rounded font-medium"
-          style={{ color: "var(--surface)", background: "var(--accent)" }}
-        >
-          Open Workflows
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function renderError(repo: RepoOption, message: string, onRetry: () => void) {
-  return (
-    <div className="px-5 py-5 flex flex-col gap-3">
-      <div className="flex items-start gap-2 text-sm" style={{ color: "var(--ink)" }}>
-        <XCircle className="w-4 h-4 mt-0.5" style={{ color: "var(--accent)" }} />
-        <span>Couldn&apos;t initialise {repo.full_name}.</span>
-      </div>
-      <p className="text-[11px] font-mono break-all" style={{ color: "var(--ink-muted)" }}>
-        {message}
-      </p>
-      <div className="flex items-center gap-2 justify-end">
-        <button
-          type="button"
-          onClick={onRetry}
-          className="px-3 py-1.5 text-xs rounded font-medium"
-          style={{ color: "var(--surface)", background: "var(--accent)" }}
-        >
-          Try again
-        </button>
-      </div>
-    </div>
   );
 }
 

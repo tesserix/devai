@@ -94,11 +94,23 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const projectDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Only repos onboarded to DevAI (onboarding store, state="onboarded") are
+  // runnable. Onboarding is a deliberate step on /Repos — the dialog selects
+  // from what's already onboarded rather than the whole org. Map the onboarding
+  // record onto the lightweight shape this dropdown renders.
   const fetchRepos = useCallback(async () => {
     setLoadingRepos(true);
     try {
-      const data = await api.listRepos();
-      setRepos(data);
+      const data = await api.listOnboarded("onboarded");
+      setRepos(
+        data.map((r) => ({
+          full_name: r.full_name,
+          name: r.name,
+          description: r.description,
+          language: "",
+          private: r.tags?.includes("private") ?? false,
+        })),
+      );
     } catch {
       // API may not be available
     } finally {
@@ -224,13 +236,20 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
     if (!newRepoName.trim()) return;
     setCreating(true);
     try {
-      const repo = await api.createRepo("tesserix", newRepoName.trim(), newRepoDesc);
-      setSelectedRepo(repo.full_name);
-      setSearch(repo.full_name);
+      // Create + onboard in one shot (scaffolds README / CI / PR + release
+      // gates / Dependabot / CODEOWNERS, drops the .platform/devai.yaml marker,
+      // records it onboarded) so the new repo is immediately runnable and shows
+      // up in the onboarded list — same path as the /Repos "New repo" button.
+      const res = await api.createAndOnboardRepo({
+        name: newRepoName.trim(),
+        description: newRepoDesc,
+      });
+      setSelectedRepo(res.repo);
+      setSearch(res.repo);
       setShowCreate(false);
       setNewRepoName("");
       setNewRepoDesc("");
-      setScaffold(true);
+      setScaffold(false); // create+onboard already scaffolds the repo
       await fetchRepos();
     } catch {
       // Handle error
@@ -353,7 +372,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
           </button>
         </div>
         <p className="text-sm mb-5" style={{ color: "var(--ink-soft)" }}>
-          Select a repository, link a project board, and describe your requirements.
+          Pick an onboarded repository, link a project board, and describe your requirements.
         </p>
 
         <div className="space-y-4">
@@ -364,7 +383,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
             </label>
             <input
               type="text"
-              placeholder={loadingRepos ? "Loading repositories..." : "Search repositories..."}
+              placeholder={loadingRepos ? "Loading onboarded repos..." : "Search onboarded repos..."}
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -442,7 +461,19 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   ))
                 ) : (
                   <div className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
-                    {loadingRepos ? "Loading..." : "No repositories found"}
+                    {loadingRepos ? (
+                      "Loading..."
+                    ) : search ? (
+                      `No onboarded repo matches “${search}”.`
+                    ) : (
+                      <>
+                        No repos onboarded yet.{" "}
+                        <a href="/repos" className="font-medium hover:underline" style={{ color: "var(--accent)" }}>
+                          Onboard one in Repos →
+                        </a>{" "}
+                        or create a new one above.
+                      </>
+                    )}
                   </div>
                 )}
               </div>

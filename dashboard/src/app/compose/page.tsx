@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Send, Users, Wifi, WifiOff } from "lucide-react";
 import {
   api,
@@ -15,6 +16,7 @@ import { AttachmentUpload, type Attachment } from "@/components/attachment-uploa
 import { TerminalPanel } from "@/components/terminal-panel";
 import { CheckpointTimeline, type Checkpoint } from "@/components/checkpoint-timeline";
 import { BlueprintPicker } from "@/components/blueprint-picker";
+import { RepoPicker } from "@/components/repo-picker";
 import { HelpPopover } from "@/components/guidance";
 import { RunStateBadge, normalizeRunState, type RunState } from "@/components/run-state-badge";
 
@@ -39,8 +41,25 @@ const SSE_REPLAY = 50; // frames the server replays on (re-)connect
 type Conn = "idle" | "connecting" | "open" | "closed";
 
 export default function ComposePage() {
+  return (
+    <Suspense fallback={null}>
+      <ComposeInner />
+    </Suspense>
+  );
+}
+
+function ComposeInner() {
+  const searchParams = useSearchParams();
   const [intent, setIntent] = useState("");
   const [repo, setRepo] = useState("");
+
+  // Deep-link target: ⌘K @ (and any other surface) can hand us a repo to
+  // pre-select via /compose?repo=owner/name. Only seed once, on mount.
+  useEffect(() => {
+    const r = searchParams.get("repo");
+    if (r) setRepo(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [blueprints, setBlueprints] = useState<BlueprintSummary[]>([]);
   const [loadingBlueprints, setLoadingBlueprints] = useState(false);
@@ -302,17 +321,7 @@ export default function ComposePage() {
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex flex-col text-xs" style={{ color: "var(--ink-muted)" }}>
               Repo
-              <input
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                placeholder="tesserix/my-repo"
-                className="mt-1 w-56 rounded-md border px-2 py-1 text-sm"
-                style={{
-                  background: "var(--surface)",
-                  borderColor: "var(--border-subtle)",
-                  color: "var(--ink-strong)",
-                }}
-              />
+              <RepoPicker value={repo} onChange={setRepo} className="mt-1 w-56" />
             </label>
 
             <label className="flex flex-col text-xs" style={{ color: "var(--ink-muted)" }}>
