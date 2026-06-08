@@ -91,7 +91,7 @@ export function RunList({
     const inFlight = isInFlight(run.stage);
     const isBusy = busyId === run.run_id;
     return (
-      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
         {isFailed && onRetrigger && (
           <ControlPill
             label="Retry"
@@ -268,7 +268,9 @@ export function RunList({
                 {completedAgents}/{agentCount || "?"}
               </span>
             </div>
-            <div className="mt-1.5 flex items-center justify-between gap-2">
+            {/* State on its own line; controls on a dedicated wrap-friendly row
+                below so PAUSE/STOP/DELETE never get clipped in the narrow rail. */}
+            <div className="mt-2 space-y-2">
               <RunStateBadge state={run.stage} />
               {controlsFor(run)}
             </div>
@@ -308,7 +310,7 @@ function ControlPill({ label, color, busy, onClick }: ControlPillProps) {
       className={clsx(
         "pill",
         PILL_CLASS[color],
-        "!py-0 !text-[10px] cursor-pointer transition-opacity",
+        "!px-2 !py-0.5 !text-[10px] font-medium whitespace-nowrap cursor-pointer transition-opacity hover:opacity-80",
         busy && "opacity-50 pointer-events-none",
       )}
       title={label}
