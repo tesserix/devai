@@ -31,6 +31,7 @@ import {
 import type { A2AMessage } from "@/lib/api";
 import { A2AFeed } from "@/components/a2a-feed";
 import { ChatPanel } from "@/components/chat-panel";
+import { LiveLogs } from "@/components/live-logs";
 import { RepoPanel } from "@/components/repo-panel";
 import { RunDAG } from "@/components/pipeline-flow";
 import { CheckpointTimeline, type Checkpoint } from "@/components/checkpoint-timeline";
@@ -50,7 +51,7 @@ import {
   Workflow,
 } from "lucide-react";
 
-type Tab = "overview" | "timeline" | "preview" | "repo" | "chat";
+type Tab = "overview" | "logs" | "timeline" | "preview" | "repo" | "chat";
 
 interface RunDetail extends PipelineRun {
   blueprint?: string;
@@ -310,6 +311,7 @@ export default function RunDetailPage() {
         {(
           [
             { key: "overview", label: "Overview" },
+            { key: "logs", label: "Logs" },
             { key: "timeline", label: "Timeline" },
             { key: "preview", label: "Preview" },
             { key: "repo", label: "Repo" },
@@ -391,6 +393,36 @@ export default function RunDetailPage() {
                 />
                 <InjectCard onInject={inject} disabledReason={injectReason} injections={injections} />
               </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "logs" && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-5xl">
+              <p className="mb-3 text-[13px]" style={{ color: "var(--ink-soft)" }}>
+                Live per-stage stream as the crew works — each stage logs as it starts, runs, and
+                completes. Watch the code and docs get built here; the developed files land in the{" "}
+                <button
+                  type="button"
+                  onClick={() => setTab("repo")}
+                  className="font-medium hover:underline"
+                  style={{ color: "var(--accent)" }}
+                >
+                  Repo
+                </button>{" "}
+                tab and the agents&apos; reasoning in{" "}
+                <button
+                  type="button"
+                  onClick={() => setTab("timeline")}
+                  className="font-medium hover:underline"
+                  style={{ color: "var(--accent)" }}
+                >
+                  Timeline
+                </button>
+                .
+              </p>
+              <LiveLogs taskId={runId} />
             </div>
           </div>
         )}

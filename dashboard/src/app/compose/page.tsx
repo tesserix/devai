@@ -2,7 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Send, Users, Wifi, WifiOff } from "lucide-react";
+import { ArrowUpRight, Send, Terminal, Users, Wifi, WifiOff } from "lucide-react";
+import Link from "next/link";
 import {
   api,
   type BlueprintSummary,
@@ -413,48 +414,75 @@ function ComposeInner() {
         </div>
       </div>
 
-      {/* Live work area */}
+      {/* Live work area — only mounts once a run is dispatched, so the page
+          isn't a giant empty terminal void before you hit Run. */}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
-        <div className="flex flex-col">
-          {/* Stream status + run state strip */}
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              {runState && <RunStateBadge state={runState} />}
-              {!runState && (
-                <span className="text-xs" style={{ color: "var(--ink-muted)" }}>
-                  Idle — dispatch a task to start streaming.
+        {/* Left: live terminal while running, friendly placeholder while idle. */}
+        <div className="flex min-w-0 flex-col">
+          {taskId ? (
+            <>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {runState && <RunStateBadge state={runState} />}
+                  {taskId && (
+                    <Link
+                      href={`/runs/${taskId}`}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline"
+                      style={{ color: "var(--accent)" }}
+                    >
+                      Open full run <ArrowUpRight className="w-3 h-3" />
+                    </Link>
+                  )}
+                </div>
+                <span
+                  className="inline-flex items-center gap-1.5 text-[11px]"
+                  style={{ color: "var(--ink-muted)" }}
+                  title={
+                    conn === "open"
+                      ? "Live — streaming run events"
+                      : conn === "closed"
+                        ? "Reconnecting — missed frames will backfill"
+                        : "Connecting to the event stream"
+                  }
+                >
+                  {conn === "open" ? (
+                    <Wifi className="w-3.5 h-3.5" style={{ color: "var(--ok)" }} aria-hidden />
+                  ) : (
+                    <WifiOff className="w-3.5 h-3.5" aria-hidden />
+                  )}
+                  {conn === "open" ? "Live" : conn === "closed" ? "Reconnecting…" : "Connecting…"}
                 </span>
-              )}
-            </div>
-            {taskId && (
+              </div>
+              <div className="h-[420px]">
+                <TerminalPanel events={events} />
+              </div>
+            </>
+          ) : (
+            <div
+              className="flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-12 text-center"
+              style={{ borderColor: "var(--border-subtle)", background: "var(--surface)" }}
+            >
               <span
-                className="inline-flex items-center gap-1.5 text-[11px]"
-                style={{ color: "var(--ink-muted)" }}
-                title={
-                  conn === "open"
-                    ? "Live — streaming run events"
-                    : conn === "closed"
-                      ? "Reconnecting — missed frames will backfill"
-                      : "Connecting to the event stream"
-                }
+                className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full"
+                style={{ background: "var(--surface-muted)" }}
               >
-                {conn === "open" ? (
-                  <Wifi className="w-3.5 h-3.5" style={{ color: "var(--ok)" }} aria-hidden />
-                ) : (
-                  <WifiOff className="w-3.5 h-3.5" aria-hidden />
-                )}
-                {conn === "open" ? "Live" : conn === "closed" ? "Reconnecting…" : "Connecting…"}
+                <Terminal className="h-5 w-5" style={{ color: "var(--ink-muted)" }} />
               </span>
-            )}
-          </div>
-
-          <div className="h-[420px]">
-            <TerminalPanel events={events} />
-          </div>
+              <p className="text-sm font-medium" style={{ color: "var(--ink-strong)" }}>
+                Ready when you are
+              </p>
+              <p className="mt-1 max-w-md text-xs leading-relaxed" style={{ color: "var(--ink-muted)" }}>
+                Hit <span className="font-medium" style={{ color: "var(--ink-strong)" }}>Run</span> to
+                dispatch the crew. The live terminal and per-stage progress stream in here as it
+                builds — open the full run for logs, the developed repo, and the agent timeline.
+              </p>
+            </div>
+          )}
         </div>
 
+        {/* Right: crew preview (idle or running) + checkpoints (running only). */}
         <div className="space-y-4">
-          {selectedCrew && (
+          {selectedCrew ? (
             <div
               className="rounded-lg border p-4"
               style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
@@ -478,8 +506,22 @@ function ComposeInner() {
                 ))}
               </ul>
             </div>
+          ) : (
+            !taskId && (
+              <div
+                className="rounded-lg border border-dashed p-4 text-xs leading-relaxed"
+                style={{ borderColor: "var(--border-subtle)", color: "var(--ink-muted)" }}
+              >
+                Pick a <span className="font-medium" style={{ color: "var(--ink-strong)" }}>Team</span> +{" "}
+                <span className="font-medium" style={{ color: "var(--ink-strong)" }}>Crew</span> to
+                preview its members here, or leave Crew on{" "}
+                <span className="font-mono">dynamic</span> to let the lead assemble one.
+              </div>
+            )
           )}
-          <CheckpointTimeline checkpoints={checkpoints} onRollback={taskId ? rollback : undefined} />
+          {taskId && (
+            <CheckpointTimeline checkpoints={checkpoints} onRollback={rollback} />
+          )}
         </div>
       </div>
     </div>
