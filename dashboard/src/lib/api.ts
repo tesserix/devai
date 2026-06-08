@@ -173,7 +173,12 @@ async function errorMessage(res: Response): Promise<string> {
 function normalizeRun(raw: unknown): PipelineRun {
   const r = (raw ?? {}) as Record<string, unknown>;
   const runId = (r.run_id ?? r.id ?? r.task_id ?? "") as string;
-  const stage = (r.stage ?? r.current_stage ?? r.state ?? "unknown") as string;
+  // `||` not `??`: a terminal run clears `current_stage` to "" (empty, not
+  // null), and `??` would stop there — leaving stage="" which the badge maps to
+  // "pending". That made finished runs read PENDING in the Fleet list (and hid
+  // the Retry button, which is gated on isFailed). Fall through empty strings so
+  // a failed/completed run surfaces its `state` (stage_failed / completed).
+  const stage = ((r.stage as string) || (r.current_stage as string) || (r.state as string) || "unknown");
   const agents =
     (r.agents as PipelineRun["agents"]) ??
     (r.agent_statuses as PipelineRun["agents"]) ??
