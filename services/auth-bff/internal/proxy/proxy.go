@@ -87,7 +87,12 @@ func New(cfg Config) (*Handler, error) {
 		kagentHost:     cfg.KagentHost,
 		aregistryHost:  cfg.AregistryHost,
 		previewDomain:  strings.ToLower(cfg.PreviewDomain),
-		sharedSecret:   cfg.SharedSecret,
+		// Trim whitespace/newlines — a secret stored with a trailing newline
+		// (e.g. `echo "x" | gcloud secrets …` without -n) is an INVALID HTTP
+		// header value, which made the reverse proxy fail with
+		// "invalid header field value for X-Auth-Bff-Secret" → 502 on
+		// aregistry/kagent. Trimming here keeps the header valid regardless.
+		sharedSecret:   strings.TrimSpace(cfg.SharedSecret),
 	}
 	if cfg.PreviewDomain != "" && cfg.PreviewNamespace != "" {
 		h.previewProxy = newDynamicPreviewProxy(cfg.PreviewNamespace)
