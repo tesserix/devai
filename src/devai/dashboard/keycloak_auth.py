@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -39,7 +40,12 @@ class KeycloakOIDC:
         return self._well_known
 
     def get_authorize_url(self, redirect_uri: str, state: str) -> str:
-        """Generate the Keycloak authorization URL."""
+        """Generate the Keycloak authorization URL.
+
+        Params are percent-encoded with ``urllib.parse.urlencode`` so the
+        redirect_uri/scope/state can't break the query string (the scope's
+        spaces in particular were previously emitted raw).
+        """
         params = {
             "client_id": self.config.keycloak_client_id,
             "redirect_uri": redirect_uri,
@@ -47,7 +53,7 @@ class KeycloakOIDC:
             "scope": "openid profile email",
             "state": state,
         }
-        query = "&".join(f"{k}={v}" for k, v in params.items())
+        query = urllib.parse.urlencode(params)
         return f"{self.issuer_url}/protocol/openid-connect/auth?{query}"
 
     async def exchange_code(self, code: str, redirect_uri: str) -> dict[str, Any]:

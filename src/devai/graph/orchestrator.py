@@ -66,6 +66,7 @@ import contextlib
 import json
 import logging
 import time
+import traceback
 from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, StateGraph
@@ -96,6 +97,45 @@ RUN_CONTROL_KEY = "devai:run:{run_id}:control"
 PAUSE_POLL_INTERVAL = 5.0  # seconds — how often we check while paused
 PAUSE_MAX_WAIT = 3600.0  # 1h max pause before we give up and stop
 
+# Nodes that perform NO SCM mutations (read/analysis/routing only). The
+# AttributeError self-heal — which re-runs a node from scratch with a fresh
+# SCM client — is only safe for these, because re-running a node that already
+# created an epic/branch/PR/merge would duplicate that side effect. Every
+# other node is mutating and must NOT be auto-retried. Keep this list
+# conservative: when in doubt, treat a node as mutating.
+_IDEMPOTENT_NODES: frozenset[str] = frozenset(
+    {
+        "ingest_documents",
+        "detect_tech_stack",
+        "analyze_requirements",
+        "orchestrator_pre",
+        "orchestrator_review",
+        "orchestrator_security",
+        "orchestrator_tests",
+        "orchestrator_post",
+    }
+)
+
+
+# Path fragment that identifies a frame inside the SCM client package.
+_SCM_PACKAGE_FRAGMENT = "devai/scm/"
+
+
+def _attribute_error_from_scm(exc: AttributeError) -> bool:
+    """True only when an AttributeError was raised from inside the SCM client.
+
+    The self-heal is meant to recover from SCM interface drift (a stale client
+    missing a newer helper), not to mask arbitrary AttributeErrors in agent
+    logic. We walk the traceback and require at least one frame inside the
+    ``devai.scm`` package so a genuine bug elsewhere fails normally instead of
+    silently re-running the node.
+    """
+    for frame, _lineno in traceback.walk_tb(exc.__traceback__):
+        filename = frame.f_code.co_filename.replace("\\", "/")
+        if _SCM_PACKAGE_FRAGMENT in filename:
+            return True
+    return False
+
 
 class RunStoppedError(Exception):
     """Raised when a pipeline run is stopped via the dashboard.
@@ -124,6 +164,12 @@ class ALMOrchestrator:
         self.config = config
         self._checkpoint = StateCheckpoint(state_manager.redis)
         self._graph = self._build_graph()
+        # Strong references to fire-and-forget progress-persistence tasks.
+        # asyncio only holds a weak reference to scheduled tasks, so without
+        # this set the GC can cancel an in-flight _persist_event mid-write and
+        # silently drop a progress event. The done-callback discards each task
+        # once it finishes so the set stays bounded.
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     def _build_graph(self) -> Any:
         """Build the ALM StateGraph with story-level parallel execution."""
@@ -560,9 +606,30 @@ class ALMOrchestrator:
             )
             result = {"error": f"Agent {node_name} timed out after {NODE_TIMEOUT}s"}
         except AttributeError as e:
-            # Self-heal: AttributeError on an SCM method usually means
-            # the agent has a stale client interface. Re-instantiate
-            # with a fresh client from the factory and retry once.
+            # Self-heal is ONLY safe when (a) the AttributeError actually came
+            # from the SCM client (interface drift), not arbitrary agent logic,
+            # and (b) the node performs no SCM mutations, so re-running it from
+            # scratch can't duplicate a side effect (a second create-epic /
+            # branch / PR). Anything else fails normally so real bugs surface
+            # and mutating nodes are never silently replayed.
+            if not (_attribute_error_from_scm(e) and node_name in _IDEMPOTENT_NODES):
+                reason = (
+                    "not an SCM-client error"
+                    if not _attribute_error_from_scm(e)
+                    else "node is mutating / not idempotent"
+                )
+                logger.exception(
+                    "Agent %s raised AttributeError (%s) — NOT self-healing (%s)",
+                    node_name,
+                    e,
+                    reason,
+                )
+                self._report_progress(state, node_name, "failed", str(e)[:200])
+                await self.state_manager.set_agent_status(
+                    state.get("run_id", ""), agent.name, "failed", str(e)[:500]
+                )
+                await self._record_failure(agent.name, state, str(e))
+                raise
             logger.warning(
                 "Agent %s raised AttributeError (%s) — attempting self-heal with a fresh SCM client and retrying once",
                 node_name,
@@ -1016,9 +1083,16 @@ class ALMOrchestrator:
         logger.info("Pipeline [%s] %s: %s — %s", state.get("run_id", "?"), step, status, detail)
         run_id = state.get("run_id", "")
         if run_id:
-            import asyncio
-
-            asyncio.ensure_future(self._persist_event(run_id, step, status, detail))
+            try:
+                task = asyncio.ensure_future(self._persist_event(run_id, step, status, detail))
+            except RuntimeError:
+                # No running loop (e.g. called from a sync context) — nothing
+                # to schedule; the event is still logged above.
+                return
+            # Keep a strong reference until the task completes so the GC can't
+            # drop the in-flight event persistence.
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
     async def _persist_event(self, run_id: str, step: str, status: str, detail: str) -> None:
         try:

@@ -55,6 +55,45 @@ export interface BlueprintGraph {
   levels: string[][];
 }
 
+// Lightweight blueprint summary for the picker (DASH-6) and the Workflows home.
+// name + human title + one-line description + stage count, derived by
+// listBlueprints() from the catalog (and/or the graph node count).
+export interface BlueprintSummary {
+  name: string;
+  title: string;
+  description: string;
+  stageCount: number;
+  /** Lanes the blueprint spans (for a compact affordance). */
+  lanes?: string[];
+}
+
+// Filters accepted by listRuns(); the backend already supports all of these.
+export interface RunFilters {
+  blueprint?: string;
+  repo?: string;
+  state?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// The supervisor stage's advisory delegation plan (DASH-12). Surfaced on the
+// run detail so the LLM's reasoning is visible — it does NOT change the DAG.
+export interface DelegationAssignment {
+  stage?: string;
+  agent?: string;
+  task?: string;
+  rationale?: string;
+  [key: string]: unknown;
+}
+export interface DelegationPlan {
+  summary?: string;
+  assignments: DelegationAssignment[];
+  tracking_issue_url?: string | null;
+  /** Free-form extras the backend may attach. */
+  [key: string]: unknown;
+}
+
 export interface PipelineConfig {
   auto_mode: boolean;
   gates: Record<string, boolean>;
@@ -64,12 +103,31 @@ export interface PipelineConfig {
   max_review_iterations: number;
 }
 
+// Centralized 401 handling (DASH-11). When the session has expired the backend
+// returns 401 on any API call; rather than surfacing a raw "API 401" in every
+// widget, we bounce the browser to /login with a return_to so the user lands
+// back where they were. Guarded so it fires once and never during SSR.
+let redirectingToLogin = false;
+function handleUnauthorized(): void {
+  if (typeof window === "undefined") return;
+  if (redirectingToLogin) return;
+  // Never redirect-loop when we're already on the login page.
+  if (window.location.pathname.startsWith("/login")) return;
+  redirectingToLogin = true;
+  const returnTo = window.location.pathname + window.location.search;
+  window.location.assign(`/login?return_to=${encodeURIComponent(returnTo)}`);
+}
+
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
     ...opts,
     headers: { "Content-Type": "application/json", ...opts?.headers },
   });
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error("Session expired — redirecting to sign in.");
+  }
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
@@ -157,17 +215,71 @@ export const api = {
   // …} but the dashboard's PipelineRun shape is {run_id, stage, agents}. Normalize
   // at the boundary so a missing run_id never reaches run.run_id.slice() and
   // white-screens the page.
-  listRuns: async (repo?: string, limit = 20) => {
-    const raw = await apiFetch<unknown[]>(
-      `/pipeline/runs?limit=${limit}${repo ? `&repo=${repo}` : ""}`
-    );
+  //
+  // Overloaded for back-compat: the legacy callers pass (repo?, limit?); the new
+  // /runs index (DASH-8) passes a RunFilters object. Both go to the same
+  // backend query which already supports blueprint/repo/state/source/limit/offset.
+  listRuns: async (filtersOrRepo?: RunFilters | string, limit = 20) => {
+    const f: RunFilters =
+      typeof filtersOrRepo === "string" || filtersOrRepo === undefined
+        ? { repo: filtersOrRepo as string | undefined, limit }
+        : filtersOrRepo;
+    const p = new URLSearchParams();
+    p.set("limit", String(f.limit ?? 20));
+    if (f.offset) p.set("offset", String(f.offset));
+    if (f.repo) p.set("repo", f.repo);
+    if (f.blueprint) p.set("blueprint", f.blueprint);
+    if (f.state) p.set("state", f.state);
+    if (f.source) p.set("source", f.source);
+    const raw = await apiFetch<unknown[]>(`/pipeline/runs?${p.toString()}`);
     return (Array.isArray(raw) ? raw : []).map(normalizeRun);
   },
 
   getRun: async (runId: string) =>
     normalizeRun(await apiFetch<unknown>(`/pipeline/runs/${runId}`)),
 
-  // Render-ready blueprint graph — the pipeline-flow view draws this directly.
+  // The supervisor stage's advisory delegation plan (DASH-12). Returns null when
+  // the run carries none (e.g. a non-supervisor blueprint). Read from the run's
+  // agent_context — the backend exposes it under the run detail.
+  getDelegationPlan: async (runId: string): Promise<DelegationPlan | null> => {
+    try {
+      return await apiFetch<DelegationPlan>(`/pipeline/runs/${encodeURIComponent(runId)}/delegation-plan`);
+    } catch {
+      return null;
+    }
+  },
+
+  // A2A message timeline for a run (DASH-7) — replaces the hardcoded
+  // /dashboard/api fetch in the run detail page.
+  getRunA2A: (runId: string) =>
+    apiFetch<A2AMessage[]>(`/pipeline/runs/${encodeURIComponent(runId)}/a2a`),
+
+  // List blueprints for the picker (DASH-6) + the Workflows home. Returns a
+  // compact summary (name + title + description + stage count). The backend
+  // serves the catalog at /pipeline/blueprints; we normalize the field names
+  // and derive stageCount from whichever shape comes back.
+  listBlueprints: async (): Promise<BlueprintSummary[]> => {
+    const raw = await apiFetch<unknown[]>("/pipeline/blueprints");
+    return (Array.isArray(raw) ? raw : []).map((item) => {
+      const b = (item ?? {}) as Record<string, unknown>;
+      const stageCount =
+        (b.stage_count as number) ??
+        (b.stageCount as number) ??
+        (Array.isArray(b.stages) ? (b.stages as unknown[]).length : 0) ??
+        (Array.isArray(b.nodes) ? (b.nodes as unknown[]).length : 0) ??
+        0;
+      return {
+        name: (b.name as string) ?? "",
+        title: (b.title as string) ?? (b.display_name as string) ?? (b.name as string) ?? "",
+        description: (b.description as string) ?? "",
+        stageCount,
+        lanes: Array.isArray(b.lanes) ? (b.lanes as string[]) : undefined,
+      };
+    });
+  },
+
+  // Render-ready blueprint graph — the BlueprintDAG / pipeline-flow views draw
+  // this directly.
   getBlueprintGraph: (name = "alm-pipeline") =>
     apiFetch<BlueprintGraph>(`/pipeline/blueprints/${encodeURIComponent(name)}`),
 
@@ -192,11 +304,33 @@ export const api = {
       truncated: boolean;
     }>(`/runs/${runId}/repo/file?path=${encodeURIComponent(path)}`),
 
-  triggerPipeline: (repo: string, requirements: string, issueNumber?: number) =>
-    apiFetch<{ run_id: string; stage: string }>("/pipeline/trigger", {
+  // Dispatch a run. Now threads the chosen blueprint (DASH-6) so the user
+  // actually picks app-scaffold / crew-task / supervisor-alm instead of the
+  // backend silently defaulting. `blueprint` is optional for back-compat.
+  triggerPipeline: (
+    repo: string,
+    requirements: string,
+    opts: { issueNumber?: number; blueprint?: string } = {},
+  ) =>
+    apiFetch<{ run_id: string; stage: string; blueprint?: string }>("/pipeline/trigger", {
       method: "POST",
-      body: JSON.stringify({ repo, requirements, issue_number: issueNumber }),
+      body: JSON.stringify({
+        repo,
+        requirements,
+        issue_number: opts.issueNumber,
+        blueprint: opts.blueprint,
+      }),
     }),
+
+  // Inject an additional instruction into a running pipeline (DASH-10). The
+  // backend merges it into agent_context['injections'] for the next re-planning
+  // stage to read. Returns 501 if the active blueprint has no consumer — the
+  // caller surfaces that honestly rather than pretending it landed.
+  injectMessage: (runId: string, message: string) =>
+    apiFetch<{ run_id: string; injected: boolean }>(
+      `/pipeline/runs/${encodeURIComponent(runId)}/inject`,
+      { method: "POST", body: JSON.stringify({ message }) },
+    ),
 
   retriggerRun: (runId: string) =>
     apiFetch<{ run_id: string; stage: string; repo: string; retry_of: string }>(

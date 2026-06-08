@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 import redis.asyncio as redis
@@ -218,15 +219,20 @@ class StateManager:
         index. Newest first.
         """
         if blueprint and repo:
-            ids = await self.redis.zinterstore(
-                "_devai:pipeline:_tmpfilter",
-                {
-                    self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint): 1.0,
-                    self.PIPELINE_BY_REPO_KEY.format(repo=repo): 1.0,
-                },
-            )
-            ids = await self.redis.zrevrange("_devai:pipeline:_tmpfilter", 0, limit - 1)
-            await self.redis.delete("_devai:pipeline:_tmpfilter")
+            # Per-call temp key so concurrent filtered lists can't clobber or
+            # leak each other's intersection results.
+            tmp_key = f"_devai:pipeline:_tmpfilter:{uuid.uuid4().hex}"
+            try:
+                await self.redis.zinterstore(
+                    tmp_key,
+                    {
+                        self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint): 1.0,
+                        self.PIPELINE_BY_REPO_KEY.format(repo=repo): 1.0,
+                    },
+                )
+                ids = await self.redis.zrevrange(tmp_key, 0, limit - 1)
+            finally:
+                await self.redis.delete(tmp_key)
         elif blueprint:
             ids = await self.redis.zrevrange(self.PIPELINE_BY_BLUEPRINT_KEY.format(blueprint=blueprint), 0, limit - 1)
         elif repo:

@@ -32,6 +32,49 @@ def _service(request: Request):
     return svc
 
 
+async def _require_principal(request: Request):
+    """Resolve the caller's Principal, gated by the ``require_auth`` flag.
+
+    Behavior-neutral by default: when ``DEVAI_REQUIRE_AUTH`` is False (the
+    current prod default) this returns the resolved principal or ``None`` for
+    anonymous callers — exactly the legacy ``extract_principal`` path, so
+    nothing changes until the flag is flipped in chart values (CHART-1). When
+    ``require_auth`` is True it delegates to :func:`devai.authz.require_principal`,
+    which 401s anonymous callers (no fallback to a literal ``operator``).
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is not None and getattr(config, "require_auth", False):
+        from devai.authz import require_principal
+
+        return await require_principal(request)
+    from devai.identity import extract_principal
+
+    try:
+        return await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
+        return None
+
+
+async def _authorize_run(request: Request, task: dict[str, Any] | None):
+    """Resolve the caller and enforce team membership on the run's owning team.
+
+    Returns the resolved principal (or None when auth is off and the caller is
+    anonymous — the behavior-neutral default path). When ``require_auth`` is on,
+    :func:`_require_principal` 401s for anonymous callers, and we additionally
+    reject callers who are not members of the run's owning team
+    (``team_service.can_dispatch``).
+
+    This is the run-control / approval-gate guard for CODE-2: it ensures a
+    human-in-the-loop decision is attributable to an authorized team member.
+    """
+    principal = await _require_principal(request)
+    team_id = (task or {}).get("team_id") or ""
+    team_service = getattr(request.app.state, "team_service", None)
+    if team_service is not None and not team_service.can_dispatch(principal, team_id):
+        raise HTTPException(status_code=403, detail=f"not a member of team {team_id}")
+    return principal
+
+
 # ────────────────────────────────────────────────────────────────────
 # Reads
 # ────────────────────────────────────────────────────────────────────
@@ -95,6 +138,37 @@ async def get_run(request: Request, task_id: str) -> dict[str, Any]:
     return task
 
 
+@router.get("/runs/{task_id}/a2a")
+async def get_run_a2a(request: Request, task_id: str) -> list[dict[str, Any]]:
+    """Agent-to-agent message timeline for a run (dashboard TIMELINE tab).
+
+    Sourced from the run's handover bag; returns [] for runs that produced no
+    A2A traffic so the dashboard timeline degrades cleanly.
+    """
+    task = await _service(request).get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id!r} not found")
+    ctx = task.get("agent_context") or {}
+    msgs = ctx.get("a2a_messages") or task.get("a2a_messages") or []
+    return msgs if isinstance(msgs, list) else []
+
+
+@router.get("/runs/{task_id}/delegation-plan")
+async def get_run_delegation_plan(request: Request, task_id: str) -> dict[str, Any] | None:
+    """The advisory supervisor delegation plan for a run, if any.
+
+    The supervisor stage writes ``delegation_plan`` into the handover bag. It is
+    ADVISORY metadata — it does not add/remove/reorder the executed DAG stages —
+    and is surfaced read-only on the run detail page. Returns null when the run
+    didn't pass through a supervisor stage.
+    """
+    task = await _service(request).get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id!r} not found")
+    plan = (task.get("agent_context") or {}).get("delegation_plan")
+    return plan if isinstance(plan, dict) else None
+
+
 @router.get("/events/recent")
 async def recent_events(request: Request, limit: int = Query(100, ge=1, le=1000)) -> list[dict[str, Any]]:
     """Return the last `limit` stage events from the ring buffer."""
@@ -132,10 +206,10 @@ class DispatchResponse(BaseModel):
 
 @router.post("/runs", response_model=DispatchResponse, status_code=202)
 async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse:
-    from devai.identity import extract_principal, trace_id_from_request
+    from devai.identity import trace_id_from_request
 
     svc = _service(request)
-    principal = await extract_principal(request)
+    principal = await _require_principal(request)
 
     # Resolve the owning team: explicit body wins, else the caller's primary
     # team. Authorize the choice against the caller's memberships.
@@ -200,13 +274,13 @@ class TriggerBody(BaseModel):
 @router.post("/trigger")
 async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
     """Dashboard "Start Pipeline" — dispatch a durable blueprint run."""
-    from devai.identity import extract_principal, trace_id_from_request
+    from devai.identity import trace_id_from_request
 
     svc = _service(request)
     intent = (body.requirements or "").strip()
     if not intent:
         raise HTTPException(status_code=400, detail="requirements text is required")
-    principal = await extract_principal(request)
+    principal = await _require_principal(request)
     agent_context: dict[str, Any] = {"requirements": intent}
     if body.issue_number is not None:
         agent_context["trigger_ref"] = str(body.issue_number)
@@ -229,7 +303,7 @@ async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
 @router.post("/runs/{task_id}/retrigger")
 async def retrigger(request: Request, task_id: str) -> dict[str, Any]:
     """Re-dispatch a finished/failed run with its ORIGINAL intent + repo."""
-    from devai.identity import extract_principal, trace_id_from_request
+    from devai.identity import trace_id_from_request
 
     svc = _service(request)
     original = await svc.get_task(task_id)
@@ -240,7 +314,9 @@ async def retrigger(request: Request, task_id: str) -> dict[str, Any]:
     repo = original.get("repo") or ""
     if not intent:
         raise HTTPException(status_code=400, detail="run has no original requirements to replay")
-    principal = await extract_principal(request)
+    # Retriggering re-runs the original work — enforce team membership on the
+    # source run's owning team (CODE-2) and require a principal when auth is on.
+    principal = await _authorize_run(request, original)
     new_id = await svc.dispatch(
         intent=intent,
         blueprint=original.get("blueprint"),
@@ -256,8 +332,12 @@ async def retrigger(request: Request, task_id: str) -> dict[str, Any]:
 
 async def _set_control(request: Request, task_id: str, value: str) -> dict[str, Any]:
     svc = _service(request)
-    if await svc.get_task(task_id) is None:
+    task = await svc.get_task(task_id)
+    if task is None:
         raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    # Run-control (pause/resume/stop) is a privileged action — require a
+    # principal (when auth is on) and enforce team membership (CODE-2).
+    await _authorize_run(request, task)
     await svc.set_run_control(task_id, value)
     return {"run_id": task_id, "control": value}
 
@@ -288,6 +368,10 @@ async def inject(request: Request, task_id: str) -> dict[str, Any]:
     crew lead) to pick up. Returns 404 if the run isn't currently in memory.
     """
     svc = _service(request)
+    task = await svc.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    await _authorize_run(request, task)
     body = await request.json()
     message = (body.get("message") or "").strip()
     if not message:
@@ -324,6 +408,7 @@ async def get_config(request: Request, repo: str = "default") -> dict[str, Any]:
 @router.post("/config")
 async def save_config(request: Request) -> dict[str, str]:
     """Persist per-repo pipeline config."""
+    await _require_principal(request)
     body = await request.json()
     repo = body.get("repo", "default")
     redis = _config_redis(request)
@@ -347,14 +432,30 @@ async def list_approvals(request: Request, task_id: str) -> list[dict[str, Any]]
 @router.post("/runs/{task_id}/approvals/{gate}/approve")
 async def approve(request: Request, task_id: str, gate: str) -> dict[str, str]:
     """Approve a gate — the durable workflow (or in-process gate) proceeds."""
-    await _service(request).approve_gate(task_id, gate, "approved")
+    svc = _service(request)
+    task = await svc.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    # Human-in-the-loop guardrail: an approval must come from an authenticated
+    # team member, and we record who approved (CODE-2).
+    principal = await _authorize_run(request, task)
+    await svc.approve_gate(
+        task_id, gate, "approved", approver=principal.to_dict() if principal else None
+    )
     return {"status": "approved", "gate": gate, "run_id": task_id}
 
 
 @router.post("/runs/{task_id}/approvals/{gate}/reject")
 async def reject(request: Request, task_id: str, gate: str) -> dict[str, str]:
     """Reject a gate — the run is cancelled at the gate."""
-    await _service(request).approve_gate(task_id, gate, "rejected")
+    svc = _service(request)
+    task = await svc.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    principal = await _authorize_run(request, task)
+    await svc.approve_gate(
+        task_id, gate, "rejected", approver=principal.to_dict() if principal else None
+    )
     return {"status": "rejected", "gate": gate, "run_id": task_id}
 
 
@@ -381,6 +482,8 @@ async def rollback_run(request: Request, task_id: str, body: RollbackBody) -> di
     snapshot = svc.get_task_in_memory(task_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="task not found")
+    # Rolling a working tree back is a privileged, run-mutating action.
+    await _authorize_run(request, snapshot)
     known = {cp.get("sha") for cp in (snapshot.get("checkpoints") or [])}
     if body.sha not in known:
         raise HTTPException(status_code=404, detail="sha is not a checkpoint of this task")

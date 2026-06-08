@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { Inter, IBM_Plex_Mono, Source_Serif_4, Syne } from "next/font/google";
 import "./globals.css";
-import { ThemeProvider } from "./theme-provider";
 import { MissionControlShell } from "@/components/mission-control-shell";
 import { ToastProvider } from "@/components/toast";
+import { THEME_INIT_SCRIPT } from "@/lib/theme-script";
 
 // Fonts mirror PLATFORM.md §14 (Tactical Monospace). We load only the
 // weights we actually use to keep the bundle lean.
@@ -24,25 +24,14 @@ export const metadata: Metadata = {
  * when the current path is /login.
  *
  * Theme application:
- *   1. An inline blocking script reads localStorage('devai-theme') and
- *      `prefers-color-scheme` BEFORE React paints, then toggles
- *      `html.dark`. This eliminates the dark/light flash on reload
- *      that every theme-toggle without SSR cookies suffers from.
- *   2. The Settings page persists the choice into localStorage. The
- *      sidebar toggle is a thin wrapper over the same key.
+ *   1. An inline blocking script (THEME_INIT_SCRIPT, shared with
+ *      next.config.ts for the CSP hash) reads localStorage('devai-theme')
+ *      and `prefers-color-scheme` BEFORE React paints, then toggles
+ *      `html.dark`. This eliminates the dark/light flash on reload.
+ *   2. The Settings page + sidebar toggle persist the choice into the same
+ *      'devai-theme' key.
  *   3. New visitors get the system preference; explicit toggles win.
  */
-const THEME_INIT_SCRIPT = `
-(function () {
-  try {
-    var stored = localStorage.getItem('devai-theme');
-    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    var useDark = stored ? stored === 'dark' : prefersDark;
-    if (useDark) document.documentElement.classList.add('dark');
-  } catch (e) {}
-})();
-`.trim();
-
 export default function RootLayout({
   children,
 }: {
@@ -55,11 +44,12 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="min-h-screen" suppressHydrationWarning>
-        <ThemeProvider>
-          <ToastProvider>
-            <MissionControlShell>{children}</MissionControlShell>
-          </ToastProvider>
-        </ThemeProvider>
+        {/* Theme is applied by the inline THEME_INIT_SCRIPT above (reads the
+         * 'devai-theme' localStorage key before first paint). The old
+         * ThemeProvider used a different, dead 'theme' key and is removed. */}
+        <ToastProvider>
+          <MissionControlShell>{children}</MissionControlShell>
+        </ToastProvider>
       </body>
     </html>
   );

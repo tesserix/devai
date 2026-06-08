@@ -2,13 +2,37 @@
 
 import type React from "react";
 import { useState } from "react";
+import Link from "next/link";
 import { clsx } from "clsx";
 import type { PipelineRun } from "@/lib/api";
+import { RunStateBadge, normalizeRunState } from "@/components/run-state-badge";
+
+/**
+ * RunList — the recent-runs list.
+ *
+ * Two presentations from one component:
+ *   - "compact" (default): the dense Fleet-home sidebar list, selection-driven
+ *     (onSelect), with inline pause/resume/stop/retry controls.
+ *   - "rows": the /runs index (DASH-8) — each run is a Link to /runs/<id>,
+ *     showing repo · blueprint · source · state · time. No selection state.
+ *
+ * State colouring is centralised through the shared RunStateBadge /
+ * normalizeRunState so a "running" run reads the same here as on the run page.
+ */
+
+interface RunRow extends PipelineRun {
+  blueprint?: string;
+  trigger_type?: string;
+  source?: string;
+  created_at: string;
+}
 
 interface RunListProps {
-  runs: PipelineRun[];
+  runs: RunRow[];
+  /** "compact" = selectable sidebar (default). "rows" = linked index rows. */
+  variant?: "compact" | "rows";
   selectedRunId?: string;
-  onSelect: (runId: string) => void;
+  onSelect?: (runId: string) => void;
   // Retrigger by run id (server replays the original requirements).
   onRetrigger?: (runId: string) => Promise<void> | void;
   // Pause / resume / stop a running pipeline. Take effect at the next
@@ -18,43 +42,15 @@ interface RunListProps {
   onStop?: (runId: string) => Promise<void> | void;
 }
 
-const STAGE_DOT: Record<string, string> = {
-  triggered: "bg-gray-400",
-  requirements_analyzed: "bg-gray-500",
-  epic_created: "bg-indigo-500",
-  stories_created: "bg-blue-500",
-  plan_created: "bg-indigo-600",
-  code_implemented: "bg-amber-500",
-  code_reviewed: "bg-orange-500",
-  build_monitoring: "bg-yellow-500",
-  tests_complete: "bg-lime-600",
-  deploying: "bg-teal-500",
-  deployed: "bg-green-600",
-  done: "bg-green-700",
-  failed: "bg-red-600",
-  cancelled: "bg-gray-500",
-  paused: "bg-amber-400",
-};
-
-// Stages where the run is considered "in flight" — pause/stop are
-// meaningful. Anything in this set shows the pause + stop controls.
-const ACTIVE_STAGES = new Set([
-  "triggered",
-  "requirements_analyzed",
-  "epic_created",
-  "stories_created",
-  "plan_created",
-  "code_implemented",
-  "code_reviewed",
-  "build_monitoring",
-  "tests_complete",
-  "deploying",
-  "running",
-  "paused",
-]);
+// Stages where the run is considered "in flight" — pause/stop are meaningful.
+function isInFlight(stage: string): boolean {
+  const s = normalizeRunState(stage);
+  return s === "running" || s === "paused" || s === "queued" || s === "gate-pending";
+}
 
 export function RunList({
   runs,
+  variant = "compact",
   selectedRunId,
   onSelect,
   onRetrigger,
@@ -77,114 +73,181 @@ export function RunList({
     }
   };
 
-  if (runs.length === 0) {
+  function controlsFor(run: RunRow) {
+    const norm = normalizeRunState(run.stage);
+    const isFailed = norm === "failed";
+    const isPaused = norm === "paused";
+    const inFlight = isInFlight(run.stage);
+    const isBusy = busyId === run.run_id;
     return (
-      <div className="text-center py-10 text-gray-400 dark:text-gray-500">
-        <p className="text-sm">No pipeline runs yet</p>
-        <p className="text-xs mt-1">Trigger a run from the CLI or webhook</p>
+      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        {isFailed && onRetrigger && (
+          <ControlPill
+            label="Retry"
+            color="accent"
+            busy={isBusy}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleControl(run.run_id, onRetrigger);
+            }}
+          />
+        )}
+        {inFlight && !isPaused && onPause && (
+          <ControlPill
+            label="Pause"
+            color="warn"
+            busy={isBusy}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleControl(run.run_id, onPause);
+            }}
+          />
+        )}
+        {isPaused && onResume && (
+          <ControlPill
+            label="Resume"
+            color="ok"
+            busy={isBusy}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleControl(run.run_id, onResume);
+            }}
+          />
+        )}
+        {(inFlight || isPaused) && onStop && (
+          <ControlPill
+            label="Stop"
+            color="error"
+            busy={isBusy}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleControl(run.run_id, onStop);
+            }}
+          />
+        )}
       </div>
     );
   }
 
+  // ── /runs index rows ────────────────────────────────────────────────
+  if (variant === "rows") {
+    return (
+      <ul className="divide-y" style={{ borderColor: "var(--border-subtle)" }}>
+        {runs.map((run) => {
+          const agentCount = Object.keys(run.agents || {}).length;
+          const source = run.source || run.trigger_type;
+          return (
+            <li key={run.run_id}>
+              <Link
+                href={`/runs/${encodeURIComponent(run.run_id)}`}
+                className="group flex items-center gap-4 px-4 py-3 transition-colors hover:bg-[var(--surface-muted)]"
+              >
+                <RunStateBadge state={run.stage} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="font-medium text-sm truncate"
+                      style={{ color: "var(--ink-strong)" }}
+                    >
+                      {run.repo || "—"}
+                    </span>
+                    {run.blueprint && (
+                      <span
+                        className="font-mono text-[11px] px-1.5 py-0.5 rounded shrink-0"
+                        style={{
+                          background: "var(--surface-muted)",
+                          color: "var(--ink-muted)",
+                        }}
+                      >
+                        {run.blueprint}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className="mt-0.5 flex items-center gap-2 text-[11px]"
+                    style={{ color: "var(--ink-muted)" }}
+                  >
+                    <span className="font-mono">{(run.run_id ?? "").slice(0, 12)}</span>
+                    {source && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>{source}</span>
+                      </>
+                    )}
+                    {agentCount > 0 && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>{agentCount} agents</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <span
+                  className="text-[11px] shrink-0 tabular-nums"
+                  style={{ color: "var(--ink-muted)" }}
+                >
+                  {formatTime(run.created_at)}
+                </span>
+                {controlsFor(run)}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  // ── compact selectable sidebar (Fleet home) ─────────────────────────
   return (
     <div className="space-y-1">
       {runs.map((run) => {
         const isSelected = run.run_id === selectedRunId;
         const agentCount = Object.keys(run.agents || {}).length;
         const completedAgents = Object.values(run.agents || {}).filter(
-          (a) => a.status === "completed"
+          (a) => a.status === "completed",
         ).length;
-        const isFailed = run.stage === "failed";
-        const isPaused = run.stage === "paused";
-        const isCancelled = run.stage === "cancelled";
-        const isActive = ACTIVE_STAGES.has(run.stage) && !isFailed && !isCancelled;
-        const isBusy = busyId === run.run_id;
 
         return (
           <button
             key={run.run_id}
-            onClick={() => onSelect(run.run_id)}
+            onClick={() => onSelect?.(run.run_id)}
             className={clsx(
-              "w-full text-left p-2.5 rounded-md border transition-all",
-              isSelected
-                ? "border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40"
-                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+              "w-full text-left p-2.5 rounded-md border transition-colors",
             )}
+            style={{
+              background: isSelected ? "var(--accent-soft-bg-2)" : "var(--surface)",
+              borderColor: isSelected ? "var(--accent-soft-bd)" : "var(--border-subtle)",
+            }}
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className={clsx("w-1.5 h-1.5 rounded-full shrink-0", STAGE_DOT[run.stage] || "bg-gray-400")} />
-                <span className="text-xs font-mono text-gray-500 dark:text-gray-500">
-                  {(run.run_id ?? "").slice(0, 8)}
-                </span>
-              </div>
-              <span className="text-xs text-gray-400 dark:text-gray-500">
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className="text-xs font-mono truncate"
+                style={{ color: "var(--ink-muted)" }}
+              >
+                {(run.run_id ?? "").slice(0, 8)}
+              </span>
+              <span className="text-xs shrink-0" style={{ color: "var(--ink-muted)" }}>
                 {formatTime(run.created_at)}
               </span>
             </div>
-            <div className="mt-1 flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate max-w-[140px]">
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span
+                className="text-sm font-medium truncate"
+                style={{ color: "var(--ink-strong)" }}
+              >
                 {run.repo}
               </span>
-              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0 ml-1">
-                {completedAgents}/{agentCount || "?"} agents
+              <span className="text-xs shrink-0" style={{ color: "var(--ink-muted)" }}>
+                {completedAgents}/{agentCount || "?"}
               </span>
             </div>
-            <div className="mt-1.5 flex items-center justify-between">
-              <span className={clsx(
-                "text-xs px-1.5 py-0.5 rounded",
-                isFailed
-                  ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-                  : "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
-              )}>
-                {run.stage.replace(/_/g, " ")}
-              </span>
-              <div className="flex items-center gap-1">
-                {isFailed && onRetrigger && (
-                  <ControlPill
-                    label="Retry"
-                    color="indigo"
-                    busy={isBusy}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await handleControl(run.run_id, onRetrigger);
-                    }}
-                  />
-                )}
-                {isActive && !isPaused && onPause && (
-                  <ControlPill
-                    label="Pause"
-                    color="amber"
-                    busy={isBusy}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await handleControl(run.run_id, onPause);
-                    }}
-                  />
-                )}
-                {isPaused && onResume && (
-                  <ControlPill
-                    label="Resume"
-                    color="emerald"
-                    busy={isBusy}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await handleControl(run.run_id, onResume);
-                    }}
-                  />
-                )}
-                {(isActive || isPaused) && onStop && (
-                  <ControlPill
-                    label="Stop"
-                    color="red"
-                    busy={isBusy}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await handleControl(run.run_id, onStop);
-                    }}
-                  />
-                )}
-              </div>
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <RunStateBadge state={run.stage} />
+              {controlsFor(run)}
             </div>
           </button>
         );
@@ -193,35 +256,36 @@ export function RunList({
   );
 }
 
-type PillColor = "indigo" | "amber" | "emerald" | "red";
+type PillColor = "accent" | "warn" | "ok" | "error";
 
-const PILL_CLASSES: Record<PillColor, string> = {
-  indigo:
-    "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800/40",
-  amber:
-    "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/40",
-  emerald:
-    "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-800/40",
-  red:
-    "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/40",
+const PILL_CLASS: Record<PillColor, string> = {
+  accent: "pill-info",
+  warn: "pill-warn",
+  ok: "pill-ok",
+  error: "pill-error",
 };
 
 interface ControlPillProps {
   label: string;
   color: PillColor;
   busy: boolean;
-  onClick: (e: React.MouseEvent) => Promise<void> | void;
+  onClick: (e: React.MouseEvent) => void;
 }
 
 function ControlPill({ label, color, busy, onClick }: ControlPillProps) {
   return (
     <span
       role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onClick(e as unknown as React.MouseEvent);
+      }}
       className={clsx(
-        "text-xs px-2 py-0.5 rounded transition-colors",
-        busy ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
-        PILL_CLASSES[color],
+        "pill",
+        PILL_CLASS[color],
+        "!py-0 !text-[10px] cursor-pointer transition-opacity",
+        busy && "opacity-50 pointer-events-none",
       )}
       title={label}
       aria-disabled={busy}
@@ -234,7 +298,8 @@ function ControlPill({ label, color, busy, onClick }: ControlPillProps) {
 function formatTime(ts: string): string {
   if (!ts) return "";
   try {
-    const d = new Date(parseFloat(ts) * 1000);
+    const n = parseFloat(ts);
+    const d = Number.isFinite(n) ? new Date(n * 1000) : new Date(ts);
     return d.toLocaleString([], {
       month: "short",
       day: "numeric",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -25,14 +26,20 @@ class GitHubOAuth:
         self._http = httpx.AsyncClient(timeout=15.0)
 
     def get_authorize_url(self, redirect_uri: str, state: str) -> str:
-        """Generate the GitHub OAuth authorization URL."""
+        """Generate the GitHub OAuth authorization URL.
+
+        Params are percent-encoded with ``urllib.parse.urlencode`` so a
+        redirect_uri/state containing reserved characters (``&``, ``=``,
+        spaces) can't break the query string or smuggle extra params
+        (the old manual ``&``.join had no escaping).
+        """
         params = {
             "client_id": self.config.github_oauth_client_id,
             "redirect_uri": redirect_uri,
             "scope": "repo read:org project",
             "state": state,
         }
-        query = "&".join(f"{k}={v}" for k, v in params.items())
+        query = urllib.parse.urlencode(params)
         return f"{GITHUB_OAUTH_AUTHORIZE}?{query}"
 
     async def exchange_code(self, code: str) -> dict[str, Any]:
@@ -66,6 +73,53 @@ class GitHubOAuth:
         )
         resp.raise_for_status()
         return resp.json()
+
+    async def is_user_authorized(self, access_token: str, user: dict[str, Any]) -> bool:
+        """Decide whether a freshly-authenticated GitHub user may get a session.
+
+        A GitHub OAuth app lets *any* GitHub account through the OAuth dance —
+        so without a gate, anyone on github.com becomes a DevAI operator. This
+        narrows it to two opt-in checks:
+
+          1. ``config.github_org`` membership — the user must belong to the
+             configured org (resolved via ``GET /user/orgs``, the same scope
+             ``read:org`` we already request).
+          2. An optional login/email allowlist
+             (``config.github_oauth_email_allowlist``) — exact match on the
+             user's login or primary email.
+
+        Behavior-neutral default: when *neither* a non-empty ``github_org``
+        nor an allowlist is configured, this returns True (today's
+        any-account behavior). The gate only tightens once an org/allowlist
+        is set in config.
+        """
+        org = (getattr(self.config, "github_org", "") or "").strip()
+        allowlist = {
+            str(v).strip().lower()
+            for v in (getattr(self.config, "github_oauth_email_allowlist", None) or [])
+            if str(v).strip()
+        }
+
+        # No org and no allowlist configured → preserve today's open behavior.
+        if not org and not allowlist:
+            return True
+
+        login = str(user.get("login", "")).strip().lower()
+        email = str(user.get("email", "") or "").strip().lower()
+
+        if allowlist and (login in allowlist or (email and email in allowlist)):
+            return True
+
+        if org:
+            try:
+                orgs = await self.get_user_orgs(access_token)
+            except Exception:  # noqa: BLE001 — a lookup failure must fail closed, not open
+                logger.warning("github oauth: org membership lookup failed for %s", login or "<unknown>")
+                return False
+            if any(str(o.get("login", "")).strip().lower() == org.lower() for o in orgs):
+                return True
+
+        return False
 
     async def get_org_repos(self, access_token: str, org: str) -> list[dict[str, Any]]:
         """Get repositories in an organization."""

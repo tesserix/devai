@@ -1,4 +1,62 @@
 import type { NextConfig } from "next";
+import { createHash } from "crypto";
+import { THEME_INIT_SCRIPT } from "./src/lib/theme-script";
+
+// ── Security response headers (DASH-3) ──────────────────────────────────────
+// Neither dashboard set any headers(). Both render chat markdown via
+// dangerouslySetInnerHTML, so a strict CSP is the containment layer if the
+// (now sanitized) renderer ever regresses, and frame-ancestors blocks
+// clickjacking of the session-bearing UI.
+//
+// script-src: we pin the SHA-256 hash of the inline theme-init script so it is
+// explicitly allowed. Next.js (App Router, no middleware here) also emits inline
+// hydration/route-data scripts; without a per-request nonce those need
+// 'unsafe-inline'. Browsers ignore 'unsafe-inline' once a hash/nonce is present,
+// so to keep the app working we currently rely on 'unsafe-inline' for the Next
+// runtime AND list the theme hash for documentation/forward-compat. The harder
+// lock-down (drop 'unsafe-inline', add a middleware nonce) is the planned next
+// step — tracked alongside the auth hardening.
+const THEME_SCRIPT_HASH = `'sha256-${createHash("sha256")
+  .update(THEME_INIT_SCRIPT, "utf8")
+  .digest("base64")}'`;
+
+// Hosts the app legitimately talks to / frames. Firebase + Google Identity for
+// sign-in; the preview hosts for the run Preview iframe.
+const CONNECT_SRC = [
+  "'self'",
+  "https://*.googleapis.com",
+  "https://*.firebaseio.com",
+  "https://*.firebaseapp.com",
+  "https://identitytoolkit.googleapis.com",
+  "https://securetoken.googleapis.com",
+  "https://*.tesserix.app",
+  "wss://*.tesserix.app",
+].join(" ");
+
+const FRAME_SRC = ["'self'", "https://*.tesserix.app"].join(" ");
+
+const CSP = [
+  "default-src 'self'",
+  // 'unsafe-inline' kept for Next's inline runtime (see note above); theme hash
+  // listed for the eventual nonce-based hardening. 'unsafe-eval' is NOT allowed.
+  `script-src 'self' 'unsafe-inline' ${THEME_SCRIPT_HASH}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  `connect-src ${CONNECT_SRC}`,
+  `frame-src ${FRAME_SRC}`,
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: CSP },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "X-Frame-Options", value: "DENY" },
+];
 
 // In K8s, the dashboard proxies API calls to devai-api via internal
 // service DNS. Locally, it falls back to localhost:8080. The mapping
@@ -94,6 +152,15 @@ const nextConfig: NextConfig = {
       {
         source: "/api/:path*",
         destination: `${API_INTERNAL_URL}/dashboard/api/:path*`,
+      },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        // Apply the security headers to every route.
+        source: "/:path*",
+        headers: SECURITY_HEADERS,
       },
     ];
   },

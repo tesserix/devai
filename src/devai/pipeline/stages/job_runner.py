@@ -55,6 +55,36 @@ logger = logging.getLogger(__name__)
 # wrapper can pick the inline path.
 _INLINE_HINT = "inline"
 
+# Authored blueprints can set `stage.config.image` to override the runner
+# image. An arbitrary image runs as a K8s Job with the platform's LLM/SCM
+# secrets mounted (cluster code-exec via a published blueprint). Restrict the
+# override to the trusted devai runner registry prefix; anything else is
+# rejected and the stage falls back to the per-stack / default runner image.
+# The per-stack image map (RuntimeConfig.runner_image_per_stack) is also
+# considered trusted because it is operator-set chart config, not authored.
+_TRUSTED_IMAGE_PREFIXES = ("ghcr.io/tesserix/devai/",)
+
+
+def _image_is_allowed(image: str, runtime: K8sJobRuntime) -> bool:
+    """True if ``image`` is on the trusted runner allowlist.
+
+    Allowed sources:
+      * any tag under the trusted devai runner registry prefix, OR
+      * a value already present in the operator-set per-stack image map, OR
+      * the runtime's configured default runner image.
+    Everything else (Docker Hub, an attacker-controlled registry, a digest
+    pinned elsewhere) is rejected.
+    """
+    img = (image or "").strip()
+    if not img:
+        return False
+    if img.startswith(_TRUSTED_IMAGE_PREFIXES):
+        return True
+    per_stack = runtime.config.runner_image_per_stack or {}
+    if img in per_stack.values():
+        return True
+    return img == runtime.config.runner_image
+
 
 class JobRunnerStage(PipelineStage):
     """Submit an agent run to the cluster and wait for the Job to finish.
@@ -234,17 +264,42 @@ class JobRunnerStage(PipelineStage):
         runtime image (2) → aregistry agent profile's ``image`` (3) →
         runtime default (4). The aregistry hit was already paid by
         ``_fetch_agent_profile``; this is a pure dict lookup.
+
+        SECURITY (CODE-4): the ``stage.config.image`` override and the
+        registry profile's ``image`` are both attacker-influenceable through
+        authored blueprints / catalog records. Any image we hand to the Job
+        runs in-cluster with LLM + SCM secrets mounted, so every candidate is
+        run through ``_image_is_allowed`` (trusted devai registry prefix, the
+        operator-set per-stack map, or the default runner image). A rejected
+        override does NOT fail the stage — it is logged and we fall through to
+        the trusted per-stack / default image so a malicious override can only
+        ever downgrade to a safe image, never escalate.
         """
         override = self.config.get("image")
         if override:
-            return str(override)
+            if _image_is_allowed(str(override), runtime):
+                return str(override)
+            logger.warning(
+                "stage %s: rejecting untrusted stage.config.image %r — "
+                "falling back to trusted runner image",
+                self._stage_name,
+                override,
+            )
         stack = str(self.config.get("stack", "default"))
         per_stack = runtime.config.runner_image_per_stack or {}
         if stack in per_stack:
             return per_stack[stack]
 
         if profile and profile.get("image"):
-            return str(profile["image"])
+            prof_image = str(profile["image"])
+            if _image_is_allowed(prof_image, runtime):
+                return prof_image
+            logger.warning(
+                "stage %s: rejecting untrusted agent-profile image %r — "
+                "falling back to default runner image",
+                self._stage_name,
+                prof_image,
+            )
 
         return runtime.config.runner_image
 
@@ -281,12 +336,18 @@ def job_runner_stage(deps: StageDeps, config: dict[str, Any]) -> JobRunnerStage:
 
 _RESULT_PREFIX = "RESULT::"
 
+# Cap the RESULT:: payload we will parse. The runner controls its stdout, so a
+# hostile/buggy runner could emit a multi-MB line; bound it before json.loads
+# to keep parse cost + the resulting in-memory dict bounded (CODE-13).
+_MAX_RESULT_PAYLOAD_BYTES = 128 * 1024  # 128 KiB
+
 
 def _parse_runner_result(logs: str) -> dict[str, Any]:
     """Find the runner's `RESULT::{...}` line and parse it as JSON.
 
     Walks the log tail from the end so we pick up the latest result even
-    when a runner emitted progress prints. Returns `{}` if no marker.
+    when a runner emitted progress prints. Returns `{}` if no marker, if the
+    payload exceeds the size cap, or if it isn't valid JSON.
     """
     if not logs:
         return {}
@@ -297,6 +358,13 @@ def _parse_runner_result(logs: str) -> dict[str, Any]:
         payload = line[len(_RESULT_PREFIX) :].strip()
         if not payload:
             continue
+        if len(payload) > _MAX_RESULT_PAYLOAD_BYTES:
+            logger.warning(
+                "runner result line exceeds %d bytes (%d) — ignoring",
+                _MAX_RESULT_PAYLOAD_BYTES,
+                len(payload),
+            )
+            return {}
         try:
             parsed = json.loads(payload)
             if isinstance(parsed, dict):
@@ -308,32 +376,103 @@ def _parse_runner_result(logs: str) -> dict[str, Any]:
     return {}
 
 
-_TOP_LEVEL_HANDOVER_KEYS = (
-    "epic_issue_number",
-    "pr_number",
-    "branch_name",
-    "review_decision",
-    "security_decision",
-    "deploy_status",
-    "detected_tech_stack",
-    "skill_profile_name",
-    "build_status",
-    "test_failed",
-    "test_passed",
-    "test_total",
-    "preview_url",
-    "editor_url",
-)
+# Per-key allowlist for values promoted from runner-controlled output into the
+# handover bag / dashboard. A compromised or buggy runner controls everything
+# on its stdout RESULT:: line, so each lifted key is validated by type before
+# being merged (CODE-13). URL-shaped keys get an extra host check so a runner
+# can't inject an arbitrary iframe src or steer SCM with a spoofed link.
+#   "int"   → coerced to int, else dropped
+#   "str"   → must be a (length-capped) string
+#   "bool"  → must be a real bool
+#   "url"   → must be a string whose host is on _ALLOWED_URL_SUFFIXES
+_TOP_LEVEL_HANDOVER_SCHEMA: dict[str, str] = {
+    "epic_issue_number": "int",
+    "pr_number": "int",
+    "branch_name": "str",
+    "review_decision": "str",
+    "security_decision": "str",
+    "deploy_status": "str",
+    "detected_tech_stack": "str",
+    "skill_profile_name": "str",
+    "build_status": "str",
+    "test_failed": "int",
+    "test_passed": "int",
+    "test_total": "int",
+    "preview_url": "url",
+    "editor_url": "url",
+}
+
+# Hostnames a runner-supplied URL may point at. Anything else is dropped so a
+# compromised runner can't inject a cross-origin iframe src into the dashboard.
+_ALLOWED_URL_SUFFIXES = (".tesserix.app",)
+
+# Cap promoted string values so a runner can't bloat task state / the dashboard.
+_MAX_LIFTED_STR_LEN = 2048
+
+
+def _safe_url(value: Any) -> str | None:
+    """Return ``value`` if it is an https URL on an allowed host, else None."""
+    if not isinstance(value, str) or not value:
+        return None
+    if len(value) > _MAX_LIFTED_STR_LEN:
+        return None
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(value)
+    except Exception:  # noqa: BLE001
+        return None
+    if parsed.scheme not in ("https", "http"):
+        return None
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return None
+    if any(host == s.lstrip(".") or host.endswith(s) for s in _ALLOWED_URL_SUFFIXES):
+        return value
+    return None
+
+
+def _coerce(kind: str, value: Any) -> Any:
+    """Validate/coerce a single lifted value per its schema kind. None drops it."""
+    if kind == "int":
+        if isinstance(value, bool):  # bool is a subclass of int — reject
+            return None
+        if isinstance(value, int):
+            return value
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    if kind == "bool":
+        return value if isinstance(value, bool) else None
+    if kind == "str":
+        if not isinstance(value, str):
+            return None
+        return value[:_MAX_LIFTED_STR_LEN]
+    if kind == "url":
+        return _safe_url(value)
+    return None
 
 
 def _lift_top_level(data: dict[str, Any]) -> dict[str, Any]:
     """Surface well-known scalars from the runner output to the top of
     StageResult.data so other stages and the dashboard can read them
-    without nesting through `<stage>_output`."""
+    without nesting through `<stage>_output`.
+
+    Every value is validated against ``_TOP_LEVEL_HANDOVER_SCHEMA`` before it
+    is promoted (CODE-13): wrong-typed values are dropped, strings are
+    length-capped, and URL fields must resolve to an allowed tesserix host.
+    Keys not in the schema are never lifted.
+    """
+    if not isinstance(data, dict):
+        return {}
     out: dict[str, Any] = {}
-    for key in _TOP_LEVEL_HANDOVER_KEYS:
-        if key in data and data[key] is not None:
-            out[key] = data[key]
+    for key, kind in _TOP_LEVEL_HANDOVER_SCHEMA.items():
+        if key not in data or data[key] is None:
+            continue
+        coerced = _coerce(kind, data[key])
+        if coerced is not None:
+            out[key] = coerced
     return out
 
 

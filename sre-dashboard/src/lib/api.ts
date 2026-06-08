@@ -1,10 +1,28 @@
 const API = "/api";
 
+// Guard so a burst of failing requests can't trigger multiple concurrent
+// navigations to /login (which would also clobber the captured return_to).
+let redirectingToLogin = false;
+
+// Centralized 401 handling (DASH-11): when the SRE session has expired the
+// API proxy returns 401. Instead of surfacing an opaque "401: ..." error in
+// every panel, bounce the browser to /login?return_to=<current> so the user
+// re-authenticates and lands back where they were. SSR-guarded and de-duped.
+function handleUnauthorized(): never {
+  if (typeof window !== "undefined" && !redirectingToLogin) {
+    redirectingToLogin = true;
+    const here = window.location.pathname + window.location.search;
+    window.location.assign(`/login?return_to=${encodeURIComponent(here)}`);
+  }
+  throw new Error("Session expired");
+}
+
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...opts,
     headers: { "Content-Type": "application/json", ...opts?.headers },
   });
+  if (res.status === 401) handleUnauthorized();
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -23,6 +41,38 @@ export interface Incident {
   created_at: string;
   resolved_at?: string;
   mttr_seconds?: number;
+}
+
+// A remediation action the SRE pipeline recorded against an incident.
+// Shape mirrors the sre_remediations table (db/migrations/0002_sre_schema).
+export interface Remediation {
+  id: string;
+  incident_id: string;
+  action_type: string; // create_issue | create_pr | scale_up | restart_pod | rollback | alert
+  description: string;
+  target?: string | null; // deployment name, PR URL, issue URL
+  payload?: Record<string, unknown>;
+  status: string; // pending | executed | failed | rolled_back
+  executed_at?: string | null;
+  result?: string | null;
+  created_at: string;
+}
+
+// Incident detail = the base incident plus its recorded remediations.
+export interface IncidentDetail extends Incident {
+  remediations: Remediation[];
+}
+
+// A single time-series metric sample. Shape mirrors the sre_metrics table.
+export interface Metric {
+  id: number;
+  cluster_id: string;
+  app_id?: string | null;
+  metric_name: string; // cpu_usage | memory_usage | error_rate | latency_p99 | pod_restarts | request_rate
+  metric_value: number;
+  metric_unit?: string | null; // percent | bytes | ms | count | req/s
+  labels?: Record<string, unknown>;
+  recorded_at: string;
 }
 
 export interface ScanRun {
@@ -83,7 +133,7 @@ export const sre = {
   listIncidents: (status = "open", limit = 50) =>
     apiFetch<Incident[]>(`/incidents?status=${status}&limit=${limit}`),
 
-  getIncident: (id: string) => apiFetch<Incident & { remediations: any[] }>(`/incidents/${id}`),
+  getIncident: (id: string) => apiFetch<IncidentDetail>(`/incidents/${id}`),
 
   updateIncident: (id: string, data: { status?: string; resolution_note?: string }) =>
     apiFetch<{ status: string }>(`/incidents/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
@@ -93,7 +143,7 @@ export const sre = {
   listApps: () => apiFetch<AppReliability[]>("/apps"),
 
   metrics: (appId?: string, limit = 100) =>
-    apiFetch<any[]>(`/metrics?${appId ? `app_id=${appId}&` : ""}limit=${limit}`),
+    apiFetch<Metric[]>(`/metrics?${appId ? `app_id=${appId}&` : ""}limit=${limit}`),
 
   costs: (days = 30) => apiFetch<CostReport[]>(`/costs?days=${days}`),
 

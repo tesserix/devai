@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithGoogle, exchangeForSession } from "@/lib/firebase";
+import { safeReturn } from "@/lib/safe-return";
 
 // useSearchParams() forces this page out of the static-prerender path,
 // so we wrap the search-params consumer in a Suspense boundary as
@@ -21,12 +22,13 @@ function LoginPageInner() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Where to send the browser after a successful sign-in. The
-  // ?return_to=… param is honoured for any *.tesserix.app origin that
-  // chooses to bounce off the dashboard login (the agentic services
-  // are internal-only today, so this is opt-in for future public
-  // hostnames — the session cookie is on .tesserix.app so it travels).
-  const returnTo = params.get("return_to") ?? "/";
+  // Where to send the browser after a successful sign-in. The raw
+  // ?return_to=… param is UNTRUSTED — it is run through safeReturn() which
+  // allows only same-site relative paths or *.tesserix.app absolute URLs
+  // and otherwise falls back to "/". This closes the open-redirect /
+  // post-auth phishing primitive (DASH-1). The session cookie is on
+  // .tesserix.app so in-family absolute returns travel correctly.
+  const returnTo = safeReturn(params.get("return_to"));
 
   async function handleGoogleSignIn() {
     setError(null);
@@ -34,7 +36,10 @@ function LoginPageInner() {
     try {
       const { idToken, pool, tenantId } = await signInWithGoogle();
       await exchangeForSession(idToken, pool, tenantId);
-      if (returnTo.startsWith("http")) {
+      // safeReturn already validated the destination; an absolute URL is
+      // necessarily within the tesserix.app family, a relative path is
+      // same-site. Absolute → full navigation, relative → SPA replace.
+      if (/^https?:\/\//.test(returnTo)) {
         window.location.href = returnTo;
       } else {
         router.replace(returnTo);

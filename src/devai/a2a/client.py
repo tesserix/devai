@@ -10,10 +10,13 @@ their declared ``url`` the same way.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
+import socket
 import uuid
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from devai.a2a.card import AgentCard
 from devai.a2a.errors import A2AError
@@ -27,6 +30,51 @@ logger = logging.getLogger(__name__)
 
 # In-cluster service DNS — the safe default the SSRF allowlist permits.
 _DEFAULT_URL_SUFFIXES = [".svc.cluster.local", ".svc"]
+
+
+def _resolve_host_block_check(url: str, in_cluster_suffixes: list[str]) -> None:
+    """Resolve a card URL's hostname and reject non-routable/metadata targets.
+
+    ``check_service_url`` only blocks IP *literals*; a hostname that resolves to
+    a loopback / link-local (169.254.169.254) / unspecified / reserved address
+    sails past the suffix allowlist. We resolve the host and fail closed if any
+    resolved address is dangerous. Unresolvable hosts are left to the transport
+    layer (the call will simply fail). Raises :class:`A2AError` on rejection.
+
+    In-cluster Service DNS legitimately resolves to RFC-1918 ClusterIPs, so the
+    broad ``is_private`` block is applied only to hosts OUTSIDE the in-cluster
+    suffix allowlist; loopback/link-local/metadata/unspecified/reserved are
+    always blocked (those are never a valid Service ClusterIP).
+    """
+    host = urlparse(url).hostname
+    if not host:
+        return
+    # Literals are already handled by check_service_url; skip resolution.
+    try:
+        ipaddress.ip_address(host)
+        return
+    except ValueError:
+        pass
+    host_l = host.lower()
+    is_in_cluster = any(
+        host_l == s.lower().lstrip(".") or host_l.endswith(s.lower()) for s in in_cluster_suffixes if s != "*"
+    )
+    try:
+        infos = socket.getaddrinfo(host_l, None)
+    except OSError:
+        return
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        dangerous = ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved or ip.is_multicast
+        if not is_in_cluster:
+            # External targets must not resolve into RFC-1918 space either.
+            dangerous = dangerous or ip.is_private
+        if dangerous:
+            raise A2AError(f"a2a: refusing to call {host!r} — resolves to non-routable {addr} (SSRF guard)")
 
 
 class A2AClient:
@@ -110,6 +158,9 @@ class A2AClient:
             return
         verify_card_signature(card, self._registry.get_signing_key())
         check_service_url(card.url, self._suffixes)
+        # Suffix allowlist alone misses a hostname that resolves to a
+        # private/metadata IP — resolve and IP-block before calling.
+        _resolve_host_block_check(card.url, self._suffixes)
 
     # -- invocation --------------------------------------------------------- #
 

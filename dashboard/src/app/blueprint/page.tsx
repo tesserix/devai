@@ -1,16 +1,22 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
   Boxes,
+  GitBranch,
   GitMerge,
   Layers,
   Loader2,
+  Play,
   RefreshCw,
   Sparkles,
 } from "lucide-react";
+
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import { GuidancePanel } from "@/components/guidance";
 
 type Blueprint = {
   name: string;
@@ -70,9 +76,11 @@ export default function BlueprintPage() {
 
   return (
     <div className="p-7 space-y-5 min-h-full">
+      <Breadcrumbs items={[{ label: "Registry", href: "/registry" }, { label: "Blueprints" }]} />
+
       <header className="flex items-start justify-between gap-4">
         <div>
-          <div className="label-eyebrow">Pipeline</div>
+          <div className="label-eyebrow">Registry</div>
           <h1
             className="font-serif text-2xl font-medium mt-1 flex items-center gap-2"
             style={{ color: "var(--ink-strong)" }}
@@ -80,21 +88,31 @@ export default function BlueprintPage() {
             <Layers className="w-5 h-5" style={{ color: "var(--accent)" }} />
             Blueprints
           </h1>
-          <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
-            DAGs of stages — each blueprint composes deterministic and agentic
-            stages into a runnable pipeline. The default <code>app-scaffold</code>{" "}
-            powers the &ldquo;build me an app&rdquo; live-preview flow.
+          <p className="text-sm mt-1 max-w-2xl" style={{ color: "var(--ink-soft)" }}>
+            The read-only catalog of runnable DAGs — each blueprint composes deterministic and agentic
+            stages into a pipeline. The default <code>app-scaffold</code> powers the &ldquo;build me an
+            app&rdquo; live-preview flow. To dispatch one against a repo, head to{" "}
+            <Link href="/workflows" className="underline underline-offset-2" style={{ color: "var(--accent)" }}>
+              Workflows
+            </Link>
+            .
           </p>
         </div>
-        <button
-          onClick={load}
-          disabled={refreshing}
-          className="btn-secondary"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link href="/workflows" className="btn-primary !py-1.5">
+            <Play className="w-3.5 h-3.5" /> Run a workflow
+          </Link>
+          <Link href="/workflows/new" className="btn-secondary">
+            <GitBranch className="w-3.5 h-3.5" /> Build
+          </Link>
+          <button onClick={load} disabled={refreshing} className="btn-secondary">
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </header>
+
+      <GuidancePanel id="blueprints" />
 
       {error && (
         <div
@@ -184,9 +202,22 @@ export default function BlueprintPage() {
                       {activeBp.name}
                     </h2>
                   </div>
-                  <span className="label-eyebrow">
-                    {activeBp.stages?.length ?? 0} stages
-                  </span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <Link
+                      href={`/runs?blueprint=${encodeURIComponent(activeBp.name)}`}
+                      className="text-[12px] hover:underline underline-offset-2"
+                      style={{ color: "var(--ink-muted)" }}
+                    >
+                      View runs
+                    </Link>
+                    <Link
+                      href="/workflows"
+                      className="inline-flex items-center gap-1.5 text-[12px] font-medium hover:underline underline-offset-2"
+                      style={{ color: "var(--accent)" }}
+                    >
+                      <Play className="w-3 h-3" /> Run this
+                    </Link>
+                  </div>
                 </div>
                 {activeBp.description && (
                   <p className="text-sm mt-2 whitespace-pre-line" style={{ color: "var(--ink-soft)" }}>

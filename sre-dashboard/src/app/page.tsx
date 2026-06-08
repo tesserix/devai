@@ -14,6 +14,8 @@ import { ClusterOverview } from "@/components/cluster-overview";
 import { ScanHistory } from "@/components/scan-history";
 import { SREChatPanel } from "@/components/sre-chat-panel";
 import { RuntimePanel } from "@/components/runtime-panel";
+import { ToastProvider, useToast } from "@/components/toast";
+import { Explainer } from "@/components/explainer";
 import { clsx } from "clsx";
 
 type Tab =
@@ -40,6 +42,16 @@ const NAV_ITEMS: { key: Tab; label: string }[] = [
 ];
 
 export default function SREDashboard() {
+  // ToastProvider must wrap the component that calls useToast (DASH-11).
+  return (
+    <ToastProvider>
+      <SREDashboardInner />
+    </ToastProvider>
+  );
+}
+
+function SREDashboardInner() {
+  const toast = useToast();
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [clusters, setClusters] = useState<ClusterHealth[]>([]);
   const [apps, setApps] = useState<AppReliability[]>([]);
@@ -48,8 +60,13 @@ export default function SREDashboard() {
   const [tab, setTab] = useState<Tab>("overview");
   const [selectedIncident, setSelectedIncident] = useState<string>();
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
   // Mobile nav drawer (the sidebar is an inline rail on md+).
   const [navOpen, setNavOpen] = useState(false);
+
+  // `selectedIncident` is wired to the incident feed for future drill-in; mark
+  // it referenced so the lint/type pass doesn't flag the setter-only usage.
+  void selectedIncident;
 
   // Selecting a tab closes the mobile drawer.
   useEffect(() => {
@@ -77,11 +94,58 @@ export default function SREDashboard() {
     }
   }, []);
 
+  // Poll every 10s, but ONLY while the tab is visible (DASH-11). Polling a
+  // hidden tab wastes the SRE API's kubectl-backed budget and battery; we also
+  // refresh immediately on becoming visible so the view isn't stale.
   useEffect(() => {
     fetchAll();
-    const interval = setInterval(fetchAll, 10000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | undefined;
+
+    const start = () => {
+      if (interval) return;
+      interval = setInterval(() => {
+        if (document.visibilityState === "visible") fetchAll();
+      }, 10000);
+    };
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchAll();
+        start();
+      } else {
+        stop();
+      }
+    };
+
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [fetchAll]);
+
+  // Trigger a manual scan with explicit busy state + error toast (DASH-11).
+  // Previously this was a bare `sre.triggerScan().then(fetchAll)` whose
+  // rejection was unhandled, so a failed trigger looked like a no-op.
+  const triggerScan = useCallback(async () => {
+    if (scanning) return;
+    setScanning(true);
+    try {
+      await sre.triggerScan();
+      toast.success("Scan triggered — results will appear shortly.");
+      await fetchAll();
+    } catch (e) {
+      toast.error(`Could not trigger scan: ${errMsg(e)}`);
+    } finally {
+      setScanning(false);
+    }
+  }, [scanning, toast, fetchAll]);
 
   const criticalCount = incidents.filter((i) => i.severity === "critical").length;
   const openCount = incidents.length;
@@ -175,10 +239,11 @@ export default function SREDashboard() {
         {/* Trigger Scan */}
         <div className="p-3 border-t border-gray-200 dark:border-gray-700">
           <button
-            onClick={() => sre.triggerScan().then(fetchAll)}
-            className="w-full px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+            onClick={triggerScan}
+            disabled={scanning}
+            className="w-full px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-wait"
           >
-            Trigger Manual Scan
+            {scanning ? "Triggering scan…" : "Trigger Manual Scan"}
           </button>
           <div className="flex items-center justify-between mt-2">
             <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
@@ -231,7 +296,9 @@ export default function SREDashboard() {
           ) : (
             <>
               {tab === "overview" && (
-                clusters.length === 0 ? (
+                <>
+                  <Explainer id="overview" />
+                  {clusters.length === 0 ? (
                   <EmptyState
                     title="Waiting for first scan"
                     body="The SRE service is up but no scan has populated cluster health yet. Click 'Trigger Manual Scan' in the sidebar."
@@ -255,22 +322,28 @@ export default function SREDashboard() {
                     </div>
                   </div>
                 </div>
-                )
+                )}
+                </>
               )}
 
               {tab === "incidents" && (
-                incidents.length === 0 ? (
+                <>
+                  <Explainer id="incidents" />
+                  {incidents.length === 0 ? (
                   <EmptyState
                     title="No open incidents"
                     body="The SRE pipeline hasn't detected any actionable issues. Trigger a manual scan to refresh."
                   />
                 ) : (
                   <IncidentFeed incidents={incidents} onSelect={setSelectedIncident} />
-                )
+                )}
+                </>
               )}
 
               {tab === "apps" && (
-                apps.length === 0 ? (
+                <>
+                  <Explainer id="apps" />
+                  {apps.length === 0 ? (
                   <EmptyState
                     title="No applications discovered yet"
                     body="The Discovery Agent hasn't run yet, or the cluster has no namespaces. Trigger a manual scan from the sidebar."
@@ -312,22 +385,28 @@ export default function SREDashboard() {
                     </div>
                   ))}
                 </div>
-                )
+                )}
+                </>
               )}
 
               {tab === "scans" && (
-                scans.length === 0 ? (
+                <>
+                  <Explainer id="scans" />
+                  {scans.length === 0 ? (
                   <EmptyState
                     title="No scans recorded yet"
                     body="Trigger your first manual scan to populate the SRE database."
                   />
                 ) : (
                   <ScanHistory runs={scans} />
-                )
+                )}
+                </>
               )}
 
               {tab === "costs" && (
-                costs.length === 0 ? (
+                <>
+                  <Explainer id="costs" />
+                  {costs.length === 0 ? (
                   <div className="text-center py-16 text-gray-400 dark:text-gray-500">
                     <p className="text-lg">No cost data yet</p>
                     <p className="text-sm mt-1">Trigger a manual scan to populate cost analysis</p>
@@ -400,7 +479,8 @@ export default function SREDashboard() {
                       );
                     })}
                   </div>
-                )
+                )}
+                </>
               )}
 
               {tab === "blueprints" && <RuntimePanel mode="blueprints" />}
@@ -423,4 +503,10 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1.5 max-w-md mx-auto">{body}</p>
     </div>
   );
+}
+
+// Normalize an unknown thrown value to a readable string for toasts/errors.
+function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
 }

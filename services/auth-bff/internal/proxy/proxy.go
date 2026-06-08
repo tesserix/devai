@@ -42,6 +42,7 @@ type Handler struct {
 	kagentHost     string
 	aregistryHost  string
 	previewDomain  string // e.g. tesserix.app — gates which hosts the preview proxy serves
+	sharedSecret   string // shared secret stamped as X-Auth-Bff-Secret so upstream can trust X-Forwarded-* (blank = unset)
 }
 
 // Config holds Handler dependencies.
@@ -58,6 +59,15 @@ type Config struct {
 	// preview proxy disabled.
 	PreviewDomain    string
 	PreviewNamespace string
+
+	// SharedSecret is stamped as X-Auth-Bff-Secret on every proxied request
+	// so the upstream (devai identity._forward_trusted) can confirm the
+	// X-Forwarded-* identity headers came from this BFF and not a spoofing
+	// in-mesh pod. Blank = unset (legacy behavior: the header is not sent and
+	// the upstream's secret check, if it has no configured secret, stays a
+	// no-op — i.e. unchanged behavior). Source: DEVAI_AUTH_BFF_SHARED_SECRET /
+	// DEVAI_BFF_SHARED_SECRET, the same ExternalSecret the upstream reads.
+	SharedSecret string
 }
 
 // New constructs a Handler.
@@ -77,6 +87,7 @@ func New(cfg Config) (*Handler, error) {
 		kagentHost:     cfg.KagentHost,
 		aregistryHost:  cfg.AregistryHost,
 		previewDomain:  strings.ToLower(cfg.PreviewDomain),
+		sharedSecret:   cfg.SharedSecret,
 	}
 	if cfg.PreviewDomain != "" && cfg.PreviewNamespace != "" {
 		h.previewProxy = newDynamicPreviewProxy(cfg.PreviewNamespace)
@@ -125,6 +136,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("X-Forwarded-Email", sess.Email)
 	r.Header.Set("X-Forwarded-Uid", sess.UID)
 	r.Header.Set("X-Forwarded-Tenant", sess.TenantID)
+
+	// Stamp the shared secret so the upstream can prove the X-Forwarded-*
+	// identity came from this BFF (devai identity._forward_trusted compares
+	// X-Auth-Bff-Secret against its configured secret and fails closed on a
+	// mismatch). Always drop any client-supplied value first so a caller
+	// can't forge the header; only re-set it when we actually have a secret.
+	// When the secret is unset, the header is simply removed — legacy
+	// behavior is preserved (the upstream fails closed only when it has a
+	// configured secret of its own).
+	r.Header.Del("X-Auth-Bff-Secret")
+	if h.sharedSecret != "" {
+		r.Header.Set("X-Auth-Bff-Secret", h.sharedSecret)
+	}
 
 	target.ServeHTTP(w, r)
 }

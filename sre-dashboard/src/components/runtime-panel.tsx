@@ -12,6 +12,14 @@ import {
   type SREBlueprint,
   type SRESchedule,
 } from "@/lib/api";
+import { useToast } from "@/components/toast";
+import { Explainer } from "@/components/explainer";
+
+// Normalize an unknown thrown value to a readable string.
+function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
 
 export function RuntimePanel({ mode }: { mode: "blueprints" | "schedules" | "sources" }) {
   if (mode === "blueprints") return <BlueprintsPanel />;
@@ -41,10 +49,7 @@ function SourcesPanel() {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        Observability backends the SRE runtime can pull from. Connect or edit these in{" "}
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">DevAI → Settings → Observability</span>.
-      </p>
+      <Explainer id="sources" />
       {error && <div className="text-sm text-amber-600 dark:text-amber-400">{error}</div>}
       {loaded && sources.length === 0 && (
         <div className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -137,6 +142,7 @@ function BlueprintsPanel() {
 
   return (
     <div className="space-y-3">
+      <Explainer id="blueprints" />
       {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
       {toast && <div className="text-sm text-emerald-600 dark:text-emerald-400">{toast}</div>}
       {items.length === 0 && (
@@ -245,31 +251,58 @@ function FlowGraph({ graph }: { graph: BlueprintGraph }) {
 }
 
 function SchedulesPanel() {
+  const toast = useToast();
   const [items, setItems] = useState<SRESchedule[]>([]);
   const [error, setError] = useState("");
+  // Per-schedule busy flag so a row's buttons disable while its mutation runs.
+  const [busyId, setBusyId] = useState("");
 
   const load = useCallback(async () => {
     try {
       setItems(await sre.listSchedules());
+      setError("");
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      setError(errMsg(e));
     }
   }, []);
   useEffect(() => {
     load();
   }, [load]);
 
+  // Toggle/delete were fire-and-forget: a rejected promise was unhandled, so a
+  // failed enable/disable or delete silently looked like it worked. Wrap each
+  // in try/catch with a busy state + error toast (DASH-11).
   async function toggle(s: SRESchedule) {
-    await sre.updateSchedule(s.id, { enabled: !s.enabled });
-    load();
+    if (busyId) return;
+    setBusyId(s.id);
+    try {
+      await sre.updateSchedule(s.id, { enabled: !s.enabled });
+      toast.success(`${s.blueprint} schedule ${s.enabled ? "disabled" : "enabled"}`);
+      await load();
+    } catch (e) {
+      toast.error(`Could not update schedule: ${errMsg(e)}`);
+    } finally {
+      setBusyId("");
+    }
   }
-  async function remove(id: string) {
-    await sre.deleteSchedule(id);
-    load();
+
+  async function remove(s: SRESchedule) {
+    if (busyId) return;
+    setBusyId(s.id);
+    try {
+      await sre.deleteSchedule(s.id);
+      toast.success(`Deleted ${s.blueprint} schedule`);
+      await load();
+    } catch (e) {
+      toast.error(`Could not delete schedule: ${errMsg(e)}`);
+    } finally {
+      setBusyId("");
+    }
   }
 
   return (
     <div className="space-y-2">
+      <Explainer id="schedules" />
       {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
       {items.length === 0 && (
         <div className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -292,7 +325,8 @@ function SchedulesPanel() {
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => toggle(s)}
-              className={`text-xs px-3 py-1.5 rounded ${
+              disabled={busyId === s.id}
+              className={`text-xs px-3 py-1.5 rounded disabled:opacity-50 disabled:cursor-wait ${
                 s.enabled
                   ? "bg-emerald-600 text-white"
                   : "border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400"
@@ -300,8 +334,12 @@ function SchedulesPanel() {
             >
               {s.enabled ? "Enabled" : "Disabled"}
             </button>
-            <button onClick={() => remove(s.id)} className="text-xs px-3 py-1.5 rounded text-red-600 dark:text-red-400">
-              Delete
+            <button
+              onClick={() => remove(s)}
+              disabled={busyId === s.id}
+              className="text-xs px-3 py-1.5 rounded text-red-600 dark:text-red-400 disabled:opacity-50 disabled:cursor-wait"
+            >
+              {busyId === s.id ? "…" : "Delete"}
             </button>
           </div>
         </div>

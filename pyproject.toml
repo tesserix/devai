@@ -72,6 +72,11 @@ dependencies = [
     # provisions per-user/per-tenant secrets into Google Secret Manager.
     # Imported lazily inside the gcp_sm adapter only.
     "google-cloud-secret-manager>=2.20.0",
+    # Password hashing for the local_db identity backend (LOCAL/sandbox only).
+    # Imported lazily inside src/devai/adapters/identity/local_db.py, so a
+    # prod deployment (auth terminated at the auth-bff, noop backend) never
+    # loads it. bcrypt backend bundled; argon2 used when its backend is present.
+    "passlib[bcrypt]>=1.7.4",
 ]
 
 [project.optional-dependencies]

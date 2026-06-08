@@ -37,6 +37,75 @@ if TYPE_CHECKING:
 _MAX_TASK_FRAG_LEN = 26
 _DNS_SAFE = re.compile(r"[^a-z0-9-]+")
 
+# repo/ref injection guards. `repo` and `branch` flow from the API boundary
+# all the way into an in-pod `sh -lc git clone ...`. Even though we now quote
+# the shell vars and pass them through env (not string interpolation), we also
+# validate the shape at use so a value like `--upload-pack=…`, `;rm -rf`, or a
+# leading `-` can never reach git as an option/argument.
+#   repo:   owner/name  (GitHub "owner/repo" form; owner must start alnum so a
+#           leading '-' can never be parsed as a git option)
+#   ref:    a branch/tag name (no leading '-', no shell metacharacters)
+_REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._/-]+$")
+_REF_RE = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
+
+
+def _validate_repo(repo: str) -> str:
+    """Return ``repo`` if it is a safe ``owner/name`` slug, else raise.
+
+    Defence-in-depth: the API boundary (StartPreviewBody) should reject bad
+    input first, but the manifest builder is also reachable from the pipeline
+    (app-scaffold) so we re-validate here. Rejecting `..` and a leading `-`
+    closes path-traversal and git-option-injection.
+    """
+    r = (repo or "").strip()
+    if not r or ".." in r or not _REPO_RE.match(r):
+        raise ValueError(f"invalid repo slug: {repo!r} (expected owner/name)")
+    return r
+
+
+def _validate_ref(ref: str) -> str:
+    """Return ``ref`` if it is a safe branch/tag name, else raise.
+
+    A leading '-' would be parsed by git as an option, and shell
+    metacharacters could break out even when quoted under some shells.
+    """
+    r = (ref or "").strip()
+    if not r or ".." in r or not _REF_RE.match(r):
+        raise ValueError(f"invalid git ref: {ref!r}")
+    return r
+
+
+# Hardened git-clone script shared by both preview builders. Reads REPO/BRANCH
+# from the environment (never interpolated into the command string), quotes
+# every expansion, terminates option parsing with `--`, disables interactive
+# credential prompts (GIT_TERMINAL_PROMPT=0) and blocks any transport other
+# than https (protocol.allow=never + protocol.https.allow=always). The token
+# is supplied via an `askpass` helper so it never lands in the cloned
+# `.git/config` remote URL on the shared PVC (CODE-9): the remote stays a
+# bare https URL, credentials are provided out-of-band per fetch.
+_GIT_CLONE_SCRIPT = (
+    'set -eu; '
+    # Reject a leading '-' defensively (env could be tampered with).
+    'case "${REPO}" in -*) echo "bad repo" >&2; exit 1;; esac; '
+    'case "${BRANCH}" in -*) echo "bad branch" >&2; exit 1;; esac; '
+    'export GIT_TERMINAL_PROMPT=0; '
+    # askpass feeds the token to git without persisting it in .git/config.
+    'printf "#!/bin/sh\\nexec echo \\"${DEVAI_SCM_TOKEN}\\"\\n" > /tmp/askpass.sh; '
+    'chmod 700 /tmp/askpass.sh; '
+    'export GIT_ASKPASS=/tmp/askpass.sh; '
+    'git -c protocol.allow=never -c protocol.https.allow=always '
+    '-c credential.helper= '
+    'clone --branch "${BRANCH}" --depth 1 -- '
+    '"https://x-access-token@github.com/${REPO}.git" /work; '
+    # Belt-and-braces: scrub any credential that a future git version might
+    # cache in the cloned config, and reset the remote to a bare URL.
+    'git -C /work remote set-url origin "https://github.com/${REPO}.git" || true; '
+    'git -C /work config --unset-all credential.helper 2>/dev/null || true; '
+    'chown -R 1000:1000 /work'
+)
+
+_GIT_CLONE_SCRIPT_IF_MISSING = 'test -d /work/.git || { ' + _GIT_CLONE_SCRIPT + '; }; chown -R 1000:1000 /work'
+
 
 def _dns_safe(value: str, *, max_len: int = 63) -> str:
     """Coerce an arbitrary string into a DNS-1123 label.
@@ -249,6 +318,10 @@ def build_preview_manifests(
     routes `preview-<run_id>.devai.tesserix.app` → the Service, and
     `editor-<run_id>.devai.tesserix.app` → the bridge port.
     """
+    # Validate untrusted inputs before they reach the in-pod git clone.
+    repo = _validate_repo(inputs.repo)
+    branch = _validate_ref(inputs.branch)
+
     name_frag = _dns_safe(inputs.run_id, max_len=24)
     # The Service name == the leftmost DNS label of the preview host, which is
     # the convention the devai-auth-bff preview proxy resolves on
@@ -263,7 +336,7 @@ def build_preview_manifests(
         "app.kubernetes.io/name": name,
         "devai.tesserix.app/run-id": name_frag,
         "devai.tesserix.app/role": "preview",
-        "devai.tesserix.app/repo": _dns_safe(inputs.repo, max_len=48),
+        "devai.tesserix.app/repo": _dns_safe(repo, max_len=48),
     }
 
     # A PVC (not emptyDir) so the workspace + node_modules survive pod
@@ -287,18 +360,14 @@ def build_preview_manifests(
         {
             "name": "git-clone",
             "image": "alpine/git:2.43.0",
-            "command": [
-                "sh",
-                "-lc",
-                (
-                    "git clone --branch ${BRANCH} --depth 1 "
-                    "https://x-access-token:${DEVAI_SCM_TOKEN}@github.com/${REPO}.git /work && "
-                    "chown -R 1000:1000 /work"
-                ),
-            ],
+            # REPO/BRANCH are passed via env (validated above) and consumed by
+            # the hardened clone script — never interpolated into the command
+            # string. See _GIT_CLONE_SCRIPT for the injection/credential
+            # hardening rationale (CODE-8/CODE-9).
+            "command": ["sh", "-c", _GIT_CLONE_SCRIPT],
             "env": [
-                {"name": "REPO", "value": inputs.repo},
-                {"name": "BRANCH", "value": inputs.branch},
+                {"name": "REPO", "value": repo},
+                {"name": "BRANCH", "value": branch},
                 {
                     "name": "DEVAI_SCM_TOKEN",
                     "valueFrom": {
@@ -461,6 +530,10 @@ def build_fullstack_preview_manifests(
     ${API_PUBLIC_URL}/${WEB_PUBLIC_URL} placeholders in the profile env are
     resolved to the per-session hosts here (the auto API↔UI wiring).
     """
+    # Validate untrusted inputs before they reach the in-pod git clone.
+    repo = _validate_repo(repo)
+    branch = _validate_ref(branch)
+
     frag = _dns_safe(run_id, max_len=24)
     web_name = f"preview-{frag}"
     api_name = f"api-{frag}"
@@ -487,13 +560,10 @@ def build_fullstack_preview_manifests(
         {
             "name": "git-clone",
             "image": "alpine/git:2.43.0",
-            "command": [
-                "sh",
-                "-lc",
-                "test -d /work/.git || git clone --branch ${BRANCH} --depth 1 "
-                "https://x-access-token:${DEVAI_SCM_TOKEN}@github.com/${REPO}.git /work; "
-                "chown -R 1000:1000 /work",
-            ],
+            # Idempotent clone (skip if /work/.git already exists from a reused
+            # PVC), via the same hardened script — env-passed, quoted, no token
+            # in the persisted remote URL. See _GIT_CLONE_SCRIPT (CODE-8/9).
+            "command": ["sh", "-c", _GIT_CLONE_SCRIPT_IF_MISSING],
             "env": [
                 {"name": "REPO", "value": repo},
                 {"name": "BRANCH", "value": branch},
@@ -662,4 +732,12 @@ __all__ = [
     "build_fullstack_preview_manifests",
     "build_job_spec",
     "build_preview_manifests",
+    "validate_repo",
+    "validate_ref",
 ]
+
+
+# Public aliases so the API boundary (preview/routes.py StartPreviewBody) and
+# the SCM tool clones can reuse the exact same repo/ref guards (CODE-8).
+validate_repo = _validate_repo
+validate_ref = _validate_ref

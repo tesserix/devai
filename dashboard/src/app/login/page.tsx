@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithGoogle, exchangeForSession } from "@/lib/firebase";
+import { safeReturn } from "@/lib/safe-return";
 
 // useSearchParams() forces this page out of the static-prerender path, so
 // we wrap the search-params consumer in a Suspense boundary as required
@@ -25,12 +26,13 @@ function LoginPageInner() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  // Where to send the browser after a successful sign-in. The
-  // ?return_to=… param is honoured for any *.tesserix.app origin that
-  // chooses to bounce off the dashboard login (the agentic services
-  // are internal-only today, so this is opt-in for future public
-  // hostnames — the session cookie is on .tesserix.app so it travels).
-  const returnTo = params.get("return_to") ?? "/";
+  // Where to send the browser after a successful sign-in. The ?return_to=…
+  // param is honoured ONLY after validation by safeReturn() — an unvalidated
+  // return_to is a classic post-auth open-redirect / phishing primitive
+  // (DASH-1). We accept a same-site relative path, or an absolute URL whose
+  // host is tesserix.app / *.tesserix.app (the session cookie is on
+  // .tesserix.app so those are legitimately in-family). Anything else → "/".
+  const returnTo = safeReturn(params.get("return_to"));
 
   // Ask the backend which auth mode is active. local_db → password form;
   // anything else (or a failure) → the Google/GIP button.
@@ -42,6 +44,8 @@ function LoginPageInner() {
   }, []);
 
   function goHome() {
+    // returnTo is already validated by safeReturn(); an absolute value here is
+    // guaranteed to be on the tesserix.app family, a relative one is same-site.
     if (returnTo.startsWith("http")) window.location.href = returnTo;
     else router.replace(returnTo);
   }

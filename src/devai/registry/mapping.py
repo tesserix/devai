@@ -25,6 +25,29 @@ def _safe_label(value: str) -> str:
     return v[:63] or "operator"
 
 
+# An artifact name must be a DNS-1123 subdomain-ish token: lowercase
+# alphanumerics plus `.`/`-`, no leading/trailing separators. The registry
+# enforces this on its side; normalizing here keeps authored names predictable
+# and stops path/registry-hostile input (spaces, slashes, ../) at the door.
+_NAME_INVALID_RE = re.compile(r"[^a-z0-9._-]+")
+
+
+def normalize_artifact_name(name: str) -> str:
+    """Normalize an authored artifact name to a registry-safe token.
+
+    Lowercases, replaces runs of disallowed characters with a single ``-``,
+    and trims leading/trailing separators. Raises ValueError when nothing
+    usable remains (an all-invalid name) so the caller surfaces a 422 rather
+    than persisting an empty/garbage key.
+    """
+    raw = (name or "").strip().lower()
+    cleaned = _NAME_INVALID_RE.sub("-", raw).strip("-._")
+    cleaned = cleaned[:253]
+    if not cleaned:
+        raise ValueError(f"name {name!r} normalizes to empty (no valid characters)")
+    return cleaned
+
+
 def _base_metadata(name: str, *, tenant: str, created_by: str, version: str = "") -> dict[str, Any]:
     meta: dict[str, Any] = {
         "name": name,
@@ -212,5 +235,6 @@ __all__ = [
     "blueprint_to_blueprint_envelope",
     "skill_fields_to_skill_envelope",
     "mcp_fields_to_mcpserver_envelope",
+    "normalize_artifact_name",
     "AUTHORED_LABEL",
 ]

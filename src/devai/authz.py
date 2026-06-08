@@ -19,12 +19,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from devai.identity import extract_principal
 
 if TYPE_CHECKING:
     from fastapi import Request
+
+    from devai.identity import Principal
 
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -63,4 +66,35 @@ async def enforce_auth(request: Request) -> JSONResponse | None:
     return None
 
 
-__all__ = ["enforce_auth", "needs_auth_check"]
+async def require_principal(request: Request) -> Principal:
+    """Resolve the caller's :class:`~devai.identity.Principal` or raise 401.
+
+    This is the per-route counterpart to :func:`enforce_auth` (which is the
+    blanket middleware gate). Mutating handlers that must know *who* the caller
+    is — and must refuse anonymous access regardless of the global
+    ``require_auth`` flag — depend on this directly::
+
+        from devai.authz import require_principal
+
+        @router.post("/api/pipeline/{run_id}/approve")
+        async def approve(run_id: str, request: Request):
+            principal = await require_principal(request)
+            ...
+
+    It reuses :func:`devai.identity.extract_principal`, so it honors the same
+    trust rules (auth-bff shared-secret gate, forwarded-header stripping,
+    session-cookie decryption). A failure inside identity resolution is
+    treated as "no principal" — the request is rejected with 401, never
+    leaked as a 500. Callers must NOT fall back to a literal ``operator``
+    principal for mutating calls; this helper is the single rejection point.
+    """
+    try:
+        principal = await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
+        principal = None
+    if principal is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return principal
+
+
+__all__ = ["enforce_auth", "needs_auth_check", "require_principal"]

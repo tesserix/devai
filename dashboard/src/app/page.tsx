@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, type PipelineRun } from "@/lib/api";
 import { AGENT_INFO } from "@/lib/constants";
@@ -60,8 +61,14 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [selectedRunId]);
 
-  const handleTrigger = async (repo: string, requirements: string) => {
-    const result = await api.triggerPipeline(repo, requirements);
+  const handleTrigger = async (
+    repo: string,
+    requirements: string,
+    opts?: { blueprint?: string },
+  ) => {
+    // Forward the blueprint picked in the dialog (DASH-6) so the backend no
+    // longer silently falls back to the default blueprint.
+    const result = await api.triggerPipeline(repo, requirements, opts);
     setSelectedRunId(result.run_id);
     await fetchRuns();
   };
@@ -128,7 +135,16 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        <div className="px-4 pt-1 pb-2 label-eyebrow">Recent Runs</div>
+        <div className="px-4 pt-1 pb-2 flex items-center justify-between">
+          <span className="label-eyebrow">Recent Runs</span>
+          <Link
+            href="/runs"
+            className="text-[11px] font-medium underline-offset-2 hover:underline"
+            style={{ color: "var(--accent)" }}
+          >
+            View all →
+          </Link>
+        </div>
 
         <div className="flex-1 overflow-y-auto px-3 pb-3">
           {loading ? (
@@ -193,6 +209,12 @@ export default function DashboardPage() {
                     <span className="pill">{orchestratorRouting.progress_pct}%</span>
                   )}
                   <span className="pill-muted pill">{selectedRun.stage.replace(/_/g, " ")}</span>
+                  <Link
+                    href={`/runs/${encodeURIComponent(selectedRun.run_id)}`}
+                    className="btn-secondary !py-1 !px-2.5 !text-xs"
+                  >
+                    Open run →
+                  </Link>
                 </div>
               </div>
             </header>

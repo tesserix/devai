@@ -51,13 +51,38 @@ def _service(request: Request) -> OnboardingService:
     return svc
 
 
+async def _require_principal(request: Request) -> None:
+    """Gate a mutating onboarding action behind a real principal.
+
+    Dormant by default (behavior-neutral): when ``DEVAI_REQUIRE_AUTH`` is off
+    this is a no-op, preserving today's anonymous-onboarding behavior for local
+    dev. When it's on, an anonymous caller is rejected with 401 — onboarding
+    routes open/merge GitHub PRs and create repos with the platform token, so
+    they must not be drivable without an identity. The deliberate enablement
+    happens in chart values, not here.
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is None or not getattr(config, "require_auth", False):
+        return
+    try:
+        p = await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
+        p = None
+    if p is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+
+
 async def _principal(request: Request) -> str:
     """The authenticated actor for audit fields (who onboarded / merged).
 
     Resolved from the auth-bff ``X-Forwarded-*`` headers or the
     ``devai_session`` cookie via :func:`devai.identity.extract_principal`,
-    so the value can't be spoofed through the request body. Falls back to
-    ``'operator'`` only when no identity is resolvable (e.g. local dev).
+    so the value can't be spoofed through the request body.
+
+    When ``DEVAI_REQUIRE_AUTH`` is on the caller is already gated by
+    :func:`_require_principal`, so a resolvable identity is guaranteed and we
+    never attribute a mutating action to a literal ``'operator'``. With the gate
+    off (local dev) we keep the ``'operator'`` fallback for behavior-neutrality.
     """
     try:
         p = await extract_principal(request)
@@ -68,6 +93,10 @@ async def _principal(request: Request) -> str:
             val = getattr(p, attr, None)
             if val:
                 return str(val)
+    config = getattr(request.app.state, "config", None)
+    if config is not None and getattr(config, "require_auth", False):
+        # Auth is enforced — never collapse a mutating actor to 'operator'.
+        raise HTTPException(status_code=401, detail="authentication required")
     return "operator"
 
 
@@ -143,6 +172,7 @@ async def list_onboarded(
 @router.post("/onboarded")
 async def onboard_repos(request: Request, body: OnboardRequest) -> dict[str, Any]:
     """Onboard one or many repos — opens a gated PR adding the marker."""
+    await _require_principal(request)
     svc = _service(request)
     try:
         return await svc.onboard(
@@ -178,6 +208,7 @@ async def create_and_onboard_repo(request: Request, body: CreateRepoRequest) -> 
     record it as ONBOARDED in one shot — no PR needed for a repo we just made."""
     import httpx
 
+    await _require_principal(request)
     svc = _service(request)
     try:
         return await svc.create_and_onboard(
@@ -235,6 +266,7 @@ class MergeRequest(BaseModel):
 @router.post("/onboarded/{owner}/{name}/ready")
 async def mark_onboarding_pr_ready(request: Request, owner: str, name: str) -> dict[str, Any]:
     """Promote the draft onboarding PR to a ready-for-review (real) PR."""
+    await _require_principal(request)
     _check_repo(owner, name)
     svc = _service(request)
     try:
@@ -251,6 +283,7 @@ async def merge_onboarding_pr(
     request: Request, owner: str, name: str, body: MergeRequest | None = None
 ) -> dict[str, Any]:
     """Merge the onboarding PR from inside DevAI and flip the repo to onboarded."""
+    await _require_principal(request)
     _check_repo(owner, name)
     svc = _service(request)
     method = (body.method if body else "squash") or "squash"
@@ -286,6 +319,7 @@ class AssignRequest(BaseModel):
 @router.post("/onboarded/{owner}/{name}/assign")
 async def assign_reviewer(request: Request, owner: str, name: str, body: AssignRequest) -> dict[str, Any]:
     """Request a reviewer on the onboarding PR (assign-to-approve flow)."""
+    await _require_principal(request)
     _check_repo(owner, name)
     svc = _service(request)
     try:
@@ -298,6 +332,7 @@ async def assign_reviewer(request: Request, owner: str, name: str, body: AssignR
 
 @router.delete("/onboarded/{owner}/{name}")
 async def archive_onboarded(request: Request, owner: str, name: str) -> dict[str, Any]:
+    await _require_principal(request)
     _check_repo(owner, name)
     svc = _service(request)
     row = await svc.archive(owner, name)
@@ -311,6 +346,7 @@ async def reconcile(
     request: Request, org: str = Query("", description="Org to reconcile (default: configured org)")
 ) -> dict[str, Any]:
     """Rebuild / refresh the cache from the `.platform/devai.yaml` markers."""
+    await _require_principal(request)
     if org and not _valid_segment(org):
         raise HTTPException(status_code=422, detail="invalid org")
     svc = _service(request)

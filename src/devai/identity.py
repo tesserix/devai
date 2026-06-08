@@ -141,15 +141,66 @@ def _forward_trusted(request: Request) -> bool:
     When ``DEVAI_AUTH_BFF_SHARED_SECRET`` is configured, the auth-bff must
     echo it in the ``X-Auth-Bff-Secret`` header; a request without a
     matching secret is treated as un-forwarded (its X-Forwarded-* headers
-    are ignored). When no secret is configured, forwarded headers are
-    trusted unconditionally — the original behavior.
+    are ignored). The match is a constant-time compare of two *non-empty*
+    values — an empty provided secret can never equal an empty configured
+    secret (we never reach the compare in that case), so a header-less
+    request is never silently trusted under a configured secret.
+
+    When no secret is configured, behavior is controlled by
+    ``DEVAI_TRUST_FORWARDED_WITHOUT_SECRET`` (default True): True keeps the
+    original behavior (trust the edge unconditionally); False FAILS CLOSED so
+    forwarded identity is never trusted without a matched non-empty secret.
     """
-    config = getattr(getattr(request, "app", None), "state", None)
-    secret = getattr(getattr(config, "config", None), "auth_bff_shared_secret", "") if config else ""
+    cfg = getattr(getattr(request, "app", None), "state", None)
+    cfg = getattr(cfg, "config", None) if cfg else None
+    secret = getattr(cfg, "auth_bff_shared_secret", "") if cfg else ""
     if not secret:
-        return True
+        # No shared secret. Trust the edge only if the deployment opts in
+        # (default) — otherwise fail closed (never empty==empty match).
+        return bool(getattr(cfg, "trust_forwarded_without_secret", True))
     provided = request.headers.get("x-auth-bff-secret", "")
     return bool(provided) and hmac.compare_digest(provided, secret)
+
+
+# Identity headers the auth-bff stamps. When a request's forwarded identity
+# can't be trusted, we strip ALL of these from the ASGI scope so no later
+# code path (or accidental re-read) can derive identity or an admin role from
+# them. ``X-Auth-Bff-Secret`` is stripped too so it never leaks downstream.
+_FORWARDED_IDENTITY_HEADERS = frozenset(
+    {
+        b"x-forwarded-user",
+        b"x-forwarded-email",
+        b"x-forwarded-uid",
+        b"x-forwarded-tenant",
+        b"x-forwarded-pool",
+        b"x-forwarded-name",
+        b"x-forwarded-roles",
+        b"x-auth-bff-secret",
+    }
+)
+
+
+def _strip_forwarded_identity(request: Request) -> None:
+    """Remove untrusted ``X-Forwarded-*`` identity headers from the ASGI scope.
+
+    Starlette's ``request.headers`` is immutable, but it's a view over
+    ``request.scope["headers"]`` (a list of ``(name, value)`` byte tuples).
+    Rewriting that list in place ensures any downstream handler that reads
+    forwarded identity sees nothing — defense in depth for the case where the
+    secret check failed but a caller still set spoofed headers. Never raises.
+    """
+    try:
+        scope = getattr(request, "scope", None)
+        if not isinstance(scope, dict):
+            return
+        headers = scope.get("headers")
+        if not headers:
+            return
+        scope["headers"] = [
+            (name, value) for (name, value) in headers if name.lower() not in _FORWARDED_IDENTITY_HEADERS
+        ]
+    except Exception:  # noqa: BLE001 — header scrubbing must never break a request
+        logger.debug("failed to strip untrusted forwarded headers", exc_info=True)
 
 
 async def extract_principal(request: Request) -> Principal | None:
@@ -168,20 +219,25 @@ async def extract_principal(request: Request) -> Principal | None:
        or to refuse the request.
     """
     # 1. auth-bff stamped headers — trusted only when they actually came
-    #    from the bff (see _forward_trusted). Otherwise ignore them and fall
-    #    through, so a direct caller can't spoof identity by setting headers.
+    #    from the bff (see _forward_trusted). Otherwise STRIP them and fall
+    #    through, so a direct caller can't spoof identity (or an admin role)
+    #    by setting headers, and no later handler can read the spoofed values.
     fwd_email = request.headers.get("x-forwarded-user") or request.headers.get("x-forwarded-email")
-    if fwd_email and _forward_trusted(request):
-        principal = Principal(
-            email=fwd_email,
-            uid=request.headers.get("x-forwarded-uid", ""),
-            tenant_id=request.headers.get("x-forwarded-tenant", ""),
-            pool=request.headers.get("x-forwarded-pool", ""),
-            auth_provider="auth-bff",
-            display_name=request.headers.get("x-forwarded-name", "") or fwd_email,
-        )
-        await _enrich_teams(principal, request)
-        return principal
+    if fwd_email:
+        if _forward_trusted(request):
+            principal = Principal(
+                email=fwd_email,
+                uid=request.headers.get("x-forwarded-uid", ""),
+                tenant_id=request.headers.get("x-forwarded-tenant", ""),
+                pool=request.headers.get("x-forwarded-pool", ""),
+                auth_provider="auth-bff",
+                display_name=request.headers.get("x-forwarded-name", "") or fwd_email,
+            )
+            await _enrich_teams(principal, request)
+            return principal
+        # Forwarded identity present but the secret check failed — never trust
+        # it; scrub the headers so nothing downstream picks them up.
+        _strip_forwarded_identity(request)
 
     # 2. dashboard session cookie → Redis lookup
     session_id = request.cookies.get("devai_session")

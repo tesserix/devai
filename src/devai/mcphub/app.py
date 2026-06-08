@@ -120,13 +120,34 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
 
     @app.middleware("http")
     async def _identity_and_profile(request: Request, call_next):  # noqa: ANN001
-        """Terminate caller identity and resolve their tool-surface profile."""
+        """Terminate caller identity and resolve their tool-surface profile.
+
+        Fail-closed gate (audit CODE-6): when the caller has no verified
+        principal and ``DEVAI_MCP_HUB_REQUIRE_AUTH`` is on, the request is
+        rejected with 401 instead of silently falling back to the default
+        ToolProfile — an unauthenticated caller must not reach the mutating
+        ``scm_*`` surface. The flag DEFAULTS OFF to stay behavior-neutral with
+        the running system (auth is enabled deliberately in prod chart values);
+        when off, an anonymous caller still resolves to the curated default
+        profile exactly as before.
+        """
         from devai.identity import extract_principal
 
         try:
             principal = await extract_principal(request)
         except Exception:  # noqa: BLE001 — never block a request on identity parse
             principal = None
+
+        # /healthz must stay reachable for liveness/readiness probes even when
+        # auth is required (probes carry no principal).
+        require_auth = getattr(settings, "mcp_hub_require_auth", False)
+        if require_auth and principal is None and not request.url.path.startswith("/healthz"):
+            logger.warning("mcphub: rejecting unauthenticated request to %s (require_auth on)", request.url.path)
+            return JSONResponse(
+                {"error": "unauthorized", "detail": "mcp hub requires an authenticated principal"},
+                status_code=401,
+            )
+
         requested = request.query_params.get("profile", "")
         set_current_profile(profile_for_principal(principal, requested))
         return await call_next(request)

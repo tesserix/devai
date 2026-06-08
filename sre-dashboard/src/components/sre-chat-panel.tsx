@@ -24,7 +24,16 @@ export function SREChatPanel() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sessionId = useRef(`sre-chat-${Date.now()}`);
+  // Persist the chat session id (DASH-11). Previously a fresh
+  // `sre-chat-${Date.now()}` was minted on every mount, so navigating away
+  // and back (or a reload) silently started a new server-side conversation
+  // and dropped the 30-message history the backend keeps per session. We
+  // reuse a stable id across mounts via localStorage; SSR-safe (ref init runs
+  // on the client for "use client" components, guarded for older runtimes).
+  const sessionId = useRef<string>("");
+  if (!sessionId.current) {
+    sessionId.current = readOrCreateSessionId();
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -133,7 +142,45 @@ export function SREChatPanel() {
   );
 }
 
-function renderMarkdown(md: string): string {
+// Stable, persisted SRE chat session id (DASH-11). Falls back to an
+// in-memory id when localStorage is unavailable (private mode / SSR).
+const SESSION_KEY = "devai-sre-chat-session";
+
+function readOrCreateSessionId(): string {
+  if (typeof window === "undefined") return `sre-chat-${Date.now()}`;
+  try {
+    const existing = window.localStorage.getItem(SESSION_KEY);
+    if (existing) return existing;
+    const fresh = `sre-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    window.localStorage.setItem(SESSION_KEY, fresh);
+    return fresh;
+  } catch {
+    return `sre-chat-${Date.now()}`;
+  }
+}
+
+// ── Markdown rendering (DASH-4) ─────────────────────────────────────────────
+// SRE chat content is heavily cluster/SCM-derived (pod names, log lines, event
+// messages, incident/issue text) and therefore UNTRUSTED. The render path is:
+//
+//   1. entity-escape the raw text (so any literal HTML is inert),
+//   2. apply a small, fixed markdown→HTML transform,
+//   3. run the result through DOMPurify — a vetted sanitizer — with a strict
+//      tag allowlist, a PROTOCOL ALLOWLIST on links (http/https/mailto only,
+//      no javascript:/data:), and a hook that forces rel="noopener noreferrer"
+//      and target="_blank" on every surviving anchor.
+//
+// The old hand-rolled escape-first pipeline was one reorder away from stored
+// XSS (e.g. an `<img src=x onerror=...>` in a log line). DOMPurify needs
+// `window`, so on the server we return only the escaped+marked HTML (already
+// inert, no anchors emitted) and the browser re-sanitizes on hydration.
+
+const SAFE_URI =
+  /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
+
+let domPurifyHookInstalled = false;
+
+function markdownToHtml(md: string): string {
   return md
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -145,6 +192,9 @@ function renderMarkdown(md: string): string {
     .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
     .replace(/^## (.+)$/gm, '<h2 class="text-base font-semibold mt-4 mb-1">$1</h2>')
     .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
+    // Links — markdown [label](url). The url is sanitized by DOMPurify's
+    // protocol allowlist below; the label is already entity-escaped.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
     .replace(/^\|(.+)\|$/gm, (_, row) => {
       const cells = row.split("|").map((c: string) => c.trim());
       return `<tr>${cells.map((c: string) => `<td class="px-2 py-1 border-b border-gray-200 dark:border-gray-600">${c}</td>`).join("")}</tr>`;
@@ -153,4 +203,35 @@ function renderMarkdown(md: string): string {
     .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     .replace(/((<li.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
     .replace(/\n/g, "<br />");
+}
+
+function renderMarkdown(md: string): string {
+  const html = markdownToHtml(md);
+
+  // On the server we cannot run DOMPurify (no DOM). The escaped+marked HTML is
+  // already inert; the browser re-renders and sanitizes on hydration.
+  if (typeof window === "undefined") return html;
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const DOMPurify = require("dompurify");
+  const purify = DOMPurify.default ?? DOMPurify;
+
+  // Force safe link attributes on every anchor exactly once per session.
+  if (!domPurifyHookInstalled && typeof purify.addHook === "function") {
+    purify.addHook("afterSanitizeAttributes", (node: Element) => {
+      if (node.tagName === "A") {
+        node.setAttribute("rel", "noopener noreferrer");
+        node.setAttribute("target", "_blank");
+      }
+    });
+    domPurifyHookInstalled = true;
+  }
+
+  return purify.sanitize(html, {
+    ALLOWED_TAGS: ["pre", "code", "strong", "em", "h1", "h2", "h3", "table", "tr", "td", "ul", "li", "br", "a", "p"],
+    // No `target` here — the hook stamps it. `rel` is allowed so the hook's
+    // value survives. Protocol allowlist blocks javascript:/data: URIs.
+    ALLOWED_ATTR: ["class", "href", "rel", "target"],
+    ALLOWED_URI_REGEXP: SAFE_URI,
+  });
 }

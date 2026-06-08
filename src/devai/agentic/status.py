@@ -9,14 +9,59 @@ than 5xx-ing the whole call.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
+import socket
 from dataclasses import asdict, dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 from devai.registry import RegistryClient
 
 logger = logging.getLogger(__name__)
+
+# Probe targets are operator/env-supplied URLs. To avoid a latent SSRF (a probe
+# URL pointed at the metadata server or an arbitrary external host), restrict
+# every probe to in-cluster Kubernetes Service DNS and reject hosts that resolve
+# to non-routable / metadata addresses.
+_ALLOWED_PROBE_SUFFIXES = (".svc.cluster.local", ".svc")
+
+
+def _probe_url_allowed(url: str) -> tuple[bool, str]:
+    """Return (ok, reason). Only in-cluster Service hostnames over http/https
+    are allowed, and the host must not resolve to a private/metadata IP."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False, f"unsupported scheme {parsed.scheme!r} (need http/https)"
+    host = parsed.hostname
+    if not host:
+        return False, "url has no host"
+    host_l = host.lower()
+    # IP literals are never in-cluster Service DNS — reject outright.
+    try:
+        ipaddress.ip_address(host_l)
+        return False, "ip-literal targets are not allowed (use the Service DNS name)"
+    except ValueError:
+        pass
+    if not any(host_l == s.lstrip(".") or host_l.endswith(s) for s in _ALLOWED_PROBE_SUFFIXES):
+        return False, f"host {host!r} is not an in-cluster Service (.svc / .svc.cluster.local)"
+    # Defense in depth: block a Service name that resolves to a non-routable
+    # or metadata address (DNS rebinding / split-horizon).
+    try:
+        infos = socket.getaddrinfo(host_l, None)
+    except OSError:
+        # Unresolvable now — let the probe attempt it; httpx will fail soft.
+        return True, ""
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved or ip.is_multicast:
+            return False, f"host {host!r} resolves to non-routable {addr}"
+    return True, ""
 
 
 @dataclass(slots=True)
@@ -153,6 +198,12 @@ def _probe_http(
     cs = ComponentStatus(name=name, role=role, namespace=namespace, url=url, reachable=False)
     if os.environ.get("DEVAI_AGENTIC_PROBES", "true").lower() == "false":
         cs.error = "probes disabled (DEVAI_AGENTIC_PROBES=false)"
+        return cs
+    # SSRF guard: only probe in-cluster Service DNS (operator/env-supplied URL).
+    ok, reason = _probe_url_allowed(url)
+    if not ok:
+        cs.error = f"probe target rejected: {reason}"
+        logger.warning("agentic probe %s rejected: %s (url=%s)", name, reason, url)
         return cs
     try:
         import httpx  # type: ignore[import-untyped]

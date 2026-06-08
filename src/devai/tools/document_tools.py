@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from devai.tools.path_guard import PathTraversalError, confine
@@ -20,6 +21,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Validation for doc_read_github_wiki: an owner/name slug and a single
+# path-safe page name. Page names may include sub-paths (a/b) but never `..`
+# or a leading '/' (checked separately) — both would rebase the raw URL path.
+_WIKI_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+_WIKI_PAGE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 DOCUMENT_TOOLS: list[dict[str, Any]] = [
     {
@@ -364,17 +371,33 @@ class DocumentToolExecutor:
         }
 
     async def _handle_doc_read_github_wiki(self, inp: dict[str, Any]) -> dict[str, Any]:
-        """Read GitHub wiki pages."""
+        """Read GitHub wiki pages.
+
+        ``repo``/``page`` can come from injected text, so they are validated
+        (no ``..``, no leading ``/``) before being put in the URL, and the
+        fetch goes through the SSRF guard with redirects disabled so a 302
+        can't bounce the request onto an internal address.
+        """
         import httpx
 
-        repo = inp["repo"]
-        page = inp.get("page", "Home")
+        from devai.tools.url_guard import UnsafeURLError, assert_public_url
+
+        repo = (inp["repo"] or "").strip()
+        page = (inp.get("page") or "Home").strip()
+
+        # owner/name slug and a single path-safe page name; reject traversal
+        # and a leading '/' that could rebase the URL path.
+        if ".." in repo or repo.startswith("-") or not _WIKI_REPO_RE.match(repo):
+            return {"error": f"invalid repo slug: {repo!r} (expected owner/name)"}
+        if ".." in page or page.startswith("/") or not _WIKI_PAGE_RE.match(page):
+            return {"error": f"invalid wiki page name: {page!r}"}
 
         # GitHub wikis are accessible via raw markdown URLs
         url = f"https://raw.githubusercontent.com/wiki/{repo}/{page}.md"
 
         try:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            assert_public_url(url)
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
                 resp = await client.get(url)
                 if resp.status_code == 200:
                     return {
@@ -382,6 +405,10 @@ class DocumentToolExecutor:
                         "page": page,
                         "content": resp.text[:15000],
                     }
+                if resp.has_redirect_location:
+                    return {"error": "wiki fetch redirected (refusing to follow)"}
                 return {"error": f"Wiki page not found (HTTP {resp.status_code})"}
+        except UnsafeURLError as e:
+            return {"error": f"refusing to fetch wiki: {e}"}
         except Exception as e:
             return {"error": f"Failed to fetch wiki: {e}"}

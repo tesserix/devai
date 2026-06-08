@@ -27,6 +27,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import traceback
 from typing import Any
@@ -39,6 +40,13 @@ logging.basicConfig(
 
 
 RESULT_PREFIX = "RESULT::"
+
+# Legacy agents are imported as `devai.agents.<name>`. The name is env-derived
+# (DEVAI_RUNNER_AGENT) so it must be validated before it reaches importlib —
+# otherwise a value like `../foo`, `os`, or `a.b` could import an unintended
+# module (and trigger its import-time side effects). A legacy agent name is a
+# single lowercase identifier segment: letters, digits, underscores, no dots.
+_LEGACY_AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def main() -> int:
@@ -252,6 +260,12 @@ async def _invoke_legacy(agent_name: str, state: dict[str, Any], config: Any) ->
     without porting them to Specializations first.
     """
     import importlib
+
+    # Validate the env-derived name BEFORE importlib so a crafted value can't
+    # import an arbitrary submodule (or its import-time side effects). Only a
+    # plain lowercase identifier segment is allowed — no dots, no traversal.
+    if not _LEGACY_AGENT_NAME_RE.match(agent_name or ""):
+        return {"ok": False, "error": f"invalid legacy agent name: {agent_name!r}"}
 
     module_name = f"devai.agents.{agent_name}"
     try:

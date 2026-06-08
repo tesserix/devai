@@ -76,8 +76,17 @@ async def chat_stream(request: Request) -> StreamingResponse:
     agent = request.app.state.chat_agent
 
     async def event_stream():
-        async for chunk in agent.stream_chat(message, session_id, principal=principal, trace_id=trace_id):
-            yield f"data: {json.dumps({'text': chunk})}\n\n"
+        from devai.services.redact import redact_secrets
+
+        try:
+            async for chunk in agent.stream_chat(message, session_id, principal=principal, trace_id=trace_id):
+                # Redact each streamed chunk — tool output / error text can
+                # carry connection strings or bare provider keys.
+                yield f"data: {json.dumps({'text': redact_secrets(chunk)})}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Chat stream failed for session %s (user=%s)", session_id, principal.email)
+            safe = redact_secrets(str(exc))[:200]
+            yield f"data: {json.dumps({'text': f'Sorry, I encountered an error: {safe}'})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -111,6 +120,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
         websocket.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
     agent = websocket.app.state.chat_agent
 
+    from devai.services.redact import redact_secrets
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -120,9 +131,17 @@ async def chat_websocket(websocket: WebSocket) -> None:
             if not user_message:
                 continue
 
-            # Stream response chunks
-            async for chunk in agent.stream_chat(user_message, session_id, principal=principal, trace_id=trace_id):
-                await websocket.send_json({"type": "chunk", "text": chunk})
+            # Stream response chunks, redacting each — tool output / error
+            # text can carry connection strings or bare provider keys.
+            try:
+                async for chunk in agent.stream_chat(
+                    user_message, session_id, principal=principal, trace_id=trace_id
+                ):
+                    await websocket.send_json({"type": "chunk", "text": redact_secrets(chunk)})
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Chat WS turn failed for session %s (user=%s)", session_id, principal.email)
+                safe = redact_secrets(str(exc))[:200]
+                await websocket.send_json({"type": "chunk", "text": f"Sorry, I encountered an error: {safe}"})
 
             await websocket.send_json({"type": "done"})
 

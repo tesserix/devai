@@ -81,8 +81,42 @@ class DownstreamConnection:
                 await stack.aclose()
             raise DownstreamError(f"connect {self.name}: {e}") from e
 
+    def _guard_endpoint(self) -> None:
+        """Last-line SSRF guard at the dial site (defense in depth, audit CODE-6).
+
+        Discovery already screens endpoints, but the actual network dial
+        re-validates the registry-supplied endpoint — including a full DNS
+        resolution that closes the hostname→private/metadata-IP rebinding gap — so
+        no code path (a direct ``DownstreamConnection`` construction, a future
+        caller that skips discovery) can dial a non-routable/off-allowlist host.
+
+        BEHAVIOR-NEUTRALITY: enforcement is gated by ``settings.mcp_hub_ssrf_enforce``
+        (default OFF). When OFF the guard runs in audit mode — a failing endpoint
+        is logged but still dialed (today's behavior preserved). When ON, the
+        bearer is stripped and the dial is refused (``DownstreamError`` → the Hub
+        drops the leg, fail-closed). Settings are read lazily so this module stays
+        import-pure for unit tests.
+        """
+        from devai.config import settings
+        from devai.mcphub.discovery import EndpointGuardError, check_endpoint_url
+
+        enforce = bool(getattr(settings, "mcp_hub_ssrf_enforce", False))
+        try:
+            check_endpoint_url(self.spec.endpoint, list(settings.a2a_allowed_url_suffixes), resolve=enforce)
+        except EndpointGuardError as e:
+            if enforce:
+                self._headers.pop("Authorization", None)
+                raise DownstreamError(f"connect {self.name}: {e}") from e
+            logger.warning(
+                "mcphub: downstream %r endpoint failed the SSRF guard (audit mode — dialing anyway; "
+                "set DEVAI_MCP_HUB_SSRF_ENFORCE=true to block): %s",
+                self.name,
+                e,
+            )
+
     async def _open_transport(self, stack: AsyncExitStack) -> tuple[Any, Any]:
         """Open the configured transport, returning (read, write) streams."""
+        self._guard_endpoint()
         if self.spec.transport == "sse":
             from mcp.client.sse import sse_client  # lazy
 

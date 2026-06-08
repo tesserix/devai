@@ -16,9 +16,57 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from devai.onboarding.routes import _valid_segment
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/scm", tags=["scm"])
+
+
+async def _require_principal(request: Request):
+    """Resolve the caller's Principal, gated by the ``require_auth`` flag.
+
+    Behavior-neutral by default: when ``DEVAI_REQUIRE_AUTH`` is False (the
+    current prod default) this returns the resolved principal or ``None`` for
+    anonymous callers — exactly the legacy ``extract_principal`` path, so
+    nothing changes until the flag is flipped in chart values (CHART-1). When
+    ``require_auth`` is True it delegates to :func:`devai.authz.require_principal`,
+    which 401s anonymous callers (no fallback to a literal ``operator``).
+
+    This is the CODE-1 gate for the mutating SCM routes (create_repo /
+    initialise / scan), which mutate GitHub state with the platform's
+    privileged token.
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is not None and getattr(config, "require_auth", False):
+        from devai.authz import require_principal
+
+        return await require_principal(request)
+    from devai.identity import extract_principal
+
+    try:
+        return await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
+        return None
+
+
+def _check_segments(*segments: str) -> None:
+    """Reject crafted owner/name/repo path segments before they reach the SCM
+    client. Reuses onboarding's ``_valid_segment`` (alnum start, then
+    alnum/dot/dash/underscore, bounded length, no ``..``) so a path-traversal
+    or URL-encoded separator can never be interpolated into a GitHub API path.
+    """
+    for seg in segments:
+        if not _valid_segment(seg):
+            raise HTTPException(status_code=422, detail="invalid repo owner/name segment")
+
+
+def _check_repo_full(repo: str) -> None:
+    """Validate an ``owner/name`` repo reference passed as a query param."""
+    parts = repo.split("/")
+    if len(parts) != 2:
+        raise HTTPException(status_code=422, detail="repo must be 'owner/name'")
+    _check_segments(*parts)
 
 
 # --------------------------------------------------------------------------- #
@@ -184,6 +232,8 @@ async def create_repo(request: Request, body: CreateRepoRequest) -> dict[str, An
     The new repo lands fully private under the configured org so the
     pipeline can immediately open issues / PRs against it.
     """
+    await _require_principal(request)
+    _check_segments(body.name)
     client = _client(request)
     org = _org(request)
     try:
@@ -298,6 +348,7 @@ async def list_issues(
     /workflows kanban renders. Each card carries number / title /
     labels / state / updated_at / html_url and the assigned lane.
     """
+    _check_repo_full(repo)
     client = _client(request)
     try:
         issues = await client.list_issues(repo=repo, state=state, limit=100)
@@ -411,6 +462,8 @@ async def initialise_repo(request: Request, owner: str, name: str) -> Initialise
     audit it. Auto-merge is intentionally NOT triggered here — the
     repo's existing branch-protection rules win.
     """
+    await _require_principal(request)
+    _check_segments(owner, name)
     client = _client(request)
     full = f"{owner}/{name}"
 
@@ -567,6 +620,8 @@ async def scan_repo(request: Request, owner: str, name: str) -> ScanResponse:
     (`/scan/deep` later) but this profile is enough to seed agent
     prompts with 'what kind of repo am I in'.
     """
+    await _require_principal(request)
+    _check_segments(owner, name)
     client = _client(request)
     full = f"{owner}/{name}"
 

@@ -55,6 +55,14 @@ def profile_for_principal(principal: Principal | None, requested: str = "") -> T
     surface; an admin by role → unrestricted; everyone else → the default
     ``core`` surface. This is the seam where ``ToolProfile`` *artifacts* plug in
     (Phase 5) — for now it's a safe, explicit default.
+
+    Auth note (audit CODE-6): the fail-closed gate that rejects an anonymous
+    caller (so they never reach the mutating ``scm_*`` surface) lives upstream in
+    the ASGI middleware (``app._identity_and_profile``), keyed on
+    ``DEVAI_MCP_HUB_REQUIRE_AUTH``. By the time this resolver runs with
+    ``principal is None``, that flag is off, so anonymous deliberately keeps the
+    curated default surface (behavior-neutral). Admin (unrestricted) is only ever
+    granted to a verified principal — never derived from a missing identity.
     """
     is_admin = bool(principal and _ADMIN_ROLES.intersection(principal.roles))
     if requested == "unrestricted" and is_admin:

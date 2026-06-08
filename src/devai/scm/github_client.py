@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import json
 import logging
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -82,10 +83,28 @@ class GitHubSCMClient(SCMClient):
         GitHub App installation token)."""
         return await self._transport.token()
 
+    @staticmethod
+    def _safe_path(path: str) -> str:
+        """Percent-encode the path portion of a request URL.
+
+        Callers build paths by interpolating repo/owner/name/ref/branch values
+        (e.g. ``f"/repos/{repo}/git/ref/heads/{branch}"``). Quoting with
+        ``safe="/"`` keeps the path structure (and any leading ``?query``
+        already appended by the caller) intact while encoding spaces, control
+        chars, and stray separators in those interpolated segments — defense in
+        depth against a crafted ref/branch from reshaping the GitHub API path.
+        """
+        if not path:
+            return path
+        head, sep, query = path.partition("?")
+        # Preserve already-encoded sequences (safe="%") so re-quoting is a no-op
+        # on values the caller pre-encoded; keep "/" as the path separator.
+        return urllib.parse.quote(head, safe="/%:@") + sep + query
+
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         headers = await self._transport.auth_headers("token")
         headers.update(kwargs.pop("headers", {}))
-        resp = await self._http.request(method, path, headers=headers, **kwargs)
+        resp = await self._http.request(method, self._safe_path(path), headers=headers, **kwargs)
         if resp.is_client_error or resp.is_server_error:
             logger.error("GitHub API %s %s → %s: %s", method, path, resp.status_code, self._error_detail(resp))
             resp.raise_for_status()
@@ -559,7 +578,7 @@ class GitHubSCMClient(SCMClient):
     async def get_pr_diff(self, repo: str, pr_id: int) -> str:
         headers = await self._transport.auth_headers("token")
         headers["Accept"] = "application/vnd.github.diff"
-        resp = await self._http.get(f"/repos/{repo}/pulls/{pr_id}", headers=headers)
+        resp = await self._http.get(self._safe_path(f"/repos/{repo}/pulls/{pr_id}"), headers=headers)
         resp.raise_for_status()
         return resp.text
 

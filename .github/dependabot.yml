@@ -1,0 +1,41 @@
+# CHART-12: keep dependencies patched (mirrors agentic-registry/.github/dependabot.yml).
+version: 2
+updates:
+  # Python backend (devai package) — pyproject.toml at repo root.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # ALM dashboard (Next.js).
+  - package-ecosystem: npm
+    directory: "/dashboard"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # SRE dashboard (Next.js).
+  - package-ecosystem: npm
+    directory: "/sre-dashboard"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Auth BFF (Go).
+  - package-ecosystem: gomod
+    directory: "/services/auth-bff"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Base images in the root Dockerfiles (Dockerfile, Dockerfile.runner, Dockerfile.sre).
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

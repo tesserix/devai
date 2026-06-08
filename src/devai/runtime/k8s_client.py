@@ -92,8 +92,12 @@ class RuntimeConfig:
                 "preview_domain",
                 "tesserix.app",
             ),
-            # Dedicated namespace for ephemeral preview workloads (quota +
-            # deny-all-egress NetworkPolicy live here, not the app namespace).
+            # Dedicated namespace for ephemeral preview workloads. The
+            # namespace-scoped quota and the restricting egress NetworkPolicy
+            # are owned by the charts lane (tesserix-k8s manifests for
+            # devai-previews), NOT created here — do not assume egress is
+            # already locked down from this code path. See action item
+            # CHART-2.
             preview_namespace=getattr(
                 settings,
                 "preview_namespace",
@@ -379,8 +383,11 @@ class K8sJobRuntime:
         )
         return {
             "deployment_name": name,
-            "service_name": svc["metadata"]["name"],
-            "virtualservice_name": vs["metadata"]["name"],
+            # Use the FIRST applied service/virtualservice, not the trailing
+            # loop variable (which was the last manifest in the list and raised
+            # NameError when the lists were empty).
+            "service_name": svcs[0]["metadata"]["name"] if svcs else name,
+            "virtualservice_name": vss[0]["metadata"]["name"] if vss else "",
             "preview_host": manifests.get("preview_host", ""),
             "editor_host": manifests.get("editor_host", ""),
         }

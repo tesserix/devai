@@ -102,7 +102,13 @@ class PreviewSpinnerStage(PipelineStage):
             editor_bridge_port=int(self.config.get("bridge_port", _DEFAULT_BRIDGE_PORT)),
         )
 
-        manifests = build_preview_manifests(runtime.config, inputs)
+        # build_preview_manifests validates repo/ref and raises ValueError on a
+        # bad slug (CODE-8). Surface it as a clear stage failure rather than a
+        # cryptic manifest error downstream.
+        try:
+            manifests = build_preview_manifests(runtime.config, inputs)
+        except ValueError as e:
+            raise RuntimeError(f"spin_preview_pod: invalid preview inputs: {e}") from e
         applied = await runtime.apply_preview(manifests)
 
         preview_url = f"https://{applied['preview_host']}" if applied.get("preview_host") else ""

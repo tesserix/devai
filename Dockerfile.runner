@@ -12,7 +12,8 @@
 # Kept slim — language-specific scaffolding (Node, Go, Python) lives in
 # stack variants: devai-runner-nextjs, devai-runner-go, devai-runner-python.
 
-FROM python:3.12-slim AS base
+# CHART-11: pin python:3.12-slim by digest for reproducible builds.
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

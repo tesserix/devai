@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from devai.authoring.service import AuthoringError
+from devai.authoring.service import AuthoringError, AuthoringQuotaError
 from devai.identity import extract_principal
 
 if TYPE_CHECKING:
@@ -31,16 +31,39 @@ def _service(request: Request) -> AuthoringService:
     return svc
 
 
+def _require_auth(request: Request) -> bool:
+    settings = getattr(request.app.state, "settings", None)
+    return bool(getattr(settings, "require_auth", False))
+
+
 async def _principal(request: Request) -> str:
+    """Resolve the authoring principal for attribution.
+
+    Honest attribution (CODE-21): when ``require_auth`` is on, a request with
+    no resolvable principal is rejected (401) instead of being silently
+    attributed to ``operator``. We also distinguish a genuine "no principal"
+    (anonymous request) from a "lookup error" (identity backend hiccup) in
+    the logs. Default ``require_auth=False`` preserves today's behavior —
+    anonymous creates are attributed to ``operator``.
+    """
+    lookup_failed = False
     try:
         p = await extract_principal(request)
     except Exception:  # noqa: BLE001
+        logger.warning("authoring: principal lookup raised — treating as anonymous", exc_info=True)
         p = None
+        lookup_failed = True
     if p is not None:
         for attr in ("email", "display_name", "uid"):
             val = getattr(p, attr, None)
             if val:
                 return str(val)
+    if _require_auth(request):
+        raise HTTPException(status_code=401, detail="authentication required for authoring")
+    if lookup_failed:
+        logger.info("authoring: attributing to 'operator' after identity lookup error")
+    else:
+        logger.debug("authoring: anonymous request attributed to 'operator'")
     return "operator"
 
 
@@ -103,6 +126,8 @@ async def create_specialization(request: Request, body: CreateAgentBody) -> dict
             for k, v in (body.handover_schema or {}).items()
         }
         return await svc.create_specialization_from_fields(fields, created_by=created_by)
+    except AuthoringQuotaError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
     except AuthoringError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
@@ -140,6 +165,8 @@ async def create_blueprint(request: Request, body: CreateBlueprintBody) -> dict[
     svc = _service(request)
     try:
         return await svc.create_blueprint(body.yaml, created_by=await _principal(request))
+    except AuthoringQuotaError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
     except AuthoringError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
@@ -173,6 +200,8 @@ async def list_skills(request: Request) -> list[dict[str, Any]]:
 async def create_skill(request: Request, body: CreateSkillBody) -> dict[str, Any]:
     try:
         return await _service(request).create_skill(body.model_dump(), created_by=await _principal(request))
+    except AuthoringQuotaError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
     except AuthoringError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
@@ -213,6 +242,8 @@ async def create_mcp_server(request: Request, body: CreateMcpServerBody) -> dict
         raise HTTPException(status_code=422, detail="one of 'url' (remote) or 'image' (container) is required")
     try:
         return await _service(request).create_mcp_server(body.model_dump(), created_by=await _principal(request))
+    except AuthoringQuotaError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
     except AuthoringError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 

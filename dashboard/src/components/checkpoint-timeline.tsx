@@ -3,9 +3,14 @@
 import { RotateCcw } from "lucide-react";
 
 /**
- * Right-rail checkpoint timeline — the "Git & checkpoints" panel from the
- * Cursor screenshot. Each agent step that committed a restore point shows
- * up here; the ↩ button rolls the working tree back to that commit.
+ * Right-rail checkpoint timeline — the "Git & checkpoints" panel. Each agent
+ * step that committed a restore point shows up here; the ↩ button rolls the
+ * working tree back to that commit.
+ *
+ * Rollback honesty (DASH-10): rollback only does something when the backend
+ * worktree consumer is wired. The parent can pass `rollbackDisabledReason` to
+ * render the control as disabled with an explanatory tooltip instead of having
+ * it silently no-op — or omit `onRollback` entirely to hide it.
  */
 
 export interface Checkpoint {
@@ -24,26 +29,32 @@ function shortTime(ts?: number): string {
 export function CheckpointTimeline({
   checkpoints,
   onRollback,
+  /** When set, the ↩ button renders disabled with this tooltip (honest no-op). */
+  rollbackDisabledReason,
 }: {
   checkpoints: Checkpoint[];
   onRollback?: (sha: string) => void;
+  rollbackDisabledReason?: string;
 }) {
+  const showRollback = !!onRollback || !!rollbackDisabledReason;
+  const disabled = !onRollback;
+
   return (
     <div
       className="rounded-lg border p-4"
       style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
     >
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold" style={{ color: "var(--text-strong)" }}>
+        <h3 className="text-sm font-semibold" style={{ color: "var(--ink-strong)" }}>
           Checkpoints
         </h3>
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+        <span className="text-xs tabular-nums" style={{ color: "var(--ink-muted)" }}>
           {checkpoints.length}
         </span>
       </div>
 
       {checkpoints.length === 0 ? (
-        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+        <p className="text-xs leading-relaxed" style={{ color: "var(--ink-muted)" }}>
           No checkpoints yet. Each agent step that commits a restore point appears here.
         </p>
       ) : (
@@ -52,31 +63,37 @@ export function CheckpointTimeline({
             <li key={`${cp.sha}-${i}`} className="flex items-start gap-3">
               <span
                 className="mt-1 h-2 w-2 shrink-0 rounded-full"
-                style={{ background: "var(--accent, #f97316)" }}
+                style={{ background: "var(--accent)" }}
               />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm" style={{ color: "var(--text-strong)" }}>
+                  <span className="truncate text-sm" style={{ color: "var(--ink-strong)" }}>
                     {cp.label || cp.stage || "checkpoint"}
                   </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs tabular-nums" style={{ color: "var(--ink-muted)" }}>
                       {shortTime(cp.ts)}
                     </span>
-                    {onRollback && (
+                    {showRollback && (
                       <button
                         type="button"
-                        title={`Roll back to ${cp.sha.slice(0, 12)}`}
-                        onClick={() => onRollback(cp.sha)}
-                        className="rounded p-1 transition hover:opacity-80"
-                        style={{ color: "var(--text-muted)" }}
+                        disabled={disabled}
+                        title={
+                          disabled
+                            ? rollbackDisabledReason || "Rollback unavailable"
+                            : `Roll back to ${cp.sha.slice(0, 12)}`
+                        }
+                        onClick={() => onRollback?.(cp.sha)}
+                        className="btn-ghost p-1 transition"
+                        style={disabled ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                        aria-disabled={disabled}
                       >
                         <RotateCcw size={13} />
                       </button>
                     )}
                   </div>
                 </div>
-                <code className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                <code className="text-[11px]" style={{ color: "var(--ink-muted)" }}>
                   {cp.sha.slice(0, 12)}
                 </code>
               </div>

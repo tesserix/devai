@@ -38,7 +38,9 @@ export function MissionControlShell({ children }: { children: React.ReactNode })
     window.localStorage.setItem("devai-theme", next ? "dark" : "light");
   }, []);
 
-  const onNewTask = useCallback(() => router.push("/control?action=new"), [router]);
+  // The "New task" action opens the lifecycle home (Workflows), where the
+  // blueprint picker + trigger dialog live — NOT the removed /control stub (DASH-9).
+  const onNewTask = useCallback(() => router.push("/workflows?action=new"), [router]);
 
   if (isAuth) {
     return <>{children}</>;

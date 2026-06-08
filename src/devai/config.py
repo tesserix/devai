@@ -207,6 +207,16 @@ class Settings(BaseSettings):
     # closing header-spoofing if the pod is ever reachable without the edge.
     auth_bff_shared_secret: str = ""
 
+    # Whether X-Forwarded-* identity is trusted when no shared secret is set.
+    # Default True preserves today's behavior: with auth_bff_shared_secret
+    # empty, forwarded headers are trusted unconditionally (the auth-bff +
+    # Istio edge is assumed). Set False to FAIL CLOSED — forwarded identity
+    # is never trusted (and inbound X-Forwarded-* are stripped) unless a
+    # non-empty secret is configured AND matches. Flip this on in prod once
+    # the auth-bff stamps X-Auth-Bff-Secret (see CODE-5) so a pod reachable
+    # without the edge can't be driven by spoofed identity headers.
+    trust_forwarded_without_secret: bool = True
+
     # Shared AES-GCM key (16/24/32 bytes) the auth-bff uses to encrypt the
     # devai_session cookie (services/auth-bff/internal/session/cookie.go). The
     # dashboard proxies /api straight to devai-api, bypassing the bff, so
@@ -220,6 +230,36 @@ class Settings(BaseSettings):
     # Set to the per-run workspace root to stop a prompt-injected agent
     # from reading arbitrary files (e.g. /etc/passwd).
     tool_workspace_root: str = ""
+
+    # --- Hardening flags (security review) ---
+    # Each is also read at its use-site via getattr with the SAME default, so
+    # behavior is identical whether or not these are declared — they live here
+    # for discoverability. Defaults preserve today's behavior; flip the gates
+    # on in prod values once the paired code/charts changes are deployed.
+
+    # Idle-TTL (seconds) before an unused preview environment is reaped (CODE-11).
+    # Env: DEVAI_PREVIEW_TTL_SECONDS. Default 4h.
+    preview_ttl_seconds: int = 14400
+
+    # MCP Hub: require an authenticated principal on /mcp (else 401) and apply
+    # the SSRF allowlist when dialing registry-supplied downstream endpoints
+    # (CODE-6). Default False keeps today's open behavior; set True in prod.
+    mcp_hub_require_auth: bool = False
+    mcp_hub_ssrf_enforce: bool = False
+
+    # Authoring guardrails (CODE-21). Trusted registries an authored MCP-server
+    # image may reference; per-principal / per-kind creation caps + rate limit
+    # (0 = unlimited, today's behavior).
+    authoring_trusted_image_registries: list[str] = Field(
+        default_factory=lambda: ["ghcr.io/tesserix/"]
+    )
+    authoring_per_kind_cap: int = 0
+    authoring_per_principal_quota: int = 0
+    authoring_rate_limit_per_minute: int = 0
+
+    # GitHub OAuth: in addition to github_org membership, only these emails/
+    # logins may mint a dashboard session (CODE-15). Empty = no allowlist.
+    github_oauth_email_allowlist: list[str] = Field(default_factory=list)
 
     # --- Pipeline ---
     max_review_iterations: int = 3

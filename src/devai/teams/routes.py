@@ -30,6 +30,28 @@ def _principal(request: Request):
     return extract_principal(request)
 
 
+def _require_auth(request: Request) -> bool:
+    settings = getattr(request.app.state, "settings", None)
+    return bool(getattr(settings, "require_auth", False))
+
+
+async def _creator(request: Request) -> str:
+    """Resolve the creating principal for honest attribution.
+
+    When ``require_auth`` is on, an anonymous request is rejected (401)
+    instead of being silently attributed to ``system@devai``. Default
+    ``require_auth=False`` preserves today's behavior.
+    """
+    principal = await _principal(request)
+    if principal is not None:
+        ident = principal.uid or principal.email
+        if ident:
+            return ident
+    if _require_auth(request):
+        raise HTTPException(status_code=401, detail="authentication required to create a team")
+    return "system@devai"
+
+
 # ── Teams ─────────────────────────────────────────────────────────────
 
 
@@ -45,8 +67,7 @@ class CreateTeamBody(BaseModel):
 
 @router.post("", status_code=201)
 async def create_team(request: Request, body: CreateTeamBody) -> dict[str, str]:
-    principal = await _principal(request)
-    creator = (principal.uid or principal.email) if principal else "system@devai"
+    creator = await _creator(request)
     team_id = await _svc(request).create_team(body.name, created_by=creator, org_id=body.org_id)
     return {"team_id": team_id}
 

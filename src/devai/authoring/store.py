@@ -73,6 +73,16 @@ class DefinitionStore(ABC):
     @abstractmethod
     async def delete(self, kind: str, name: str) -> bool: ...
 
+    async def count(self, kind: str) -> int:
+        """Number of stored definitions of ``kind``.
+
+        Default implementation counts via ``list``; backends with a cheaper
+        path (e.g. Redis SCARD on the index set) override it. Used by the
+        authoring service's per-kind cap so an unbounded create loop can't
+        balloon the store while auth is off.
+        """
+        return len(await self.list(kind))
+
 
 class InMemoryDefinitionStore(DefinitionStore):
     """Process-local store. Used in tests and when Redis is unreachable."""
@@ -145,6 +155,10 @@ class RedisDefinitionStore(DefinitionStore):
         removed = await self._redis.delete(self._key(kind, name))
         await self._redis.srem(self._index(kind), name)
         return bool(removed)
+
+    async def count(self, kind: str) -> int:
+        # SCARD on the per-kind index — O(1) vs. materializing every record.
+        return int(await self._redis.scard(self._index(kind)))
 
 
 __all__ = [

@@ -158,9 +158,26 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
   );
 }
 
-/** Minimal markdown to HTML (tables, bold, code, lists). */
-function renderMarkdown(md: string): string {
-  const html = md
+// Chat content is partly cluster/SCM-derived (pod names, log lines, issue and
+// PR text), so it must be treated as untrusted. The render path is therefore:
+//
+//   1. entity-escape the raw text (so any literal HTML is inert),
+//   2. apply a small, fixed markdown→HTML transform,
+//   3. run the result through DOMPurify — a vetted sanitizer — with a strict
+//      tag allowlist, a PROTOCOL ALLOWLIST on links (http/https/mailto only,
+//      no javascript:/data:), and a hook that forces rel="noopener noreferrer"
+//      and target="_blank" on every surviving anchor.
+//
+// DOMPurify needs `window`, so on the server we return only the escaped+marked
+// HTML (no anchors are emitted there) and the browser re-sanitizes on hydration.
+
+const SAFE_URI =
+  /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
+
+let domPurifyHookInstalled = false;
+
+function markdownToHtml(md: string): string {
+  return md
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -171,6 +188,9 @@ function renderMarkdown(md: string): string {
     .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
     .replace(/^## (.+)$/gm, '<h2 class="text-base font-semibold mt-4 mb-1">$1</h2>')
     .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
+    // Links — markdown [label](url). The url is sanitized by DOMPurify's
+    // protocol allowlist below; the label is already entity-escaped.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
     .replace(/^\|(.+)\|$/gm, (_, row) => {
       const cells = row.split("|").map((c: string) => c.trim());
       return `<tr>${cells.map((c: string) => `<td class="px-2 py-1 border-b border-gray-200 dark:border-gray-600">${c}</td>`).join("")}</tr>`;
@@ -179,22 +199,35 @@ function renderMarkdown(md: string): string {
     .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     .replace(/((<li.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
     .replace(/\n/g, "<br />");
+}
 
-  // Defense-in-depth: even though we entity-escape first, the hand-rolled
-  // regex above can be fragile to future edits and chat tool output can echo
-  // untrusted repo/issue/PR text. Sanitize the final HTML so no event handlers
-  // or scriptable attributes can survive into the DOM.
-  //
-  // DOMPurify is browser-only (it needs `window`). Import it lazily and only in
-  // the browser so server-side rendering of this client component doesn't crash
-  // the whole app. On the server we return the entity-escaped HTML (already the
-  // primary XSS defense); the browser re-renders + sanitizes on hydration.
+function renderMarkdown(md: string): string {
+  const html = markdownToHtml(md);
+
+  // On the server we cannot run DOMPurify (no DOM). The escaped+marked HTML is
+  // already inert; the browser re-renders and sanitizes on hydration.
   if (typeof window === "undefined") return html;
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const DOMPurify = require("dompurify");
-  const sanitize = DOMPurify.sanitize ?? DOMPurify.default?.sanitize;
-  return sanitize(html, {
+  const purify = DOMPurify.default ?? DOMPurify;
+
+  // Force safe link attributes on every anchor exactly once per session.
+  if (!domPurifyHookInstalled && typeof purify.addHook === "function") {
+    purify.addHook("afterSanitizeAttributes", (node: Element) => {
+      if (node.tagName === "A") {
+        node.setAttribute("rel", "noopener noreferrer");
+        node.setAttribute("target", "_blank");
+      }
+    });
+    domPurifyHookInstalled = true;
+  }
+
+  return purify.sanitize(html, {
     ALLOWED_TAGS: ["pre", "code", "strong", "em", "h1", "h2", "h3", "table", "tr", "td", "ul", "li", "br", "a", "p"],
-    ALLOWED_ATTR: ["class", "href", "target", "rel"],
+    // No `target` here — the hook stamps it. `rel` is allowed so the hook's
+    // value survives. Protocol allowlist blocks javascript:/data: URIs.
+    ALLOWED_ATTR: ["class", "href", "rel", "target"],
+    ALLOWED_URI_REGEXP: SAFE_URI,
   });
 }

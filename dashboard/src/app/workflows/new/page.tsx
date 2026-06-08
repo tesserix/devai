@@ -1,14 +1,20 @@
 "use client";
 
+import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, GitBranch, Loader2, Play, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, GitBranch, Loader2, Play, Plus, Trash2, Users } from "lucide-react";
 
 import { api, type RegistryItem } from "@/lib/api";
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import { GuidancePanel, HelpPopover } from "@/components/guidance";
 import {
   blueprintFromGraph,
+  validateConditionKeys,
+  SEED_CREWS,
   STAGE_KEYS,
   STAGE_TYPES,
+  TASK_BOOL_KEYS,
   type BuilderStage,
 } from "@/lib/blueprintFromGraph";
 
@@ -16,11 +22,16 @@ let _seq = 0;
 const newId = () => `s${++_seq}`;
 
 /**
- * Visual blueprint builder — compose a DAG of stages (each optionally running a
- * composed agent via run_specialization), wire dependencies, preview the graph,
- * and publish. Publishing POSTs the generated YAML to /api/authoring/blueprints,
- * which validates it through the same loader as on-disk blueprints and pushes a
- * Blueprint envelope to the registry.
+ * Visual blueprint builder — compose a DAG of stages, wire dependencies, preview
+ * the graph, and publish. Agentic stages run a composed agent (run_specialization
+ * → config.specialization); crew stages run a lead+members crew (run_crew →
+ * config.crew). Stages can carry an optional condition that skips them.
+ *
+ * Publishing POSTs the generated YAML to /api/authoring/blueprints, which
+ * validates it through the same loader as on-disk blueprints. We validate the
+ * same things up front (DASH-9) so the user sees problems inline instead of a
+ * 400 from the backend: unknown agents and empty/unknown crews silently no-op at
+ * runtime, and a typo'd condition key would make a gate run unconditionally.
  */
 export default function NewWorkflowPage() {
   const router = useRouter();
@@ -31,15 +42,41 @@ export default function NewWorkflowPage() {
     { id: newId(), name: "start", type: "context", stageKey: "context_hydration", dependsOn: [] },
   ]);
   const [agents, setAgents] = useState<RegistryItem[]>([]);
+  const [crews, setCrews] = useState<string[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [issues, setIssues] = useState<string[]>([]);
   const [done, setDone] = useState<string | null>(null);
 
+  // Load the registered agents (block publish on unknown names) and resolvable
+  // crews (seed crews + every team's DB crews) for the pickers.
   useEffect(() => {
     api.listRegistryAgents().then(setAgents).catch(() => setAgents([]));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const names = new Set<string>(SEED_CREWS);
+      try {
+        const teams = await api.listTeams();
+        const perTeam = await Promise.all(
+          teams.map((t) => api.listCrews(t.id).catch(() => [])),
+        );
+        for (const list of perTeam) for (const c of list) if (c?.name) names.add(c.name);
+      } catch {
+        // Teams may be disabled — seed crews still let the picker work.
+      }
+      if (!cancelled) setCrews([...names].sort());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const agentNames = useMemo(() => new Set(agents.map((a) => a.name)), [agents]);
+  const crewNames = useMemo(() => new Set(crews), [crews]);
 
   function patch(id: string, p: Partial<BuilderStage>) {
     setStages((ss) => ss.map((s) => (s.id === id ? { ...s, ...p } : s)));
@@ -74,7 +111,10 @@ export default function NewWorkflowPage() {
     setError(null);
     setIssues([]);
     setDone(null);
-    const { yaml, errors } = blueprintFromGraph(name, description, stages);
+    const { yaml, errors } = blueprintFromGraph(name, description, stages, {
+      knownAgents: agentNames,
+      knownCrews: crewNames,
+    });
     if (errors.length) {
       setIssues(errors);
       return;
@@ -110,39 +150,66 @@ export default function NewWorkflowPage() {
   }
 
   return (
-    <div className="p-7 space-y-6 max-w-5xl">
+    <div className="p-7 space-y-5 max-w-5xl">
+      <Breadcrumbs
+        items={[
+          { label: "Fleet", href: "/" },
+          { label: "Workflows", href: "/workflows" },
+          { label: "Build blueprint" },
+        ]}
+      />
+
       <header>
         <div className="label-eyebrow">Authoring</div>
-        <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
-          <GitBranch className="w-5 h-5 text-indigo-400" /> Build Blueprint
+        <h1
+          className="font-serif text-2xl font-medium mt-1 flex items-center gap-2"
+          style={{ color: "var(--ink-strong)" }}
+        >
+          <GitBranch className="w-5 h-5" style={{ color: "var(--accent)" }} /> Build blueprint
         </h1>
-        <p className="text-sm text-[var(--ink-300)] mt-1">
-          Compose a DAG of stages, wire their dependencies, and publish. Agentic stages run a composed
-          agent; publishing validates the blueprint and registers it.
+        <p className="text-sm mt-1 max-w-2xl" style={{ color: "var(--ink-soft)" }}>
+          Compose a DAG of stages, wire their dependencies, and publish. Agentic stages run a single
+          composed agent; crew stages run a lead + members. The DAG you draw is the DAG that runs —
+          conditions can only skip a stage, never add one.
         </p>
       </header>
+
+      <GuidancePanel id="builder" />
 
       {error && <Banner kind="error">{error}</Banner>}
       {issues.length > 0 && (
         <Banner kind="error">
-          <ul className="list-disc list-inside space-y-0.5">
-            {issues.map((i) => (
-              <li key={i}>{i}</li>
-            ))}
-          </ul>
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <ul className="space-y-0.5">
+              {issues.map((i) => (
+                <li key={i}>{i}</li>
+              ))}
+            </ul>
+          </div>
         </Banner>
       )}
       {done && (
         <Banner kind="ok">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="flex items-center gap-2">
-              <Check className="w-4 h-4" /> Published blueprint <span className="font-mono">{done}</span>. It's registered and runnable.
+              <Check className="w-4 h-4" /> Published blueprint{" "}
+              <span className="font-mono">{done}</span>. It&apos;s registered and runnable.
             </span>
             <span className="flex items-center gap-2">
-              <button type="button" onClick={runNow} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-medium">
+              <button
+                type="button"
+                onClick={runNow}
+                disabled={saving}
+                className="btn-primary !py-1 !text-xs"
+              >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} Run now
               </button>
-              <button type="button" onClick={() => router.push("/workflows")} className="px-3 py-1 rounded-md border border-emerald-500/40 text-xs text-emerald-200 hover:border-emerald-400">
+              <button
+                type="button"
+                onClick={() => router.push("/workflows")}
+                className="btn-secondary !py-1 !text-xs"
+              >
                 Done
               </button>
             </span>
@@ -152,10 +219,20 @@ export default function NewWorkflowPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="Name (kebab-case)">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-flow" className={inputCls} />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="my-flow"
+            className="field w-full"
+          />
         </Field>
         <Field label="Description">
-          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this blueprint does" className={inputCls} />
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What this blueprint does"
+            className="field w-full"
+          />
         </Field>
       </div>
 
@@ -169,97 +246,244 @@ export default function NewWorkflowPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <label className="label-eyebrow">Stages ({stages.length})</label>
-          <button type="button" onClick={addStage} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--surface-border)] text-sm text-[var(--ink-200)] hover:border-[var(--surface-border-strong)]">
+          <button type="button" onClick={addStage} className="btn-secondary">
             <Plus className="w-4 h-4" /> Add stage
           </button>
         </div>
 
         {stages.map((s) => (
-          <div key={s.id} className="panel p-3 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Field label="Name">
-                <input value={s.name} onChange={(e) => patch(s.id, { name: e.target.value })} className={inputCls} />
-              </Field>
-              <Field label="Type">
-                <select value={s.type} onChange={(e) => patch(s.id, { type: e.target.value })} className={inputCls}>
-                  {STAGE_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Stage">
-                <select value={s.stageKey} onChange={(e) => patch(s.id, { stageKey: e.target.value })} className={inputCls}>
-                  {STAGE_KEYS.map((k) => (
-                    <option key={k} value={k}>{k}</option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            {s.stageKey === "run_specialization" && (
-              <Field label="Agent (specialization)">
-                <input
-                  list={`agents-${s.id}`}
-                  value={s.agent ?? ""}
-                  onChange={(e) => patch(s.id, { agent: e.target.value })}
-                  placeholder="composed agent name"
-                  className={inputCls}
-                />
-                <datalist id={`agents-${s.id}`}>
-                  {agents.map((a) => (
-                    <option key={a.name} value={a.name} />
-                  ))}
-                </datalist>
-              </Field>
-            )}
-
-            <div>
-              <span className="label-eyebrow">Depends on</span>
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {stages.filter((o) => o.id !== s.id).length === 0 ? (
-                  <span className="text-xs text-[var(--ink-500)]">no other stages yet</span>
-                ) : (
-                  stages
-                    .filter((o) => o.id !== s.id)
-                    .map((o) => {
-                      const on = s.dependsOn.includes(o.name);
-                      return (
-                        <button
-                          key={o.id}
-                          type="button"
-                          onClick={() => toggleDep(s.id, o.name)}
-                          className={
-                            "px-2 py-1 rounded-md border text-xs font-mono transition-colors " +
-                            (on ? "border-indigo-500/60 bg-indigo-500/10 text-[var(--ink-100)]" : "border-[var(--surface-border)] text-[var(--ink-400)] hover:border-[var(--surface-border-strong)]")
-                          }
-                        >
-                          {o.name}
-                        </button>
-                      );
-                    })
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button type="button" onClick={() => removeStage(s.id)} className="inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300">
-                <Trash2 className="w-3.5 h-3.5" /> Remove
-              </button>
-            </div>
-          </div>
+          <StageEditor
+            key={s.id}
+            stage={s}
+            allStages={stages}
+            agents={agents}
+            agentNames={agentNames}
+            crews={crews}
+            crewNames={crewNames}
+            onPatch={(p) => patch(s.id, p)}
+            onToggleDep={(dep) => toggleDep(s.id, dep)}
+            onRemove={() => removeStage(s.id)}
+          />
         ))}
       </div>
 
       <div className="flex items-center gap-3">
-        <button type="button" onClick={publish} disabled={saving} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium">
+        <button type="button" onClick={publish} disabled={saving} className="btn-primary">
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitBranch className="w-4 h-4" />}
           Publish blueprint
         </button>
-        <button type="button" onClick={() => router.push("/workflows")} className="px-4 py-2 rounded-md border border-[var(--surface-border)] text-sm text-[var(--ink-200)] hover:border-[var(--surface-border-strong)]">
+        <button type="button" onClick={() => router.push("/workflows")} className="btn-secondary">
           Cancel
         </button>
       </div>
     </div>
+  );
+}
+
+// ── Stage editor row ───────────────────────────────────────────────────────
+
+function StageEditor({
+  stage: s,
+  allStages,
+  agents,
+  agentNames,
+  crews,
+  crewNames,
+  onPatch,
+  onToggleDep,
+  onRemove,
+}: {
+  stage: BuilderStage;
+  allStages: BuilderStage[];
+  agents: RegistryItem[];
+  agentNames: Set<string>;
+  crews: string[];
+  crewNames: Set<string>;
+  onPatch: (p: Partial<BuilderStage>) => void;
+  onToggleDep: (dep: string) => void;
+  onRemove: () => void;
+}) {
+  const agentVal = (s.agent ?? "").trim();
+  const crewVal = (s.crew ?? "").trim();
+  const agentUnknown =
+    s.stageKey === "run_specialization" &&
+    agentVal !== "" &&
+    agentNames.size > 0 &&
+    !agentNames.has(agentVal);
+  const crewUnknown =
+    s.stageKey === "run_crew" && crewVal !== "" && crewNames.size > 0 && !crewNames.has(crewVal);
+  const condUnknown = validateConditionKeys(s.condition);
+
+  return (
+    <div className="panel p-3 space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Field label="Name">
+          <input value={s.name} onChange={(e) => onPatch({ name: e.target.value })} className="field w-full" />
+        </Field>
+        <Field label="Type">
+          <select value={s.type} onChange={(e) => onPatch({ type: e.target.value })} className="field w-full">
+            {STAGE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Stage">
+          <select value={s.stageKey} onChange={(e) => onPatch({ stageKey: e.target.value })} className="field w-full">
+            {STAGE_KEYS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      {s.stageKey === "run_specialization" && (
+        <Field label="Agent (specialization)">
+          <input
+            list={`agents-${s.id}`}
+            value={s.agent ?? ""}
+            onChange={(e) => onPatch({ agent: e.target.value })}
+            placeholder="composed agent name"
+            className="field w-full"
+            style={agentUnknown ? { borderColor: "var(--error)" } : undefined}
+            aria-invalid={agentUnknown}
+          />
+          <datalist id={`agents-${s.id}`}>
+            {agents.map((a) => (
+              <option key={a.name} value={a.name} />
+            ))}
+          </datalist>
+          {agentUnknown ? (
+            <InlineHint kind="error">
+              &ldquo;{agentVal}&rdquo; isn&apos;t a registered agent — an unknown agent silently no-ops at runtime.
+            </InlineHint>
+          ) : agentVal === "" ? (
+            <InlineHint kind="muted">Required. Pick a registered agent for this stage to run.</InlineHint>
+          ) : null}
+        </Field>
+      )}
+
+      {s.stageKey === "run_crew" && (
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <Users className="w-3 h-3" style={{ color: "var(--ink-muted)" }} /> Crew
+              <HelpPopover term="crew" />
+            </span>
+          }
+        >
+          <input
+            list={`crews-${s.id}`}
+            value={s.crew ?? ""}
+            onChange={(e) => onPatch({ crew: e.target.value })}
+            placeholder="backend_crew"
+            className="field w-full"
+            style={crewUnknown ? { borderColor: "var(--error)" } : undefined}
+            aria-invalid={crewUnknown}
+          />
+          <datalist id={`crews-${s.id}`}>
+            {crews.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+          {crewUnknown ? (
+            <InlineHint kind="error">
+              &ldquo;{crewVal}&rdquo; isn&apos;t a resolvable crew. Pick a seed or team crew that exists.
+            </InlineHint>
+          ) : crewVal === "" ? (
+            <InlineHint kind="error">
+              Required. An empty crew resolves to <code>no_crew</code> and the stage does nothing.
+            </InlineHint>
+          ) : null}
+        </Field>
+      )}
+
+      <Field
+        label={
+          <span className="inline-flex items-center gap-1.5">
+            Condition <span style={{ color: "var(--ink-muted)" }}>(optional skip guard)</span>
+            <HelpPopover term="condition" />
+          </span>
+        }
+      >
+        <input
+          value={s.condition ?? ""}
+          onChange={(e) => onPatch({ condition: e.target.value })}
+          placeholder="e.g. task.has_pr  ·  !task.has_sandbox  ·  output.review_decision_approved"
+          className="field w-full font-mono text-[12.5px]"
+          style={condUnknown.length ? { borderColor: "var(--error)" } : undefined}
+          aria-invalid={condUnknown.length > 0}
+        />
+        {condUnknown.length > 0 ? (
+          <InlineHint kind="error">
+            Unknown key{condUnknown.length > 1 ? "s" : ""} {condUnknown.map((k) => `"${k}"`).join(", ")}.
+            Use a <code>task.*</code> flag or an <code>output.</code> / <code>state.</code> /{" "}
+            <code>agent_context.</code> lookup.
+          </InlineHint>
+        ) : (
+          <InlineHint kind="muted">
+            Leave blank to always run. Flags: {TASK_BOOL_KEYS.slice(0, 4).join(", ")}…
+          </InlineHint>
+        )}
+      </Field>
+
+      <div>
+        <span className="label-eyebrow">Depends on</span>
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {allStages.filter((o) => o.id !== s.id).length === 0 ? (
+            <span className="text-xs" style={{ color: "var(--ink-muted)" }}>
+              no other stages yet
+            </span>
+          ) : (
+            allStages
+              .filter((o) => o.id !== s.id)
+              .map((o) => {
+                const on = s.dependsOn.includes(o.name);
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => onToggleDep(o.name)}
+                    className="px-2 py-1 rounded-md border text-xs font-mono transition-colors"
+                    style={{
+                      borderColor: on ? "var(--accent-soft-bd)" : "var(--border-subtle)",
+                      background: on ? "var(--accent-soft-bg-2)" : "transparent",
+                      color: on ? "var(--ink-strong)" : "var(--ink-muted)",
+                    }}
+                  >
+                    {o.name}
+                  </button>
+                );
+              })
+          )}
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex items-center gap-1.5 text-xs"
+          style={{ color: "var(--error-ink)" }}
+        >
+          <Trash2 className="w-3.5 h-3.5" /> Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InlineHint({ kind, children }: { kind: "error" | "muted"; children: React.ReactNode }) {
+  return (
+    <p
+      className="mt-1 text-[11.5px] leading-snug"
+      style={{ color: kind === "error" ? "var(--error-ink)" : "var(--ink-muted)" }}
+    >
+      {children}
+    </p>
   );
 }
 
@@ -317,7 +541,12 @@ function DagPreview({ preview }: { preview: Preview }) {
   const width = cols * CW + 20;
   const height = rows * CH + 20;
   const pos = new Map(placed.map((p) => [p.name, { x: p.col * CW + 10, y: p.row * CH + 10 }]));
-  if (placed.length === 0) return <div className="text-xs text-[var(--ink-500)] p-3">No stages.</div>;
+  if (placed.length === 0)
+    return (
+      <div className="text-xs p-3" style={{ color: "var(--ink-muted)" }}>
+        No stages.
+      </div>
+    );
   return (
     <div className="overflow-auto">
       <svg width={width} height={height} className="min-w-full">
@@ -332,7 +561,7 @@ function DagPreview({ preview }: { preview: Preview }) {
               y1={a.y + NH / 2}
               x2={b.x}
               y2={b.y + NH / 2}
-              stroke="#7c83f0"
+              stroke="var(--accent)"
               strokeWidth={1.5}
               markerEnd="url(#arrow)"
             />
@@ -340,15 +569,31 @@ function DagPreview({ preview }: { preview: Preview }) {
         })}
         <defs>
           <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-            <path d="M0,0 L7,3 L0,6 Z" fill="#7c83f0" />
+            <path d="M0,0 L7,3 L0,6 Z" fill="var(--accent)" />
           </marker>
         </defs>
         {placed.map((p) => {
           const xy = pos.get(p.name)!;
           return (
             <g key={p.name}>
-              <rect x={xy.x} y={xy.y} width={NW} height={NH} rx={6} fill="rgba(99,102,241,0.13)" stroke="#6366f1" strokeWidth={1.2} />
-              <text x={xy.x + NW / 2} y={xy.y + NH / 2 + 4} textAnchor="middle" fontSize={11} fontFamily="monospace" fill="var(--ink-100)">
+              <rect
+                x={xy.x}
+                y={xy.y}
+                width={NW}
+                height={NH}
+                rx={6}
+                fill="var(--accent-soft-bg)"
+                stroke="var(--accent)"
+                strokeWidth={1.2}
+              />
+              <text
+                x={xy.x + NW / 2}
+                y={xy.y + NH / 2 + 4}
+                textAnchor="middle"
+                fontSize={11}
+                fontFamily="monospace"
+                fill="var(--ink-strong)"
+              >
                 {p.name.length > 16 ? p.name.slice(0, 15) + "…" : p.name}
               </text>
             </g>
@@ -359,10 +604,7 @@ function DagPreview({ preview }: { preview: Preview }) {
   );
 }
 
-const inputCls =
-  "w-full px-3 py-2 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] text-sm text-[var(--ink-100)] placeholder-[var(--ink-500)] focus:outline-none focus:border-indigo-500/50";
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <label className="block space-y-1.5">
       <span className="label-eyebrow">{label}</span>
@@ -372,9 +614,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Banner({ kind, children }: { kind: "error" | "ok"; children: React.ReactNode }) {
-  const cls =
+  const style =
     kind === "error"
-      ? "border-red-500/30 bg-red-500/10 text-red-300"
-      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  return <div className={`rounded-md border px-3 py-2 text-sm ${cls}`}>{children}</div>;
+      ? { background: "var(--error-soft-bg)", color: "var(--error-ink)", border: "1px solid var(--error-soft-bd)" }
+      : { background: "var(--ok-soft-bg)", color: "var(--ok-ink)", border: "1px solid var(--ok-soft-bd)" };
+  return (
+    <div className="rounded-md px-3 py-2 text-sm" style={style}>
+      {children}
+    </div>
+  );
 }

@@ -7,15 +7,12 @@ import { clsx } from "clsx";
 import {
   Box,
   Boxes,
-  BrainCog,
-  ChevronRight,
-  ChevronsLeftRight,
-  Database,
   FolderGit2,
-  GitBranch,
+  FolderKanban,
+  ChevronRight,
   Layers,
   Lightbulb,
-  LineChart,
+  ListChecks,
   LogOut,
   MessageSquareText,
   Moon,
@@ -28,6 +25,7 @@ import {
   Sparkles,
   Sun,
   Users,
+  Workflow,
   Wrench,
   X,
 } from "lucide-react";
@@ -77,11 +75,16 @@ type NavItem = {
   badge?: string;
 };
 
+// FLEET — the lifecycle workspace. After disambiguation (DASH-5):
+//   * Workflows  → the lifecycle home: browse blueprints, run, recent runs.
+//   * Runs       → every execution of a blueprint, filterable.
+//   * Board      → the GitHub-issue Kanban (was confusingly under "Workflows").
 const TOP: NavItem[] = [
   { href: "/compose", label: "Compose", Icon: Sparkles, description: "Cursor-style agent composer" },
   { href: "/", label: "Fleet", Icon: Boxes, description: "Active pipeline runs" },
-  { href: "/workflows", label: "Workflows", Icon: GitBranch, description: "Cross-functional gates" },
-  { href: "/memory", label: "Memory", Icon: BrainCog, description: "Episodic + semantic" },
+  { href: "/workflows", label: "Workflows", Icon: Workflow, description: "Browse blueprints → run → observe" },
+  { href: "/runs", label: "Runs", Icon: ListChecks, description: "Every blueprint execution" },
+  { href: "/board", label: "Board", Icon: FolderKanban, description: "GitHub issue Kanban" },
 ];
 
 // REGISTRY — every artifact kind in the shared registry, browse + author.
@@ -96,12 +99,11 @@ const REGISTRY: NavItem[] = [
   { href: "/registry", label: "Browse", Icon: PackageOpen, description: "Full catalog explorer" },
 ];
 
+// PLATFORM — onboarding + gateway health. (Removed the dead "Coming soon"
+// routes — /control, /analytics, /catalog, /memory — per DASH-9.)
 const MID: NavItem[] = [
   { href: "/repos", label: "Repos", Icon: FolderGit2, description: "Onboard org repositories" },
   { href: "/gateway", label: "Gateway", Icon: Radio, description: "Agent Gateway + LLM proxy health" },
-  { href: "/catalog", label: "Catalog", Icon: Database, description: "Resolved capability map" },
-  { href: "/control", label: "Control", Icon: ChevronsLeftRight, description: "Manual pause / takeover" },
-  { href: "/analytics", label: "Analytics", Icon: LineChart, description: "Cost + duration trends" },
 ];
 
 const SRE: NavItem[] = [
@@ -149,8 +151,10 @@ export function MissionControlNav({
     window.localStorage.setItem("devai-theme", next ? "dark" : "light");
   }
 
+  // The "New task" CTA opens the lifecycle home (Workflows), where the
+  // blueprint picker + trigger dialog live — NOT the old /control stub (DASH-9).
   function newTask() {
-    router.push("/control?action=new");
+    router.push("/workflows?action=new");
   }
 
   return (

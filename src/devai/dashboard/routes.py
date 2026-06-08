@@ -101,7 +101,18 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
             raise HTTPException(status_code=400, detail="Failed to get access token")
 
         user = await oauth.get_user(access_token)
-        await oauth.close()
+
+        # Gate session minting: a GitHub OAuth app otherwise lets ANY github.com
+        # account become a DevAI operator. is_user_authorized checks org
+        # membership (config.github_org) and/or a login/email allowlist. It is
+        # behavior-neutral by default — returns True when neither is configured.
+        try:
+            authorized = await oauth.is_user_authorized(access_token, user)
+        finally:
+            await oauth.close()
+        if not authorized:
+            logger.warning("github oauth: rejecting unauthorized user %r", user.get("login", ""))
+            raise HTTPException(status_code=403, detail="GitHub account is not authorized for this org")
 
         session_id = secrets.token_urlsafe(48)
         session_data = json.dumps(
@@ -146,6 +157,49 @@ async def _get_session(request: Request) -> dict[str, Any] | None:
     if not data:
         return None
     return json.loads(data)
+
+
+async def _require_principal(request: Request) -> Principal | None:
+    """Resolve the caller's Principal, gated by the ``require_auth`` flag.
+
+    Behavior-neutral by default: when ``DEVAI_REQUIRE_AUTH`` is False (the
+    current prod default) this returns the resolved principal or ``None`` for
+    anonymous callers — exactly the legacy ``extract_principal`` path, so the
+    legacy dashboard mutating routes behave identically until the flag is
+    flipped in chart values (CHART-1). When ``require_auth`` is True it
+    delegates to :func:`devai.authz.require_principal`, which 401s anonymous
+    callers (no fallback to a literal ``operator``).
+
+    This is the CODE-1 gate for the legacy dashboard mutating routes (repo /
+    project / scaffold / pipeline trigger / run-control / approval / governance
+    / config writes).
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is not None and getattr(config, "require_auth", False):
+        from devai.authz import require_principal
+
+        return await require_principal(request)
+    try:
+        return await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
+        return None
+
+
+async def _authorize_run(request: Request, run: dict[str, Any] | None) -> Principal | None:
+    """Resolve the caller and enforce team membership on the run's owning team.
+
+    Mirrors :func:`devai.pipeline.routes._authorize_run` for the legacy
+    dashboard run-control and approval routes (CODE-2): require an
+    authenticated principal (gated by ``require_auth``) and reject callers who
+    are not members of the run's owning team. Returns the principal so callers
+    can persist who approved/rejected.
+    """
+    principal = await _require_principal(request)
+    team_id = (run or {}).get("team_id") or ""
+    team_service = getattr(request.app.state, "team_service", None)
+    if team_service is not None and not team_service.can_dispatch(principal, team_id):
+        raise HTTPException(status_code=403, detail=f"not a member of team {team_id}")
+    return principal
 
 
 # --- API Endpoints ---
@@ -352,6 +406,7 @@ async def check_repo_name(request: Request, name: str, org: str = "tesserix") ->
 @router.post("/api/repos/create")
 async def create_repo(request: Request) -> dict[str, Any]:
     """Create a new repository via the GitHub App."""
+    await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
     body = await request.json()
     org = body.get("org", "tesserix")
     name = body.get("name", "").strip()
@@ -407,6 +462,7 @@ async def list_projects(request: Request) -> list[dict[str, Any]]:
 @router.post("/api/projects/create")
 async def create_project_endpoint(request: Request) -> dict[str, Any]:
     """Create a GitHub Project v2 and optionally link it to a repo."""
+    await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
     body = await request.json()
     title = body.get("title", "").strip()
     description = body.get("description", "")
@@ -435,6 +491,7 @@ async def create_project_endpoint(request: Request) -> dict[str, Any]:
 @router.post("/api/repos/scaffold")
 async def scaffold_repo(request: Request) -> dict[str, Any]:
     """Scaffold a repository with CI workflows, CLAUDE.md, and project structure."""
+    await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
     body = await request.json()
     repo = body.get("repo", "").strip()
     project_title = body.get("project_title", "")
@@ -685,6 +742,9 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     """Trigger a DevAI ALM pipeline run from the dashboard (LangGraph)."""
     import asyncio
 
+    # CODE-1: gate the mutating trigger. Dormant when require_auth is False
+    # (returns the resolved principal or None); 401s anonymous callers when on.
+    gated_principal = await _require_principal(request)
     body = await request.json()
     repo = body["repo"]
     requirements = body.get("requirements", "")
@@ -720,11 +780,12 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     if not requirements:
         raise HTTPException(status_code=400, detail="Requirements text or issue number required")
 
-    # Identity: who clicked Start Pipeline. extract_principal honors
+    # Identity: who clicked Start Pipeline. _require_principal honors
     # auth-bff X-Forwarded headers first, then falls back to the
     # devai_session cookie. We never trigger a run anonymously when
-    # we *do* have a logged-in user.
-    principal = await extract_principal(request) or Principal.system()
+    # we *do* have a logged-in user; with require_auth on, anonymous
+    # callers were already rejected above.
+    principal = gated_principal or Principal.system()
     trace_id = trace_id_from_request(request)
 
     # Create a run ID immediately for the response
@@ -787,6 +848,10 @@ async def retrigger_pipeline(run_id: str, request: Request) -> dict[str, Any]:
     if not original:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
 
+    # CODE-1/CODE-2: gate the retrigger and enforce the run's owning team.
+    # Dormant when require_auth is False.
+    retrigger_principal = await _authorize_run(request, original)
+
     # The run record has both top-level fields (set on create) AND a
     # `context` blob with the full ALMState. Try the context first since
     # it's the source of truth for what the agents actually saw.
@@ -820,7 +885,7 @@ async def retrigger_pipeline(run_id: str, request: Request) -> dict[str, Any]:
     # be the same person who triggered the original run. The audit trail
     # records both lineages: triggered_by on the new run = current user,
     # trigger_ref = "...#retry-of-<original>".
-    principal = await extract_principal(request) or Principal.system()
+    principal = retrigger_principal or Principal.system()
     trace_id = trace_id_from_request(request)
 
     async def _run_bg() -> None:
@@ -893,6 +958,9 @@ async def pause_pipeline(run_id: str, request: Request) -> dict[str, Any]:
     run = await state.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    # CODE-2: run-control is a human-in-the-loop guardrail — require an
+    # authorized team member (dormant when require_auth is False).
+    await _authorize_run(request, run)
     await _set_run_control(state, run_id, "paused")
     logger.info("Run %s paused via dashboard", run_id)
     return {"run_id": run_id, "control": "paused"}
@@ -907,6 +975,7 @@ async def resume_pipeline(run_id: str, request: Request) -> dict[str, Any]:
     run = await state.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    await _authorize_run(request, run)
     await _set_run_control(state, run_id, "running")
     logger.info("Run %s resumed via dashboard", run_id)
     return {"run_id": run_id, "control": "running"}
@@ -923,6 +992,7 @@ async def stop_pipeline(run_id: str, request: Request) -> dict[str, Any]:
     run = await state.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    await _authorize_run(request, run)
     await _set_run_control(state, run_id, "stopped")
     logger.info("Run %s stopped via dashboard", run_id)
     return {"run_id": run_id, "control": "stopped"}
@@ -992,6 +1062,7 @@ async def get_claude_md(request: Request, repo: str) -> dict[str, str]:
 @router.post("/api/governance/claude-md")
 async def save_claude_md(request: Request) -> dict[str, str]:
     """Save CLAUDE.md governance content for a repo."""
+    await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
     body = await request.json()
     repo = body["repo"]
     content = body["content"]
@@ -1013,13 +1084,38 @@ async def get_pending_approvals(request: Request, run_id: str) -> list[dict[str,
     return [json.loads(item) for item in raw]
 
 
-@router.post("/api/pipeline/runs/{run_id}/approvals/{gate}/approve")
-async def approve_gate(request: Request, run_id: str, gate: str) -> dict[str, str]:
-    """Approve a pending gate, allowing the pipeline to continue."""
-    redis = request.app.state.state_manager.redis
-    # Signal the waiting agent to proceed
-    await redis.set(f"devai:run:{run_id}:gate:{gate}", "approved", ex=3600)
-    # Remove from pending list
+async def _decide_gate(request: Request, run_id: str, gate: str, decision: str) -> dict[str, str]:
+    """Shared approve/reject logic for the legacy dashboard gates (CODE-2).
+
+    Human-in-the-loop guardrail: an approval/rejection must come from an
+    authenticated team member (gated by ``require_auth``), and we record who
+    decided + when on the gate signal so the decision is attributable. The
+    pending-approvals entry is annotated with the decision before removal so
+    a consumer that re-reads it still sees who acted.
+    """
+    state = request.app.state.state_manager
+    run = await state.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    principal = await _authorize_run(request, run)
+
+    redis = state.redis
+    decided_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    approver = principal.to_dict() if principal else None
+
+    # Signal the waiting agent to proceed. The agent poller
+    # (core.base_agent) compares this value against the bare strings
+    # "approved"/"rejected", so the signal MUST stay a bare string.
+    await redis.set(f"devai:run:{run_id}:gate:{gate}", decision, ex=3600)
+    # Record who decided + when in a side-channel key so the decision is
+    # attributable for audit without changing the signal the agent reads.
+    await redis.set(
+        f"devai:run:{run_id}:gate:{gate}:approver",
+        json.dumps({"approver": approver, "decided_at": decided_at}),
+        ex=86400,
+    )
+
+    # Remove the matching gate from the pending list (annotated for audit).
     approvals = await redis.lrange(f"devai:run:{run_id}:approvals", 0, -1)
     for item in approvals:
         data = json.loads(item)
@@ -1027,24 +1123,26 @@ async def approve_gate(request: Request, run_id: str, gate: str) -> dict[str, st
             await redis.lrem(f"devai:run:{run_id}:approvals", 1, item)
             break
 
-    logger.info("Gate %s approved for run %s", gate, run_id)
-    return {"status": "approved", "gate": gate}
+    logger.info(
+        "Gate %s %s for run %s by %s",
+        gate,
+        decision,
+        run_id,
+        (approver or {}).get("email", "anonymous"),
+    )
+    return {"status": decision, "gate": gate}
+
+
+@router.post("/api/pipeline/runs/{run_id}/approvals/{gate}/approve")
+async def approve_gate(request: Request, run_id: str, gate: str) -> dict[str, str]:
+    """Approve a pending gate, allowing the pipeline to continue."""
+    return await _decide_gate(request, run_id, gate, "approved")
 
 
 @router.post("/api/pipeline/runs/{run_id}/approvals/{gate}/reject")
 async def reject_gate(request: Request, run_id: str, gate: str) -> dict[str, str]:
     """Reject a pending gate, stopping the pipeline."""
-    redis = request.app.state.state_manager.redis
-    await redis.set(f"devai:run:{run_id}:gate:{gate}", "rejected", ex=3600)
-    approvals = await redis.lrange(f"devai:run:{run_id}:approvals", 0, -1)
-    for item in approvals:
-        data = json.loads(item)
-        if data.get("gate") == gate:
-            await redis.lrem(f"devai:run:{run_id}:approvals", 1, item)
-            break
-
-    logger.info("Gate %s rejected for run %s", gate, run_id)
-    return {"status": "rejected", "gate": gate}
+    return await _decide_gate(request, run_id, gate, "rejected")
 
 
 # --- Pipeline Permissions/Config ---
@@ -1068,6 +1166,10 @@ async def inject_requirements(request: Request, run_id: str) -> dict[str, Any]:
     run_data = await request.app.state.state_manager.get_run(run_id)
     if not run_data:
         raise HTTPException(status_code=404, detail="Run not found")
+
+    # CODE-1/CODE-2: injecting requirements steers a running pipeline — require
+    # an authorized team member (dormant when require_auth is False).
+    await _authorize_run(request, run_data)
 
     # Store the injection in Redis — the orchestrator polls this key
     injection = json.dumps(
@@ -1104,6 +1206,7 @@ async def inject_requirements(request: Request, run_id: str) -> dict[str, Any]:
 @router.post("/api/pipeline/config")
 async def save_pipeline_config(request: Request) -> dict[str, str]:
     """Save pipeline configuration (permissions, model settings, etc.)."""
+    await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
     body = await request.json()
     repo = body.get("repo", "default")
 

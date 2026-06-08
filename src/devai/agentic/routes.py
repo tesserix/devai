@@ -25,6 +25,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agentic", tags=["agentic"])
 
 
+async def _require_operator(request: Request) -> None:
+    """Operator-only gate for sensitive agentic actions/probes.
+
+    Dormant by default: when ``DEVAI_REQUIRE_AUTH`` is off this is a no-op so
+    current behavior is preserved. When it's on, the caller must resolve to a
+    real principal (no anonymous status probes / kagent dispatch) — 401
+    otherwise. The deliberate flip lives in chart values, not here.
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is None or not getattr(config, "require_auth", False):
+        return
+    from devai.identity import extract_principal
+
+    try:
+        principal = await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
+        principal = None
+    if principal is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+
+
 @router.get("/status")
 async def status(request: Request) -> dict[str, Any]:
     """Aggregated snapshot of the four agentic control-plane services.
@@ -34,6 +55,7 @@ async def status(request: Request) -> dict[str, Any]:
     probes run in a thread (httpx is sync) so the event loop stays
     responsive when one upstream is slow.
     """
+    await _require_operator(request)
     client = getattr(request.app.state, "registry_client", None)
     snapshot = await asyncio.to_thread(
         fetch_agentic_status,
@@ -53,6 +75,7 @@ async def llm_probe(request: Request) -> dict[str, Any]:
     """End-to-end test: dial the LLM gateway from devai-api, fire a
     1-token Anthropic call, return the result. Used as a smoke-test
     button in the Gateway panel."""
+    await _require_operator(request)
     try:
         from devai.adapters.llm import (
             LLMMessage,
@@ -107,6 +130,7 @@ async def kagent_dispatch(request: Request, agent: str, body: KagentDispatchBody
     from devai.config import settings
     from devai.identity import extract_principal, trace_id_from_request
 
+    await _require_operator(request)
     client = create_kagent_client(settings)
     if client is None:
         raise HTTPException(status_code=503, detail="kagent is not configured (no kagent_url)")

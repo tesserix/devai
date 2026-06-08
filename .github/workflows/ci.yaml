@@ -156,9 +156,22 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
         run: kubectl rollout restart deployment/devai-api -n devai
 
-      - name: Trivy vulnerability scan
+      # CHART-12: gating scan — fail the build (exit-code 1) on CRITICAL/HIGH so
+      # vulnerable images don't ship. Pinned to a trivy-action commit SHA
+      # (v0.36.0) instead of the mutable @master, which runs with packages:write.
+      - name: Trivy vulnerability gate
         if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Trivy vulnerability scan (SARIF)
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           format: sarif

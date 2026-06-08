@@ -18,6 +18,8 @@ import tempfile
 from typing import Any
 from urllib.parse import quote, urlparse
 
+from devai.tools.git_guard import InvalidGitRef, run_git_clone, validate_ref, validate_repo
+
 logger = logging.getLogger(__name__)
 
 VALIDATION_TOOLS: list[dict[str, Any]] = [
@@ -232,21 +234,17 @@ class ValidationToolExecutor:
     # --- Helpers ---
 
     async def _clone(self, repo: str, branch: str, tmpdir: str) -> bool:
+        # Validate before git sees them: reject `..`, leading `-`, and any
+        # value outside the safe owner/name + ref charset (injected text).
+        try:
+            repo = validate_repo(repo)
+            branch = validate_ref(branch)
+        except InvalidGitRef as e:
+            logger.error("Refusing to clone: %s", e)
+            return False
         clone_url = await self._build_clone_url(repo)
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            "clone",
-            "--branch",
-            branch,
-            "--depth",
-            "1",
-            clone_url,
-            tmpdir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        return proc.returncode == 0
+        returncode, _ = await run_git_clone(clone_url, branch, tmpdir)
+        return returncode == 0
 
     async def _build_clone_url(self, repo: str) -> str:
         """Build an authenticated clone URL when the SCM client supports it."""

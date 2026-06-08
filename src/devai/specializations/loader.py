@@ -55,6 +55,31 @@ _ALLOWED_HANDOVER_KEYS = {"type", "required", "description"}
 
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*(ms|s|m|h)?\s*$")
 
+# A user-authored spec may only bind `legacy_python_class:` to a curated set
+# of in-tree agent modules. Without this, the authoring API (auth is off by
+# default) is an importlib-of-arbitrary-module code-exec path in the
+# orchestrator process. On-disk built-in specs are loaded with authored=False
+# and bypass this restriction. The prefix is the package the runner imports
+# legacy agents from; the explicit set is the allowlist within it.
+_LEGACY_CLASS_ALLOWED_PREFIX = "devai.agents."
+_LEGACY_CLASS_ALLOWLIST: frozenset[str] = frozenset()
+
+
+def _legacy_class_allowed(dotted: str) -> bool:
+    """True if a user-authored spec may bind this legacy_python_class.
+
+    Allowed when it's on the explicit allowlist OR lives under the curated
+    ``devai.agents.*`` package (a real, in-tree agent module — never an
+    attacker-supplied top-level import like ``os`` or ``subprocess``). A
+    module path under the prefix must still name a submodule (have a dotted
+    tail), so the bare prefix alone is rejected.
+    """
+    if not dotted:
+        return True  # empty == no legacy bridge; nothing to restrict
+    if dotted in _LEGACY_CLASS_ALLOWLIST:
+        return True
+    return dotted.startswith(_LEGACY_CLASS_ALLOWED_PREFIX) and len(dotted) > len(_LEGACY_CLASS_ALLOWED_PREFIX)
+
 
 def _parse_timeout(value: Any, *, default: int = 900) -> int:
     """Parse Fiber-style duration. Returns seconds (int)."""
@@ -113,7 +138,18 @@ def _parse_handover_schema(raw: Any, *, source: str) -> dict[str, HandoverField]
     return out
 
 
-def load_specialization_from_string(text: str, *, source: str = "<inline>") -> Specialization:
+def load_specialization_from_string(
+    text: str, *, source: str = "<inline>", authored: bool = False
+) -> Specialization:
+    """Parse a specialization YAML string into a Specialization.
+
+    ``authored=True`` marks the input as coming from the user-authoring API
+    (the dashboard Create-Agent form / raw YAML), which is subject to extra
+    restrictions a trusted on-disk built-in spec is not — notably the
+    ``legacy_python_class`` allowlist (see :func:`_legacy_class_allowed`).
+    On-disk built-ins load with ``authored=False`` (the default), preserving
+    today's behavior for the shipped catalog.
+    """
     try:
         raw = yaml.safe_load(text)
     except yaml.YAMLError as e:
@@ -128,6 +164,13 @@ def load_specialization_from_string(text: str, *, source: str = "<inline>") -> S
     name = raw.get("name")
     if not name or not isinstance(name, str):
         raise SpecializationLoadError(f"{source}: missing or invalid 'name'")
+
+    legacy_class = str(raw.get("legacy_python_class", "") or "")
+    if authored and not _legacy_class_allowed(legacy_class):
+        raise SpecializationLoadError(
+            f"{source}: legacy_python_class {legacy_class!r} is not permitted on an authored agent "
+            f"(only built-in modules under {_LEGACY_CLASS_ALLOWED_PREFIX}* are allowed)"
+        )
 
     system_prompt = raw.get("system_prompt", "") or ""
     if not isinstance(system_prompt, str):
@@ -165,7 +208,7 @@ def load_specialization_from_string(text: str, *, source: str = "<inline>") -> S
             handover_schema=_parse_handover_schema(raw.get("handover_schema"), source=source),
             risk_level=RiskLevel.parse(raw.get("risk_level"), default=RiskLevel.MEDIUM),
             role_color=str(raw.get("role_color", "engineer")),
-            legacy_python_class=str(raw.get("legacy_python_class", "")),
+            legacy_python_class=legacy_class,
             metadata=dict(metadata),
         )
     except ValueError as e:

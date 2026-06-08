@@ -1,432 +1,372 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CheckCircle2,
-  CircleDashed,
-  ExternalLink,
-  GitBranch,
-  Loader2,
-  RefreshCw,
-  Rocket,
-  Search,
-  Truck,
-} from "lucide-react";
-
 /**
- * Workflows — kanban board over GitHub issues in the active repo.
+ * Workflows — the lifecycle HOME (DASH-5).
  *
- * Five swimlanes mirror the AgentAI lifecycle:
+ * One page to define → run → observe: every runnable blueprint is a card with a
+ * mini DAG preview, its description, a Run button (opens the shared trigger
+ * flow with that blueprint pre-selected), and its most recent runs linking to
+ * /runs/[id]. A GuidancePanel up top explains how it all fits together.
  *
- *   QUEUED       not started; ready to be picked
- *   IN-PROGRESS  agent has the issue
- *   REVIEW       PR opened, reviewer feedback loop
- *   DEPLOYED     merged + deployed to staging / preview
- *   SHIPPED      live in production
+ * The GitHub-issue Kanban that used to live here moved to /board.
  *
- * Lane membership is label-driven (see _LANE_LABELS in
- * src/devai/scm/routes.py). The dashboard reads
- * GET /api/scm/issues?repo=<owner>/<name> and renders one column per
- * lane. Each card carries title + #number + labels + last update.
+ * Data:
+ *   api.listBlueprints()              → the blueprint cards
+ *   api.getBlueprintGraph(name)       → each card's mini DAG (lazy, per card)
+ *   api.listRuns({ blueprint })       → each card's recent runs
+ *   api.triggerPipeline(repo, …, {blueprint}) → dispatch (via TriggerDialog)
  *
- * Repo selection: stored in localStorage("devai-workflows-repo"). The
- * user picks a repo from a /api/scm/repos-backed search box at the
- * top. The list of issues then refreshes for that repo.
+ * ?action=new auto-opens the trigger flow (the sidebar / ⌘K "New task" CTA
+ * routes here with that query — DASH-9).
  */
 
-type Lane = "queued" | "in_progress" | "review" | "deployed" | "shipped";
+import Link from "next/link";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { GitBranch, Layers, Play, Plus, RefreshCw } from "lucide-react";
 
-type Issue = {
-  number: number;
-  title: string;
-  state: "open" | "closed";
-  labels: string[];
-  updated_at: string;
-  html_url: string;
-  lane: Lane;
-  assignee: string;
-};
-
-type Lanes = Record<Lane, Issue[]>;
-
-type Repo = {
-  full_name: string;
-  name: string;
-  description: string;
-  private: boolean;
-  default_branch: string;
-  html_url: string;
-  pushed_at: string;
-};
-
-const LANE_ORDER: Lane[] = ["queued", "in_progress", "review", "deployed", "shipped"];
-
-const LANE_META: Record<Lane, { label: string; Icon: typeof CircleDashed; tone: string }> = {
-  queued:      { label: "Queued",       Icon: CircleDashed, tone: "var(--ink-muted)" },
-  in_progress: { label: "In progress",  Icon: Loader2,      tone: "var(--info)" },
-  review:      { label: "Review",       Icon: GitBranch,    tone: "var(--warn)" },
-  deployed:    { label: "Deployed",     Icon: Truck,        tone: "var(--accent)" },
-  shipped:     { label: "Shipped",      Icon: Rocket,       tone: "var(--ok)" },
-};
+import {
+  api,
+  type BlueprintGraph,
+  type BlueprintSummary,
+  type PipelineRun,
+} from "@/lib/api";
+import { BlueprintDAG } from "@/components/blueprint-dag";
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import { EmptyState } from "@/components/empty-state";
+import { GuidancePanel, HelpPopover } from "@/components/guidance";
+import { RunStateBadge } from "@/components/run-state-badge";
+import { TriggerDialog } from "@/components/trigger-dialog";
 
 export default function WorkflowsPage() {
-  const [repoQuery, setRepoQuery] = useState("");
-  const [repoList, setRepoList] = useState<Repo[]>([]);
-  const [repoOpen, setRepoOpen] = useState(false);
-  const [repoLoading, setRepoLoading] = useState(false);
-  const [activeRepo, setActiveRepoState] = useState<string>("");
-  const [lanes, setLanes] = useState<Lanes | null>(null);
-  const [lanesLoading, setLanesLoading] = useState(false);
+  return (
+    <Suspense fallback={<WorkflowsSkeleton />}>
+      <WorkflowsHome />
+    </Suspense>
+  );
+}
+
+function WorkflowsHome() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [blueprints, setBlueprints] = useState<BlueprintSummary[] | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const repoBoxRef = useRef<HTMLDivElement>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    const stored = window.localStorage.getItem("devai-workflows-repo");
-    if (stored) setActiveRepoState(stored);
-  }, []);
+  // The trigger flow, pre-bound to a chosen blueprint.
+  const [triggerBlueprint, setTriggerBlueprint] = useState<string | null>(null);
 
-  function setActiveRepo(full: string) {
-    setActiveRepoState(full);
-    window.localStorage.setItem("devai-workflows-repo", full);
-    setRepoOpen(false);
-    setRepoQuery("");
-    // Fire-and-forget repo scan so the memory adapter has a fresh
-    // profile (tech, frameworks, package managers) before the next
-    // pipeline run picks this repo up.
-    const [owner, name] = full.split("/", 2);
-    if (owner && name) {
-      fetch(
-        `/api/scm/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/scan`,
-        { method: "POST" }
-      ).catch(() => undefined);
-    }
-  }
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (repoBoxRef.current && !repoBoxRef.current.contains(e.target as Node)) {
-        setRepoOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
-
-  useEffect(() => {
-    if (!repoOpen) return;
-    let cancelled = false;
-    setRepoLoading(true);
-    // Only enrolled repos (those with .platform/devai.yaml on the
-    // default branch) belong on the Workflows board. Anything else
-    // should go through ⌘K @ to opt in first.
-    const params = new URLSearchParams({ initialised: "true" });
-    if (repoQuery) params.set("q", repoQuery);
-    const url = `/api/scm/repos?${params.toString()}`;
-    fetch(url)
-      .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data: Repo[]) => {
-        if (!cancelled) setRepoList(data);
-      })
-      .catch(() => {
-        if (!cancelled) setRepoList([]);
-      })
-      .finally(() => {
-        if (!cancelled) setRepoLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [repoQuery, repoOpen]);
-
-  const fetchLanes = useCallback(async (repoFull: string) => {
-    if (!repoFull) return;
-    setLanesLoading(true);
+  const load = useCallback(async () => {
+    setRefreshing(true);
     setError(null);
     try {
-      const r = await fetch(`/api/scm/issues?repo=${encodeURIComponent(repoFull)}&state=all`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setLanes(await r.json());
+      const list = await api.listBlueprints();
+      setBlueprints(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setLanes(null);
+      setBlueprints(null);
     } finally {
-      setLanesLoading(false);
+      setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    if (activeRepo) fetchLanes(activeRepo);
-  }, [activeRepo, fetchLanes]);
+    load();
+  }, [load]);
 
-  const totals = useMemo(() => {
-    if (!lanes) return null;
-    return LANE_ORDER.reduce<Record<Lane, number>>(
-      (acc, l) => {
-        acc[l] = (lanes[l] || []).length;
-        return acc;
-      },
-      { queued: 0, in_progress: 0, review: 0, deployed: 0, shipped: 0 },
-    );
-  }, [lanes]);
+  // ?action=new opens the trigger flow with no blueprint pre-bound — the
+  // backend picks the repo-appropriate default. (To run a specific blueprint,
+  // use its card's Run button.) We open with "" (not null) to mean "open,
+  // unbound". Clear the query so a refresh doesn't re-open it.
+  useEffect(() => {
+    if (searchParams.get("action") === "new") {
+      setTriggerBlueprint("");
+      router.replace("/workflows");
+    }
+  }, [searchParams, router]);
+
+  const handleTrigger = useCallback(
+    async (repo: string, requirements: string) => {
+      const result = await api.triggerPipeline(repo, requirements, {
+        blueprint: triggerBlueprint || undefined,
+      });
+      setTriggerBlueprint(null);
+      if (result?.run_id) router.push(`/runs/${result.run_id}`);
+    },
+    [triggerBlueprint, router],
+  );
 
   return (
     <div className="p-7 space-y-5 min-h-full">
+      <Breadcrumbs items={[{ label: "Fleet", href: "/" }, { label: "Workflows" }]} />
+
       <header className="flex items-start justify-between gap-4">
         <div>
-          <div className="label-eyebrow">Pipeline</div>
-          <h1 className="font-serif text-2xl font-medium mt-1" style={{ color: "var(--ink-strong)" }}>
+          <div className="label-eyebrow">Lifecycle</div>
+          <h1
+            className="font-serif text-2xl font-medium mt-1 flex items-center gap-2"
+            style={{ color: "var(--ink-strong)" }}
+          >
+            <Layers className="w-5 h-5" style={{ color: "var(--accent)" }} />
             Workflows
           </h1>
-          <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
-            Issues from the selected repository, grouped by lane. Each card is an issue the AgentAI is
-            working through — <span style={{ color: "var(--ink-muted)" }}>queued → in progress → review → deployed → shipped</span>.
+          <p className="text-sm mt-1 max-w-2xl" style={{ color: "var(--ink-soft)" }}>
+            Pick a blueprint, point it at a repo, and dispatch a run. Each blueprint is a fixed DAG of
+            stages — runs differ by which stages skip, never by adding or reordering them.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/workflows/new"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium whitespace-nowrap"
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setTriggerBlueprint("")}
+            className="btn-primary !py-1.5"
           >
+            <Plus className="w-3.5 h-3.5" /> New run
+          </button>
+          <Link href="/workflows/new" className="btn-secondary">
             <GitBranch className="w-3.5 h-3.5" /> Build blueprint
           </Link>
-          <button
-            onClick={() => activeRepo && fetchLanes(activeRepo)}
-            disabled={!activeRepo || lanesLoading}
-            className="btn-secondary"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${lanesLoading ? "animate-spin" : ""}`} /> Refresh
+          <button onClick={load} disabled={refreshing} className="btn-secondary">
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} /> Refresh
           </button>
         </div>
       </header>
 
-      {/* Repo picker. Click to open; type to filter. Selection persists. */}
-      <div ref={repoBoxRef} className="relative max-w-md">
-        <button
-          type="button"
-          onClick={() => setRepoOpen((v) => !v)}
-          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md text-sm transition-colors"
-          style={{
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            color: activeRepo ? "var(--ink)" : "var(--ink-muted)",
-          }}
-        >
-          <span className="flex items-center gap-2 min-w-0">
-            <Search className="w-3.5 h-3.5" style={{ color: "var(--ink-muted)" }} />
-            <span className="truncate font-mono">{activeRepo || "Select a repository…"}</span>
-          </span>
-          <span className="label-eyebrow">change</span>
-        </button>
-
-        {repoOpen && (
-          <div
-            className="absolute z-10 mt-1 w-full max-h-[60vh] overflow-y-auto panel-raised"
-            style={{ background: "var(--surface-raised)" }}
-          >
-            <div className="p-2 border-b" style={{ borderColor: "var(--border-subtle)" }}>
-              <input
-                autoFocus
-                value={repoQuery}
-                onChange={(e) => setRepoQuery(e.target.value)}
-                placeholder="Search repositories…"
-                className="field w-full"
-              />
-            </div>
-            {repoLoading ? (
-              <div className="px-3 py-4 text-sm" style={{ color: "var(--ink-muted)" }}>
-                Loading…
-              </div>
-            ) : repoList.length === 0 ? (
-              <div className="px-3 py-4 text-sm" style={{ color: "var(--ink-muted)" }}>
-                No enrolled repositories. Press{" "}
-                <kbd
-                  className="font-mono text-[10px] px-1 py-0.5 rounded border"
-                  style={{
-                    borderColor: "var(--border-subtle)",
-                    background: "var(--surface-muted)",
-                    color: "var(--ink)",
-                  }}
-                >
-                  ⌘K
-                </kbd>{" "}
-                then type <code>@</code> to enrol one.
-              </div>
-            ) : (
-              <ul className="divide-y" style={{ borderColor: "var(--border-subtle)" }}>
-                {repoList.map((r) => (
-                  <li key={r.full_name}>
-                    <button
-                      onClick={() => setActiveRepo(r.full_name)}
-                      className="w-full text-left px-3 py-2 hover:bg-[var(--surface-hover)] transition-colors"
-                    >
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="font-mono text-sm" style={{ color: "var(--ink-strong)" }}>
-                          {r.full_name}
-                        </span>
-                        {r.private && <span className="pill-muted pill">private</span>}
-                      </div>
-                      {r.description && (
-                        <p className="text-xs mt-0.5" style={{ color: "var(--ink-soft)" }}>
-                          {r.description}
-                        </p>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Lane summary chips */}
-      {totals && (
-        <div className="flex items-center gap-2 flex-wrap">
-          {LANE_ORDER.map((l) => {
-            const { label, Icon, tone } = LANE_META[l];
-            return (
-              <span
-                key={l}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs"
-                style={{
-                  background: "var(--surface-muted)",
-                  border: "1px solid var(--border-subtle)",
-                  color: "var(--ink-soft)",
-                }}
-              >
-                <Icon className="w-3 h-3" style={{ color: tone }} />
-                <span>{label}</span>
-                <span className="font-mono tabular-nums" style={{ color: "var(--ink-strong)" }}>
-                  {totals[l]}
-                </span>
-              </span>
-            );
-          })}
-        </div>
-      )}
+      <GuidancePanel id="workflows" />
 
       {error && (
         <div
-          className="rounded-md px-3 py-2 text-sm font-mono"
+          className="rounded-md px-3 py-2 text-sm font-mono flex items-start gap-2"
           style={{
             background: "var(--error-soft-bg)",
             color: "var(--error-ink)",
             border: "1px solid var(--error-soft-bd)",
           }}
         >
-          {error}
+          <div>
+            <div className="font-semibold">Pipeline runtime unavailable</div>
+            <div className="text-xs mt-0.5 opacity-90">{error}</div>
+          </div>
         </div>
       )}
 
-      {!activeRepo ? (
-        <div className="panel p-8 text-center" style={{ color: "var(--ink-soft)" }}>
-          <p className="text-sm">Pick an enrolled repository above to load its workflow.</p>
-          <p className="text-xs mt-2" style={{ color: "var(--ink-muted)" }}>
-            Need to add one? Press{" "}
-            <kbd
-              className="font-mono text-[10px] px-1 py-0.5 rounded border"
-              style={{
-                borderColor: "var(--border-subtle)",
-                background: "var(--surface-muted)",
-                color: "var(--ink)",
-              }}
-            >
-              ⌘K
-            </kbd>{" "}
-            and type <code>@</code> to enrol it.
-          </p>
-        </div>
+      {loading ? (
+        <WorkflowsCardsSkeleton />
+      ) : !blueprints || blueprints.length === 0 ? (
+        !error && (
+          <div className="panel">
+            <EmptyState
+              Icon={Layers}
+              title="No blueprints registered"
+              description="The runtime hasn't loaded any blueprint YAMLs yet. Build your own, or browse the catalog."
+              action={{ label: "Build a blueprint", href: "/workflows/new" }}
+              secondary={{ label: "Browse blueprints", href: "/blueprint" }}
+            />
+          </div>
+        )
       ) : (
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-          {LANE_ORDER.map((lane) => (
-            <Column key={lane} lane={lane} issues={(lanes && lanes[lane]) || []} loading={lanesLoading} />
+        <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {blueprints.map((b) => (
+            <BlueprintCard
+              key={b.name}
+              blueprint={b}
+              onRun={() => setTriggerBlueprint(b.name)}
+            />
           ))}
         </section>
       )}
+
+      {/* Shared trigger flow, pre-bound to the chosen blueprint. The dialog is
+          generic (repo + requirements); we thread the blueprint via the parent
+          handler so the backend dispatches the right DAG (DASH-6). */}
+      <TriggerDialog
+        open={triggerBlueprint !== null}
+        onClose={() => setTriggerBlueprint(null)}
+        onTrigger={handleTrigger}
+      />
     </div>
   );
 }
 
-function Column({ lane, issues, loading }: { lane: Lane; issues: Issue[]; loading: boolean }) {
-  const { label, Icon, tone } = LANE_META[lane];
+// ── Blueprint card ───────────────────────────────────────────────────────
+
+function BlueprintCard({
+  blueprint,
+  onRun,
+}: {
+  blueprint: BlueprintSummary;
+  onRun: () => void;
+}) {
+  const [graph, setGraph] = useState<BlueprintGraph | null>(null);
+  const [graphErr, setGraphErr] = useState(false);
+  const [runs, setRuns] = useState<PipelineRun[] | null>(null);
+
+  // Lazily fetch the DAG + recent runs for this blueprint.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getBlueprintGraph(blueprint.name)
+      .then((g) => !cancelled && setGraph(g))
+      .catch(() => !cancelled && setGraphErr(true));
+    api
+      .listRuns({ blueprint: blueprint.name, limit: 3 })
+      .then((r) => !cancelled && setRuns(r))
+      .catch(() => !cancelled && setRuns([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [blueprint.name]);
+
+  const isSupervisor = blueprint.name === "supervisor-alm";
+
   return (
-    <div className="flex flex-col min-w-0">
-      <header
-        className="flex items-center justify-between px-3 py-2 rounded-t-md border"
-        style={{ background: "var(--surface-muted)", borderColor: "var(--border-subtle)" }}
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon
-            className={`w-3.5 h-3.5 shrink-0 ${lane === "in_progress" ? "animate-spin" : ""}`}
-            style={{ color: tone }}
-          />
-          <span className="label-eyebrow !text-[10px]">{label}</span>
+    <article className="panel p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2
+              className="font-mono text-[15px] font-medium truncate"
+              style={{ color: "var(--ink-strong)" }}
+            >
+              {blueprint.title || blueprint.name}
+            </h2>
+            <span
+              className="inline-flex items-center gap-1 text-[11px]"
+              style={{ color: "var(--ink-muted)" }}
+            >
+              <GitBranch className="w-3 h-3" />
+              {blueprint.stageCount} stage{blueprint.stageCount === 1 ? "" : "s"}
+            </span>
+            {isSupervisor && (
+              <span className="inline-flex items-center gap-1">
+                <span className="pill pill-muted !text-[9px]">advisory plan</span>
+                <HelpPopover term="dynamic" />
+              </span>
+            )}
+          </div>
+          {blueprint.description && (
+            <p
+              className="mt-1 text-[13px] leading-snug line-clamp-2"
+              style={{ color: "var(--ink-soft)" }}
+            >
+              {blueprint.description}
+            </p>
+          )}
         </div>
-        <span className="font-mono text-xs tabular-nums" style={{ color: "var(--ink-strong)" }}>
-          {issues.length}
-        </span>
-      </header>
-      <div
-        className="flex-1 min-h-[200px] rounded-b-md border border-t-0 p-2 space-y-2"
-        style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
-      >
-        {loading && issues.length === 0 ? (
-          <div className="text-xs px-1 py-2" style={{ color: "var(--ink-muted)" }}>
-            Loading…
-          </div>
-        ) : issues.length === 0 ? (
-          <div className="text-xs px-1 py-2" style={{ color: "var(--ink-muted)" }}>
-            Nothing in this lane.
-          </div>
+        <button type="button" onClick={onRun} className="btn-primary !py-1.5 shrink-0">
+          <Play className="w-3.5 h-3.5" /> Run
+        </button>
+      </div>
+
+      {/* Mini DAG — static (no overlay) "what this blueprint does" preview. */}
+      <div className="panel-muted p-2 overflow-hidden">
+        {graph ? (
+          <BlueprintDAG graph={graph} dense />
+        ) : graphErr ? (
+          <p className="text-[12px] px-1 py-3" style={{ color: "var(--ink-muted)" }}>
+            Preview unavailable for <span className="font-mono">{blueprint.name}</span>.
+          </p>
         ) : (
-          issues.map((i) => <Card key={i.number} issue={i} />)
+          <div
+            className="animate-pulse rounded"
+            style={{ height: 72, background: "var(--surface-muted)" }}
+          />
         )}
       </div>
+
+      {/* Recent runs of this blueprint. */}
+      <RecentRuns runs={runs} blueprintName={blueprint.name} />
+    </article>
+  );
+}
+
+function RecentRuns({
+  runs,
+  blueprintName,
+}: {
+  runs: PipelineRun[] | null;
+  blueprintName: string;
+}) {
+  return (
+    <div className="border-t pt-2.5" style={{ borderColor: "var(--border-subtle)" }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="label-eyebrow">Recent runs</span>
+        <Link
+          href={`/runs?blueprint=${encodeURIComponent(blueprintName)}`}
+          className="text-[11px] hover:underline underline-offset-2"
+          style={{ color: "var(--accent)" }}
+        >
+          View all
+        </Link>
+      </div>
+      {runs === null ? (
+        <div className="space-y-1.5">
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className="animate-pulse rounded"
+              style={{ height: 28, background: "var(--surface-muted)" }}
+            />
+          ))}
+        </div>
+      ) : runs.length === 0 ? (
+        <p className="text-[12px] py-1" style={{ color: "var(--ink-muted)" }}>
+          No runs yet — Run it to see the DAG fill in live.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {runs.map((r) => (
+            <li key={r.run_id}>
+              <Link
+                href={`/runs/${r.run_id}`}
+                className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--surface-hover)]"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono text-[11px]" style={{ color: "var(--ink-muted)" }}>
+                    {(r.run_id ?? "").slice(0, 8)}
+                  </span>
+                  <span
+                    className="text-[12px] truncate"
+                    style={{ color: "var(--ink-strong)" }}
+                  >
+                    {r.repo || "—"}
+                  </span>
+                </span>
+                <RunStateBadge state={r.stage} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
-function Card({ issue }: { issue: Issue }) {
+// ── Loading skeletons ──────────────────────────────────────────────────────
+
+function WorkflowsCardsSkeleton() {
   return (
-    <a
-      href={issue.html_url}
-      target="_blank"
-      rel="noreferrer"
-      className="block rounded-md p-2.5 transition-colors group"
-      style={{ background: "var(--surface)", border: "1px solid var(--border-subtle)" }}
-      onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
-      onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-mono text-xs" style={{ color: "var(--ink-muted)" }}>
-          #{issue.number}
-        </span>
-        <ExternalLink
-          className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{ color: "var(--ink-muted)" }}
-        />
-      </div>
-      <h3 className="text-sm leading-snug mt-1" style={{ color: "var(--ink-strong)" }}>
-        {issue.title}
-      </h3>
-      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-        {issue.labels.slice(0, 3).map((l) => (
-          <span key={l} className="pill-muted pill !text-[9px] !tracking-wider !py-0">
-            {l}
-          </span>
-        ))}
-        {issue.assignee && (
-          <span className="text-[10px] font-mono" style={{ color: "var(--ink-muted)" }}>
-            @{issue.assignee}
-          </span>
-        )}
-      </div>
-      {issue.state === "closed" && (
-        <div className="mt-1.5 inline-flex items-center gap-1 text-[10px]" style={{ color: "var(--ok)" }}>
-          <CheckCircle2 className="w-3 h-3" /> closed
+    <section className="grid grid-cols-1 xl:grid-cols-2 gap-4" aria-busy>
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="panel p-4 space-y-3">
+          <div className="animate-pulse rounded" style={{ height: 22, width: "40%", background: "var(--surface-muted)" }} />
+          <div className="animate-pulse rounded" style={{ height: 80, background: "var(--surface-muted)" }} />
+          <div className="animate-pulse rounded" style={{ height: 40, background: "var(--surface-muted)" }} />
         </div>
-      )}
-    </a>
+      ))}
+    </section>
+  );
+}
+
+function WorkflowsSkeleton() {
+  return (
+    <div className="p-7 space-y-5 min-h-full">
+      <div className="animate-pulse rounded" style={{ height: 18, width: 160, background: "var(--surface-muted)" }} />
+      <div className="animate-pulse rounded" style={{ height: 32, width: 220, background: "var(--surface-muted)" }} />
+      <WorkflowsCardsSkeleton />
+    </div>
   );
 }

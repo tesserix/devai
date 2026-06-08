@@ -85,6 +85,7 @@ func main() {
 		AregistryHost:     cfg.AregistryHost,
 		PreviewDomain:     cfg.PreviewDomain,
 		PreviewNamespace:  cfg.PreviewNamespace,
+		SharedSecret:      cfg.SharedSecret,
 	})
 	if err != nil {
 		logger.Fatalf("proxy: %v", err)
@@ -99,6 +100,14 @@ func main() {
 		logger.Printf("agentic reverse-proxy: enabled (kagent=%s, aregistry=%s)", cfg.KagentHost, cfg.AregistryHost)
 	default:
 		logger.Printf("agentic reverse-proxy: partial (kagent=%q, aregistry=%q)", cfg.KagentHost, cfg.AregistryHost)
+	}
+	// Surface (never the value of) the X-Auth-Bff-Secret posture so the
+	// spoofing-defense state is obvious in pod logs. Unset = legacy behavior
+	// (header not stamped); the upstream fails closed only with its own secret.
+	if cfg.SharedSecret != "" {
+		logger.Printf("X-Auth-Bff-Secret: enabled (stamped on proxied identity)")
+	} else {
+		logger.Printf("X-Auth-Bff-Secret: unset (forwarded identity unsigned — set DEVAI_AUTH_BFF_SHARED_SECRET to enable)")
 	}
 
 	// One mux. Auth + health routes for everything; everything else falls

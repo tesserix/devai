@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 import google.generativeai as genai
 
+from devai.providers.groq_provider import _fetch_secret_via_adapter
+
 if TYPE_CHECKING:
     from devai.config import Settings
 
@@ -31,30 +33,16 @@ class GeminiProvider:
         self._model_name = config.gemini_model
 
     def _fetch_from_gcp(self, secret_name: str) -> str:
-        """Fetch API key from GCP Secret Manager."""
-        try:
-            import subprocess
+        """Fetch the API key via the secrets adapter (GCP SM SDK + Workload Identity).
 
-            result = subprocess.run(
-                [
-                    "gcloud",
-                    "secrets",
-                    "versions",
-                    "access",
-                    "latest",
-                    f"--secret={secret_name}",
-                    "--project=tesseracthub-480811",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                logger.info("Loaded Gemini API key from GCP Secret Manager: %s", secret_name)
-                return result.stdout.strip()
-        except Exception as e:
-            logger.debug("Could not fetch GCP secret %s: %s", secret_name, e)
-        return ""
+        Routes through ``adapters/secrets/factory`` instead of shelling out to the
+        ``gcloud`` CLI, which is absent from the distroless image. The project comes
+        from settings (``DEVAI_SECRETS_GCP_PROJECT`` / ``DEVAI_GKE_PROJECT``).
+        """
+        value = _fetch_secret_via_adapter(self._config, secret_name)
+        if value:
+            logger.info("Loaded Gemini API key from secrets adapter: %s", secret_name)
+        return value
 
     async def generate(
         self,

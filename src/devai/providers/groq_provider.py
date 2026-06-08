@@ -21,6 +21,48 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _fetch_secret_via_adapter(config: Settings, secret_name: str) -> str:
+    """Resolve a secret value through the secrets adapter (no gcloud subprocess).
+
+    Uses ``adapters/secrets/factory`` so the lookup runs over the GCP Secret
+    Manager SDK with Workload Identity (or whatever ``DEVAI_SECRETS_PROVIDER``
+    selects), reading the project from settings rather than a hard-coded id.
+    Returns ``""`` on any failure so provider construction degrades gracefully.
+    """
+    if not secret_name:
+        return ""
+    try:
+        import asyncio
+
+        from devai.adapters.secrets.factory import create_secrets_adapter
+
+        adapter = create_secrets_adapter(config)
+
+        async def _resolve() -> str:
+            try:
+                value = await adapter.get_secret(secret_name)
+            finally:
+                await adapter.close()
+            return value or ""
+
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is not None:
+            # Constructed inside an already-running loop (rare): run the
+            # coroutine on a dedicated loop in a worker thread to avoid reentry.
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(lambda: asyncio.run(_resolve())).result(timeout=15)
+        return asyncio.run(_resolve())
+    except Exception as e:  # noqa: BLE001 — never let secret resolution crash boot
+        logger.debug("Could not fetch secret %s via adapter: %s", secret_name, e)
+        return ""
+
+
 class GroqProvider:
     """Groq Cloud provider for fast LLM inference with Claude fallback."""
 
@@ -37,30 +79,16 @@ class GroqProvider:
         self._fallback_enabled = bool(config.anthropic_api_key)
 
     def _fetch_from_gcp(self, secret_name: str) -> str:
-        """Fetch API key from GCP Secret Manager."""
-        try:
-            import subprocess
+        """Fetch the API key via the secrets adapter (GCP SM SDK + Workload Identity).
 
-            result = subprocess.run(
-                [
-                    "gcloud",
-                    "secrets",
-                    "versions",
-                    "access",
-                    "latest",
-                    f"--secret={secret_name}",
-                    "--project=tesseracthub-480811",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                logger.info("Loaded Groq API key from GCP Secret Manager: %s", secret_name)
-                return result.stdout.strip()
-        except Exception as e:
-            logger.debug("Could not fetch GCP secret %s: %s", secret_name, e)
-        return ""
+        Routes through ``adapters/secrets/factory`` instead of shelling out to the
+        ``gcloud`` CLI, which is absent from the distroless image. The project comes
+        from settings (``DEVAI_SECRETS_GCP_PROJECT`` / ``DEVAI_GKE_PROJECT``).
+        """
+        value = _fetch_secret_via_adapter(self._config, secret_name)
+        if value:
+            logger.info("Loaded Groq API key from secrets adapter: %s", secret_name)
+        return value
 
     async def generate(
         self,

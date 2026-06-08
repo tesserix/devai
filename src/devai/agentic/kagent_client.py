@@ -15,9 +15,20 @@ confirm the controller's contract in-cluster before enabling it on the hot path.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Kubernetes object names (agents, namespaces) are RFC-1123 DNS labels:
+# lowercase alphanumerics and '-', starting/ending alphanumeric. Validating
+# before interpolation prevents path traversal / SSRF via crafted segments
+# (e.g. ``../`` or ``foo/bar``) in the A2A URL.
+_DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+
+
+def _valid_k8s_name(value: str) -> bool:
+    return bool(value) and bool(_DNS_LABEL.match(value))
 
 
 class KagentError(RuntimeError):
@@ -31,15 +42,26 @@ class KagentClient:
         *,
         namespace: str = "kagent",
         timeout_seconds: float = 30.0,
+        service_token: str = "",
     ) -> None:
         if not base_url:
             raise KagentError("kagent base_url is required")
         self._base = base_url.rstrip("/")
+        if namespace and not _valid_k8s_name(namespace):
+            raise KagentError(f"invalid kagent namespace {namespace!r} (must be a DNS-1123 label)")
         self._namespace = namespace
         self._timeout = timeout_seconds
+        # The auth-bff shared secret. Stamped as X-Auth-Bff-Secret so the
+        # controller's identity.forward_trusted gate accepts our forwarded
+        # identity instead of silently dropping it (see CODE-5/CODE-17).
+        self._service_token = service_token
 
     def a2a_url(self, agent: str, namespace: str | None = None) -> str:
         ns = namespace or self._namespace
+        if not _valid_k8s_name(agent):
+            raise KagentError(f"invalid kagent agent name {agent!r} (must be a DNS-1123 label)")
+        if not _valid_k8s_name(ns):
+            raise KagentError(f"invalid kagent namespace {ns!r} (must be a DNS-1123 label)")
         return f"{self._base}/api/a2a/{ns}/{agent}"
 
     @staticmethod
@@ -80,6 +102,11 @@ class KagentClient:
         url = self.a2a_url(agent, namespace)
         payload = self._build_request(message, message_id, request_id)
         headers = {"Content-Type": "application/json"}
+        # Stamp the shared secret so the forwarded identity is actually
+        # trusted downstream. Without it, X-Forwarded-User is dropped by the
+        # receiver's forward-trusted gate (it is meaningless on its own).
+        if self._service_token:
+            headers["X-Auth-Bff-Secret"] = self._service_token
         if triggered_by:
             headers["X-Forwarded-User"] = triggered_by
         if trace_id:
@@ -112,8 +139,9 @@ def create_kagent_client(settings: Any) -> KagentClient | None:
     if not url:
         return None
     ns = getattr(settings, "kagent_default_namespace", "") or "kagent"
+    service_token = getattr(settings, "auth_bff_shared_secret", "") or ""
     try:
-        return KagentClient(url, namespace=ns)
+        return KagentClient(url, namespace=ns, service_token=service_token)
     except KagentError:
         return None
 

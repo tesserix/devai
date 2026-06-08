@@ -26,8 +26,8 @@ type Config struct {
 	// web API key is a project identifier, not a credential) — but we
 	// avoid checking them into git and source them from GCP Secret
 	// Manager via ExternalSecret, so rotation flows through one path.
-	GIPWebAPIKey    string
-	GIPAuthDomain   string // e.g. tesseracthub-480811.firebaseapp.com
+	GIPWebAPIKey  string
+	GIPAuthDomain string // e.g. tesseracthub-480811.firebaseapp.com
 
 	// Hostnames that map onto pools. The /auth/config endpoint reads
 	// the incoming Host header and picks the right tenant/pool.
@@ -43,6 +43,14 @@ type Config struct {
 
 	// Authorization
 	AdminAllowedEmails string // comma-separated
+
+	// SharedSecret is stamped as X-Auth-Bff-Secret on proxied requests so the
+	// upstream (devai identity._forward_trusted) can confirm the X-Forwarded-*
+	// identity came from this BFF, not a spoofing in-mesh pod. Blank = unset
+	// (legacy behavior: header not sent). Sourced from the same ExternalSecret
+	// the upstream reads. Both env names are accepted (DEVAI_AUTH_BFF_SHARED_SECRET
+	// preferred, DEVAI_BFF_SHARED_SECRET kept for parity with the upstream).
+	SharedSecret string
 
 	// Reverse-proxy targets (kagent + aregistry).
 	//
@@ -84,6 +92,7 @@ func Load() (*Config, error) {
 		SessionSecure:        getEnv("DEVAI_BFF_SESSION_SECURE", "true") == "true",
 		SessionEncryptKey:    os.Getenv("DEVAI_BFF_SESSION_ENCRYPT_KEY"),
 		AdminAllowedEmails:   os.Getenv("DEVAI_BFF_ADMIN_ALLOWED_EMAILS"),
+		SharedSecret:         firstEnv("DEVAI_AUTH_BFF_SHARED_SECRET", "DEVAI_BFF_SHARED_SECRET"),
 		KagentUpstreamURL:    os.Getenv("DEVAI_BFF_KAGENT_UPSTREAM_URL"),
 		AregistryUpstreamURL: os.Getenv("DEVAI_BFF_AREGISTRY_UPSTREAM_URL"),
 		KagentHost:           os.Getenv("DEVAI_BFF_KAGENT_HOST"),
@@ -155,4 +164,15 @@ func getEnv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// firstEnv returns the value of the first env var in keys that is set and
+// non-empty, else "". Used where one setting accepts several alias names.
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
 }

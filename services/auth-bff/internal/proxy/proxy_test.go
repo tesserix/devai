@@ -115,3 +115,93 @@ func TestServeHTTP_OnlyKagentEnabled(t *testing.T) {
 		}
 	}
 }
+
+// mintSessionCookie produces a valid session cookie value for the test
+// manager so authenticated-path tests can exercise header stamping.
+func mintSessionCookie(t *testing.T, m *session.Manager) *http.Cookie {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	if err := m.Mint(rec, session.Session{
+		UID:      "uid-123",
+		Email:    "user@tesserix.app",
+		TenantID: "tenant-1",
+		Pool:     "agentic",
+	}); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	res := rec.Result()
+	cookies := res.Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("Mint set no cookie")
+	}
+	return cookies[0]
+}
+
+// TestServeHTTP_StampsAuthBffSecret is the CODE-5 regression: when a shared
+// secret is configured the proxy must stamp X-Auth-Bff-Secret on the
+// upstream request (alongside the existing X-Forwarded-* identity headers),
+// when it is unset the header must be absent, and any client-supplied value
+// must always be stripped so a caller can't forge the BFF's trust signal.
+func TestServeHTTP_StampsAuthBffSecret(t *testing.T) {
+	mgr := newTestSessionManager(t)
+	cookie := mintSessionCookie(t, mgr)
+
+	cases := []struct {
+		name         string
+		sharedSecret string
+		inbound      string // client-supplied X-Auth-Bff-Secret on the request
+		wantSecret   string // expected value at the upstream ("" = header absent)
+	}{
+		{"secret set stamps header", "s3cr3t", "", "s3cr3t"},
+		{"secret unset omits header", "", "", ""},
+		{"inbound forgery stripped when set", "s3cr3t", "forged", "s3cr3t"},
+		{"inbound forgery stripped when unset", "", "forged", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotSecret string
+			var gotUser string
+			var secretSeen bool
+			upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				gotSecret = r.Header.Get("X-Auth-Bff-Secret")
+				_, secretSeen = r.Header["X-Auth-Bff-Secret"]
+				gotUser = r.Header.Get("X-Forwarded-User")
+			}))
+			defer upstream.Close()
+
+			h, err := New(Config{
+				Session:        mgr,
+				KagentUpstream: upstream.URL,
+				KagentHost:     "kagent.test",
+				SharedSecret:   tc.sharedSecret,
+			})
+			if err != nil {
+				t.Fatalf("proxy.New: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "http://kagent.test/foo", nil)
+			req.Host = "kagent.test"
+			req.AddCookie(cookie)
+			if tc.inbound != "" {
+				req.Header.Set("X-Auth-Bff-Secret", tc.inbound)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+
+			// Identity headers must always be stamped (unchanged contract).
+			if gotUser != "user@tesserix.app" {
+				t.Fatalf("X-Forwarded-User = %q, want user@tesserix.app", gotUser)
+			}
+			if tc.wantSecret == "" {
+				if secretSeen {
+					t.Fatalf("X-Auth-Bff-Secret present (%q), want absent", gotSecret)
+				}
+			} else {
+				if gotSecret != tc.wantSecret {
+					t.Fatalf("X-Auth-Bff-Secret = %q, want %q", gotSecret, tc.wantSecret)
+				}
+			}
+		})
+	}
+}

@@ -38,10 +38,32 @@ with workflow.unsafe.imports_passed_through():
         task_from_dict,
         task_to_dict,
     )
-    from devai.pipeline.types import TaskState
+    from devai.pipeline.types import FAILURE_STATES, TaskState
 
 _DEFAULT_STAGE_TIMEOUT = 900
 _DEFAULT_MAX_ATTEMPTS = 3
+
+
+def _result_failed(result: Any) -> bool:
+    """True when a (non-raised) StageResult signals a soft failure.
+
+    A stage that catches its own error returns a StageResult rather than
+    raising; without this check the workflow would record it as completed and
+    ignore ``on_failure``. We treat three signals as failure, in priority
+    order, so the contract works whether or not the StageResult dataclass
+    grows a dedicated ``ok``/``failed`` field:
+      1. an explicit ``failed: true`` in the handover data,
+      2. an explicit ``ok: false`` in the handover data,
+      3. ``next_state`` landing in a FAILURE_STATE.
+    """
+    data = getattr(result, "data", None) or {}
+    if isinstance(data, dict):
+        if data.get("failed") is True:
+            return True
+        if data.get("ok") is False:
+            return True
+    next_state = getattr(result, "next_state", None)
+    return next_state is not None and next_state in FAILURE_STATES
 
 
 @workflow.defn(name="BlueprintWorkflow")
@@ -185,21 +207,47 @@ class BlueprintWorkflow:
             return exc
 
     def _apply(self, task: Any, spec: Any, res: Any) -> None:
-        """Merge one stage outcome into the task (declared-order, deterministic)."""
+        """Merge one stage outcome into the task (declared-order, deterministic).
+
+        Two failure shapes are honored so ``on_failure`` is respected on either
+        execution path:
+          * a raised exception (hard failure — activity raised / timed out), and
+          * a *soft* failure — the stage caught its own error and returned a
+            StageResult that signals failure (an explicit ``ok=False`` /
+            ``failed=True`` flag in its data, or ``next_state`` landing in a
+            FAILURE_STATE). Previously a soft failure in a parallel/gate level
+            was merged as a completed stage, so ``on_failure: stop`` never fired.
+        """
         if isinstance(res, BaseException):
-            if should_continue_on_failure(spec.on_failure):
-                workflow.logger.warning("stage %s failed, on_failure=continue: %s", spec.name, res)
-                task.stages_failed.append(spec.name)
-                return
-            task.state = TaskState.STAGE_FAILED
-            task.error = f"stage {spec.name!r} failed: {res}"
-            task.failed_stage = spec.name
-            task.stages_failed.append(spec.name)
+            self._record_failure(task, spec, f"stage {spec.name!r} failed: {res}")
             return
 
         result = stage_result_from_dict(res)
+
+        # Soft failure: the stage returned (didn't raise) but reported failure.
+        if _result_failed(result):
+            reason = result.message or f"stage {spec.name!r} reported failure"
+            # Still merge any handover the stage produced before it failed, so
+            # downstream diagnostics / rollback have its partial output.
+            if result.data:
+                task.agent_context.update(result.data)
+            self._record_failure(task, spec, reason, soft_state=result.next_state)
+            return
+
         if result.data:
             task.agent_context.update(result.data)
         if result.next_state is not None:
             task.state = result.next_state
         task.stages_completed.append(spec.name)
+
+    def _record_failure(self, task: Any, spec: Any, reason: str, *, soft_state: Any = None) -> None:
+        """Apply a stage failure (hard or soft) honoring ``on_failure``."""
+        task.stages_failed.append(spec.name)
+        if should_continue_on_failure(spec.on_failure):
+            workflow.logger.warning("stage %s failed, on_failure=continue: %s", spec.name, reason)
+            return
+        # stop | rollback: halt the run. Preserve the stage's own failure state
+        # when it gave one (soft path), else the generic STAGE_FAILED.
+        task.state = soft_state if soft_state in FAILURE_STATES else TaskState.STAGE_FAILED
+        task.error = reason
+        task.failed_stage = spec.name

@@ -16,6 +16,7 @@ the chat agent, and the dashboard all read from the same instance.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections import deque
@@ -89,6 +90,10 @@ class PipelineService:
         )
         self._sse_queues: list[asyncio.Queue[tuple[float, str, dict[str, Any]]]] = []
         self._lock = asyncio.Lock()
+        # Strong references to fire-and-forget publish tasks so the event loop
+        # can't GC them mid-flight (asyncio only holds a weak ref). Cleared by
+        # a done-callback when each task finishes.
+        self._publish_tasks: set[asyncio.Task[None]] = set()
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
@@ -471,18 +476,37 @@ class PipelineService:
                 applied = True
         return applied
 
-    async def approve_gate(self, task_id: str, gate: str, decision: str) -> bool:
+    async def approve_gate(
+        self, task_id: str, gate: str, decision: str, *, approver: dict[str, Any] | None = None
+    ) -> bool:
         """Approve or reject a human-approval gate on BOTH backends.
 
         `decision` is "approved" | "rejected". Records a Redis gate marker (for
         the in-process gate check + the dashboard's pending list) and sends the
         durable approve/reject Signal to the Temporal workflow.
+
+        ``approver`` — the principal that made the decision (``{email, uid}``).
+        Persisted alongside the decision so the human-in-the-loop guardrail has
+        an auditable record of who approved/rejected. None means the legacy
+        unattributed path (only reachable when auth is off).
         """
         sm = self.state_manager
         redis = getattr(sm, "redis", None)
         if redis is not None:
             try:
                 await redis.set(f"devai:pipeline:gate:{task_id}:{gate}", decision, ex=86400)
+                if approver:
+                    record = {
+                        "decision": decision,
+                        "by": approver.get("email") or approver.get("uid") or "",
+                        "uid": approver.get("uid", ""),
+                        "ts": time.time(),
+                    }
+                    await redis.set(
+                        f"devai:pipeline:gate:{task_id}:{gate}:approver",
+                        json.dumps(record),
+                        ex=86400,
+                    )
             except Exception:  # noqa: BLE001
                 logger.debug("gate marker write failed", exc_info=True)
         if self._pipeline is not None:
@@ -687,7 +711,11 @@ class PipelineService:
             except Exception:  # noqa: BLE001
                 logger.warning("event_bus publish failed: subject=%s", subject, exc_info=True)
 
-        asyncio.create_task(_pub())
+        task = asyncio.create_task(_pub())
+        # Keep a strong ref until the task completes — otherwise the GC may
+        # drop the only reference and the NATS publish is silently cancelled.
+        self._publish_tasks.add(task)
+        task.add_done_callback(self._publish_tasks.discard)
 
     def _ensure_started(self) -> None:
         if not self._started or self._pipeline is None:

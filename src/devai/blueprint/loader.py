@@ -31,7 +31,14 @@ from typing import Any
 
 import yaml
 
+from devai.blueprint.conditions import _TASK_BOOL_KEYS, validate_condition
+
 logger = logging.getLogger(__name__)
+
+# Human-readable hint for the load-time condition error (the bare property
+# names without the `task.` prefix), so the message points the author at the
+# valid keys without exposing the internal frozenset directly.
+_TASK_BOOL_KEYS_HINT = _TASK_BOOL_KEYS
 
 
 class BlueprintLoadError(Exception):
@@ -224,6 +231,22 @@ def load_blueprint_from_string(text: str, *, source: str = "<inline>") -> Bluepr
         depends_on = entry.get("depends_on") or []
         if not isinstance(depends_on, list) or not all(isinstance(d, str) for d in depends_on):
             raise BlueprintLoadError(f"{source}: stages[{i}] ({stage_name}) depends_on must be a list of strings")
+
+        # Validate the condition's keys at load time. A typo'd bare key (e.g.
+        # `task.haspr`) would otherwise fail open at runtime and let a gated
+        # stage run unconditionally — break loudly here instead. Prefixed
+        # (output./state.) keys resolve dynamically and stay fail-open.
+        condition = entry.get("condition")
+        if condition is not None:
+            if not isinstance(condition, str):
+                raise BlueprintLoadError(f"{source}: stages[{i}] ({stage_name}) condition must be a string")
+            unknown_keys = validate_condition(condition)
+            if unknown_keys:
+                raise BlueprintLoadError(
+                    f"{source}: stages[{i}] ({stage_name}) condition references unknown key(s): "
+                    f"{sorted(unknown_keys)}. Known task keys: {sorted(_TASK_BOOL_KEYS_HINT)} "
+                    f"(or an output./state. prefix)"
+                )
 
         config = entry.get("config") or {}
         if not isinstance(config, dict):

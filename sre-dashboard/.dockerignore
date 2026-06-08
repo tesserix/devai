@@ -1,0 +1,12 @@
+# CHART-10: keep the `COPY . .` layer from clobbering the npm ci install layer
+# and from leaking local build/dev artifacts and secrets into the image.
+node_modules
+.next
+.env
+.env.*
+.git
+.gitignore
+Dockerfile
+.dockerignore
+npm-debug.log*
+*.log

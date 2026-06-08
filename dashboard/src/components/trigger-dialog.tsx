@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, type BlueprintSummary } from "@/lib/api";
+import { BlueprintPicker } from "@/components/blueprint-picker";
+import { HelpPopover } from "@/components/guidance";
 
 interface Repo {
   full_name: string;
@@ -9,6 +11,22 @@ interface Repo {
   description: string;
   language: string;
   private: boolean;
+}
+
+// Pick the repo-appropriate default blueprint (DASH-6). A freshly created /
+// scaffolded repo is empty, so app-scaffold (build it from nothing) fits best;
+// an existing repo gets the full ALM pipeline. We fall back to whatever the
+// catalog actually ships so the recommendation is never a phantom name.
+function recommendBlueprint(
+  available: BlueprintSummary[],
+  opts: { isEmptyRepo: boolean },
+): string | undefined {
+  if (available.length === 0) return undefined;
+  const has = (name: string) => available.some((b) => b.name === name);
+  const order = opts.isEmptyRepo
+    ? ["app-scaffold", "alm-pipeline", "supervisor-alm", "crew-task"]
+    : ["alm-pipeline", "supervisor-alm", "crew-task"];
+  return order.find(has) ?? available[0].name;
 }
 
 interface Project {
@@ -22,7 +40,16 @@ interface Project {
 interface TriggerDialogProps {
   open: boolean;
   onClose: () => void;
-  onTrigger: (repo: string, requirements: string) => Promise<void>;
+  /**
+   * Dispatch handler. The 3rd `opts` argument threads the chosen blueprint
+   * (DASH-6) so the backend no longer silently defaults. It is optional so
+   * existing 2-arg callers keep working unchanged.
+   */
+  onTrigger: (
+    repo: string,
+    requirements: string,
+    opts?: { blueprint?: string },
+  ) => Promise<void>;
 }
 
 export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) {
@@ -57,6 +84,13 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   const [scaffold, setScaffold] = useState(false);
   const [scaffolding, setScaffolding] = useState(false);
 
+  // Blueprint selection (DASH-6). `blueprint` is the chosen name; once the user
+  // picks one explicitly we stop auto-steering it toward the recommendation.
+  const [blueprints, setBlueprints] = useState<BlueprintSummary[]>([]);
+  const [loadingBlueprints, setLoadingBlueprints] = useState(false);
+  const [blueprint, setBlueprint] = useState<string | null>(null);
+  const [blueprintTouched, setBlueprintTouched] = useState(false);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
   const projectDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -84,10 +118,39 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
     }
   }, []);
 
+  const fetchBlueprints = useCallback(async () => {
+    setLoadingBlueprints(true);
+    try {
+      const data = await api.listBlueprints();
+      setBlueprints(data);
+    } catch {
+      // Blueprint runtime may be disabled — the picker shows its own empty note.
+    } finally {
+      setLoadingBlueprints(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (open && repos.length === 0) fetchRepos();
     if (open && projects.length === 0) fetchProjects();
-  }, [open, repos.length, projects.length, fetchRepos, fetchProjects]);
+    if (open && blueprints.length === 0) fetchBlueprints();
+  }, [open, repos.length, projects.length, blueprints.length, fetchRepos, fetchProjects, fetchBlueprints]);
+
+  // The recommended blueprint depends on whether the target repo is empty:
+  // scaffolding a brand-new repo, or a freshly created one, leans toward
+  // app-scaffold; an existing repo gets the full ALM pipeline.
+  const selectedRepoMeta = repos.find((r) => r.full_name === selectedRepo);
+  const isEmptyRepo = scaffold || (!!selectedRepo && !selectedRepoMeta);
+  const recommended = useMemo(
+    () => recommendBlueprint(blueprints, { isEmptyRepo }),
+    [blueprints, isEmptyRepo],
+  );
+
+  // Auto-steer toward the recommendation until the user picks one themselves.
+  useEffect(() => {
+    if (blueprintTouched) return;
+    if (recommended) setBlueprint(recommended);
+  }, [recommended, blueprintTouched]);
 
   // Debounced repo name availability check
   const checkRepoName = useCallback((name: string) => {
@@ -216,13 +279,17 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
         setScaffolding(false);
       }
 
-      await onTrigger(selectedRepo, requirements);
+      await onTrigger(selectedRepo, requirements, {
+        blueprint: blueprint ?? undefined,
+      });
       setSelectedRepo("");
       setSearch("");
       setSelectedProject("");
       setProjectSearch("");
       setRequirements("");
       setScaffold(false);
+      setBlueprint(null);
+      setBlueprintTouched(false);
       onClose();
     } finally {
       setLoading(false);
@@ -267,8 +334,9 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
         }}
       >
         <div className="flex items-center justify-between mb-1">
-          <h2 className="font-serif text-lg font-medium" style={{ color: "var(--ink-strong)" }}>
+          <h2 className="flex items-center gap-1.5 font-serif text-lg font-medium" style={{ color: "var(--ink-strong)" }}>
             New Pipeline Run
+            <HelpPopover term="run" />
           </h2>
           <button
             onClick={onClose}
@@ -636,6 +704,21 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
               </span>
             </label>
           </div>
+
+          {/* Blueprint picker (DASH-6) — pick which DAG this run executes
+              instead of letting the backend silently default. Defaults to the
+              repo-appropriate recommendation and previews the selected DAG. */}
+          <BlueprintPicker
+            blueprints={blueprints}
+            value={blueprint}
+            onChange={(name) => {
+              setBlueprint(name);
+              setBlueprintTouched(true);
+            }}
+            recommended={recommended}
+            loading={loadingBlueprints}
+            loadGraph={(name) => api.getBlueprintGraph(name)}
+          />
 
           {/* Requirements */}
           <div>

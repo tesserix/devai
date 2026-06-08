@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,31 @@ if TYPE_CHECKING:
     from devai.runtime.k8s_client import K8sJobRuntime
 
 logger = logging.getLogger(__name__)
+
+
+# Cap how much pod stdout we pull and retain. The runner can emit a large log
+# (and on failure the tail is echoed into exception messages / the dashboard),
+# so bound it to avoid unbounded memory growth from a noisy or hostile runner.
+_MAX_LOG_TAIL_LINES = 2000
+_MAX_LOG_TAIL_BYTES = 256 * 1024  # 256 KiB is plenty for triage
+
+
+def _cap_logs(logs: str) -> str:
+    """Return the trailing slice of ``logs`` bounded to _MAX_LOG_TAIL_BYTES."""
+    if not logs:
+        return ""
+    if len(logs) <= _MAX_LOG_TAIL_BYTES:
+        return logs
+    return logs[-_MAX_LOG_TAIL_BYTES:]
+
+
+# Bound the parked-outcome cache so a stream of completed-but-unclaimed Jobs
+# (e.g. stages that were forgotten after an api restart) can't grow memory
+# without limit. Outcomes older than the TTL or beyond the cap are evicted on
+# each new parking — a late-registering stage past the TTL re-derives state
+# from the cluster instead (phase-2 resume).
+_OUTCOME_TTL_SECONDS = 3600.0  # 1h — well past any normal stage await
+_OUTCOME_MAX_ENTRIES = 512
 
 
 @dataclass(slots=True)
@@ -47,6 +73,8 @@ class JobOutcome:
     # Parsed from the pod's LOG::/CHECKPOINT::/RESULT:: line-protocol.
     checkpoints: list[dict[str, Any]] = field(default_factory=list)
     result: dict[str, Any] | None = None
+    # Monotonic timestamp the outcome was parked at — drives TTL eviction.
+    parked_at: float = field(default_factory=time.monotonic)
 
 
 class JobWatcher:
@@ -90,6 +118,32 @@ class JobWatcher:
         outcome = self._outcomes.pop(job_name, None)
         self._waiters.pop(job_name, None)
         return outcome
+
+    def _evict_stale_outcomes(self) -> None:
+        """Drop expired / overflow parked outcomes that no one claimed.
+
+        Outcomes are only consumed by a registered awaiter. If a stage was
+        forgotten (api restart) its outcome would otherwise live forever, so
+        evict any whose ``parked_at`` exceeds the TTL, and — if still over the
+        entry cap — drop the oldest. Outcomes with a live waiter are kept so we
+        never strand an in-flight stage.
+        """
+        now = time.monotonic()
+        for name, outcome in list(self._outcomes.items()):
+            if name in self._waiters:
+                continue
+            if now - outcome.parked_at > _OUTCOME_TTL_SECONDS:
+                self._outcomes.pop(name, None)
+        if len(self._outcomes) <= _OUTCOME_MAX_ENTRIES:
+            return
+        # Over the cap — evict oldest unwaited outcomes first.
+        evictable = sorted(
+            (item for item in self._outcomes.items() if item[0] not in self._waiters),
+            key=lambda item: item[1].parked_at,
+        )
+        overflow = len(self._outcomes) - _OUTCOME_MAX_ENTRIES
+        for name, _ in evictable[:overflow]:
+            self._outcomes.pop(name, None)
 
     async def start(self) -> None:
         """Spawn the background watch loop. Safe to call multiple times."""
@@ -201,7 +255,7 @@ class JobWatcher:
         pod_name = await self._runtime.find_pod_for_job(job_name)
         logs = ""
         if pod_name is not None:
-            logs = await self._runtime.pod_logs(pod_name, tail_lines=2000)
+            logs = _cap_logs(await self._runtime.pod_logs(pod_name, tail_lines=_MAX_LOG_TAIL_LINES))
 
         # Recover the structured result + checkpoint timeline from the pod's
         # line-protocol stdout (LOG::/CHECKPOINT::/RESULT::).
@@ -219,6 +273,9 @@ class JobWatcher:
             checkpoints=parsed.checkpoints,
             result=parsed.result,
         )
+        # Trim stale/unclaimed outcomes before adding a new one so the cache
+        # stays bounded even when stages are forgotten across api restarts.
+        self._evict_stale_outcomes()
         self._outcomes[job_name] = outcome
 
         ev = self._waiters.get(job_name)

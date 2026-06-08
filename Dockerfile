@@ -1,4 +1,5 @@
-FROM python:3.12-slim AS builder
+# CHART-11: pin python:3.12-slim by digest for reproducible builds.
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl && rm -rf /var/lib/apt/lists/*
@@ -8,7 +9,8 @@ COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .
 
-FROM python:3.12-slim
+# CHART-11: pin python:3.12-slim by digest for reproducible builds.
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git && rm -rf /var/lib/apt/lists/*

@@ -240,7 +240,10 @@ def create_app(
                     settings=config,
                     scm=preview_scm,
                 )
-                logger.info("Preview service ready")
+                # CODE-11: launch the idle-TTL reaper so abandoned previews
+                # don't leak until the namespace quota self-DoSes.
+                app.state.preview_service.start_reaper()
+                logger.info("Preview service ready (TTL reaper started)")
         except Exception:
             logger.exception("Preview service failed to start — preview API will 503")
             app.state.preview_service = None
@@ -392,6 +395,10 @@ def create_app(
             for cm in getattr(app.state, "_domain_mcp_cms", []) or []:
                 with suppress(Exception):
                     await cm.__aexit__(None, None, None)
+            preview_service = getattr(app.state, "preview_service", None)
+            if preview_service is not None:
+                with suppress(Exception):
+                    await preview_service.stop_reaper()
             if messaging_service is not None:
                 with suppress(Exception):
                     await messaging_service.stop()

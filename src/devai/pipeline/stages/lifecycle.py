@@ -214,11 +214,47 @@ class _CleanupStage(PipelineStage):
         return "cleanup"
 
     async def execute(self, task: DevAITask) -> StageResult:
-        # In the current architecture there's no sandbox pod to tear down;
-        # this is a hook for future sandbox/preview support.
+        # Tear down the per-run preview pod (Deployment + Service +
+        # VirtualService + PVC) if this run spun one up. Previously this was a
+        # stub, so previews leaked until the namespace quota self-DoSed
+        # (CODE-11). The deployment name is stamped on the task by the
+        # spin_preview_pod stage (task.sandbox_pod / agent_context).
+        cleaned_preview = await self._delete_preview(task)
+
         task.sandbox_pod = None
         task.dev_server_port = None
-        return StageResult(message="cleanup complete", data={"cleanup_done": True})
+        return StageResult(
+            message="cleanup complete",
+            data={"cleanup_done": True, "preview_deleted": cleaned_preview},
+        )
+
+    async def _delete_preview(self, task: DevAITask) -> bool:
+        """Best-effort delete of this run's preview. Returns True if attempted.
+
+        The K8s runtime is shared on ``deps.extra["k8s_runtime"]`` (None when
+        the runtime is disabled — local/in-process runs have no preview pod).
+        Cleanup must never fail the run, so any error is logged and swallowed.
+        """
+        deployment = (
+            task.sandbox_pod
+            or task.agent_context.get("preview_deployment_name")
+            or task.agent_context.get("preview_deployment")
+        )
+        if not deployment:
+            return False
+
+        runtime = (self.deps.extra or {}).get("k8s_runtime") if self.deps.extra else None
+        if runtime is None:
+            logger.debug("cleanup: preview %s present but no k8s runtime — skipping delete", deployment)
+            return False
+
+        try:
+            await runtime.delete_preview(str(deployment))
+            logger.info("cleanup: deleted preview %s for run %s", deployment, task.id)
+            return True
+        except Exception:  # noqa: BLE001 — cleanup must not fail the run
+            logger.warning("cleanup: delete_preview(%s) failed", deployment, exc_info=True)
+            return False
 
 
 def cleanup_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:

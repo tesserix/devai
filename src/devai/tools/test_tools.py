@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 from devai.services.redact import redact_secrets
+from devai.tools.git_guard import InvalidGitRef, run_git_clone, validate_ref, validate_repo
 
 logger = logging.getLogger(__name__)
 
@@ -68,29 +69,29 @@ class TestToolExecutor:
         base_url = inp["base_url"]
         test_file = inp.get("test_file", "")
 
+        # Validate before git sees them: reject `..`, leading `-`, and any
+        # value outside the safe owner/name + ref charset (injected text).
+        try:
+            repo = validate_repo(repo)
+            branch = validate_ref(branch)
+        except InvalidGitRef as e:
+            return {"success": False, "error": str(e)}
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Clone the repo
+            # Clone the repo (hardened: -- before args, no transport but https,
+            # no interactive credential prompt).
             clone_url = await self._build_clone_url(repo)
-            clone_proc = await asyncio.create_subprocess_exec(
-                "git",
-                "clone",
-                "--branch",
-                branch,
-                "--depth",
-                "1",
-                clone_url,
-                tmpdir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await clone_proc.communicate()
-            if clone_proc.returncode != 0:
+            returncode, stderr = await run_git_clone(clone_url, branch, tmpdir)
+            if returncode != 0:
                 return {"success": False, "error": f"Clone failed: {redact_secrets(stderr.decode())}"}
 
-            # Install dependencies
+            # Install dependencies. --ignore-scripts blocks pre/post-install
+            # lifecycle hooks (a supply-chain RCE vector via a malicious dep)
+            # since we run untrusted repo dependencies here.
             install_proc = await asyncio.create_subprocess_exec(
                 "npm",
                 "install",
+                "--ignore-scripts",
                 cwd=tmpdir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
