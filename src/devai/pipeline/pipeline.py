@@ -190,6 +190,10 @@ class Pipeline:
     def list_tasks(self) -> list[DevAITask]:
         return list(self._tasks.values())
 
+    def remove_task(self, task_id: str) -> bool:
+        """Drop a task from the in-memory registry. Returns True if present."""
+        return self._tasks.pop(task_id, None) is not None
+
     async def signal_run(self, task_id: str, signal_name: str, args: list[Any] | None = None) -> bool:
         """Send a control signal to a run via the workflow backend.
 

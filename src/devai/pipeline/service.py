@@ -454,6 +454,14 @@ class PipelineService:
         return True
 
     _CONTROL_SIGNALS = {"paused": "pause", "running": "resume", "stopped": "stop"}
+    # Control value → the run state the snapshot should show when there is no
+    # live executor to honor the polled flag.
+    _CONTROL_PERSISTED_STATE = {
+        "stopped": "cancelled",
+        "paused": "paused",
+        "running": "running",
+        "resume": "running",
+    }
 
     async def set_run_control(self, task_id: str, value: str) -> bool:
         """Set a run's control (pause/resume/stop) on BOTH backends.
@@ -463,6 +471,12 @@ class PipelineService:
         (a no-op when the in-process backend is active). One of the two is
         honored depending on the active provider — so the dashboard button works
         the same either way.
+
+        When NO live executor is processing the run in-memory (e.g. the api
+        restarted, leaving a "running" snapshot, or the run belongs to the
+        legacy orchestrator store the Fleet list reads), the polled flag/Signal
+        is never read — so we also reflect the control directly onto the
+        persisted snapshot. Without this, Stop on such a run looked like a no-op.
         """
         applied = False
         sm = self.state_manager
@@ -471,10 +485,77 @@ class PipelineService:
             await setter(task_id, value)
             applied = True
         sig = self._CONTROL_SIGNALS.get(value)
+        live = self._pipeline is not None and self._pipeline.get_task(task_id) is not None
         if sig and self._pipeline is not None:
             if await self._pipeline.signal_run(task_id, sig):
                 applied = True
+        if not live:
+            if await self._reflect_control_persisted(task_id, value):
+                applied = True
         return applied
+
+    async def _reflect_control_persisted(self, task_id: str, value: str) -> bool:
+        """Write the control's target state onto the persisted snapshot.
+
+        Handles both the pipeline-task store (`state` field) and the legacy
+        orchestrator run store (`stage` field). Returns True if a snapshot was
+        updated."""
+        sm = self.state_manager
+        target = self._CONTROL_PERSISTED_STATE.get(value)
+        if sm is None or target is None:
+            return False
+        get_pt = getattr(sm, "get_pipeline_task", None)
+        if get_pt is not None:
+            task = await get_pt(task_id)
+            if task:
+                task["state"] = target
+                task["updated_at"] = time.time()
+                await sm.persist_task(task, ttl=self.config.pipeline_task_ttl)
+                return True
+        upd = getattr(sm, "update_run_stage", None)
+        get_run = getattr(sm, "get_run", None)
+        if upd is not None and get_run is not None and await get_run(task_id):
+            await upd(task_id, target)
+            return True
+        return False
+
+    async def get_legacy_run(self, task_id: str) -> dict[str, Any] | None:
+        """Best-effort read of a legacy orchestrator run (`devai:run:*`)."""
+        sm = self.state_manager
+        getter = getattr(sm, "get_run", None)
+        if sm is None or getter is None:
+            return None
+        try:
+            return await getter(task_id)
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def delete_run(self, task_id: str) -> bool:
+        """Remove a run entirely — from the in-memory pipeline (stopping it
+        first), the pipeline-task store, and the legacy orchestrator store —
+        plus its control flag. Idempotent; safe on zombie / unknown runs."""
+        if self._pipeline is not None and self._pipeline.get_task(task_id) is not None:
+            try:
+                await self.set_run_control(task_id, "stopped")
+            except Exception:  # noqa: BLE001
+                logger.debug("stop-before-delete failed for %s", task_id, exc_info=True)
+            self._pipeline.remove_task(task_id)
+        sm = self.state_manager
+        if sm is not None:
+            for method in ("delete_pipeline_task", "delete_run"):
+                fn = getattr(sm, method, None)
+                if fn is not None:
+                    try:
+                        await fn(task_id)
+                    except Exception:  # noqa: BLE001
+                        logger.warning("%s failed for %s", method, task_id, exc_info=True)
+            ctrl = getattr(sm, "set_pipeline_control", None)
+            if ctrl is not None:
+                try:
+                    await ctrl(task_id, "")
+                except Exception:  # noqa: BLE001
+                    logger.debug("clear control flag failed for %s", task_id, exc_info=True)
+        return True
 
     async def approve_gate(
         self, task_id: str, gate: str, decision: str, *, approver: dict[str, Any] | None = None

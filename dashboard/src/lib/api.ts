@@ -353,6 +353,11 @@ export const api = {
       method: "POST",
     }),
 
+  deleteRun: (runId: string) =>
+    apiFetch<{ run_id: string; deleted: boolean }>(`/pipeline/runs/${runId}`, {
+      method: "DELETE",
+    }),
+
   // Config
   getConfig: (repo = "default") => apiFetch<PipelineConfig>(`/pipeline/config?repo=${repo}`),
 

@@ -12,10 +12,12 @@ import { RunList } from "@/components/run-list";
 import { TriggerDialog } from "@/components/trigger-dialog";
 import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
+import { useToast } from "@/components/toast";
 
 type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "events" | "chat" | "config";
 
 export default function DashboardPage() {
+  const toast = useToast();
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const [selectedRun, setSelectedRun] = useState<PipelineRun | null>(null);
@@ -84,19 +86,32 @@ export default function DashboardPage() {
     await fetchRuns();
   };
 
-  const handlePause = async (runId: string) => {
-    await api.pauseRun(runId);
-    await fetchRuns();
+  // Run controls. Errors used to be swallowed silently (the button just did
+  // nothing) — surface them as a toast so a failed pause/stop is visible.
+  const runControl = async (
+    runId: string,
+    verb: string,
+    fn: (id: string) => Promise<unknown>,
+  ) => {
+    try {
+      await fn(runId);
+      toast.success(`Run ${runId.slice(0, 8)} ${verb}.`);
+    } catch (e) {
+      toast.error(`Couldn't ${verb.replace(/ed$/, "")} run: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      await fetchRuns();
+    }
   };
 
-  const handleResume = async (runId: string) => {
-    await api.resumeRun(runId);
-    await fetchRuns();
-  };
+  const handlePause = (runId: string) => runControl(runId, "paused", api.pauseRun);
+  const handleResume = (runId: string) => runControl(runId, "resumed", api.resumeRun);
+  const handleStop = (runId: string) => runControl(runId, "stopped", api.stopRun);
 
-  const handleStop = async (runId: string) => {
-    await api.stopRun(runId);
-    await fetchRuns();
+  const handleDelete = async (runId: string) => {
+    await runControl(runId, "deleted", api.deleteRun);
+    // If the deleted run was selected, clear the selection so the detail pane
+    // doesn't keep polling a now-gone run.
+    if (selectedRunId === runId) setSelectedRunId(undefined);
   };
 
   const handleApprove = async (gate: string) => {
@@ -169,6 +184,7 @@ export default function DashboardPage() {
               onPause={handlePause}
               onResume={handleResume}
               onStop={handleStop}
+              onDelete={handleDelete}
             />
           )}
         </div>

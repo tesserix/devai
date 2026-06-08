@@ -40,6 +40,8 @@ interface RunListProps {
   onPause?: (runId: string) => Promise<void> | void;
   onResume?: (runId: string) => Promise<void> | void;
   onStop?: (runId: string) => Promise<void> | void;
+  // Delete a run (stops it if live, then removes it). Confirmed before firing.
+  onDelete?: (runId: string) => Promise<void> | void;
 }
 
 // Stages where the run is considered "in flight" — pause/stop are meaningful.
@@ -57,6 +59,7 @@ export function RunList({
   onPause,
   onResume,
   onStop,
+  onDelete,
 }: RunListProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -71,6 +74,14 @@ export function RunList({
     } finally {
       setBusyId(null);
     }
+  };
+
+  const handleDelete = (runId: string) => {
+    if (!onDelete || busyId === runId) return;
+    if (typeof window !== "undefined" && !window.confirm(`Delete run ${runId.slice(0, 8)}? This removes it permanently.`)) {
+      return;
+    }
+    void handleControl(runId, onDelete);
   };
 
   function controlsFor(run: RunRow) {
@@ -126,6 +137,18 @@ export function RunList({
               e.preventDefault();
               e.stopPropagation();
               handleControl(run.run_id, onStop);
+            }}
+          />
+        )}
+        {onDelete && (
+          <ControlPill
+            label="Delete"
+            color="muted"
+            busy={isBusy}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleDelete(run.run_id);
             }}
           />
         )}
@@ -256,13 +279,14 @@ export function RunList({
   );
 }
 
-type PillColor = "accent" | "warn" | "ok" | "error";
+type PillColor = "accent" | "warn" | "ok" | "error" | "muted";
 
 const PILL_CLASS: Record<PillColor, string> = {
   accent: "pill-info",
   warn: "pill-warn",
   ok: "pill-ok",
   error: "pill-error",
+  muted: "pill-muted",
 };
 
 interface ControlPillProps {

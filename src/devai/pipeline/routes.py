@@ -334,6 +334,11 @@ async def _set_control(request: Request, task_id: str, value: str) -> dict[str, 
     svc = _service(request)
     task = await svc.get_task(task_id)
     if task is None:
+        # The Fleet list also shows legacy-orchestrator runs (devai:run:*) that
+        # aren't pipeline tasks — fall back so pause/resume/stop work on them too
+        # (previously this 404'd and the dashboard silently swallowed it).
+        task = await svc.get_legacy_run(task_id)
+    if task is None:
         raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
     # Run-control (pause/resume/stop) is a privileged action — require a
     # principal (when auth is on) and enforce team membership (CODE-2).
@@ -358,6 +363,23 @@ async def resume(request: Request, task_id: str) -> dict[str, Any]:
 async def stop(request: Request, task_id: str) -> dict[str, Any]:
     """Stop a run — it cancels (not fails) at the next stage boundary."""
     return await _set_control(request, task_id, "stopped")
+
+
+@router.delete("/runs/{task_id}")
+async def delete_run(request: Request, task_id: str) -> dict[str, Any]:
+    """Delete a run — stops it if live, then removes it from the pipeline-task
+    store, the legacy orchestrator store, and clears its control flag. Lets the
+    dashboard clean up old / zombie runs."""
+    svc = _service(request)
+    task = await svc.get_task(task_id)
+    if task is None:
+        task = await svc.get_legacy_run(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    # Deleting a run is privileged — same guard as run-control.
+    await _authorize_run(request, task)
+    await svc.delete_run(task_id)
+    return {"run_id": task_id, "deleted": True}
 
 
 @router.post("/runs/{task_id}/inject")

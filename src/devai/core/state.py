@@ -71,6 +71,24 @@ class StateManager:
         """List recent pipeline run IDs for a specific repo."""
         return await self.redis.lrange(f"devai:runs:by_repo:{repo}", 0, limit - 1)
 
+    async def delete_run(self, run_id: str) -> None:
+        """Remove a legacy orchestrator run + its side keys and indices.
+
+        Used by the dashboard's run-delete action to clean up old / zombie runs
+        (the Fleet list reads this `devai:run:*` store). Idempotent."""
+        data = await self.redis.hgetall(f"devai:run:{run_id}")
+        repo = data.get("repo") if data else None
+        pipe = self.redis.pipeline()
+        pipe.delete(f"devai:run:{run_id}")
+        pipe.delete(f"devai:run:{run_id}:agents")
+        pipe.delete(f"devai:run:{run_id}:events")
+        pipe.delete(f"devai:run:{run_id}:a2a_messages")
+        pipe.lrem("devai:runs:recent", 0, run_id)
+        pipe.zrem("devai:runs:by_time", run_id)
+        if repo:
+            pipe.lrem(f"devai:runs:by_repo:{repo}", 0, run_id)
+        await pipe.execute()
+
     # --- Agent Status ---
 
     async def set_agent_status(
