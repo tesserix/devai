@@ -88,6 +88,19 @@ class BlueprintExecutor:
             len(levels),
         )
 
+        # Mark the run ACTIVE the moment execution begins. Without this the task
+        # sits at QUEUED for the entire blueprint: the app-scaffold run_as_job
+        # stages (scan/install_deps/seed_mocks) carry no `next_state`, so nothing
+        # moves it off QUEUED even as stages clearly run. The dashboard then reads
+        # state=queued, concludes the run hasn't started, and shows the QUEUED
+        # badge + "Waiting for the agent…" with empty Logs/Events/Timeline even
+        # though stage events are streaming. Per-stage sub-states (PLANNING/
+        # IMPLEMENTING) still refine this; we only guarantee it leaves QUEUED.
+        if task.state in (TaskState.PENDING, TaskState.QUEUED):
+            task.transition(TaskState.RUNNING)
+            if task.started_at is None:
+                task.started_at = time.time()
+
         for level_idx, level in enumerate(levels):
             # Honor user run-control (pause / stop) at each stage boundary.
             # Returns False when the run was stopped (task already CANCELLED).

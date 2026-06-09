@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Wifi, WifiOff } from "lucide-react";
+import { api } from "@/lib/api";
 import type { StreamEvent } from "@/lib/api";
 import { TerminalPanel } from "@/components/terminal-panel";
 
@@ -20,13 +21,28 @@ const SSE_REPLAY = 200;
 
 type Conn = "connecting" | "open" | "closed";
 
+const eventKey = (e: StreamEvent) =>
+  `${e.stage ?? ""}|${e.phase ?? ""}|${e.message ?? ""}`;
+
 function dedupeAppend(prev: StreamEvent[], next: StreamEvent): StreamEvent[] {
-  const key = (e: StreamEvent) =>
-    `${e.timestamp}|${e.stage ?? ""}|${e.phase ?? ""}|${e.message ?? ""}`;
-  const k = key(next);
+  const k = eventKey(next);
   const tail = prev.slice(-SSE_REPLAY);
-  if (tail.some((e) => key(e) === k)) return prev;
+  if (tail.some((e) => eventKey(e) === k)) return prev;
   return [...prev, next];
+}
+
+// Merge a batch (e.g. the run snapshot's stage_events) into the stream, deduped
+// by stage|phase|message and sorted by timestamp. This is the RELIABLE source:
+// the SSE feed is proxied through Next.js rewrites which buffer streaming
+// responses, so the browser's EventSource can silently deliver nothing. Polling
+// the run snapshot's stage_events over the plain GET path (which is NOT buffered)
+// guarantees the terminal shows progress; the SSE layer just adds lower latency
+// when it does come through.
+function mergeBatch(prev: StreamEvent[], batch: StreamEvent[]): StreamEvent[] {
+  const seen = new Set(prev.map(eventKey));
+  const fresh = batch.filter((e) => !seen.has(eventKey(e)));
+  if (fresh.length === 0) return prev;
+  return [...prev, ...fresh].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 }
 
 export function LiveLogs({ taskId, className }: { taskId: string; className?: string }) {
@@ -67,6 +83,49 @@ export function LiveLogs({ taskId, className }: { taskId: string; className?: st
     return () => {
       closedByUs = true;
       es?.close();
+    };
+  }, [taskId]);
+
+  // Reliable fallback: poll the run snapshot's stage_events over the plain GET
+  // path and merge them in. The SSE feed above is the nicer live layer, but it's
+  // proxied through Next.js rewrites that buffer streaming responses, so on its
+  // own the terminal can sit empty ("Waiting for the agent…") even while stages
+  // run. This poll guarantees the per-stage history shows up regardless.
+  useEffect(() => {
+    if (!taskId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const run = (await api.getRun(taskId)) as {
+          stage_events?: Array<{
+            stage?: string;
+            phase?: string;
+            message?: string;
+            error?: string | null;
+            timestamp?: number;
+            duration_ms?: number;
+          }>;
+        };
+        const se = run?.stage_events ?? [];
+        if (cancelled || se.length === 0) return;
+        const batch: StreamEvent[] = se.map((e, i) => ({
+          timestamp: e.timestamp ?? i,
+          task_id: taskId,
+          stage: e.stage,
+          phase: e.phase,
+          message: e.message,
+          error: e.error ?? null,
+        }));
+        setEvents((prev) => mergeBatch(prev, batch));
+      } catch {
+        /* transient — keep last data */
+      }
+    };
+    poll();
+    const id = window.setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
     };
   }, [taskId]);
 
