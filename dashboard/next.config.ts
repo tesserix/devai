@@ -25,14 +25,24 @@ const CONNECT_SRC = [
   "wss://*.tesserix.app",
 ].join(" ");
 
-const FRAME_SRC = ["'self'", "https://*.tesserix.app"].join(" ");
+// Firebase Auth (GIP) Google sign-in loads the gapi loader script and runs its
+// OAuth helper in an iframe/popup on these hosts — without them in script-src /
+// frame-src the popup is CSP-blocked and surfaces as `auth/internal-error`.
+const FRAME_SRC = [
+  "'self'",
+  "https://*.tesserix.app",
+  "https://*.firebaseapp.com", // <project>.firebaseapp.com/__/auth/{handler,iframe}
+  "https://apis.google.com",
+  "https://accounts.google.com",
+].join(" ");
 
 const CSP = [
   "default-src 'self'",
   // 'unsafe-inline' for Next's inline runtime + the theme script (see note
   // above). No hash/nonce here or it would disable 'unsafe-inline'. 'unsafe-eval'
-  // is NOT allowed.
-  "script-src 'self' 'unsafe-inline'",
+  // is NOT allowed. apis.google.com + gstatic are the Firebase/Google sign-in
+  // loader scripts.
+  "script-src 'self' 'unsafe-inline' https://apis.google.com https://www.gstatic.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",

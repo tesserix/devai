@@ -30,14 +30,15 @@ const CSP = [
   "default-src 'self'",
   // 'unsafe-inline' for Next's inline runtime + the theme script (see note
   // above). No hash/nonce here or it would disable 'unsafe-inline'. 'unsafe-eval'
-  // is NOT allowed.
-  "script-src 'self' 'unsafe-inline'",
+  // is NOT allowed. apis.google.com + gstatic are the Firebase/Google sign-in
+  // loader scripts (GIP popup), without which sign-in CSP-fails as auth/internal-error.
+  "script-src 'self' 'unsafe-inline' https://apis.google.com https://www.gstatic.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   `connect-src ${CONNECT_SRC}`,
-  // The SRE dashboard frames nothing; deny all framing both directions.
-  "frame-src 'none'",
+  // Frames only the GIP Google sign-in OAuth helper (popup/iframe).
+  "frame-src 'self' https://*.firebaseapp.com https://apis.google.com https://accounts.google.com",
   "frame-ancestors 'none'",
   "object-src 'none'",
   "base-uri 'self'",
