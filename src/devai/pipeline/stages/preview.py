@@ -24,12 +24,27 @@ applies directly.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.types import DevAITask, StageResult, TaskState
 
 logger = logging.getLogger(__name__)
+
+
+# git ref-safety: a valid branch is non-empty, has no whitespace and none of the
+# characters git forbids in a ref (~ ^ : ? * [ \ and ".." / "@{" sequences). The
+# old scaffold default "story/?-unknown-story" failed exactly on the "?".
+_INVALID_REF_CHARS = re.compile(r"[\s~^:?*\[\\]")
+
+
+def _is_valid_git_ref(ref: str) -> bool:
+    if not ref or ref in {"@"} or ".." in ref or "@{" in ref:
+        return False
+    if ref.startswith("/") or ref.endswith("/") or ref.endswith(".lock"):
+        return False
+    return not _INVALID_REF_CHARS.search(ref)
 
 
 # Default dev-server image. The scaffolded app installs into /work via
@@ -44,7 +59,7 @@ _DEFAULT_DEV_COMMAND: list[str] = ["sh", "-lc", "npm install && npm run dev -- -
 # the WebSocket terminal isn't shipped yet; the deployment is still
 # valid because the bridge container just sits idle until the dashboard
 # connects.
-_DEFAULT_BRIDGE_IMAGE = "ghcr.io/tesserix/devai-editor-bridge:main"
+_DEFAULT_BRIDGE_IMAGE = "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai-editor-bridge:main"
 _DEFAULT_BRIDGE_PORT = 7681
 
 
@@ -90,6 +105,14 @@ class PreviewSpinnerStage(PipelineStage):
             or task.agent_context.get("default_branch")
             or "main"
         )
+        # Ref-safety: a malformed upstream branch (e.g. the old "story/?-unknown-story"
+        # scaffold default) is an INVALID git ref and would make build_preview_manifests
+        # raise, failing the whole run. If the branch isn't a valid ref, fall back to the
+        # repo's default branch rather than hard-failing a successful scaffold.
+        if not _is_valid_git_ref(branch):
+            fallback = task.agent_context.get("default_branch") or "main"
+            logger.warning("spin_preview_pod: branch %r is not a valid ref — falling back to %r", branch, fallback)
+            branch = fallback
 
         inputs = PreviewInputs(
             run_id=task.id,

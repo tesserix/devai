@@ -213,8 +213,17 @@ export function BlueprintDAG({
           const b = byName[e.to];
           if (!a || !b) return null;
           const traversed = edgeTraversed(e.from);
-          const midX = (a.cx + b.cx) / 2;
-          const d = `M ${a.cx} ${a.cy} C ${midX} ${a.cy}, ${midX} ${b.cy}, ${b.cx} ${b.cy}`;
+          // Route from the BOTTOM edge of the source to the TOP edge of the
+          // target — a top-down flow. The old version drew center-to-center
+          // (a.cy → b.cy), so the connector ran straight THROUGH both node
+          // boxes and overlapped them. Anchoring to the box edges keeps the
+          // line in the gap between rows; the control points sit at the
+          // vertical midpoint so same-column edges are a clean straight line
+          // and cross-lane edges curve smoothly.
+          const ay = a.y + NODE_H; // bottom-center of source
+          const by = b.y; // top-center of target
+          const midY = (ay + by) / 2;
+          const d = `M ${a.cx} ${ay} C ${a.cx} ${midY}, ${b.cx} ${midY}, ${b.cx} ${by}`;
           return (
             <g key={`edge-${i}`}>
               <path
@@ -226,8 +235,8 @@ export function BlueprintDAG({
               />
               {e.kind === "conditional" && e.label && (
                 <text
-                  x={midX}
-                  y={(a.cy + b.cy) / 2 - 3}
+                  x={(a.cx + b.cx) / 2 + 6}
+                  y={midY - 2}
                   textAnchor="middle"
                   style={{ fontSize: 8, fill: "var(--ink-muted)" }}
                 >

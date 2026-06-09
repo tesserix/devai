@@ -106,7 +106,11 @@ stages:
       runner_required: true
     depends_on: [open_branch_pr]
     timeout: 600
-    on_failure: stop
+    # The preview pod is an OPTIONAL enhancement on top of a successful
+    # scaffold — the generated app already lives in the repo/branch by this
+    # point. A preview hiccup (e.g. the editor-bridge image not yet published)
+    # must NOT mark the whole run FAILED and hide the work that succeeded.
+    on_failure: continue
 
   - name: post_report
     stage: post_report            # inline — writes a summary to Redis

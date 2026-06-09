@@ -192,16 +192,26 @@ class SeniorDeveloperAgent(BaseAgent):
         # Get the active story context
         active_idx = state.get("active_story_index", 0)
         active_story = stories[active_idx] if active_idx < len(stories) else {}
-        story_number = active_story.get("number", "?")
-        story_title = active_story.get("title", "Unknown Story")
+        story_number = active_story.get("number")
+        story_title = active_story.get("title", "")
         story_desc = active_story.get("description", "")
         acceptance_criteria = active_story.get("acceptance_criteria", [])
 
         ac_text = "\n".join(f"- {c}" for c in acceptance_criteria) if acceptance_criteria else "(none)"
 
-        # Build the branch name
+        # Build the branch name. When this agent runs inside an ALM run it has a
+        # numbered story → story/<n>-<slug>. But the app-scaffold blueprint
+        # reuses this agent with NO story, so story_number was "?" and the title
+        # defaulted to "Unknown Story", yielding the branch "story/?-unknown-story".
+        # The "?" is an INVALID git ref and later made spin_preview_pod raise
+        # ValueError → the whole run FAILED even though scaffolding succeeded.
+        # Fall back to a ref-safe, story-less branch in that case.
         slug = self._slugify(story_title)
-        branch_name = f"story/{story_number}-{slug}"
+        if story_number:
+            branch_name = f"story/{story_number}-{slug}"
+        else:
+            run_suffix = str(state.get("run_id", ""))[-8:].strip("-")
+            branch_name = f"devai/{slug}" if slug else f"devai/scaffold-{run_suffix or 'app'}"
 
         # Check for existing branch (revision iteration)
         existing_branch = state.get("branch_name")
