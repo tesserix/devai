@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # advance the `deploy` branch marker
   packages: write
 
 concurrency:
@@ -89,3 +89,19 @@ jobs:
               echo "skip ${REPO} (no :latest yet)"
             fi
           done
+
+      # Only NOW — once every image's main-<sha> tag exists — advance the
+      # `deploy` branch to this commit. Kargo's warehouse watches `deploy`, NOT
+      # `main`, so it can't promote a commit before its images are pullable. This
+      # closes the race where git-discovery promoted instantly, the deploy pods
+      # pulled a not-yet-existing tag, and the GAR pull-through negative-cached a
+      # 404 that then stuck (ImagePullBackOff that never recovered).
+      - name: Advance the deploy marker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          gh api -X PATCH "repos/${OWNER_REPO}/git/refs/heads/deploy" -f sha="$SHA" -F force=true >/dev/null 2>&1 \
+            || gh api -X POST "repos/${OWNER_REPO}/git/refs" -f ref="refs/heads/deploy" -f sha="$SHA" >/dev/null
+          echo "deploy -> $SHA (images verified tagged)"
