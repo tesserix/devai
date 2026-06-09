@@ -350,8 +350,81 @@ def _suggest_stack(intent: str) -> str:
     return "nextjs"
 
 
+async def _stage_pick_stack(*, intent: str, stage_config: dict[str, Any], **_: Any) -> dict[str, Any]:
+    """Pick a curated stack for a blank repo from the user's intent.
+
+    Deterministic first-pass (the heavy customisation is the scaffold agent's
+    job). Honors an explicit, non-default `stack` in the stage config when the
+    user pre-chose one; otherwise derives it from the prompt. The chosen stack
+    is lifted into the handover bag so `scaffold_app` / `install_deps` read it.
+    """
+    chosen = (stage_config.get("stack") or "").strip()
+    if not chosen or chosen == "default":
+        chosen = _suggest_stack(intent)
+    return {"ok": True, "stack": chosen, "reason": f"selected {chosen} for: {intent[:80]}"}
+
+
+# Marker file → install command. First match wins.
+_INSTALL_CMDS: list[tuple[str, list[str]]] = [
+    ("package.json", ["npm", "install", "--no-audit", "--no-fund"]),
+    ("go.mod", ["go", "mod", "download"]),
+    ("requirements.txt", ["pip", "install", "-r", "requirements.txt"]),
+    ("pyproject.toml", ["pip", "install", "-e", "."]),
+]
+
+
+async def _stage_install_deps(*, stage_config: dict[str, Any], **_: Any) -> dict[str, Any]:
+    """Best-effort dependency pre-install in the cloned working tree.
+
+    Detects the toolchain from marker files and runs the matching install so the
+    preview pod's dev server boots fast. Degrades gracefully — a missing tool in
+    the base runner image (e.g. no `npm`) returns ok with `deferred=True`; the
+    stack-specific preview pod installs at boot. Only a real install FAILURE
+    (non-zero exit / timeout) fails the stage.
+    """
+    work = "/devai/work"
+    if not os.path.isdir(work):
+        return {"ok": True, "installed": False, "reason": "no working tree"}
+    for marker, cmd in _INSTALL_CMDS:
+        if not os.path.exists(os.path.join(work, marker)):
+            continue
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=work,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            out, _err = await asyncio.wait_for(proc.communicate(), timeout=480)
+            tail = (out or b"").decode("utf-8", "replace")[-2000:]
+            if proc.returncode != 0:
+                return {
+                    "ok": False,
+                    "installed": False,
+                    "marker": marker,
+                    "error": f"{cmd[0]} exited {proc.returncode}",
+                    "log_tail": tail,
+                }
+            return {"ok": True, "installed": True, "marker": marker, "tool": cmd[0], "log_tail": tail}
+        except TimeoutError:
+            return {"ok": False, "installed": False, "marker": marker, "error": f"{cmd[0]} install timed out"}
+        except FileNotFoundError:
+            # Toolchain not baked into the base runner — the stack-specific
+            # preview pod installs at boot. Don't fail the run.
+            return {
+                "ok": True,
+                "installed": False,
+                "deferred": True,
+                "marker": marker,
+                "reason": f"{cmd[0]} not in runner image — deferred to preview pod",
+            }
+    return {"ok": True, "installed": False, "reason": "no recognised dependency manifest"}
+
+
 _STAGE_HANDLERS: dict[str, Any] = {
     "scan_repo": _stage_scan_repo,
+    "stack_picker": _stage_pick_stack,
+    "dep_installer": _stage_install_deps,
 }
 
 

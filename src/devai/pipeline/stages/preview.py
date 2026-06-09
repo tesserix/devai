@@ -100,6 +100,14 @@ class PreviewSpinnerStage(PipelineStage):
             dev_port=int(self.config.get("dev_port", _DEFAULT_DEV_PORT)),
             editor_bridge_image=str(self.config.get("bridge_image", _DEFAULT_BRIDGE_IMAGE)),
             editor_bridge_port=int(self.config.get("bridge_port", _DEFAULT_BRIDGE_PORT)),
+            # Off unless explicitly enabled (the bridge image must be published).
+            # Without it the preview still spins up the dev server on its URL.
+            editor_bridge_enabled=bool(
+                self.config.get(
+                    "bridge_enabled",
+                    getattr(getattr(self.deps, "config", None), "preview_editor_bridge_enabled", False),
+                )
+            ),
         )
 
         # build_preview_manifests validates repo/ref and raises ValueError on a

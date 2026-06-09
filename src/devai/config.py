@@ -355,6 +355,10 @@ class Settings(BaseSettings):
     editor_bridge_image: str = (
         "asia-south1-docker.pkg.dev/tesseracthub-480811/ghcr-remote/tesserix/devai/devai-editor-bridge:main"
     )
+    # The editor-bridge sidecar (in-browser Claude Code) is OFF until its image
+    # is built + published — the live preview (dev server on a public URL) works
+    # without it. Flip to True once devai-editor-bridge ships.
+    preview_editor_bridge_enabled: bool = False
 
     # --- Monitoring ---
     prometheus_url: str = "http://prometheus-server.monitoring.svc.cluster.local:80"

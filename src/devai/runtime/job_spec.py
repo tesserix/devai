@@ -306,6 +306,10 @@ class PreviewInputs:
     dev_command: list[str]  # ["npm", "run", "dev"]
     editor_bridge_image: str  # devai-claude-code-bridge:main
     editor_bridge_port: int = 7681
+    # The editor-bridge sidecar (in-browser Claude Code) is optional — gate it
+    # off when the bridge image isn't published yet so the live preview (dev
+    # server) still spins up. Default off until the image ships.
+    editor_bridge_enabled: bool = False
 
 
 def build_preview_manifests(
@@ -458,7 +462,9 @@ def build_preview_manifests(
                     "serviceAccountName": cfg.service_account_name,
                     "securityContext": cfg.pod_security_context,
                     "initContainers": init_containers,
-                    "containers": [dev_container, bridge_container],
+                    # editor-bridge sidecar only when explicitly enabled (its
+                    # image must exist); the live preview works without it.
+                    "containers": [dev_container] + ([bridge_container] if inputs.editor_bridge_enabled else []),
                     "volumes": pod_volumes,
                     **({"imagePullSecrets": [{"name": cfg.pull_secret_name}]} if cfg.pull_secret_name else {}),
                 },
