@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type SREDraft, type SREDryRunPreview } from "@/lib/api";
+import { useConfirm } from "@/components/confirm-dialog";
 
 const BLUEPRINT_TEMPLATE = `name: my-sre-sweep
 description: >-
@@ -87,6 +88,7 @@ function statusColor(phase: string): string {
 }
 
 export default function SREStudioPage() {
+  const confirm = useConfirm();
   const [drafts, setDrafts] = useState<SREDraft[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [selected, setSelected] = useState<SREDraft | null>(null);
@@ -201,6 +203,13 @@ export default function SREStudioPage() {
   }
 
   async function remove(id: string) {
+    const ok = await confirm({
+      title: "Delete draft?",
+      message: "This permanently removes the SRE Studio draft. This can't be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     setBusy("delete");
     try {
       await api.sreStudio.deleteDraft(id);

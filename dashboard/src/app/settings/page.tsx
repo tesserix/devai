@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, KeyRound, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { useConfirm } from "@/components/confirm-dialog";
 import {
   api,
   type SettingsCatalog,
@@ -125,6 +126,7 @@ function ConnectorCard({
   onSaved: () => void;
   onDeleted: () => void;
 }) {
+  const confirm = useConfirm();
   return (
     <div className="panel p-5">
       <div className="flex items-start justify-between gap-4">
@@ -164,6 +166,13 @@ function ConnectorCard({
                 title="Delete"
                 aria-label={`Delete ${spec.label} (${c.scope})`}
                 onClick={async () => {
+                  const ok = await confirm({
+                    title: `Delete ${spec.label} connector?`,
+                    message: "This removes the connector and its stored credentials. This can't be undone.",
+                    confirmLabel: "Delete",
+                    tone: "danger",
+                  });
+                  if (!ok) return;
                   await api.deleteConnector(c.scope, c.scope_id, c.connector_key, c.instance_id);
                   onDeleted();
                 }}

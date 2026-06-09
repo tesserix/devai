@@ -240,6 +240,7 @@ export default function DashboardPage() {
               style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
             >
               <PipelineFlow
+                blueprint={(selectedRun as any)?.blueprint || "alm-pipeline"}
                 currentStage={selectedRun.stage}
                 run={selectedRun as any}
                 agentTimings={(selectedRun as any)?.context?.agent_timings}
