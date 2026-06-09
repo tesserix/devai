@@ -216,40 +216,62 @@ class JobWatcher:
         logger.info("job watcher: loop drained")
 
     async def _handle_event(self, event: dict[str, Any]) -> None:
-        """Inspect a Job event; signal waiters if it reached a terminal state."""
+        """Inspect a Job watch event; signal waiters if it reached terminal."""
         obj = event.get("object")
         if obj is None:
             return
-        # `object` may be a dict (raw) or a model instance (typed). Handle
-        # both — different SDK paths return different shapes.
+        await self._process_job(obj)
+
+    async def poll_once(self, job_name: str) -> bool:
+        """Fallback path for a missed watch event: read the Job directly and
+        process it. Returns True if the Job is terminal (outcome parked +
+        waiter fired). Best-effort — a transient API error returns False so the
+        caller keeps polling (or the watch stream catches it).
+
+        The JobRunnerStage polls this every few seconds while awaiting, so a
+        k8s watch that drops the terminal revision (reconnect/re-cycle gap)
+        can't strand the stage until its timeout.
+        """
+        try:
+            job = await self._runtime.get_job(job_name)
+        except Exception:  # noqa: BLE001 — keep polling; the watch may still catch it
+            logger.debug("job watcher: poll_once(%s) get_job failed", job_name, exc_info=True)
+            return False
+        return await self._process_job(job)
+
+    async def _process_job(self, obj: Any) -> bool:
+        """Terminal-check a Job object and, if terminal, build + park its
+        outcome and fire any waiter. Accepts both the dict shape from the watch
+        stream and the typed model from `get_job` (field access via _safe_get
+        handles both). Returns True iff the Job is terminal.
+        """
         job_name = _safe_get(obj, ["metadata", "name"])
-        status = _safe_get(obj, ["status"]) or {}
-
         if job_name is None:
-            return
+            return False
 
-        succeeded = bool(status.get("succeeded") or 0)
-        failed = bool(status.get("failed") or 0)
-        conditions = status.get("conditions") or []
+        succeeded = bool(_safe_get(obj, ["status", "succeeded"]) or 0)
+        failed = bool(_safe_get(obj, ["status", "failed"]) or 0)
+        conditions = _safe_get(obj, ["status", "conditions"]) or []
 
         # Use conditions when available — `succeeded`/`failed` counters are
         # noisy on retried pods.
         condition_type = None
         condition_message = ""
         for cond in conditions:
-            if cond.get("type") in ("Complete", "Failed") and cond.get("status") == "True":
-                condition_type = cond["type"]
-                condition_message = cond.get("message", "")
+            if _safe_get(cond, ["type"]) in ("Complete", "Failed") and _safe_get(cond, ["status"]) == "True":
+                condition_type = _safe_get(cond, ["type"])
+                condition_message = _safe_get(cond, ["message"]) or ""
                 break
 
         if condition_type is None and not (succeeded or failed):
-            # Still running — nothing to do.
-            return
+            return False  # still running
 
-        # We only act once per Job. If no waiter has registered yet, park
-        # the outcome anyway so a late-registering stage can still claim it.
+        # Already processed — make sure a (possibly late) waiter still fires.
         if job_name in self._outcomes:
-            return
+            ev = self._waiters.get(job_name)
+            if ev is not None:
+                ev.set()
+            return True
 
         ok = condition_type == "Complete" or (succeeded and not failed)
         pod_name = await self._runtime.find_pod_for_job(job_name)
@@ -262,6 +284,7 @@ class JobWatcher:
         from devai.runtime.protocol import parse_runner_lines
 
         parsed = parse_runner_lines(logs)
+        raw_status = _safe_get(obj, ["status"])
 
         outcome = JobOutcome(
             job_name=job_name,
@@ -269,7 +292,7 @@ class JobWatcher:
             message=condition_message or ("complete" if ok else "failed"),
             pod_name=pod_name,
             logs_tail=logs,
-            raw_status=status if isinstance(status, dict) else {},
+            raw_status=raw_status if isinstance(raw_status, dict) else {},
             checkpoints=parsed.checkpoints,
             result=parsed.result,
         )
@@ -291,6 +314,7 @@ class JobWatcher:
                 "job watcher: %s done with no waiter — outcome cached for late pickup",
                 job_name,
             )
+        return True
 
 
 def _safe_get(obj: Any, path: list[str]) -> Any:

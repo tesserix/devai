@@ -171,8 +171,21 @@ class JobRunnerStage(PipelineStage):
             agent_name,
         )
 
+        # Await completion. The watcher fires `event` from its k8s watch
+        # stream, but a watch can drop the terminal revision (reconnect /
+        # re-cycle gaps) — which would otherwise hang us until the stage
+        # timeout even though the Job (and the runner's RESULT::) finished. So
+        # poll the Job directly every few seconds as a fallback: poll_once
+        # reads the Job, and on a terminal status parks the outcome + fires the
+        # event itself, independent of the watch stream.
         try:
-            await event.wait()
+            while True:
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=8.0)
+                    break  # the watcher fired
+                except TimeoutError:
+                    if await watcher.poll_once(created_name):
+                        break  # poll found it terminal and parked the outcome
         except asyncio.CancelledError:
             # Executor timed out or task was cancelled — best-effort delete
             # so we don't leak the Job. The watcher will still see the
