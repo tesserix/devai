@@ -409,6 +409,21 @@ class Settings(BaseSettings):
     otel_export_interval_ms: int = 15000
     metrics_enabled: bool = True
 
+    # --- Logging & SLOs (dashboard /logs page) ---
+    # In-process log ring size (live "what is the service saying" view).
+    log_buffer_capacity: int = 2000
+    # GCS bucket holding archived pod logs (tesserix-k8s devai-log-archiver
+    # CronJob writes; we only LIST it for the archive panel). Empty disables
+    # the live listing — the panel still shows the configured policy.
+    log_archive_bucket: str = ""
+    # Days after which the purge CronJob deletes archived logs (mirrors the
+    # bucket lifecycle's delete rule; surfaced read-only in the UI).
+    log_purge_days: int = 15
+    # SLO targets the /api/analytics/slo endpoint scores against.
+    slo_availability_target_pct: float = 99.9
+    slo_latency_p95_ms: float = 1500.0
+    slo_error_rate_target_pct: float = 1.0
+
     # --- Specializations (Fiber-style YAML role catalog) ---
     specializations_enabled: bool = True
     specializations_dir: str = "specializations"

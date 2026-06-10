@@ -612,6 +612,26 @@ class Database:
         )
         return dict(row) if row else {}
 
+    async def analytics_incident_slo(self, days: int = 30) -> dict[str, Any]:
+        """Incident-side SLO inputs: MTTR, counts, resolution rate."""
+        row = await self.pool.fetchrow(
+            """SELECT
+                 COUNT(*)::int                                                   AS total_incidents,
+                 SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END)::int     AS critical_incidents,
+                 SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END)::int       AS resolved_incidents,
+                 AVG(mttr_seconds) FILTER (WHERE mttr_seconds IS NOT NULL)       AS avg_mttr_seconds,
+                 MAX(mttr_seconds)                                               AS worst_mttr_seconds
+               FROM sre_incidents
+               WHERE created_at >= NOW() - make_interval(days => $1)""",
+            days,
+        )
+        return dict(row) if row else {}
+
+    async def analytics_app_reliability(self) -> list[dict[str, Any]]:
+        """Per-app reliability rollup (uptime %, MTTR) from the SRE view."""
+        rows = await self.pool.fetch("SELECT * FROM v_sre_app_reliability")
+        return [dict(r) for r in rows]
+
     # =========================================================================
     # SRE Studio — config drafts (author → dry-run → publish)
     #

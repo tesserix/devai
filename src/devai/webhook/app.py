@@ -469,6 +469,16 @@ def create_app(
     # the request span/metrics wrap the whole handler (auth included). Noop
     # unless DEVAI_TELEMETRY_PROVIDER=otel + DEVAI_OTEL_ENDPOINT are set; the
     # factory never raises, so a bad config degrades to Noop, not a crash.
+    # In-process log ring — backs the dashboard's live Logs view
+    # (/api/analytics/logs). Bounded memory, no I/O; durable history is the
+    # GCS archive CronJob in tesserix-k8s.
+    try:
+        from devai.services.log_buffer import install as install_log_buffer
+
+        install_log_buffer(int(getattr(config, "log_buffer_capacity", 2000)))
+    except Exception:  # noqa: BLE001
+        logger.exception("log ring install failed — live Logs view disabled")
+
     try:
         from devai.adapters.telemetry import create_telemetry_adapter, set_global_telemetry
 

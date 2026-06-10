@@ -207,6 +207,35 @@ h1, h2, h3, h4 { color: var(--ink-strong); }
   color: var(--ink-muted);
 }
 
+/* Tailwind v4 preflight sets `cursor: default` on buttons; every enabled
+   button in this app is interactive, so restore the affordance globally
+   (raw buttons included — the .btn-* classes already set it too). */
+button:not(:disabled) { cursor: pointer; }
+
+/* Segmented control — pill group for range/filter toggles. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.seg > button {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: transparent;
+  border: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+.seg > button + button { border-left: 1px solid var(--border-subtle); }
+.seg > button:hover { background: var(--surface-hover); color: var(--ink); }
+.seg > button[data-active="true"] {
+  background: var(--accent-soft-bg);
+  color: var(--accent-soft-ink);
+  font-weight: 600;
+}
+
 /* Surfaces */
 .panel {
   background: var(--surface);

@@ -172,6 +172,14 @@ def create_sre_app() -> FastAPI:
     # Telemetry adapter (adapters/telemetry) — request spans/metrics for the
     # SRE API. Built synchronously so instrument_asgi can register middleware
     # before serving. Noop unless DEVAI_TELEMETRY_PROVIDER=otel; never raises.
+    # In-process log ring (live Logs view via the analytics routes).
+    try:
+        from devai.services.log_buffer import install as install_log_buffer
+
+        install_log_buffer(int(getattr(settings, "log_buffer_capacity", 2000)))
+    except Exception:  # noqa: BLE001
+        logger.exception("log ring install failed — live Logs view disabled")
+
     try:
         from devai.adapters.telemetry import create_telemetry_adapter, set_global_telemetry
 

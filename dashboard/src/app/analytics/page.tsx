@@ -36,7 +36,10 @@ function fmtMs(ms: number | null | undefined): string {
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
   const m = s / 60;
-  return `${m.toFixed(1)}m`;
+  if (m < 60) return `${m.toFixed(1)}m`;
+  const h = m / 60;
+  if (h < 48) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
 }
 function fmtUsd(n: number | null | undefined): string {
   if (n == null) return "—";
@@ -109,17 +112,9 @@ export default function AnalyticsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+          <div className="seg" role="group" aria-label="Time window">
             {DAY_OPTIONS.map((d) => (
-              <button
-                key={d}
-                onClick={() => setDays(d)}
-                className="px-3 py-1.5 text-sm"
-                style={{
-                  background: days === d ? "var(--accent-soft-bg)" : "var(--surface)",
-                  color: days === d ? "var(--accent-soft-ink)" : "var(--ink-soft)",
-                }}
-              >
+              <button key={d} onClick={() => setDays(d)} data-active={days === d} aria-pressed={days === d}>
                 {d}d
               </button>
             ))}

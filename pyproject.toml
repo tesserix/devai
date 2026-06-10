@@ -77,6 +77,10 @@ dependencies = [
     # provisions per-user/per-tenant secrets into Google Secret Manager.
     # Imported lazily inside the gcp_sm adapter only.
     "google-cloud-secret-manager>=2.20.0",
+    # GCS object-store backend (adapters/object_store/gcs.py) — composer
+    # attachments + the log-archive listing on the dashboard /logs page.
+    # Imported lazily inside the gcs adapter only.
+    "google-cloud-storage>=2.18.0",
     # Password hashing for the local_db identity backend (LOCAL/sandbox only).
     # Imported lazily inside src/devai/adapters/identity/local_db.py, so a
     # prod deployment (auth terminated at the auth-bff, noop backend) never

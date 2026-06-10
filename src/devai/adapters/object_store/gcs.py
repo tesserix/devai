@@ -66,6 +66,27 @@ class GCSObjectStoreAdapter(ObjectStoreAdapter):
 
         return await asyncio.to_thread(_do)
 
+    async def list_objects(self, *, prefix: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        def _do() -> list[dict[str, Any]]:
+            full_prefix = self._blob_name(prefix) if prefix else (self._prefix or None)
+            blobs = self._client.list_blobs(self._bucket_name, prefix=full_prefix, max_results=limit * 5)
+            out = [
+                {
+                    "key": b.name,
+                    "size": int(b.size or 0),
+                    "updated": b.updated.timestamp() if b.updated else None,
+                    "storage_class": b.storage_class or "",
+                }
+                for b in blobs
+            ]
+            out.sort(key=lambda o: o["updated"] or 0, reverse=True)
+            return out[:limit]
+
+        try:
+            return await asyncio.to_thread(_do)
+        except Exception:  # noqa: BLE001 — no creds / no bucket → empty, not error
+            return []
+
     async def health_check(self) -> dict[str, Any]:
         try:
             ok = await asyncio.to_thread(self._bucket.exists)

@@ -194,4 +194,176 @@ async def telemetry(request: Request) -> dict[str, Any]:
     }
 
 
+# ────────────────────────────────────────────────────────────────────
+# Live logs (in-process ring buffer)
+# ────────────────────────────────────────────────────────────────────
+
+
+@router.get("/logs")
+async def logs(
+    request: Request,  # noqa: ARG001 — uniform route signature
+    limit: int = Query(200, ge=1, le=1000),
+    level: str = Query("INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"),
+    q: str = "",
+    logger_prefix: str = "",
+) -> dict[str, Any]:
+    """Tail of this service's in-process log ring (newest last).
+
+    Live view only — durable history is the GCS archive (see /logs/archive).
+    """
+    from devai.services.log_buffer import get_buffer
+
+    buf = get_buffer()
+    if buf is None:
+        return {"entries": [], "stats": {"buffered": 0}, "enabled": False}
+    return {
+        "entries": buf.tail(limit=limit, min_level=level, q=q, logger_prefix=logger_prefix),
+        "stats": buf.stats(),
+        "enabled": True,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────
+# SLOs (Prometheus burn + SRE incident inputs vs configured targets)
+# ────────────────────────────────────────────────────────────────────
+
+
+async def _prom_query(config: Any, promql: str) -> float | None:
+    """Instant PromQL query → scalar; None when unreachable/empty."""
+    base = (getattr(config, "prometheus_url", "") or "").rstrip("/")
+    if not base:
+        return None
+    headers = {}
+    token = getattr(config, "prometheus_token", "") or ""
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base}/api/v1/query", params={"query": promql}, headers=headers)
+            data = resp.json()
+            results = data.get("data", {}).get("result", [])
+            if not results:
+                return None
+            return float(results[0]["value"][1])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@router.get("/slo")
+async def slo(request: Request, days: int = Query(7, ge=1, le=90)) -> dict[str, Any]:
+    """SLO scorecard: availability + latency + error-rate burn from Prometheus,
+    incident MTTR/MTTD + per-app reliability from the SRE tables, all scored
+    against the configured targets. Sections degrade to null independently."""
+    config = getattr(request.app.state, "config", None)
+    window = f"{days}d"
+
+    total = await _prom_query(config, f"sum(increase(devai_http_server_requests_total[{window}]))")
+    errors_5xx = await _prom_query(
+        config, f'sum(increase(devai_http_server_requests_total{{http_status_code=~"5.."}}[{window}]))'
+    )
+    p95 = await _prom_query(
+        config,
+        f"histogram_quantile(0.95, sum(rate(devai_http_server_duration_milliseconds_bucket[{window}])) by (le))",
+    )
+
+    availability_pct = error_rate_pct = None
+    if total is not None and total > 0:
+        bad = errors_5xx or 0.0
+        availability_pct = round((1 - bad / total) * 100, 4)
+        error_rate_pct = round((bad / total) * 100, 4)
+
+    target_avail = float(getattr(config, "slo_availability_target_pct", 99.9))
+    target_p95 = float(getattr(config, "slo_latency_p95_ms", 1500.0))
+    target_err = float(getattr(config, "slo_error_rate_target_pct", 1.0))
+
+    # Error budget: the fraction of allowed unavailability already burned.
+    budget_burn_pct = None
+    if availability_pct is not None:
+        allowed = 100.0 - target_avail
+        used = 100.0 - availability_pct
+        budget_burn_pct = round(min(100.0, (used / allowed) * 100), 2) if allowed > 0 else None
+
+    incidents: dict[str, Any] = {}
+    apps: list[dict[str, Any]] = []
+    db = await _db(request)
+    if db is not None:
+        try:
+            incidents = await db.analytics_incident_slo(days)
+        except Exception:  # noqa: BLE001
+            logger.debug("slo: incident query failed", exc_info=True)
+        try:
+            apps = await db.analytics_app_reliability()
+        except Exception:  # noqa: BLE001
+            logger.debug("slo: app reliability query failed", exc_info=True)
+
+    return {
+        "window_days": days,
+        "targets": {
+            "availability_pct": target_avail,
+            "latency_p95_ms": target_p95,
+            "error_rate_pct": target_err,
+        },
+        "http": {
+            "requests": total,
+            "availability_pct": availability_pct,
+            "error_rate_pct": error_rate_pct,
+            "latency_p95_ms": round(p95, 1) if p95 is not None else None,
+            "availability_met": (availability_pct >= target_avail) if availability_pct is not None else None,
+            "latency_met": (p95 <= target_p95) if p95 is not None else None,
+            "error_rate_met": (error_rate_pct <= target_err) if error_rate_pct is not None else None,
+            "error_budget_burn_pct": budget_burn_pct,
+        },
+        "incidents": incidents,
+        "apps": apps,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────
+# Log archive (GCS bucket the devai-log-archiver CronJob writes)
+# ────────────────────────────────────────────────────────────────────
+
+
+@router.get("/logs/archive")
+async def logs_archive(request: Request, limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
+    """The archive policy + a live object listing when the pod has GCS access.
+
+    Policy values are config (always shown); the listing degrades to [] without
+    creds so the panel still renders the bucket + lifecycle + purge settings.
+    """
+    config = getattr(request.app.state, "config", None)
+    bucket = getattr(config, "log_archive_bucket", "") if config else ""
+    purge_days = int(getattr(config, "log_purge_days", 15)) if config else 15
+
+    policy = {
+        "bucket": bucket,
+        "purge_days": purge_days,
+        # Mirrors the bucket's lifecycle rules (tesserix-k8s owns the bucket).
+        "lifecycle": [
+            {"after_days": 2, "action": "SetStorageClass", "value": "NEARLINE"},
+            {"after_days": 7, "action": "SetStorageClass", "value": "COLDLINE"},
+            {"after_days": purge_days, "action": "Delete", "value": ""},
+        ],
+        "archiver": "CronJob devai-log-archiver (every 6h) — pod logs → gs://" + (bucket or "<unset>"),
+        "purger": f"CronJob devai-log-purge (daily) — deletes objects older than {purge_days}d",
+    }
+
+    objects: list[dict[str, Any]] = []
+    total_bytes = 0
+    if bucket:
+        adapter = getattr(request.app.state, "log_archive_store", None)
+        if adapter is None:
+            try:
+                from devai.adapters.object_store.gcs import GCSObjectStoreAdapter
+
+                adapter = GCSObjectStoreAdapter(bucket=bucket)
+            except Exception:  # noqa: BLE001 — SDK/creds absent → policy-only panel
+                adapter = None
+            request.app.state.log_archive_store = adapter
+        if adapter is not None:
+            objects = await adapter.list_objects(limit=limit)
+            total_bytes = sum(o.get("size", 0) for o in objects)
+
+    return {"policy": policy, "objects": objects, "listed_bytes": total_bytes, "listing_available": bool(objects)}
+
+
 __all__ = ["router"]

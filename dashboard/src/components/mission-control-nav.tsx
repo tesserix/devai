@@ -20,6 +20,7 @@ import {
   PackageOpen,
   Plus,
   Radio,
+  ScrollText,
   Search,
   Settings,
   ShieldHalf,
@@ -107,6 +108,7 @@ const MID: NavItem[] = [
   { href: "/repos", label: "Repos", Icon: FolderGit2, description: "Onboard org repositories" },
   { href: "/gateway", label: "Gateway", Icon: Radio, description: "Agent Gateway + LLM proxy health" },
   { href: "/analytics", label: "Analytics", Icon: BarChart3, description: "Runs, agents, LLM cost + telemetry" },
+  { href: "/logs", label: "Logs", Icon: ScrollText, description: "Live logs, SLOs + GCS archive" },
 ];
 
 const SRE: NavItem[] = [

@@ -631,6 +631,15 @@ export const api = {
     llmCost: (days = 30) => apiFetch<LLMCost>(`/analytics/llm/cost?days=${days}`),
     sreSummary: () => apiFetch<AnalyticsSRESummary>("/analytics/sre/summary"),
     telemetry: () => apiFetch<TelemetryHealth>("/analytics/telemetry"),
+    logs: (opts: { limit?: number; level?: string; q?: string } = {}) => {
+      const p = new URLSearchParams();
+      if (opts.limit) p.set("limit", String(opts.limit));
+      if (opts.level) p.set("level", opts.level);
+      if (opts.q) p.set("q", opts.q);
+      return apiFetch<LogsResponse>(`/analytics/logs?${p.toString()}`);
+    },
+    slo: (days = 7) => apiFetch<SLOReport>(`/analytics/slo?days=${days}`),
+    logsArchive: (limit = 50) => apiFetch<LogArchive>(`/analytics/logs/archive?limit=${limit}`),
   },
 
   // ── Live preview: on-demand ephemeral preview environments ──────
@@ -1068,4 +1077,59 @@ export interface TelemetryHealth {
   prometheus: { url: string; reachable: boolean; status?: number };
   metrics_enabled: boolean;
   provider: string;
+}
+
+export interface LogEntry {
+  ts: number;
+  level: "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+  logger: string;
+  message: string;
+  exc?: string;
+}
+
+export interface LogsResponse {
+  entries: LogEntry[];
+  stats: {
+    buffered: number;
+    capacity?: number;
+    by_level?: Record<string, number>;
+    oldest_ts?: number | null;
+  };
+  enabled: boolean;
+}
+
+export interface SLOReport {
+  window_days: number;
+  targets: { availability_pct: number; latency_p95_ms: number; error_rate_pct: number };
+  http: {
+    requests: number | null;
+    availability_pct: number | null;
+    error_rate_pct: number | null;
+    latency_p95_ms: number | null;
+    availability_met: boolean | null;
+    latency_met: boolean | null;
+    error_rate_met: boolean | null;
+    error_budget_burn_pct: number | null;
+  };
+  incidents: {
+    total_incidents?: number;
+    critical_incidents?: number;
+    resolved_incidents?: number;
+    avg_mttr_seconds?: number | null;
+    worst_mttr_seconds?: number | null;
+  };
+  apps: Record<string, unknown>[];
+}
+
+export interface LogArchive {
+  policy: {
+    bucket: string;
+    purge_days: number;
+    lifecycle: { after_days: number; action: string; value: string }[];
+    archiver: string;
+    purger: string;
+  };
+  objects: { key: string; size: number; updated: number | null; storage_class: string }[];
+  listed_bytes: number;
+  listing_available: boolean;
 }

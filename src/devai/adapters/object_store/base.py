@@ -48,6 +48,16 @@ class ObjectStoreAdapter(Adapter):
         """A time-limited URL the browser can GET. Default: not supported."""
         raise NotImplementedError(f"{self.provider_name} adapter does not implement signed_url")
 
+    async def list_objects(self, *, prefix: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        """List stored objects under a prefix, newest first.
+
+        Each entry: `{key, size, updated (epoch), storage_class}`. Backends
+        without listing (or with no creds) return [] — callers treat an empty
+        list as "nothing visible", never an error. Backs the dashboard's
+        log-archive panel.
+        """
+        return []
+
     async def close(self) -> None:
         return None
 
