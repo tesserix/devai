@@ -173,10 +173,13 @@ def create_sre_app() -> FastAPI:
     # SRE API. Built synchronously so instrument_asgi can register middleware
     # before serving. Noop unless DEVAI_TELEMETRY_PROVIDER=otel; never raises.
     try:
-        from devai.adapters.telemetry import create_telemetry_adapter
+        from devai.adapters.telemetry import create_telemetry_adapter, set_global_telemetry
 
         app.state.telemetry = create_telemetry_adapter(settings)
         app.state.telemetry.instrument_asgi(app)
+        # Process-global sink — the instrumented LLM delegate (SRE agents'
+        # calls included) emits into the same exporter.
+        set_global_telemetry(app.state.telemetry)
     except Exception:  # noqa: BLE001
         logger.exception("SRE telemetry adapter construction failed — continuing without it")
         app.state.telemetry = None

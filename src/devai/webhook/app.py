@@ -470,10 +470,14 @@ def create_app(
     # unless DEVAI_TELEMETRY_PROVIDER=otel + DEVAI_OTEL_ENDPOINT are set; the
     # factory never raises, so a bad config degrades to Noop, not a crash.
     try:
-        from devai.adapters.telemetry import create_telemetry_adapter
+        from devai.adapters.telemetry import create_telemetry_adapter, set_global_telemetry
 
         app.state.telemetry = create_telemetry_adapter(config)
         app.state.telemetry.instrument_asgi(app)
+        # Register as the process-global sink so call sites without
+        # constructor injection (the instrumented LLM delegate, tools)
+        # emit into the same exporter.
+        set_global_telemetry(app.state.telemetry)
     except Exception:  # noqa: BLE001
         logger.exception("telemetry adapter construction failed — continuing without telemetry")
         app.state.telemetry = None

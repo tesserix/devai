@@ -95,7 +95,12 @@ def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdap
     try:
         adapter = llm_registry.resolve(chosen, settings)
         logger.info("LLMAdapter active: %s (model=%s)", adapter.provider_name, adapter.default_model)
-        return adapter
+        # Wrap every backend in the telemetry delegate so EVERY caller —
+        # pipeline agents, chat, SRE, probes — emits per-call token/latency
+        # metrics into the process-global sink. Free when telemetry is Noop.
+        from devai.adapters.llm.instrumented import InstrumentedLLMAdapter
+
+        return InstrumentedLLMAdapter(adapter)
     except AdapterNotInstalled as e:
         logger.warning("llm_provider=%s: %s — using Noop", chosen, e)
         return NoopLLMAdapter()

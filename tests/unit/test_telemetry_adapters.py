@@ -104,6 +104,69 @@ def test_known_providers() -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Global sink + instrumented LLM delegate
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _RecordingTelemetry(NoopTelemetryAdapter):
+    """Noop that remembers every record_llm call."""
+
+    def __init__(self) -> None:
+        self.llm_calls: list[LLMMetric] = []
+
+    def record_llm(self, metric: LLMMetric) -> None:
+        self.llm_calls.append(metric)
+
+
+def test_global_sink_defaults_to_noop_and_resets() -> None:
+    from devai.adapters.telemetry.runtime import get_global_telemetry, set_global_telemetry
+
+    set_global_telemetry(None)
+    assert get_global_telemetry().provider_name == "noop"
+    sink = _RecordingTelemetry()
+    set_global_telemetry(sink)
+    assert get_global_telemetry() is sink
+    set_global_telemetry(None)
+
+
+@pytest.mark.asyncio
+async def test_instrumented_llm_adapter_records_usage() -> None:
+    from devai.adapters.llm.base import make_request
+    from devai.adapters.llm.instrumented import InstrumentedLLMAdapter
+    from devai.adapters.llm.noop import NoopLLMAdapter
+    from devai.adapters.telemetry.runtime import set_global_telemetry
+
+    sink = _RecordingTelemetry()
+    set_global_telemetry(sink)
+    try:
+        wrapped = InstrumentedLLMAdapter(NoopLLMAdapter())
+        req = make_request(user="hello")
+        req.extra["agent"] = "senior-developer"
+        resp = await wrapped.generate(req)
+        assert resp is not None
+        assert len(sink.llm_calls) == 1
+        m = sink.llm_calls[0]
+        assert m.agent == "senior-developer"
+        assert m.provider == wrapped.provider_name
+        assert m.status == "ok"
+        assert m.duration_ms >= 0
+    finally:
+        set_global_telemetry(None)
+
+
+def test_factory_wraps_backends_with_instrumentation() -> None:
+    from devai.adapters.llm import create_llm_adapter
+    from devai.adapters.llm.instrumented import InstrumentedLLMAdapter
+
+    class _S:
+        llm_provider = "noop"
+
+    adapter = create_llm_adapter(_S())
+    assert isinstance(adapter, InstrumentedLLMAdapter)
+    assert adapter.provider_name == "noop"
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Analytics aggregation
 # ──────────────────────────────────────────────────────────────────────
 

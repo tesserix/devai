@@ -30,6 +30,10 @@ from devai.adapters.telemetry.factory import (
     telemetry_registry,
 )
 from devai.adapters.telemetry.noop import NoopTelemetryAdapter
+from devai.adapters.telemetry.runtime import (
+    get_global_telemetry,
+    set_global_telemetry,
+)
 
 __all__ = [
     "KNOWN_PROVIDERS",
@@ -38,5 +42,7 @@ __all__ = [
     "StageMetric",
     "TelemetryAdapter",
     "create_telemetry_adapter",
+    "get_global_telemetry",
+    "set_global_telemetry",
     "telemetry_registry",
 ]

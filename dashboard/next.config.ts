@@ -116,6 +116,11 @@ const nextConfig: NextConfig = {
         source: "/api/pipeline/:path*",
         destination: `${API_INTERNAL_URL}/api/pipeline/:path*`,
       },
+      // Analytics (run/agent/LLM rollups + telemetry health) — backs /analytics.
+      {
+        source: "/api/analytics/:path*",
+        destination: `${API_INTERNAL_URL}/api/analytics/:path*`,
+      },
       {
         source: "/api/specializations/:path*",
         destination: `${API_INTERNAL_URL}/api/specializations/:path*`,
