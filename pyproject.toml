@@ -23,6 +23,11 @@ dependencies = [
     "structlog>=26.1.0",
     "opentelemetry-api>=1.29.0",
     "opentelemetry-sdk>=1.42.1",
+    # OTLP/HTTP exporter — backs the telemetry adapter family
+    # (adapters/telemetry/otel.py) when DEVAI_TELEMETRY_PROVIDER=otel. Shipped
+    # in the image so turning telemetry on is one env var, no custom build. The
+    # adapter lazy-imports it and degrades to Noop if it's ever absent.
+    "opentelemetry-exporter-otlp-proto-http>=1.29.0",
     "python-ulid>=3.0.0",
     "rich>=13.9.0",
     "playwright>=1.49.0",

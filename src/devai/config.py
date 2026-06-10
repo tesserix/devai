@@ -395,8 +395,18 @@ class Settings(BaseSettings):
     cloudflare_account_id: str = ""
     cloudflare_zone_id: str = ""  # Primary zone for DNS/tunnel management
 
-    # --- Observability ---
-    otel_endpoint: str = ""
+    # --- Observability / telemetry adapter (adapters/telemetry) ---
+    # DEVAI_TELEMETRY_PROVIDER picks the backend: "noop" (default; discards) or
+    # "otel" (OTLP/HTTP exporter → otel-collector). With metrics_enabled=False
+    # the factory forces Noop regardless of provider. The OTel backend exports
+    # traces + metrics for HTTP requests, pipeline stages, and LLM calls. The
+    # endpoint is the collector's OTLP/HTTP base (port 4318); the adapter
+    # appends /v1/traces and /v1/metrics.
+    telemetry_provider: str = "noop"
+    otel_endpoint: str = ""  # e.g. http://otel-collector.observability.svc.cluster.local:4318
+    otel_service_name: str = "devai"
+    otel_service_namespace: str = "devai"
+    otel_export_interval_ms: int = 15000
     metrics_enabled: bool = True
 
     # --- Specializations (Fiber-style YAML role catalog) ---

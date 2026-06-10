@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clsx } from "clsx";
 import {
+  BarChart3,
   Box,
   Boxes,
   FolderGit2,
@@ -99,11 +100,13 @@ const REGISTRY: NavItem[] = [
   { href: "/registry", label: "Browse", Icon: PackageOpen, description: "Full catalog explorer" },
 ];
 
-// PLATFORM — onboarding + gateway health. (Removed the dead "Coming soon"
-// routes — /control, /analytics, /catalog, /memory — per DASH-9.)
+// PLATFORM — onboarding, gateway health, and platform-wide observability.
+// (/control, /catalog, /memory remain retired per DASH-9; /analytics is now a
+// real page backed by /api/analytics/* — run/agent/LLM stats + OTel health.)
 const MID: NavItem[] = [
   { href: "/repos", label: "Repos", Icon: FolderGit2, description: "Onboard org repositories" },
   { href: "/gateway", label: "Gateway", Icon: Radio, description: "Agent Gateway + LLM proxy health" },
+  { href: "/analytics", label: "Analytics", Icon: BarChart3, description: "Runs, agents, LLM cost + telemetry" },
 ];
 
 const SRE: NavItem[] = [

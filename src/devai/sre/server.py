@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
                 settings,
                 scm=scm,
                 state_manager=state_manager,
+                telemetry=getattr(app.state, "telemetry", None),
             )
             await pipeline_service.start()
             app.state.pipeline_service = pipeline_service
@@ -131,6 +132,10 @@ async def lifespan(app: FastAPI):
         if hasattr(app.state, "pipeline_state_manager"):
             with contextlib_suppress(Exception):
                 await app.state.pipeline_state_manager.close()
+    telemetry = getattr(app.state, "telemetry", None)
+    if telemetry is not None:
+        with contextlib_suppress(Exception):
+            await telemetry.close()  # flush the OTLP exporter
     await db.close()
 
 
@@ -149,16 +154,32 @@ def create_sre_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Origins are an explicit allowlist (never "*") because allow_credentials
+    # is on. Methods/headers are also explicit rather than "*" — the SRE API
+    # only serves JSON reads + a few control POST/PATCH calls, so there's no
+    # reason to reflect arbitrary methods/headers back with credentials.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:3200", "https://sre.tesserix.app"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
         allow_credentials=True,
     )
 
     # Expose settings so the opt-in auth gate (DEVAI_REQUIRE_AUTH) can read it.
     app.state.config = settings
+
+    # Telemetry adapter (adapters/telemetry) — request spans/metrics for the
+    # SRE API. Built synchronously so instrument_asgi can register middleware
+    # before serving. Noop unless DEVAI_TELEMETRY_PROVIDER=otel; never raises.
+    try:
+        from devai.adapters.telemetry import create_telemetry_adapter
+
+        app.state.telemetry = create_telemetry_adapter(settings)
+        app.state.telemetry.instrument_asgi(app)
+    except Exception:  # noqa: BLE001
+        logger.exception("SRE telemetry adapter construction failed — continuing without it")
+        app.state.telemetry = None
 
     @app.middleware("http")
     async def _auth_gate(request, call_next):

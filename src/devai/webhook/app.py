@@ -135,6 +135,7 @@ def create_app(
                     event_bus_adapter=event_bus_adapter,
                     registry_client=_registry_client,
                     settings_service=settings_service,
+                    telemetry=getattr(app.state, "telemetry", None),
                 )
                 await pipeline_service.start()
                 app.state.pipeline_service = pipeline_service
@@ -428,6 +429,14 @@ def create_app(
                     await spec_service.stop()
                 except Exception:  # noqa: BLE001
                     logger.exception("SpecializationService stop failed")
+            telemetry = getattr(app.state, "telemetry", None)
+            if telemetry is not None:
+                with suppress(Exception):
+                    await telemetry.close()  # flush the OTLP exporter
+            analytics_db = getattr(app.state, "analytics_db", None)
+            if analytics_db is not None:
+                with suppress(Exception):
+                    await analytics_db.close()
 
     app = FastAPI(
         title="DevAI",
@@ -453,6 +462,21 @@ def create_app(
         if blocked is not None:
             return blocked
         return await call_next(request)
+
+    # Telemetry adapter (adapters/telemetry). Built synchronously HERE — not in
+    # lifespan — because instrument_asgi adds middleware, which must be
+    # registered before the app starts serving. Added after the auth gate so
+    # the request span/metrics wrap the whole handler (auth included). Noop
+    # unless DEVAI_TELEMETRY_PROVIDER=otel + DEVAI_OTEL_ENDPOINT are set; the
+    # factory never raises, so a bad config degrades to Noop, not a crash.
+    try:
+        from devai.adapters.telemetry import create_telemetry_adapter
+
+        app.state.telemetry = create_telemetry_adapter(config)
+        app.state.telemetry.instrument_asgi(app)
+    except Exception:  # noqa: BLE001
+        logger.exception("telemetry adapter construction failed — continuing without telemetry")
+        app.state.telemetry = None
 
     # NOTE: app.state.registry_client is constructed in lifespan() above
     # alongside SpecializationService so the two share a single client +
@@ -529,6 +553,13 @@ def create_app(
     from devai.pipeline.routes import router as pipeline_router
 
     app.include_router(pipeline_router)
+
+    # Analytics routes (/api/analytics/*) — read-only rollups over the pipeline
+    # runtime (runs/stages), agent_executions (agents/LLM cost), the SRE tables,
+    # and telemetry/Prometheus health. Backs the dashboard /analytics page.
+    from devai.analytics.routes import router as analytics_router
+
+    app.include_router(analytics_router)
 
     # Specializations catalog routes (/api/specializations/*)
     from devai.specializations.routes import router as specializations_router

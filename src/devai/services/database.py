@@ -543,6 +543,76 @@ class Database:
         return [dict(r) for r in rows]
 
     # =========================================================================
+    # Analytics — read-only rollups over agent_executions + SRE views.
+    #
+    # Backs the dashboard /analytics page. Run-level stats come from the live
+    # runtime (Redis); these methods cover the per-agent / per-LLM token + cost
+    # rollups (agent_executions) and a best-effort SRE summary. Every method is
+    # best-effort: callers wrap in try/except so a missing table → empty.
+    # =========================================================================
+
+    async def analytics_agent_stats(self, days: int = 30) -> list[dict[str, Any]]:
+        """Per-agent executions, avg duration, tokens, cost, failures."""
+        rows = await self.pool.fetch(
+            """SELECT agent_name,
+                      COUNT(*)::int                                   AS executions,
+                      AVG(duration_ms)                                AS avg_duration_ms,
+                      COALESCE(SUM(tokens_input), 0)::bigint          AS tokens_input,
+                      COALESCE(SUM(tokens_output), 0)::bigint         AS tokens_output,
+                      COALESCE(SUM(llm_cost_usd), 0)::float           AS total_cost_usd,
+                      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)::int AS failures
+               FROM agent_executions
+               WHERE started_at >= NOW() - make_interval(days => $1)
+               GROUP BY agent_name
+               ORDER BY executions DESC""",
+            days,
+        )
+        return [dict(r) for r in rows]
+
+    async def analytics_llm_cost_by_model(self, days: int = 30) -> list[dict[str, Any]]:
+        """Calls, tokens, and USD cost grouped by provider/model."""
+        rows = await self.pool.fetch(
+            """SELECT COALESCE(provider, 'unknown')          AS provider,
+                      COALESCE(model, 'unknown')             AS model,
+                      COUNT(*)::int                          AS calls,
+                      COALESCE(SUM(tokens_input), 0)::bigint  AS tokens_input,
+                      COALESCE(SUM(tokens_output), 0)::bigint AS tokens_output,
+                      COALESCE(SUM(llm_cost_usd), 0)::float   AS cost_usd
+               FROM agent_executions
+               WHERE started_at >= NOW() - make_interval(days => $1)
+               GROUP BY provider, model
+               ORDER BY cost_usd DESC NULLS LAST""",
+            days,
+        )
+        return [dict(r) for r in rows]
+
+    async def analytics_llm_cost_timeseries(self, days: int = 30) -> list[dict[str, Any]]:
+        """Daily LLM cost + token totals."""
+        rows = await self.pool.fetch(
+            """SELECT to_char(date_trunc('day', started_at), 'YYYY-MM-DD') AS date,
+                      COALESCE(SUM(llm_cost_usd), 0)::float                  AS cost_usd,
+                      COALESCE(SUM(tokens_input + tokens_output), 0)::bigint AS tokens
+               FROM agent_executions
+               WHERE started_at >= NOW() - make_interval(days => $1)
+               GROUP BY 1 ORDER BY 1""",
+            days,
+        )
+        return [dict(r) for r in rows]
+
+    async def analytics_sre_summary(self) -> dict[str, Any]:
+        """Best-effort SRE counts from the shared devai_db SRE tables."""
+        row = await self.pool.fetchrow(
+            """SELECT
+                 (SELECT COUNT(*) FROM sre_incidents WHERE status = 'open')::int AS open_incidents,
+                 (SELECT COUNT(*) FROM sre_incidents
+                    WHERE status = 'open' AND severity = 'critical')::int        AS critical_incidents,
+                 (SELECT COUNT(*) FROM sre_apps)::int                            AS total_apps,
+                 (SELECT COALESCE(SUM(total_cost_usd), 0)::float FROM sre_cost_reports
+                    WHERE report_date >= NOW() - make_interval(days => 1))       AS latest_daily_cost"""
+        )
+        return dict(row) if row else {}
+
+    # =========================================================================
     # SRE Studio — config drafts (author → dry-run → publish)
     #
     # DDL lives in tesserix-k8s db-schema-bootstrap (sre_config_drafts).

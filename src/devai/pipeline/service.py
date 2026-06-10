@@ -44,6 +44,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Stage-event phases that represent a terminal transition — the ones worth one
+# telemetry metric each (STARTED is omitted so we count each stage once).
+_TELEMETRY_STAGE_PHASES = frozenset({"completed", "failed", "skipped"})
+
 
 class PipelineService:
     """Operational facade over `Pipeline`.
@@ -68,12 +72,16 @@ class PipelineService:
         blueprint_dir: str | Path | None = None,
         registry_client: Any = None,
         settings_service: Any = None,
+        telemetry: Any = None,
     ) -> None:
         self.config = config
         self.scm = scm
         self.state_manager = state_manager
         self.event_bus = event_bus
         self.event_bus_adapter = event_bus_adapter
+        # TelemetryAdapter (optional) — emits one OTel metric per stage event.
+        # None / noop is normal (telemetry off); _on_event tolerates it.
+        self.telemetry = telemetry
         # aregistry client — handed to JobRunnerStage via StageDeps.extra
         # so dispatch can resolve agent profiles before submitting Jobs.
         # None is normal (DEVAI_REGISTRY_URL unset) — stages tolerate it.
@@ -746,6 +754,24 @@ class PipelineService:
             "repo": task.repo,
         }
         self._ring.append((ts, task.id, payload))
+
+        # Best-effort OTel: one metric per terminal stage transition. record_*
+        # never raises; guard the rare case telemetry is wired but malformed.
+        if self.telemetry is not None and event.phase.value in _TELEMETRY_STAGE_PHASES:
+            try:
+                from devai.adapters.telemetry import StageMetric
+
+                self.telemetry.record_stage(
+                    StageMetric(
+                        blueprint=task.blueprint or "",
+                        stage=event.stage or "",
+                        status=event.phase.value,
+                        duration_ms=float(event.duration_ms or 0.0),
+                        repo=task.repo or "",
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("telemetry record_stage failed", exc_info=True)
 
         for q in list(self._sse_queues):
             try:

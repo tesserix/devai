@@ -250,7 +250,13 @@ class K8sToolExecutor:
 
     async def _handle_k8s_get_events(self, inp: dict[str, Any]) -> dict[str, Any]:
         ns = inp.get("namespace", "")
+        # event_type lands in a kubectl --field-selector. _kubectl uses
+        # create_subprocess_exec (no shell), so this can't shell-inject, but
+        # we still allowlist it so a malformed/agent-supplied value can't build
+        # a confusing field-selector. Kubernetes only emits Normal/Warning.
         event_type = inp.get("event_type", "Warning")
+        if event_type not in ("Warning", "Normal"):
+            event_type = "Warning"
 
         cmd = ["get", "events", "-o", "json", f"--field-selector=type={event_type}"]
         if ns:

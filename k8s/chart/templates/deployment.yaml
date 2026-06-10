@@ -15,10 +15,26 @@ spec:
         {{- include "devai.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "devai.serviceAccountName" . }}
+      # Pod-level hardening — parity with the prod chart
+      # (tesserix-k8s charts/apps/devai-api). Run as a non-root user with the
+      # default seccomp profile. readOnlyRootFilesystem is deliberately NOT set
+      # (the app writes per-task git worktrees + /tmp).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: devai-api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: {{ .Values.service.targetPort }}

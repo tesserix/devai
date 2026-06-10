@@ -618,6 +618,21 @@ export const api = {
       ),
   },
 
+  // ── Analytics: read-only rollups for the /analytics page ──────────
+  // Run/stage stats come from the live runtime; agent/LLM token+cost from
+  // Postgres; telemetry/Prometheus health from the telemetry adapter. Every
+  // endpoint degrades to empty/null sections, so the page always renders.
+  analytics: {
+    summary: (days = 30) => apiFetch<AnalyticsSummary>(`/analytics/summary?days=${days}`),
+    runsTimeseries: (days = 30) =>
+      apiFetch<RunsTimeseriesPoint[]>(`/analytics/runs/timeseries?days=${days}`),
+    stages: () => apiFetch<StageStat[]>("/analytics/stages"),
+    agents: (days = 30) => apiFetch<AgentStat[]>(`/analytics/agents?days=${days}`),
+    llmCost: (days = 30) => apiFetch<LLMCost>(`/analytics/llm/cost?days=${days}`),
+    sreSummary: () => apiFetch<AnalyticsSRESummary>("/analytics/sre/summary"),
+    telemetry: () => apiFetch<TelemetryHealth>("/analytics/telemetry"),
+  },
+
   // ── Live preview: on-demand ephemeral preview environments ──────
   // preview_url is the unique forwarded host (preview-<id>.tesserix.app) —
   // the same URL the dashboard iframes AND opens in a new tab.
@@ -976,4 +991,81 @@ export interface SaveConnectorInput {
   instance_id?: string;
   prefs?: Record<string, unknown>;
   secrets?: Record<string, string>;
+}
+
+// ── Analytics (GET /api/analytics/*) ──────────────────────────────────
+export interface AnalyticsSummary {
+  window_days: number;
+  runs: {
+    total: number;
+    completed: number;
+    failed: number;
+    active: number;
+    success_rate: number | null;
+    avg_duration_ms: number | null;
+  };
+  by_state: Record<string, number>;
+  by_blueprint: {
+    blueprint: string;
+    total: number;
+    completed: number;
+    failed: number;
+    success_rate: number | null;
+  }[];
+}
+
+export interface RunsTimeseriesPoint {
+  date: string;
+  total: number;
+  completed: number;
+  failed: number;
+}
+
+export interface StageStat {
+  stage: string;
+  runs: number;
+  failures: number;
+  avg_duration_ms: number | null;
+}
+
+export interface AgentStat {
+  agent_name: string;
+  executions: number;
+  avg_duration_ms: number | null;
+  tokens_input: number;
+  tokens_output: number;
+  total_cost_usd: number;
+  failures: number;
+}
+
+export interface LLMCost {
+  by_model: {
+    provider: string;
+    model: string;
+    calls: number;
+    tokens_input: number;
+    tokens_output: number;
+    cost_usd: number;
+  }[];
+  timeseries: { date: string; cost_usd: number; tokens: number }[];
+}
+
+export interface AnalyticsSRESummary {
+  open_incidents?: number;
+  critical_incidents?: number;
+  total_apps?: number;
+  latest_daily_cost?: number;
+}
+
+export interface TelemetryHealth {
+  telemetry: {
+    ok: boolean;
+    provider: string;
+    exporting?: boolean;
+    endpoint?: string;
+    detail?: string;
+  };
+  prometheus: { url: string; reachable: boolean; status?: number };
+  metrics_enabled: boolean;
+  provider: string;
 }

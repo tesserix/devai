@@ -12,12 +12,12 @@ Today's families:
     adapters.llm        — LLM providers (anthropic | openai | noop)
     adapters.event_bus  — pub/sub (nats | noop)
     adapters.secrets    — runtime secret resolution + provisioning (gcp_sm | env | noop)
+    adapters.telemetry  — traces/metrics (otel | noop)
 
 Planned (slot in with no churn elsewhere):
 
     adapters.vector_store     — embeddings (pgvector | pinecone | qdrant | weaviate | chroma)
     adapters.object_store     — blobs (s3 | gcs | azure_blob | local)
-    adapters.telemetry        — traces/metrics (otel | langsmith | datadog | noop)
 
 The convention every family follows:
 
