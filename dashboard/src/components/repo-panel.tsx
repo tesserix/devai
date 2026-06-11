@@ -55,29 +55,63 @@ export function RepoPanel({ runId }: { runId: string }) {
   const [flash, setFlash] = useState<Record<string, number>>({});
   const [streamStatus, setStreamStatus] = useState<"connecting" | "open" | "closed">("connecting");
 
-  // ── Initial tree load ──────────────────────────────────────────────
+  // ── Tree loading ───────────────────────────────────────────────────
+  // refreshTree re-resolves the branch server-side (the backend follows
+  // the agent's LIVE working branch) and reloads the root + every
+  // expanded folder, so commits appear as the agents push them.
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const branchRef = useRef(branch);
+  branchRef.current = branch;
+
+  const refreshTree = useCallback(
+    async (initial = false) => {
+      if (!runId) return;
+      if (initial) setLoading(true);
+      try {
+        const data = await api.getRepoTree(runId, "");
+        setRepo(data.repo);
+        setRootEntries(data.entries);
+        const branchChanged = data.branch !== branchRef.current;
+        setBranch(data.branch);
+        if (branchChanged) {
+          // New working branch (e.g. the developer just created its
+          // story branch) — old expansions point at stale paths.
+          setExpanded({});
+        } else {
+          const open = Object.keys(expandedRef.current);
+          const refreshed = await Promise.all(
+            open.map(async (p) => {
+              try {
+                const d = await api.getRepoTree(runId, p);
+                return [p, d.entries] as const;
+              } catch {
+                return null;
+              }
+            }),
+          );
+          setExpanded(Object.fromEntries(refreshed.filter(Boolean) as [string, TreeEntry[]][]));
+        }
+      } catch {
+        if (initial) setRootEntries([]);
+      } finally {
+        if (initial) setLoading(false);
+      }
+    },
+    [runId],
+  );
+
+  useEffect(() => {
+    void refreshTree(true);
+  }, [refreshTree]);
+
+  // Fallback poll: the working branch can change without a file event
+  // (branch created before the first commit lands).
   useEffect(() => {
     if (!runId) return;
-    let cancelled = false;
-    setLoading(true);
-    api
-      .getRepoTree(runId, "")
-      .then((data) => {
-        if (cancelled) return;
-        setRepo(data.repo);
-        setBranch(data.branch);
-        setRootEntries(data.entries);
-      })
-      .catch(() => {
-        if (!cancelled) setRootEntries([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [runId]);
+    const id = window.setInterval(() => void refreshTree(), 30000);
+    return () => window.clearInterval(id);
+  }, [runId, refreshTree]);
 
   // ── SSE: live repo events ──────────────────────────────────────────
   useEffect(() => {
@@ -86,6 +120,7 @@ export function RepoPanel({ runId }: { runId: string }) {
     const es = new EventSource(url, { withCredentials: true });
     setStreamStatus("connecting");
     es.addEventListener("hello", () => setStreamStatus("open"));
+    let refreshTimer: number | undefined;
     es.addEventListener("repo", (e) => {
       try {
         const payload: RepoEvent = JSON.parse((e as MessageEvent).data);
@@ -95,15 +130,20 @@ export function RepoPanel({ runId }: { runId: string }) {
         if (payload.path === openPath) {
           api.getRepoFile(runId, payload.path).then(setOpenBlob).catch(() => undefined);
         }
+        // New/changed files must APPEAR in the tree, not just flash —
+        // debounce so a burst of writes costs one reload.
+        if (refreshTimer) window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(() => void refreshTree(), 1500);
       } catch {
         // ignore malformed
       }
     });
     es.onerror = () => setStreamStatus("closed");
     return () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer);
       es.close();
     };
-  }, [runId, openPath]);
+  }, [runId, openPath, refreshTree]);
 
   // ── Flash decay — 4s, then drop from the highlight set ─────────────
   useEffect(() => {

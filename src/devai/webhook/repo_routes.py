@@ -72,12 +72,32 @@ def _safe_path(path: str) -> str:
     return str(p).lstrip("/")
 
 
-async def _resolve_run(request: Request, run_id: str) -> dict[str, Any]:
+async def _live_workbranch(request: Request, run_id: str) -> str:
+    """The branch the developer agent is committing to RIGHT NOW.
+
+    The run's ``branch_name`` only lands when the implement stage
+    completes — for the (long) duration of the stage, the agent records
+    its working branch under ``devai:run:<id>:workbranch`` so the REPO
+    tab can follow the commits live instead of showing a stale branch.
+    """
+    try:
+        redis = getattr(request.app.state.state_manager, "redis", None)
+        if redis is None:
+            return ""
+        return str(await redis.get(f"devai:run:{run_id}:workbranch") or "")
+    except Exception:  # noqa: BLE001 — visibility aid only
+        return ""
+
+
+async def _resolve_run(request: Request, run_id: str, branch_override: str = "") -> dict[str, Any]:
     """Resolve a run_id to repo+branch context.
 
     Tries the LangGraph state-manager first (legacy ALMOrchestrator
     runs), falls back to the blueprint runtime's persisted task store
     (DevAITask runs). Returns ``{repo, branch, source}`` or raises 404.
+
+    Branch preference: explicit ``branch_override`` from the client →
+    the agent's live working branch → the task's recorded branch.
     """
     state = request.app.state.state_manager
     run = await state.get_run(run_id)
@@ -86,11 +106,17 @@ async def _resolve_run(request: Request, run_id: str) -> dict[str, Any]:
         if isinstance(ctx, str):
             with contextlib.suppress(Exception):
                 ctx = json.loads(ctx)
+        branch = (
+            branch_override
+            or await _live_workbranch(request, run_id)
+            or (ctx.get("branch_name") if isinstance(ctx, dict) else None)
+            or ""
+        )
         return {
             "repo": (ctx.get("repo_full_name") if isinstance(ctx, dict) else None)
             or run.get("repo_full_name")
             or run.get("repo", ""),
-            "branch": (ctx.get("branch_name") if isinstance(ctx, dict) else None) or "",
+            "branch": branch,
             "source": "alm",
         }
 
@@ -100,9 +126,17 @@ async def _resolve_run(request: Request, run_id: str) -> dict[str, Any]:
         task = await svc.get_task(run_id)
         if task:
             ag = task.get("agent_context") or {}
+            branch = (
+                branch_override
+                or await _live_workbranch(request, run_id)
+                or task.get("branch_name")
+                or ag.get("branch_name")
+                or ag.get("default_branch")
+                or ""
+            )
             return {
                 "repo": task.get("repo") or ag.get("repo", ""),
-                "branch": task.get("branch_name") or ag.get("branch_name") or ag.get("default_branch") or "",
+                "branch": branch,
                 "source": "blueprint",
             }
 
@@ -110,15 +144,17 @@ async def _resolve_run(request: Request, run_id: str) -> dict[str, Any]:
 
 
 @router.get("/{run_id}/repo/tree")
-async def list_repo_tree(request: Request, run_id: str, path: str = "") -> dict[str, Any]:
+async def list_repo_tree(
+    request: Request, run_id: str, path: str = "", branch: str = ""
+) -> dict[str, Any]:
     """List entries under ``path`` for the run's repo.
 
     Returns ``{repo, branch, path, entries: [{name,type,size,path}]}``.
     ``type`` is one of ``file | dir``. The dashboard renders this as a
-    file tree on the REPO tab.
+    file tree on the REPO tab. ``branch`` overrides the resolved branch.
     """
     safe = _safe_path(path)
-    ctx = await _resolve_run(request, run_id)
+    ctx = await _resolve_run(request, run_id, branch_override=branch)
 
     from devai.scm import create_scm_client
 
@@ -164,7 +200,9 @@ async def list_repo_tree(request: Request, run_id: str, path: str = "") -> dict[
 
 
 @router.get("/{run_id}/repo/file")
-async def read_repo_file(request: Request, run_id: str, path: str) -> dict[str, Any]:
+async def read_repo_file(
+    request: Request, run_id: str, path: str, branch: str = ""
+) -> dict[str, Any]:
     """Read a single file's contents.
 
     Read-only — there's no companion PUT. Returns text content directly
@@ -174,7 +212,7 @@ async def read_repo_file(request: Request, run_id: str, path: str) -> dict[str, 
     if not path:
         raise HTTPException(status_code=400, detail="path is required")
     safe = _safe_path(path)
-    ctx = await _resolve_run(request, run_id)
+    ctx = await _resolve_run(request, run_id, branch_override=branch)
 
     from devai.scm import create_scm_client
 

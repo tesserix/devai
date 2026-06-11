@@ -218,6 +218,22 @@ class SeniorDeveloperAgent(BaseAgent):
         if existing_branch:
             branch_name = existing_branch
 
+        # Record the working branch durably the MOMENT it's known — the
+        # run's branch_name only lands when this stage completes, so
+        # without this the dashboard's REPO tab keeps showing the old
+        # branch for the whole (long) implement stage while commits pile
+        # up somewhere the user can't see.
+        run_id_for_branch = str(state.get("run_id") or "")
+        if run_id_for_branch:
+            try:
+                redis = getattr(self.state, "redis", None)
+                if redis is not None:
+                    await redis.set(
+                        f"devai:run:{run_id_for_branch}:workbranch", branch_name, ex=86400 * 7
+                    )
+            except Exception:  # noqa: BLE001 — visibility aid, never fail the stage
+                logger.debug("workbranch record failed", exc_info=True)
+
         # Check for A2A messages (escalations from CI, review feedback, etc.)
         inbox_context = a2a.format_inbox_context()
 
