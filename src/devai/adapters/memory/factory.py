@@ -64,13 +64,16 @@ def _build_redis(settings: Any) -> MemoryAdapter:
 def _build_pgvector(settings: Any) -> MemoryAdapter:
     from devai.adapters.memory.pgvector_adapter import PgVectorMemoryAdapter
 
-    db = _resolve_database(settings)
+    db, owns_db = _resolve_database(settings)
     if db is None:
-        raise AdapterNotConfigured("pgvector memory adapter requires a connected Database")
+        raise AdapterNotConfigured(
+            "pgvector memory adapter requires a Database (attach settings.database / "
+            "settings.state_manager.db, or set DEVAI_DATABASE_URL)"
+        )
     # An explicitly attached embedder (tests, custom wiring) wins; otherwise
     # build one from the LLM adapter family per DEVAI_EMBEDDING_PROVIDER.
     embedder = getattr(settings, "memory_embedder", None) or _build_embedder(settings)
-    return PgVectorMemoryAdapter(db, embedder=embedder)
+    return PgVectorMemoryAdapter(db, embedder=embedder, owns_database=owns_db)
 
 
 def _build_mem0(settings: Any) -> MemoryAdapter:
@@ -229,25 +232,38 @@ def _resolve_redis(settings: Any) -> Any | None:
         return None
 
 
-def _resolve_database(settings: Any) -> Any | None:
-    """Return a connected Database instance.
+def _resolve_database(settings: Any) -> tuple[Any | None, bool]:
+    """Return (Database, owns_it) for the pgvector adapter.
 
     Order of preference:
-      1. `settings.database` if directly attached
-      2. `settings.state_manager.db` if attached
-      3. Return None — pgvector adapter raises AdapterNotConfigured
+      1. `settings.database` if directly attached (host owns its lifecycle)
+      2. `settings.state_manager.db` if attached (host owns it)
+      3. Construct an UNCONNECTED Database from `settings.database_url` —
+         the adapter connects lazily on first use and owns closing it.
+         (StateManager is Redis-only, so in the server paths this is the
+         branch that actually fires; without it pgvector silently degraded
+         to Noop everywhere.)
+      4. (None, False) — pgvector adapter raises AdapterNotConfigured
 
-    Note: this resolver does NOT construct + connect a new Database; that
-    would block the factory on I/O. PgVector adapter consumers are expected
-    to attach the already-connected Database to settings before calling.
+    No branch performs I/O — Database() just stores the DSN; connect()
+    happens inside the adapter on first operation.
     """
     db = getattr(settings, "database", None)
     if db is not None:
-        return db
+        return db, False
     sm = getattr(settings, "state_manager", None)
-    if sm is not None and hasattr(sm, "db"):
-        return sm.db
-    return None
+    if sm is not None and getattr(sm, "db", None) is not None:
+        return sm.db, False
+    url = getattr(settings, "database_url", "") or ""
+    if url:
+        try:
+            from devai.services.database import Database
+
+            return Database(url), True
+        except Exception:  # noqa: BLE001
+            logger.exception("pgvector: Database construction from database_url failed")
+            return None, False
+    return None, False
 
 
 __all__ = ["KNOWN_PROVIDERS", "create_memory_adapter", "memory_registry"]

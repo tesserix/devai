@@ -204,9 +204,85 @@ def test_factory_missing_config_falls_back_to_noop():
 def test_factory_pgvector_without_db_falls_back_to_noop():
     settings = _Settings()
     settings.memory_provider = "pgvector"
-    # No `database` / `state_manager.db` attribute -> AdapterNotConfigured -> Noop
+    # No `database` / `state_manager.db` / `database_url` -> AdapterNotConfigured -> Noop
     adapter = create_memory_adapter(settings)
     assert adapter.provider_name == "noop"
+
+
+def test_factory_pgvector_builds_from_database_url():
+    """No attached Database but a DSN present → factory constructs an
+    UNCONNECTED Database the adapter owns and lazily connects.
+
+    This is the branch that actually fires in the server paths: StateManager
+    is Redis-only, so without it pgvector silently degraded to Noop."""
+    settings = _Settings()
+    settings.memory_provider = "pgvector"
+    settings.embedding_provider = "none"
+    settings.database_url = "postgresql://devai:x@db.example:5432/devai_db"
+    adapter = create_memory_adapter(settings)
+    assert adapter.provider_name == "pgvector"
+
+
+@pytest.mark.asyncio
+async def test_pgvector_lazily_connects_owned_database():
+    from devai.adapters.memory.pgvector_adapter import PgVectorMemoryAdapter
+
+    class _RaisingPoolDb:
+        """Mimics services.database.Database: .pool RAISES until connect()."""
+
+        def __init__(self):
+            self._pool = None
+            self.connect_calls = 0
+
+        @property
+        def pool(self):
+            if not self._pool:
+                raise RuntimeError("Database not connected. Call connect() first.")
+            return self._pool
+
+        async def connect(self):
+            self.connect_calls += 1
+
+            class _Pool:
+                async def fetch(self, sql, *params):
+                    return []
+
+            self._pool = _Pool()
+
+        async def close(self):
+            self._pool = None
+
+    db = _RaisingPoolDb()
+    adapter = PgVectorMemoryAdapter(db, owns_database=True)
+    # First op triggers the lazy connect instead of crashing on .pool
+    assert await adapter.recall(agent="alm") == []
+    assert db.connect_calls == 1
+    # Second op reuses the pool
+    await adapter.recall(agent="alm")
+    assert db.connect_calls == 1
+    # close() closes the owned database
+    await adapter.close()
+    assert db._pool is None
+
+
+@pytest.mark.asyncio
+async def test_pgvector_unreachable_db_degrades_not_raises():
+    from devai.adapters.memory.pgvector_adapter import PgVectorMemoryAdapter
+
+    class _DeadDb:
+        @property
+        def pool(self):
+            raise RuntimeError("Database not connected. Call connect() first.")
+
+        async def connect(self):
+            raise ConnectionError("no route to host")
+
+    adapter = PgVectorMemoryAdapter(_DeadDb(), owns_database=True)
+    assert await adapter.recall(query="x") == []
+    assert await adapter.semantic_search("x") == []
+    assert await adapter.forget("some-id") is False
+    health = await adapter.health_check()
+    assert health["ok"] is False
 
 
 # ──────────────────────────────────────────────────────────────────────

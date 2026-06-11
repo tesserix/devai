@@ -36,9 +36,47 @@ class PgVectorMemoryAdapter(MemoryAdapter):
 
     provider_name = "pgvector"
 
-    def __init__(self, database: Database, *, embedder: Any = None) -> None:
+    def __init__(self, database: Database, *, embedder: Any = None, owns_database: bool = False) -> None:
         self._db = database
         self._embedder = embedder  # any object exposing `embed(text) -> list[float]`
+        # True when the factory constructed the Database from database_url —
+        # then this adapter connects it lazily and closes it on close().
+        self._owns_db = owns_database
+        self._connect_lock: Any = None  # asyncio.Lock, created on first use
+
+    def _pool_or_none(self) -> Any | None:
+        """`Database.pool` RAISES when unconnected — never touch it bare."""
+        if self._db is None:
+            return None
+        try:
+            return self._db.pool
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _ensure_db(self) -> bool:
+        """Connect the Database on first use; True when a pool is available.
+
+        The factory hands over an UNCONNECTED Database when it built one from
+        `database_url` (connecting in the factory would block startup on I/O).
+        Database.connect() already retries with backoff; on failure we stay
+        degraded and the next call tries again.
+        """
+        if self._db is None:
+            return False
+        if self._pool_or_none() is not None:
+            return True
+        import asyncio
+
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        async with self._connect_lock:
+            if self._pool_or_none() is None:
+                try:
+                    await self._db.connect()
+                except Exception:  # noqa: BLE001
+                    logger.exception("pgvector: lazy database connect failed")
+                    return False
+        return self._pool_or_none() is not None
 
     # ── Write ─────────────────────────────────────────────────────────
 
@@ -53,8 +91,8 @@ class PgVectorMemoryAdapter(MemoryAdapter):
         metadata: dict[str, Any] | None = None,
         relevance_score: float = 1.0,
     ) -> MemoryRecord:
-        if self._db is None or self._db.pool is None:
-            raise AdapterNotConfigured("pgvector adapter requires a connected Database")
+        if not await self._ensure_db():
+            raise AdapterNotConfigured("pgvector adapter requires a reachable Database")
 
         mt = MemoryType.parse(memory_type)
         memory_id = uuid.uuid4()
@@ -107,7 +145,7 @@ class PgVectorMemoryAdapter(MemoryAdapter):
         tags: list[str] | None = None,
         limit: int = 10,
     ) -> list[MemoryRecord]:
-        if self._db is None or self._db.pool is None:
+        if not await self._ensure_db():
             return []
 
         clauses = ["is_active = TRUE"]
@@ -143,7 +181,7 @@ class PgVectorMemoryAdapter(MemoryAdapter):
         repo: str | None = None,
         memory_type: MemoryType | str | None = None,
     ) -> list[MemoryRecord]:
-        if self._db is None or self._db.pool is None:
+        if not await self._ensure_db():
             return []
 
         embedding = await self._maybe_embed(query)
@@ -163,7 +201,7 @@ class PgVectorMemoryAdapter(MemoryAdapter):
     # ── Delete ────────────────────────────────────────────────────────
 
     async def forget(self, provider_id: str) -> bool:
-        if self._db is None or self._db.pool is None:
+        if not await self._ensure_db():
             return False
         result = await self._db.pool.execute(
             "UPDATE agent_memories SET is_active = FALSE WHERE id = $1::uuid",
@@ -175,9 +213,15 @@ class PgVectorMemoryAdapter(MemoryAdapter):
     # ── Adapter contract ──────────────────────────────────────────────
 
     async def close(self) -> None:
-        # Database pool is owned by the host — don't close it here. The
-        # embedder is ours though (the factory builds it for this adapter),
-        # and it may hold an HTTP client that must be released.
+        # A host-attached Database pool is the host's to close; one the
+        # factory built from database_url is ours. The embedder is always
+        # ours (the factory builds it for this adapter) and may hold an
+        # HTTP client that must be released.
+        if self._owns_db and self._pool_or_none() is not None:
+            try:
+                await self._db.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("owned database close failed", exc_info=True)
         closer = getattr(self._embedder, "close", None)
         if closer is not None:
             try:
@@ -187,7 +231,7 @@ class PgVectorMemoryAdapter(MemoryAdapter):
 
     async def health_check(self) -> dict[str, Any]:
         try:
-            if self._db is None or self._db.pool is None:
+            if not await self._ensure_db():
                 return {"ok": False, "provider": self.provider_name, "detail": "db not connected"}
             # Connectivity probe only — this runs on every /readyz poll, so a
             # COUNT(*) over a growing table would tax the DB for no signal.
