@@ -156,6 +156,19 @@ export default function DashboardPage() {
   const runContext = (selectedRun as any)?.context ?? {};
   const a2aMessages = runContext.a2a_messages || [];
   const orchestratorRouting = runContext.orchestrator_routing;
+  // Terminal runs have no live agents — older snapshots (cancelled before
+  // the server cleared statuses) can still say "running"; never pulse them.
+  const runTerminal = ["completed", "failed", "stage_failed", "agent_timeout", "cancelled"].includes(
+    String((selectedRun as any)?.state ?? ""),
+  );
+  const displayAgents: PipelineRun["agents"] = runTerminal
+    ? Object.fromEntries(
+        Object.entries(selectedRun?.agents ?? {}).map(([k, v]) => [
+          k,
+          v?.status === "running" || v?.status === "in_progress" ? { ...v, status: "cancelled" } : v,
+        ]),
+      )
+    : (selectedRun?.agents ?? {});
 
   return (
     <div className="flex h-full" style={{ background: "var(--canvas)" }}>
@@ -332,16 +345,20 @@ export default function DashboardPage() {
 
             <div className="flex-1 overflow-y-auto p-6" style={{ background: "var(--canvas)" }}>
               {tab === "overview" && (
-                <OverviewTab run={selectedRun} a2aMessages={a2aMessages} orchestratorRouting={orchestratorRouting} />
-              )}
-              {tab === "hierarchy" && (
-                <AgentHierarchy
-                  agentStatuses={selectedRun.agents || {}}
+                <OverviewTab
+                  run={{ ...selectedRun, agents: displayAgents }}
                   a2aMessages={a2aMessages}
                   orchestratorRouting={orchestratorRouting}
                 />
               )}
-              {tab === "agents" && <AgentsTab run={selectedRun} />}
+              {tab === "hierarchy" && (
+                <AgentHierarchy
+                  agentStatuses={displayAgents}
+                  a2aMessages={a2aMessages}
+                  orchestratorRouting={orchestratorRouting}
+                />
+              )}
+              {tab === "agents" && <AgentsTab run={{ ...selectedRun, agents: displayAgents }} />}
               {tab === "a2a" && <A2ATab messages={a2aMessages} />}
               {tab === "events" && <EventsTab events={(selectedRun as any)?.events || []} />}
               {tab === "chat" && <ChatPanel runId={selectedRun?.run_id} repo={selectedRun?.repo} stage={selectedRun?.stage} />}

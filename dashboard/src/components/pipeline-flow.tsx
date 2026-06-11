@@ -74,7 +74,12 @@ export function buildRunOverlay(
   // Which stage is "active" right now (mid-flight). current_stage from the
   // blueprint engine, falling back to the legacy `stage` field.
   const active = (run.current_stage || run.stage || "").trim();
-  const runIsFailed = normalizeRunState(run.state || run.stage) === "failed";
+  const runState = normalizeRunState(run.state || run.stage);
+  const runIsFailed = runState === "failed";
+  // A terminal run has nothing "running" — but a cancelled/failed snapshot
+  // can legitimately still carry the stage it died in (current_stage), and
+  // rendering that as a pulsing RUNNING node made stopped runs look alive.
+  const runIsTerminal = runState === "failed" || runState === "cancelled" || runState === "done";
 
   // Every node the graph declares, plus any stage seen only in the run record
   // (defensive — keeps a stage visible even if the graph is stale).
@@ -95,7 +100,7 @@ export function buildRunOverlay(
     if (failed.has(name)) state = "failed";
     else if (isPendingGate) state = "gate-pending";
     else if (name === active && !completed.has(name))
-      state = runIsFailed ? "failed" : "running";
+      state = runIsFailed ? "failed" : runIsTerminal ? "cancelled" : "running";
     else if (completed.has(name)) state = "done";
     else if (skipped.has(name)) state = "skipped";
     else state = "pending";

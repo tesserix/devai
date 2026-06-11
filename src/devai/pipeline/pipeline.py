@@ -406,6 +406,9 @@ class Pipeline:
                 task.error = task.error or "stopped by user"
                 task.failed_stage = task.failed_stage or task.current_stage or ""
                 task.current_stage = ""
+                from devai.blueprint.executor import _finalize_agent_statuses
+
+                _finalize_agent_statuses(task)
                 if not task.is_terminal:
                     task.transition(TaskState.CANCELLED)
                 await self._persist(task)

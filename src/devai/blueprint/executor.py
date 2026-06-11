@@ -56,6 +56,16 @@ class _RunStopped(Exception):
 EventCallback = Callable[[DevAITask, StageEvent], None]
 
 
+
+def _finalize_agent_statuses(task: DevAITask, status: str = "cancelled") -> None:
+    """Close out lingering 'running' agent statuses when a run stops — the
+    cards must never pulse on a terminal run."""
+    for entry in task.agents.values():
+        if isinstance(entry, dict) and entry.get("status") in ("running", "in_progress"):
+            entry["status"] = status
+            entry["updated_at"] = time.time()
+
+
 class BlueprintExecutor:
     """Runs a Blueprint against a DevAITask.
 
@@ -172,6 +182,7 @@ class BlueprintExecutor:
                 task.error = "stopped by user"
                 task.failed_stage = task.current_stage or ""
                 task.current_stage = ""
+                _finalize_agent_statuses(task)
                 task.transition(TaskState.CANCELLED)
                 return False
             if ctrl == "paused" and waited < self._CONTROL_MAX_PAUSE_SECONDS:
@@ -272,6 +283,7 @@ class BlueprintExecutor:
                 task.error = "stopped by user"
                 task.failed_stage = spec.name
                 task.current_stage = ""
+                _finalize_agent_statuses(task)
                 task.transition(TaskState.CANCELLED)
                 self._emit(
                     task,
