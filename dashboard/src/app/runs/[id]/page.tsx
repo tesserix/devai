@@ -370,7 +370,7 @@ export default function RunDetailPage() {
       <div className="flex-1 min-h-0 overflow-hidden">
         {tab === "overview" && (
           <div className="h-full overflow-y-auto p-6">
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-6 max-w-[1400px]">
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-6 w-full">
               <div className="min-w-0 space-y-5">
                 <GuidancePanel id="run-detail" />
 
@@ -430,7 +430,7 @@ export default function RunDetailPage() {
 
         {tab === "logs" && (
           <div className="h-full overflow-y-auto p-6">
-            <div className="max-w-5xl">
+            <div className="w-full">
               <p className="mb-3 text-[13px]" style={{ color: "var(--ink-soft)" }}>
                 Live per-stage stream as the crew works — each stage logs as it starts, runs, and
                 completes. Watch the code and docs get built here; the developed files land in the{" "}
@@ -460,7 +460,7 @@ export default function RunDetailPage() {
 
         {tab === "timeline" && (
           <div className="h-full overflow-y-auto p-6">
-            <div className="max-w-3xl">
+            <div className="w-full max-w-none">
               <div className="flex items-center gap-1.5 mb-3">
                 <span className="label-eyebrow">Agent-to-agent messages ({a2a.length})</span>
                 <HelpPopover term="handover" />
