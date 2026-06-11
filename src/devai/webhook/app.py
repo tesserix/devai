@@ -139,6 +139,14 @@ def create_app(
                 )
                 await pipeline_service.start()
                 app.state.pipeline_service = pipeline_service
+                # Re-point the app-level memory adapter at the pipeline's.
+                # The one built in create_app() ran before start() attached
+                # the StateManager/Database to config, so under pgvector it
+                # degraded to Noop — which silently discarded scan-route
+                # writes and made /readyz report the wrong provider.
+                pipeline_memory = getattr(pipeline_service, "_memory_adapter", None)
+                if pipeline_memory is not None:
+                    app.state.memory_adapter = pipeline_memory
             except Exception:
                 logger.exception("PipelineService failed to start — continuing without it")
                 app.state.pipeline_service = None
