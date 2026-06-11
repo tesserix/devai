@@ -106,7 +106,7 @@ stages:
     agent: senior_developer
     lane: build
     depends_on: [plan-approval]
-    timeout: 30m
+    timeout: 60m   # full-app builds commit file-by-file; retries continue incrementally
 
   - name: db-engineering
     type: agentic
@@ -173,7 +173,7 @@ stages:
     lane: build
     depends_on: [diagnose-test-failures]
     condition: "output.bug_issue_number"
-    timeout: 30m
+    timeout: 45m
 
   - name: rerun-tests
     type: review

@@ -218,19 +218,50 @@ class SeniorDeveloperAgent(BaseAgent):
         if existing_branch:
             branch_name = existing_branch
 
+        # Resume-awareness: a previous ATTEMPT of this stage (timeout, pod
+        # restart, retry, heal) may already have created a branch and
+        # committed files. Without this the agent restarts FROM SCRATCH
+        # every attempt — a live run re-committed the same configs three
+        # times across resumes and could never beat the stage timeout.
+        run_id_for_branch = str(state.get("run_id") or "")
+        redis = getattr(self.state, "redis", None)
+        prior_workbranch = ""
+        committed_paths: list[str] = []
+        if run_id_for_branch and redis is not None:
+            try:
+                prior_workbranch = str(
+                    await redis.get(f"devai:run:{run_id_for_branch}:workbranch") or ""
+                )
+                raw_events = await redis.lrange(
+                    f"devai:run:{run_id_for_branch}:repo_events", -300, -1
+                )
+                seen: set[str] = set()
+                for entry in raw_events:
+                    try:
+                        p = json.loads(entry).get("path") or ""
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if p and p not in seen:
+                        seen.add(p)
+                        committed_paths.append(p)
+            except Exception:  # noqa: BLE001 — resume context is best-effort
+                logger.debug("resume context read failed", exc_info=True)
+        # Ground truth wins: continue on the branch real commits landed on,
+        # even when the previous attempt's LLM picked its own branch name.
+        if prior_workbranch:
+            branch_name = prior_workbranch
+
         # Record the working branch durably the MOMENT it's known — the
         # run's branch_name only lands when this stage completes, so
         # without this the dashboard's REPO tab keeps showing the old
         # branch for the whole (long) implement stage while commits pile
-        # up somewhere the user can't see.
-        run_id_for_branch = str(state.get("run_id") or "")
-        if run_id_for_branch:
+        # up somewhere the user can't see. (The tool layer re-stamps this
+        # with the actual branch on every real commit.)
+        if run_id_for_branch and redis is not None:
             try:
-                redis = getattr(self.state, "redis", None)
-                if redis is not None:
-                    await redis.set(
-                        f"devai:run:{run_id_for_branch}:workbranch", branch_name, ex=86400 * 7
-                    )
+                await redis.set(
+                    f"devai:run:{run_id_for_branch}:workbranch", branch_name, ex=86400 * 7
+                )
             except Exception:  # noqa: BLE001 — visibility aid, never fail the stage
                 logger.debug("workbranch record failed", exc_info=True)
 
@@ -273,6 +304,22 @@ Create feature branch `{branch_name}`, implement ONLY the changes for Story #{st
 The PR title should be: "Story #{story_number}: {story_title}"
 The PR body must include: "Closes #{story_number}"
 """
+
+        # Continuation brief: never redo finished work. This is what makes
+        # retries/resumes INCREMENTAL — each attempt finishes the remaining
+        # files instead of burning the whole time budget re-creating what
+        # the previous attempt already committed.
+        if committed_paths:
+            done_list = "\n".join(f"- {p}" for p in committed_paths[:80])
+            user_message += f"""
+
+## ALREADY DONE — CONTINUE, DO NOT START OVER
+A previous attempt of this stage already committed these files to `{branch_name}`:
+{done_list}
+
+The branch EXISTS. Do NOT recreate the branch or re-commit these files unless
+one is actually broken. Start by listing the branch to confirm its state, then
+implement ONLY the remaining work and finish with the PR."""
 
         # If revision iteration, include review feedback
         review_feedback = state.get("review_feedback", [])

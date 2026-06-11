@@ -223,6 +223,51 @@ async def test_ask_user_rejection_lets_failure_stand():
 
 
 @pytest.mark.asyncio
+async def test_timeout_with_flaky_diagnosis_still_retries():
+    """A TIMEOUT must never be abandoned because the diagnosis LLM flaked —
+    the fallback decision retries with incremental-continuation guidance."""
+
+    class _GarbageLLM:
+        provider_name = "fake"
+
+        async def generate(self, request):
+            class _R:
+                text = "sorry, I cannot help with that"  # unparseable → decision None
+
+            return _R()
+
+    class _SlowThenHealedStage(PipelineStage):
+        def __init__(self):
+            self.attempts = 0
+
+        def name(self):
+            return "slow"
+
+        async def execute(self, task):
+            self.attempts += 1
+            if not task.agent_context.get("heal:build"):
+                import asyncio
+
+                await asyncio.sleep(5)  # exceeds the 0.05s stage timeout
+            return StageResult(message="finished within budget on retry")
+
+    stage = _SlowThenHealedStage()
+    ex = _executor(llm=_GarbageLLM(), stage_factory=lambda deps, cfg: stage)
+    task = DevAITask(intent="ship", blueprint="t", repo="o/r")
+    bp = Blueprint(
+        name="t",
+        description="",
+        stages=[StageSpec(name="build", stage="work", timeout_seconds=0.05)],
+    )
+    await ex.execute(bp, task)
+
+    assert task.state == TaskState.COMPLETED
+    heal = task.agent_context["heal:build"]
+    assert "remaining work" in heal["guidance"]
+    assert stage.attempts == 2
+
+
+@pytest.mark.asyncio
 async def test_heal_disabled_via_config():
     llm = _FakeLLM({"diagnosis": "x", "action": "retry", "guidance": "y"})
     reg = StageRegistry()

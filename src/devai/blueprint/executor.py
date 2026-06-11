@@ -456,6 +456,21 @@ class BlueprintExecutor:
         decision = await self._diagnose_failure(spec, task, error)
         duration_ms = (time.monotonic() - start) * 1000.0
 
+        if decision is None and "timed out" in error.lower():
+            # A flaky diagnosis call must not doom a TIMEOUT — the recovery
+            # for "ran out of time" is always the same: continue the work
+            # incrementally (the implement agents read the committed-files
+            # ledger and skip finished work on retry).
+            decision = {
+                "action": "retry",
+                "diagnosis": "stage exceeded its time budget before finishing",
+                "guidance": (
+                    "Continue from the existing branch state. Do NOT recreate the "
+                    "branch or re-commit files that already exist — list the branch "
+                    "first, then finish ONLY the remaining work and open the PR."
+                ),
+            }
+
         if decision is None or decision.get("action") == "abort":
             why = str((decision or {}).get("diagnosis") or "no recovery path found")
             self._emit(
