@@ -20,6 +20,7 @@ task into based on the StageResult.next_state hint.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Callable, Iterable
@@ -43,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 class BlueprintExecutionError(Exception):
     """Raised when a blueprint can't be executed (cycle, missing stage, ...)."""
+
+
+class _RunStopped(Exception):
+    """Internal: the user stopped the run while a stage was executing."""
 
 
 # Hook for streaming events to subscribers (SSE, audit log, JetStream
@@ -255,8 +260,23 @@ class BlueprintExecutor:
         result: StageResult | object | None = None
         for attempt in range(1, max_attempts + 1):
             try:
-                result = await asyncio.wait_for(stage.execute(task), timeout=timeout)
+                result = await self._execute_supervised(stage, spec, task, timeout)
                 break
+            except _RunStopped:
+                # User pressed STOP while the stage was executing. The old
+                # behavior only honored stop at LEVEL boundaries, so a
+                # long-running agent stage kept going for up to its full
+                # timeout after the user stopped the run.
+                duration_ms = (time.monotonic() - start) * 1000.0
+                task.error = "stopped by user"
+                task.failed_stage = spec.name
+                task.current_stage = ""
+                task.transition(TaskState.CANCELLED)
+                self._emit(
+                    task,
+                    _ev(StageEventPhase.FAILED, duration_ms=duration_ms, error="stopped by user mid-stage"),
+                )
+                return
             except TimeoutError:
                 duration_ms = (time.monotonic() - start) * 1000.0
                 err = f"timed out after {timeout}s"
@@ -294,6 +314,46 @@ class BlueprintExecutor:
         task.current_stage = ""
 
         self._emit(task, _ev(StageEventPhase.COMPLETED, duration_ms=duration_ms, message=result.message))
+
+    async def _execute_supervised(
+        self, stage: PipelineStage, spec: StageSpec, task: DevAITask, timeout: float
+    ) -> StageResult | object:
+        """Run the stage while WATCHING the run-control flag.
+
+        STOP must take effect mid-stage — agent stages run for many minutes
+        and a user pressing Stop expects the run to halt now, not at the
+        next level boundary. We race the stage against a periodic control
+        poll: on `stopped` the in-flight stage task is cancelled and
+        :class:`_RunStopped` raised. Stage exceptions and the timeout keep
+        their existing semantics. Without a control surface (tests/minimal
+        deps) this degrades to a plain wait_for.
+        """
+        sm = self._deps.state_manager
+        getter = getattr(sm, "get_pipeline_control", None) if sm is not None else None
+        if getter is None:
+            return await asyncio.wait_for(stage.execute(task), timeout=timeout)
+
+        exec_task = asyncio.create_task(stage.execute(task), name=f"stage-{spec.name}-{task.id}")
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                done, _ = await asyncio.wait({exec_task}, timeout=self._CONTROL_POLL_SECONDS)
+                if done:
+                    return exec_task.result()  # re-raises stage exceptions naturally
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+                try:
+                    if await getter(task.id) == "stopped":
+                        raise _RunStopped
+                except _RunStopped:
+                    raise
+                except Exception:  # noqa: BLE001 — control-read blip ≠ stop
+                    continue
+        finally:
+            if not exec_task.done():
+                exec_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await exec_task
 
     _GATE_POLL_SECONDS = 3.0
     _GATE_MAX_WAIT_SECONDS = 24 * 3600.0

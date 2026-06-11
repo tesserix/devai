@@ -125,6 +125,91 @@ async def test_static_gate_rejection_cancels_run():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Mid-stage STOP — the run halts NOW, not at the next level boundary
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stop_interrupts_a_running_stage():
+    cancelled = {"flag": False}
+
+    class _SlowStage(PipelineStage):
+        def name(self):
+            return "slow"
+
+        async def execute(self, task):
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cancelled["flag"] = True
+                raise
+            return StageResult(message="never")
+
+    class _StoppableSM(_SM):
+        def __init__(self):
+            super().__init__()
+            self.control = "running"
+
+        async def get_pipeline_control(self, task_id):
+            return self.control
+
+    sm = _StoppableSM()
+    reg = StageRegistry()
+    reg.register("slow", lambda deps, cfg: _SlowStage())
+    ex, _ = _executor(sm=sm, registry=reg)
+    ex._CONTROL_POLL_SECONDS = 0.02
+
+    task = DevAITask(intent="x", blueprint="t", repo="o/r")
+
+    async def stop_soon():
+        await asyncio.sleep(0.1)
+        sm.control = "stopped"
+
+    stopper = asyncio.create_task(stop_soon())
+    await asyncio.wait_for(
+        ex.execute(_bp([StageSpec(name="s1", stage="slow", timeout_seconds=60)]), task), timeout=5
+    )
+    await stopper
+
+    assert task.state == TaskState.CANCELLED
+    assert task.error == "stopped by user"
+    assert cancelled["flag"] is True  # the in-flight stage coroutine was cancelled
+    assert "s1" not in task.stages_completed
+    assert any("stopped by user mid-stage" in (e.error or "") for e in task.stage_events)
+
+
+@pytest.mark.asyncio
+async def test_stop_does_not_trigger_retry():
+    """A user stop must never be retried as if it were a transient failure."""
+    attempts = {"n": 0}
+
+    class _SlowStage(PipelineStage):
+        def name(self):
+            return "slow"
+
+        async def execute(self, task):
+            attempts["n"] += 1
+            await asyncio.sleep(30)
+            return StageResult()
+
+    class _StoppedSM(_SM):
+        async def get_pipeline_control(self, task_id):
+            return "stopped"
+
+    reg = StageRegistry()
+    reg.register("slow", lambda deps, cfg: _SlowStage())
+    ex, _ = _executor(sm=_StoppedSM(), registry=reg)
+    ex._CONTROL_POLL_SECONDS = 0.02
+    task = DevAITask(intent="x", blueprint="t", repo="o/r")
+    # execute() checks control at the level boundary first and cancels there;
+    # exercise _run_one directly to prove the mid-stage path also stops once.
+    spec = StageSpec(name="s1", stage="slow", timeout_seconds=60)
+    await asyncio.wait_for(ex._run_one(spec, task), timeout=5)
+    assert attempts["n"] == 1
+    assert task.state == TaskState.CANCELLED
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Transient-failure retries
 # ──────────────────────────────────────────────────────────────────────
 
