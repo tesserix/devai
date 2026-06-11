@@ -43,6 +43,7 @@ stages:
   - name: ingest-documents
     type: agentic
     stage: ingest_documents
+    agent: document_analyzer
     lane: plan
     depends_on: [hydrate-context, inject-memory]
     timeout: 15m
@@ -50,6 +51,7 @@ stages:
   - name: detect-tech-stack
     type: agentic
     stage: detect_tech_stack
+    agent: tech_detector
     lane: plan
     depends_on: [ingest-documents]
     timeout: 5m
@@ -57,6 +59,7 @@ stages:
   - name: analyze-requirements
     type: agentic
     stage: analyze_requirements
+    agent: requirements_analyst
     lane: plan
     depends_on: [detect-tech-stack]
     timeout: 10m
@@ -64,6 +67,7 @@ stages:
   - name: create-epic
     type: agentic
     stage: create_epic
+    agent: product_director_epic
     lane: plan
     depends_on: [analyze-requirements]
     timeout: 10m
@@ -71,6 +75,7 @@ stages:
   - name: create-stories
     type: agentic
     stage: create_stories
+    agent: product_director_stories
     lane: plan
     depends_on: [create-epic]
     timeout: 5m
@@ -79,6 +84,7 @@ stages:
   - name: create-plan
     type: agentic
     stage: create_plan
+    agent: engineering_manager
     lane: plan
     depends_on: [create-stories]
     timeout: 15m
@@ -87,6 +93,7 @@ stages:
   - name: implement-code
     type: agentic
     stage: implement_code
+    agent: senior_developer
     lane: build
     depends_on: [create-plan]
     timeout: 30m
@@ -94,6 +101,7 @@ stages:
   - name: db-engineering
     type: agentic
     stage: db_engineering
+    agent: db_engineer
     lane: build
     title: DB Engineering
     depends_on: [implement-code]
@@ -104,6 +112,7 @@ stages:
   - name: review-code
     type: review
     stage: review_code
+    agent: staff_reviewer
     lane: review
     depends_on: [implement-code, db-engineering]
     timeout: 15m
@@ -111,6 +120,7 @@ stages:
   - name: security-scan
     type: review
     stage: security_scan
+    agent: security_expert
     lane: review
     depends_on: [review-code]
     timeout: 10m
@@ -118,6 +128,7 @@ stages:
   - name: monitor-build
     type: deterministic
     stage: monitor_build
+    agent: ci_monitor
     lane: review
     title: CI Build
     depends_on: [security-scan]
@@ -126,6 +137,7 @@ stages:
   - name: run-tests
     type: review
     stage: run_tests
+    agent: qa_tester
     lane: review
     depends_on: [monitor-build]
     timeout: 20m
@@ -134,6 +146,7 @@ stages:
   - name: staff-review
     type: review
     stage: staff_review
+    agent: staff_reviewer
     lane: review
     gate: true
     depends_on: [run-tests]
@@ -142,6 +155,7 @@ stages:
   - name: provision-infra
     type: deploy
     stage: provision_infra
+    agent: infra_provisioner
     lane: deploy
     depends_on: [staff-review]
     timeout: 15m
@@ -149,6 +163,7 @@ stages:
   - name: deploy-release
     type: deploy
     stage: deploy_release
+    agent: release_manager
     lane: deploy
     gate: true
     depends_on: [provision-infra]

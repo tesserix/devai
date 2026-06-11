@@ -149,6 +149,12 @@ class StageEvent:
     # back to), `checkpoint` carries the commit SHA. The dashboard renders
     # these as entries on the right-rail checkpoint timeline.
     checkpoint: str | None = None
+    # Which agent persona runs this stage (spec.resolved_agent()) and its
+    # visual lane — what lets consumers light up the matching agent card and
+    # phase group the moment a stage transitions, without re-reading the
+    # blueprint.
+    agent: str = ""
+    lane: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -161,6 +167,8 @@ class StageEvent:
             "type": self.stage_type,
             "gate": self.gate,
             "checkpoint": self.checkpoint,
+            "agent": self.agent,
+            "lane": self.lane,
         }
 
     @classmethod
@@ -177,6 +185,8 @@ class StageEvent:
             stage_type=d.get("type", ""),
             gate=bool(d.get("gate", False)),
             checkpoint=d.get("checkpoint"),
+            agent=d.get("agent", ""),
+            lane=d.get("lane", ""),
         )
 
 
@@ -228,6 +238,12 @@ class DevAITask:
     stages_failed: list[str] = field(default_factory=list)
     stage_events: list[StageEvent] = field(default_factory=list)
     current_stage: str = ""
+
+    # Live per-agent runtime status, derived by the event hub from stage
+    # events: {agent_key: {status, updated_at, error?}}. This is what the
+    # dashboard's agent cards read (run.agents) — the blueprint counterpart
+    # of the legacy LangGraph path's devai:run:{id}:agents hash.
+    agents: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # The handover bag. Stages write outputs here; downstream stages read.
     # Keys are role-namespaced: `requirements_analyst_output`, `coder_output`,
@@ -366,6 +382,7 @@ class DevAITask:
             "stages_failed": list(self.stages_failed),
             "stage_events": [e.to_dict() for e in self.stage_events],
             "current_stage": self.current_stage,
+            "agents": dict(self.agents),
             "agent_context": dict(self.agent_context),
             "issue_number": self.issue_number,
             "pr_number": self.pr_number,
@@ -419,6 +436,7 @@ class DevAITask:
         task.stages_failed = list(d.get("stages_failed") or [])
         task.stage_events = [StageEvent.from_dict(e) for e in (d.get("stage_events") or [])]
         task.current_stage = d.get("current_stage", "")
+        task.agents = dict(d.get("agents") or {})
         task.agent_context = dict(d.get("agent_context") or {})
         task.issue_number = d.get("issue_number")
         task.pr_number = d.get("pr_number")

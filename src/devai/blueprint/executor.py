@@ -23,6 +23,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterable
+from typing import Any
 
 from devai.blueprint.conditions import evaluate as eval_condition
 from devai.blueprint.loader import Blueprint, StageSpec
@@ -176,10 +177,24 @@ class BlueprintExecutor:
         """Execute one stage spec, handling all gates (skip / condition /
         already-done / timeout / on_failure)."""
 
+        # One factory for every event this stage emits so each carries the
+        # agent persona + lane — the dashboard lights up the matching agent
+        # card / phase group straight from the event, no blueprint re-read.
+        def _ev(phase: StageEventPhase, **kw: Any) -> StageEvent:
+            return StageEvent(
+                spec.name,
+                phase,
+                stage_type=spec.type,
+                gate=spec.gate,
+                agent=spec.resolved_agent(),
+                lane=spec.lane,
+                **kw,
+            )
+
         # Resumption: already done on a previous run.
         if spec.name in task.stages_completed:
             logger.debug("stage %s already completed — skipping", spec.name)
-            self._emit(task, StageEvent(spec.name, StageEventPhase.SKIPPED, message="already completed"))
+            self._emit(task, _ev(StageEventPhase.SKIPPED, message="already completed"))
             return
 
         # Condition gate.
@@ -191,13 +206,13 @@ class BlueprintExecutor:
             task.error = f"bad condition on {spec.name}: {e}"
             task.failed_stage = spec.name
             task.transition(TaskState.STAGE_FAILED)
-            self._emit(task, StageEvent(spec.name, StageEventPhase.FAILED, error=str(e)))
+            self._emit(task, _ev(StageEventPhase.FAILED, error=str(e)))
             return
 
         if not should_run:
             logger.info("stage %s: condition %r evaluated False — skipping", spec.name, spec.condition)
             task.stages_skipped.append(spec.name)
-            self._emit(task, StageEvent(spec.name, StageEventPhase.SKIPPED, message=f"condition: {spec.condition}"))
+            self._emit(task, _ev(StageEventPhase.SKIPPED, message=f"condition: {spec.condition}"))
             return
 
         # Resolve the stage instance. We stamp `__stage_name` into the
@@ -211,22 +226,13 @@ class BlueprintExecutor:
             task.error = str(e)
             task.failed_stage = spec.name
             task.transition(TaskState.STAGE_FAILED)
-            self._emit(task, StageEvent(spec.name, StageEventPhase.FAILED, error=str(e)))
+            self._emit(task, _ev(StageEventPhase.FAILED, error=str(e)))
             return
 
         # Run it.
         task.current_stage = spec.name
         start = time.monotonic()
-        self._emit(
-            task,
-            StageEvent(
-                spec.name,
-                StageEventPhase.STARTED,
-                message=spec.stage,
-                stage_type=spec.type,
-                gate=spec.gate,
-            ),
-        )
+        self._emit(task, _ev(StageEventPhase.STARTED, message=spec.stage))
 
         timeout = spec.timeout_seconds or self._default_timeout
         try:
@@ -257,17 +263,7 @@ class BlueprintExecutor:
         task.stages_completed.append(spec.name)
         task.current_stage = ""
 
-        self._emit(
-            task,
-            StageEvent(
-                spec.name,
-                StageEventPhase.COMPLETED,
-                duration_ms=duration_ms,
-                message=result.message,
-                stage_type=spec.type,
-                gate=spec.gate,
-            ),
-        )
+        self._emit(task, _ev(StageEventPhase.COMPLETED, duration_ms=duration_ms, message=result.message))
 
     async def _handle_failure(
         self,
@@ -288,6 +284,8 @@ class BlueprintExecutor:
                 error=error,
                 stage_type=spec.type,
                 gate=spec.gate,
+                agent=spec.resolved_agent(),
+                lane=spec.lane,
             ),
         )
 

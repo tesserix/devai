@@ -175,6 +175,32 @@ async def recent_events(request: Request, limit: int = Query(100, ge=1, le=1000)
     return _service(request).recent_events(limit=limit)
 
 
+@router.get("/runs/{task_id}/events")
+async def get_run_events(
+    request: Request, task_id: str, limit: int = Query(500, ge=1, le=2000)
+) -> list[dict[str, Any]]:
+    """Durable per-run event log (stage + agent_status + a2a envelopes).
+
+    Sourced from the Redis log the event hub appends to — unlike the
+    in-process ring it survives pod restarts. Falls back to the task's
+    recorded stage_events when the log is missing (older runs / no Redis).
+    """
+    svc = _service(request)
+    redis = getattr(svc.state_manager, "redis", None)
+    if redis is not None:
+        try:
+            raw = await redis.lrange(f"devai:run:{task_id}:events", -limit, -1)
+            if raw:
+                return [json.loads(r) for r in raw]
+        except Exception:  # noqa: BLE001 — fall through to the task snapshot
+            pass
+    task = await svc.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id!r} not found")
+    events = task.get("stage_events") or []
+    return [{"event_type": "stage", "task_id": task_id, **e} for e in events[-limit:]]
+
+
 # ────────────────────────────────────────────────────────────────────
 # Dispatch
 # ────────────────────────────────────────────────────────────────────
@@ -535,7 +561,11 @@ async def stream_events(request: Request, replay: int = Query(0, ge=0, le=1000))
                     {"timestamp": ts, "task_id": task_id, **payload},
                     default=str,
                 )
-                yield f"id: {event_id}\nevent: stage\ndata: {data}\n\n"
+                # Typed envelope: the wire event name is the envelope type
+                # (stage | agent_status | a2a). Existing listeners bound to
+                # "stage" keep working; new consumers subscribe per type.
+                event_name = payload.get("event_type") or "stage"
+                yield f"id: {event_id}\nevent: {event_name}\ndata: {data}\n\n"
         except asyncio.CancelledError:
             return
 

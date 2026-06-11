@@ -136,6 +136,14 @@ class AgentAdapter(PipelineStage):
         """
         data: dict[str, Any] = {f"{self.role_key()}_output": patch}
 
+        # Surface the agent's A2A traffic into the handover bag. base_agent
+        # merges inbox + outbox into a cumulative `a2a_messages` list (the
+        # prior bag's copy was passed in via _build_state), so writing it
+        # back replaces the bag's list with the superset — this is what
+        # makes REAL agent-to-agent traffic visible on blueprint runs.
+        if isinstance(patch.get("a2a_messages"), list):
+            data["a2a_messages"] = patch["a2a_messages"]
+
         # Surface known scalars at the top level — these are read by
         # condition expressions and the dashboard.
         for key in (

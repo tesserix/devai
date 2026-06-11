@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from collections import deque
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -103,6 +104,8 @@ class PipelineService:
         # can't GC them mid-flight (asyncio only holds a weak ref). Cleared by
         # a done-callback when each task finishes.
         self._publish_tasks: set[asyncio.Task[None]] = set()
+        # Per-blueprint stage counts, cached for progress derivation.
+        self._bp_stage_counts: dict[str, int] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
@@ -734,26 +737,48 @@ class PipelineService:
     def _on_event(self, task: DevAITask, event: StageEvent) -> None:
         """Called by Pipeline / BlueprintExecutor for every stage event.
 
-        We do four things:
-          1. Append to the ring buffer for SSE replay.
-          2. Push to every subscribed SSE queue.
-          3. Schedule a persist_task to Redis (best-effort, fire-and-forget).
+        The run-event spine. For every stage transition we:
+          1. Derive the live-observability signals (per-agent status,
+             supervisor/orchestrator synthesis + progress, coordination A2A)
+             onto the task — see _derive_run_signals.
+          2. Append the stage envelope + derived envelopes to the ring
+             buffer (SSE replay) and every subscribed SSE queue.
+          3. Append the envelopes to the durable per-run Redis logs
+             (devai:run:{id}:events / :a2a_messages) and schedule a
+             persist_task snapshot (best-effort, fire-and-forget).
           4. Publish to NATS via the event-bus adapter so any external
              subscriber (legacy agents, dashboards, downstream services)
              sees stage transitions and terminal state changes.
+        Every sink is individually fenced — one failing must not take the
+        others (or the run) down.
         """
         ts = event.timestamp
         payload = {
+            "event_type": "stage",
             "stage": event.stage,
             "phase": event.phase.value,
             "duration_ms": event.duration_ms,
             "message": event.message,
             "error": event.error,
+            "agent": event.agent,
+            "lane": event.lane,
             "task_state": task.state.value,
             "blueprint": task.blueprint,
             "repo": task.repo,
         }
+
+        # 1. Derivations mutate the task (agents dict, a2a, routing) BEFORE
+        #    the snapshot persists, so polling readers see the same truth as
+        #    SSE subscribers.
+        try:
+            derived = self._derive_run_signals(task, event, ts)
+        except Exception:  # noqa: BLE001 — derivation must never break the run
+            logger.exception("run-signal derivation failed for %s", task.id)
+            derived = []
+
         self._ring.append((ts, task.id, payload))
+        for env in derived:
+            self._ring.append((ts, task.id, env))
 
         # Best-effort OTel: one metric per terminal stage transition. record_*
         # never raises; guard the rare case telemetry is wired but malformed.
@@ -776,6 +801,8 @@ class PipelineService:
         for q in list(self._sse_queues):
             try:
                 q.put_nowait((ts, task.id, payload))
+                for env in derived:
+                    q.put_nowait((ts, task.id, env))
             except asyncio.QueueFull:
                 logger.warning("SSE queue full — dropping event")
 
@@ -785,6 +812,12 @@ class PipelineService:
                 asyncio.create_task(self.state_manager.persist_task(task.to_dict(), ttl=self.config.pipeline_task_ttl))
             except RuntimeError:
                 # No running loop (test context) — skip persistence.
+                pass
+            # Durable per-run logs: the event sequence + A2A messages survive
+            # pod restarts (the in-proc ring does not). Capped + TTL'd.
+            try:
+                self._persist_run_log(task.id, [payload, *derived], ts)
+            except RuntimeError:
                 pass
 
         # Mirror to NATS. Subject layout:
@@ -797,6 +830,16 @@ class PipelineService:
                 f"devai.pipeline.stage.{event.stage}.{event.phase.value}",
                 {"task_id": task.id, **payload, "timestamp": ts},
             )
+            # Mirror the derived envelopes so JetStream stays the canonical
+            # durable record of agent activity + coordination traffic.
+            for env in derived:
+                if env.get("event_type") == "a2a":
+                    self._schedule_publish(f"devai.pipeline.a2a.{task.id}", {"task_id": task.id, **env})
+                elif env.get("event_type") == "agent_status":
+                    self._schedule_publish(
+                        f"devai.pipeline.agent.{env.get('agent', 'unknown')}.{env.get('status', 'unknown')}",
+                        {"task_id": task.id, **env},
+                    )
         except RuntimeError:
             pass  # no running loop
 
@@ -856,6 +899,182 @@ class PipelineService:
                 task.id,
                 exc_info=True,
             )
+
+    # ── Internal: live-observability derivations (run-event spine) ────
+
+    #: stage phase → agent card status
+    _PHASE_TO_STATUS = {
+        "started": "running",
+        "completed": "completed",
+        "failed": "failed",
+        "skipped": "skipped",
+    }
+    _A2A_CAP = 500  # max coordination messages kept per run
+
+    def _derive_run_signals(self, task: DevAITask, event: StageEvent, ts: float) -> list[dict[str, Any]]:
+        """Derive agent status, coordination synthesis, and A2A from one
+        stage event. Mutates the task; returns the extra SSE envelopes.
+
+        This is the blueprint-runtime counterpart of what the legacy
+        LangGraph agents did imperatively (set_agent_status + A2ABus) —
+        derived once here so every stage type (agentic, deterministic,
+        job-runner, crew) gets live observability for free.
+        """
+        envelopes: list[dict[str, Any]] = []
+        phase = event.phase.value
+        status = self._PHASE_TO_STATUS.get(phase, "")
+        agent = (event.agent or "").strip()
+
+        # ── 1. Per-agent runtime status ─────────────────────────────
+        if agent and status:
+            entry: dict[str, Any] = {"status": status, "updated_at": ts, "stage": event.stage}
+            if event.error:
+                entry["error"] = event.error
+            task.agents[agent] = entry
+            envelopes.append(
+                {
+                    "event_type": "agent_status",
+                    "agent": agent,
+                    "status": status,
+                    "stage": event.stage,
+                    "error": event.error,
+                    "blueprint": task.blueprint,
+                }
+            )
+            # Mirror to the legacy Redis hash so anything still reading
+            # devai:run:{id}:agents (older dashboard surfaces) agrees.
+            if self.state_manager is not None and not task.dry_run:
+                try:
+                    self._spawn(self.state_manager.set_agent_status(task.id, agent, status, event.error))
+                except RuntimeError:
+                    pass
+
+        # ── 2. Coordination layer synthesis ─────────────────────────
+        # The supervisor/orchestrator cards represent the runtime itself:
+        # running while the task runs, terminal with the task. A blueprint
+        # with a REAL supervisor stage overwrites these via branch 1.
+        terminal = task.state in TERMINAL_STATES
+        coord_status = ("failed" if task.state in FAILURE_STATES else "completed") if terminal else "running"
+        for coord in ("supervisor", "orchestrator"):
+            prev = task.agents.get(coord, {}).get("status")
+            if prev != coord_status:
+                task.agents[coord] = {"status": coord_status, "updated_at": ts, "stage": event.stage}
+                envelopes.append(
+                    {
+                        "event_type": "agent_status",
+                        "agent": coord,
+                        "status": coord_status,
+                        "stage": event.stage,
+                        "error": None,
+                        "blueprint": task.blueprint,
+                    }
+                )
+
+        # Progress: completed stages over the blueprint's total. Falls back
+        # to the stages seen so far when the blueprint isn't loaded.
+        total = self._blueprint_stage_count(task.blueprint)
+        seen = len(task.stages_completed) + len(task.stages_skipped)
+        denominator = total or (seen + len(task.stages_failed) + (1 if task.current_stage else 0)) or 1
+        progress_pct = min(100, round(100 * seen / denominator))
+        task.agent_context["orchestrator_routing"] = {
+            "progress_pct": 100 if terminal and not task.error else progress_pct,
+            "current_phase": event.lane or "",
+            "status_summary": f"{event.stage} {phase}" + (f" — {event.error}" if event.error else ""),
+            "decision": task.state.value,
+        }
+
+        # ── 3. Coordination A2A (handoff / response / escalation) ───
+        # Only for persona-bearing stages; deterministic plumbing stages
+        # stay visible via the Events tab without flooding the timeline.
+        if agent and phase in ("started", "completed", "failed"):
+            if phase == "started":
+                msg_type, frm, to = "handoff", "supervisor", agent
+                subject = f"Stage '{event.stage}' handed to {agent}"
+                body = event.message or f"{event.stage} started"
+            elif phase == "completed":
+                msg_type, frm, to = "response", agent, "supervisor"
+                subject = f"'{event.stage}' completed in {event.duration_ms / 1000:.1f}s"
+                body = event.message or "done"
+            else:
+                msg_type, frm, to = "escalation", agent, "supervisor"
+                subject = f"'{event.stage}' FAILED"
+                body = event.error or "unknown error"
+
+            a2a = {
+                "id": uuid.uuid4().hex,
+                "from_agent": frm,
+                "to_agent": to,
+                "message_type": msg_type,
+                "subject": subject,
+                "body": body[:1000],
+                "payload": {"stage": event.stage, "phase": phase, "duration_ms": event.duration_ms},
+                "in_reply_to": None,
+                "timestamp": ts,
+                "triggered_by": task.triggered_by or "",
+                "trace_id": task.trace_id or task.id,
+            }
+            msgs = task.agent_context.setdefault("a2a_messages", [])
+            if isinstance(msgs, list):
+                msgs.append(a2a)
+                if len(msgs) > self._A2A_CAP:
+                    del msgs[: len(msgs) - self._A2A_CAP]
+            envelopes.append({"event_type": "a2a", **a2a})
+
+        return envelopes
+
+    def _blueprint_stage_count(self, name: str) -> int:
+        if not name or self._pipeline is None:
+            return 0
+        cached = self._bp_stage_counts.get(name)
+        if cached is not None:
+            return cached
+        try:
+            bp = self._pipeline.get_blueprint(name)
+            count = len(bp.stages) if bp is not None else 0
+        except Exception:  # noqa: BLE001
+            count = 0
+        self._bp_stage_counts[name] = count
+        return count
+
+    def _persist_run_log(self, task_id: str, envelopes: list[dict[str, Any]], ts: float) -> None:
+        """Append envelopes to the durable per-run Redis logs.
+
+        devai:run:{id}:events       — every envelope (stage/agent_status/a2a)
+        devai:run:{id}:a2a_messages — a2a only (same key the legacy LangGraph
+                                      path used, so existing readers work)
+        Both capped and TTL'd by pipeline_task_ttl. Fire-and-forget.
+        """
+        redis = getattr(self.state_manager, "redis", None)
+        if redis is None:
+            return
+        ttl = int(getattr(self.config, "pipeline_task_ttl", 86400 * 30))
+
+        async def _write() -> None:
+            try:
+                pipe = redis.pipeline()
+                events_key = f"devai:run:{task_id}:events"
+                for env in envelopes:
+                    pipe.rpush(events_key, json.dumps({"timestamp": ts, "task_id": task_id, **env}, default=str))
+                pipe.ltrim(events_key, -2000, -1)
+                pipe.expire(events_key, ttl)
+                a2a_key = f"devai:run:{task_id}:a2a_messages"
+                a2a_envs = [e for e in envelopes if e.get("event_type") == "a2a"]
+                if a2a_envs:
+                    for env in a2a_envs:
+                        pipe.rpush(a2a_key, json.dumps({k: v for k, v in env.items() if k != "event_type"}, default=str))
+                    pipe.ltrim(a2a_key, -self._A2A_CAP, -1)
+                    pipe.expire(a2a_key, ttl)
+                await pipe.execute()
+            except Exception:  # noqa: BLE001
+                logger.debug("run-log persist failed for %s", task_id, exc_info=True)
+
+        self._spawn(_write())
+
+    def _spawn(self, coro: Any) -> None:
+        """Fire-and-forget a coroutine with a strong ref (GC-safe)."""
+        task = asyncio.create_task(coro)
+        self._publish_tasks.add(task)
+        task.add_done_callback(self._publish_tasks.discard)
 
     def _schedule_publish(self, subject: str, payload: dict[str, Any]) -> None:
         """Fire-and-forget publish from sync context (the _on_event hook

@@ -146,7 +146,9 @@ async def test_service_event_ring_records_completion(settings, state_manager):
     try:
         await svc.run_once(intent="scan", blueprint="security-scan", repo="x/y")
         events = svc.recent_events(limit=100)
-        phases = {e["phase"] for e in events}
+        # The ring now carries typed envelopes (stage | agent_status | a2a);
+        # phase is a stage-envelope field.
+        phases = {e["phase"] for e in events if e.get("event_type", "stage") == "stage"}
         assert "started" in phases
         assert phases & {"completed", "skipped"}  # at least one stage finished
     finally:
