@@ -49,6 +49,8 @@ class _Cfg:
     pipeline_stage_retries = 0  # isolate recovery from transient retries
     pipeline_heal_on_failure = True
     pipeline_heal_attempts = 1
+    pipeline_stage_inactivity_grace = 240
+    pipeline_stage_hard_cap_multiplier = 100  # tests use sub-second timeouts
 
 
 class _FakeLLM:
@@ -265,6 +267,62 @@ async def test_timeout_with_flaky_diagnosis_still_retries():
     heal = task.agent_context["heal:build"]
     assert "remaining work" in heal["guidance"]
     assert stage.attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_active_stage_outlives_its_timeout():
+    """Progress-aware liveness: a stage past its deadline with a FRESH
+    tool-activity heartbeat is extended instead of killed."""
+    import asyncio
+    import time as _time
+
+    class _Working(PipelineStage):
+        def name(self):
+            return "busy"
+
+        async def execute(self, task):
+            await asyncio.sleep(3.0)  # far beyond the 0.1s timeout
+            return StageResult(message="finished while heartbeating")
+
+    sm = _SM()
+    ex = _executor(sm=sm, stage_factory=lambda deps, cfg: _Working())
+    # Speed the supervision poll up for the test.
+    ex._CONTROL_POLL_SECONDS = 0.2
+    task = DevAITask(intent="ship", blueprint="t", repo="o/r")
+    sm.redis.data[f"devai:run:{task.id}:activity"] = str(_time.time())
+    bp = Blueprint(
+        name="t", description="", stages=[StageSpec(name="build", stage="work", timeout_seconds=0.1)]
+    )
+    await ex.execute(bp, task)
+
+    assert task.state == TaskState.COMPLETED
+    assert "build" in task.stages_completed
+
+
+@pytest.mark.asyncio
+async def test_stalled_stage_still_dies_at_timeout():
+    """No heartbeat → the original timeout semantics stand."""
+    import asyncio
+
+    class _Stalled(PipelineStage):
+        def name(self):
+            return "stuck"
+
+        async def execute(self, task):
+            await asyncio.sleep(3.0)
+            return StageResult(message="never reached")
+
+    sm = _SM()  # no activity key
+    ex = _executor(llm=None, sm=sm, stage_factory=lambda deps, cfg: _Stalled())
+    ex._CONTROL_POLL_SECONDS = 0.2
+    task = DevAITask(intent="ship", blueprint="t", repo="o/r")
+    bp = Blueprint(
+        name="t", description="", stages=[StageSpec(name="build", stage="work", timeout_seconds=0.1)]
+    )
+    await ex.execute(bp, task)
+
+    assert task.state == TaskState.AGENT_TIMEOUT
+    assert "build" in task.stages_failed
 
 
 @pytest.mark.asyncio

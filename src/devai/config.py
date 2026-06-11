@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     # the fix genuinely needs a decision. Runs BEFORE on_failure semantics.
     pipeline_heal_on_failure: bool = True
     pipeline_heal_attempts: int = 1  # recovery rounds per stage
+    # Progress-aware stage liveness: a stage past its timeout is NOT killed
+    # while its agent shows recent tool activity (devai:run:<id>:activity,
+    # stamped by the tool layer) — it gets extended up to timeout × the hard
+    # cap multiplier. Stalled stages (no activity within the grace window)
+    # still die at the original timeout. "Never time out while working,
+    # die fast when stuck."
+    pipeline_stage_inactivity_grace: int = 240  # seconds of silence = stalled
+    pipeline_stage_hard_cap_multiplier: int = 4  # absolute ceiling = timeout × N
 
     # --- NATS ---
     nats_url: str = "nats://localhost:4222"
@@ -182,6 +190,21 @@ class Settings(BaseSettings):
     # to wrap up rather than raising — so this is a soft target, not a
     # hard kill switch.
     claude_max_iterations: int = 50
+    # Conversational sessions: long agent loops run as a CHAIN of bounded
+    # conversations instead of one ever-growing thread. Each session does at
+    # most `claude_session_iterations` tool turns, checkpoints its progress
+    # ("done / remaining"), and the next session starts FRESH from the brief
+    # + that note. Keeps context small (rate limits, cost, latency) and makes
+    # progress durable — a killed session loses minutes, not the whole build.
+    claude_session_iterations: int = 15
+    claude_max_sessions: int = 8
+    # Prompt caching: cache_control breakpoints on system prompt, tool
+    # schemas, and the newest user turn — every turn re-reads the prefix
+    # from cache instead of re-paying full input tokens.
+    claude_prompt_caching: bool = True
+    # Absolute backstop for one agent loop (sessions bound the real work;
+    # stage-level liveness supervision governs the practical budget).
+    claude_agent_total_timeout: int = 14400
     # Per-role caps. These are passed explicitly by each agent's call site
     # so a config tweak doesn't require touching every agent file.
     claude_max_iterations_implementation: int = 120  # senior_developer, db_engineer

@@ -1,7 +1,31 @@
 """Claude Messages API provider with tool-use agentic loop.
 
-Includes retry with exponential backoff, timeout protection,
-and LangSmith tracing integration.
+The loop runs as a CHAIN OF BOUNDED CONVERSATIONAL SESSIONS rather than
+one ever-growing thread:
+
+  - each session does at most `claude_session_iterations` tool turns;
+  - at the session boundary the model writes a checkpoint note
+    ("completed / remaining TODOs") and the next session starts FRESH
+    from the original brief + that note;
+  - the chain ends when the model finishes naturally (a turn with no
+    tool calls) or the session/iteration budget is exhausted — in which
+    case the last checkpoint note is returned as a partial result (the
+    stage output contracts + recovery agent take it from there).
+
+Why sessions: a single long conversation re-sends its whole history on
+every turn — input tokens grow linearly, the shared rate limiter starts
+sleeping ~60s per call, and a 100-turn build needs hours it doesn't
+have. Short sessions keep every turn cheap and make progress durable:
+losing a session loses minutes, not the whole build.
+
+Prompt caching (`claude_prompt_caching`) adds cache_control breakpoints
+on the system prompt, tool schemas, and the newest user turn so each
+turn re-reads the conversation prefix from cache instead of re-paying
+full input tokens. The rate limiter is fed the per-turn DELTA estimate
+accordingly.
+
+Includes retry with exponential backoff, timeout protection, and
+LangSmith tracing integration.
 """
 
 from __future__ import annotations
@@ -32,15 +56,22 @@ ToolExecutor = Callable[[str, dict[str, Any]], Coroutine[Any, Any, str]]
 # Circuit breaker for Anthropic API
 _claude_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=120, name="anthropic")
 
-# Agent execution timeout (15 minutes)
-AGENT_TIMEOUT = 900
 # Single API call timeout (3 minutes)
 API_CALL_TIMEOUT = 180
 DEFAULT_TOOL_TIMEOUT = 300
 
+_CHECKPOINT_INSTRUCTION = (
+    "SESSION CHECKPOINT — do NOT call any more tools in this session. "
+    "Reply with exactly two sections:\n"
+    "COMPLETED: what you finished this session (files, branches, PRs — be precise).\n"
+    "REMAINING: the precise remaining TODOs, in order, so the next session "
+    "can continue without re-reading everything.\n"
+    "If ALL work is done, say COMPLETED: <summary> and REMAINING: none."
+)
+
 
 class ClaudeProvider:
-    """Anthropic Claude Messages API with tool-use agentic loop."""
+    """Anthropic Claude Messages API with a session-chained tool-use loop."""
 
     def __init__(self, config: Settings) -> None:
         from devai.services.tracing import wrap_anthropic_client
@@ -49,6 +80,10 @@ class ClaudeProvider:
         self.model = config.claude_model
         self.max_tokens = config.claude_max_tokens
         self.max_iterations = config.claude_max_iterations
+        self.session_iterations = max(1, int(getattr(config, "claude_session_iterations", 15) or 15))
+        self.max_sessions = max(1, int(getattr(config, "claude_max_sessions", 8) or 8))
+        self.prompt_caching = bool(getattr(config, "claude_prompt_caching", True))
+        self.total_timeout = int(getattr(config, "claude_agent_total_timeout", 14400) or 14400)
 
     async def run_agent_loop(
         self,
@@ -58,111 +93,187 @@ class ClaudeProvider:
         tool_executor: ToolExecutor,
         max_iterations: int | None = None,
     ) -> str:
-        """Run a Claude agent loop with tool use until completion.
+        """Run the session-chained agent loop until completion.
 
-        Includes timeout protection and retry logic for API calls. When the
-        iteration ceiling is reached the loop degrades gracefully:
-
-        1. Sends a final wrap-up turn telling the model to stop calling
-           tools and produce its best final answer with what it has so far.
-        2. Returns whatever text the model produces (even if partial).
-        3. Only raises if there is literally no text to return.
-
-        This prevents one runaway agent from failing the whole pipeline
-        run, which is the right default for a development AI.
+        Degrades gracefully on every budget edge: a session that hits its
+        turn cap checkpoints and hands over to the next session; exhausting
+        all sessions returns the last checkpoint note (partial result)
+        instead of raising. Only a loop that produced literally no text
+        raises.
         """
 
         async def _run() -> str:
-            iterations = max_iterations or self.max_iterations
-            messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+            total_cap = max_iterations or self.max_iterations
+            session_cap = max(1, min(self.session_iterations, total_cap))
+            turns_used = 0
+            progress_notes: list[str] = []
             last_text = ""
 
-            for i in range(iterations):
-                response = await self._call_api(system_prompt, tools, messages)
-                assistant_content = response.content
-                messages.append({"role": "assistant", "content": assistant_content})
+            for session_no in range(1, self.max_sessions + 1):
+                if turns_used >= total_cap:
+                    break
 
-                # Capture any text the model produced this turn so we always
-                # have something to return at the end, even on a forced stop.
-                turn_text = "\n".join(block.text for block in assistant_content if isinstance(block, TextBlock))
-                if turn_text.strip():
-                    last_text = turn_text
-
-                tool_calls = [block for block in assistant_content if isinstance(block, ToolUseBlock)]
-
-                if not tool_calls:
-                    logger.info("Claude agent completed in %d iterations", i + 1)
-                    return turn_text or last_text
-
-                # On the very last allowed iteration, refuse to execute any
-                # more tool calls and give the model one final turn with a
-                # stop instruction. This converts a hard cap into a soft
-                # one without losing any reasoning the model has done.
-                if i == iterations - 1:
-                    logger.warning(
-                        "Claude agent reached iteration cap (%d) — requesting wrap-up",
-                        iterations,
+                seed = user_message
+                if progress_notes:
+                    notes = "\n\n".join(progress_notes[-2:])
+                    seed = (
+                        f"{user_message}\n\n"
+                        "## PROGRESS FROM PREVIOUS SESSION(S) — CONTINUE, DO NOT REDO\n"
+                        f"{notes}\n\n"
+                        "The work above is already done and committed. Verify with read "
+                        "tools if unsure, then complete ONLY the remaining work."
                     )
-                    tool_results = [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": tc.id,
-                            "content": (
-                                "ITERATION LIMIT REACHED. Do NOT call any more tools. "
-                                "Summarize what you have already accomplished, list any "
-                                "remaining work as TODOs in your final message, and stop."
-                            ),
-                            "is_error": True,
-                        }
-                        for tc in tool_calls
-                    ]
+                messages: list[dict[str, Any]] = [
+                    {"role": "user", "content": [{"type": "text", "text": seed}]}
+                ]
+
+                for i in range(session_cap):
+                    turns_used += 1
+                    response = await self._call_api(system_prompt, tools, messages)
+                    assistant_content = response.content
+                    messages.append({"role": "assistant", "content": assistant_content})
+
+                    turn_text = "\n".join(
+                        block.text for block in assistant_content if isinstance(block, TextBlock)
+                    )
+                    if turn_text.strip():
+                        last_text = turn_text
+
+                    tool_calls = [b for b in assistant_content if isinstance(b, ToolUseBlock)]
+                    if not tool_calls:
+                        logger.info(
+                            "Claude agent completed naturally — session %d, %d total turns",
+                            session_no,
+                            turns_used,
+                        )
+                        return turn_text or last_text
+
+                    # Session boundary (or global cap): checkpoint instead of
+                    # executing more tools — the next session continues from
+                    # the note with a fresh, small context.
+                    if i == session_cap - 1 or turns_used >= total_cap:
+                        logger.info(
+                            "Claude agent session %d hit its turn budget (%d) — checkpointing",
+                            session_no,
+                            session_cap,
+                        )
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": tc.id,
+                                        "content": _CHECKPOINT_INSTRUCTION,
+                                        "is_error": True,
+                                    }
+                                    for tc in tool_calls
+                                ],
+                            }
+                        )
+                        note = await self._call_api(system_prompt, tools, messages)
+                        note_text = "\n".join(
+                            b.text for b in note.content if isinstance(b, TextBlock)
+                        )
+                        if note_text.strip():
+                            progress_notes.append(note_text.strip())
+                            last_text = note_text
+                            # The model itself declares completion at a boundary.
+                            if "remaining: none" in note_text.lower():
+                                logger.info(
+                                    "Claude agent declared completion at session %d boundary",
+                                    session_no,
+                                )
+                                return note_text
+                        break  # next session
+
+                    tool_results = []
+                    for tc in tool_calls:
+                        logger.debug("Executing tool: %s(%s)", tc.name, tc.input)
+                        try:
+                            timeout_seconds = DEFAULT_TOOL_TIMEOUT
+                            if tc.name.startswith(("github_", "scm_", "doc_")):
+                                timeout_seconds = 120
+                            result = await with_timeout(
+                                tool_executor(tc.name, tc.input),
+                                timeout_seconds=timeout_seconds,
+                                description=f"tool:{tc.name}",
+                            )
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tc.id,
+                                    "content": result,
+                                }
+                            )
+                        except Exception as e:
+                            logger.error("Tool %s failed: %s", tc.name, e)
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tc.id,
+                                    "content": f"Error: {e}",
+                                    "is_error": True,
+                                }
+                            )
+
                     messages.append({"role": "user", "content": tool_results})
 
-                    final = await self._call_api(system_prompt, tools, messages)
-                    final_text = "\n".join(block.text for block in final.content if isinstance(block, TextBlock))
-                    if final_text.strip():
-                        logger.warning("Claude agent wrapped up after iteration cap; returning partial result")
-                        return final_text
-                    if last_text:
-                        return last_text
-                    raise RuntimeError(f"Claude agent exceeded {iterations} iterations and produced no text")
+            if last_text:
+                logger.warning(
+                    "Claude agent exhausted its session budget (%d sessions, %d turns) — "
+                    "returning last checkpoint as partial result",
+                    self.max_sessions,
+                    turns_used,
+                )
+                return last_text
+            raise RuntimeError(
+                f"Claude agent produced no text in {turns_used} turns across "
+                f"{self.max_sessions} session(s)"
+            )
 
-                tool_results = []
-                for tc in tool_calls:
-                    logger.debug("Executing tool: %s(%s)", tc.name, tc.input)
-                    try:
-                        timeout_seconds = DEFAULT_TOOL_TIMEOUT
-                        if tc.name.startswith(("github_", "scm_", "doc_")):
-                            timeout_seconds = 120
-                        result = await with_timeout(
-                            tool_executor(tc.name, tc.input),
-                            timeout_seconds=timeout_seconds,
-                            description=f"tool:{tc.name}",
-                        )
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tc.id,
-                                "content": result,
-                            }
-                        )
-                    except Exception as e:
-                        logger.error("Tool %s failed: %s", tc.name, e)
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tc.id,
-                                "content": f"Error: {e}",
-                                "is_error": True,
-                            }
-                        )
+        return await with_timeout(_run(), self.total_timeout, "claude_agent_loop")
 
-                messages.append({"role": "user", "content": tool_results})
+    # ── Prompt caching ──────────────────────────────────────────────────
 
-            # Defensive — the wrap-up branch above always returns or raises.
-            return last_text
+    def _cache_params(
+        self,
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+    ) -> tuple[Any, list[dict[str, Any]]]:
+        """Apply cache_control breakpoints (system, tools, newest user turn).
 
-        return await with_timeout(_run(), AGENT_TIMEOUT, "claude_agent_loop")
+        The conversation breakpoint MOVES each call: strip markers from the
+        user-turn dicts we own (assistant turns hold SDK objects — never
+        touched), then mark the last block of the newest user message so the
+        whole prefix above it is a cache hit on the next turn.
+        """
+        if not self.prompt_caching:
+            return system_prompt, tools
+
+        system_param = [
+            {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}
+        ]
+        tools_param = tools
+        if tools:
+            tools_param = [*tools[:-1], {**tools[-1], "cache_control": {"type": "ephemeral"}}]
+
+        for m in messages:
+            content = m.get("content") if isinstance(m, dict) else None
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        block.pop("cache_control", None)
+        for m in reversed(messages):
+            if not isinstance(m, dict) or m.get("role") != "user":
+                continue
+            content = m.get("content")
+            if isinstance(content, list) and content and isinstance(content[-1], dict):
+                content[-1]["cache_control"] = {"type": "ephemeral"}
+            break
+
+        return system_param, tools_param
 
     @retry_async(max_attempts=3, base_delay=2.0, max_delay=30.0)
     async def _call_api(
@@ -179,21 +290,29 @@ class ClaudeProvider:
         through (e.g. concurrent calls from a different process) and
         waiting the API-suggested retry-after.
         """
-        # Conservative pre-call estimate: system prompt + tools schema +
-        # all in-flight messages. We over-estimate slightly so the
-        # limiter errs toward sleeping rather than firing through.
-        estimated_input_tokens = (
-            estimate_token_count(system_prompt) + estimate_token_count(tools) + estimate_token_count(messages)
-        )
+        # Budget estimate: with prompt caching only the NEW tokens since the
+        # last turn are real spend — feeding the limiter the full (growing)
+        # history made it sleep a whole window before every late turn, which
+        # throttled implement loops to ~1 tool turn per minute.
+        if self.prompt_caching and len(messages) > 1:
+            estimated_input_tokens = estimate_token_count(messages[-1]) + 2000
+        else:
+            estimated_input_tokens = (
+                estimate_token_count(system_prompt)
+                + estimate_token_count(tools)
+                + estimate_token_count(messages)
+            )
         await get_claude_rate_limiter().acquire(estimated_input_tokens)
+
+        system_param, tools_param = self._cache_params(system_prompt, tools, messages)
 
         async def _api_call() -> Message:
             return await asyncio.wait_for(
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
-                    system=system_prompt,
-                    tools=tools,
+                    system=system_param,
+                    tools=tools_param,
                     messages=messages,
                 ),
                 timeout=API_CALL_TIMEOUT,

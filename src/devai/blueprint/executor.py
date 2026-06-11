@@ -328,30 +328,55 @@ class BlueprintExecutor:
     async def _execute_supervised(
         self, stage: PipelineStage, spec: StageSpec, task: DevAITask, timeout: float
     ) -> StageResult | object:
-        """Run the stage while WATCHING the run-control flag.
+        """Run the stage while WATCHING the run-control flag and liveness.
 
         STOP must take effect mid-stage — agent stages run for many minutes
         and a user pressing Stop expects the run to halt now, not at the
         next level boundary. We race the stage against a periodic control
         poll: on `stopped` the in-flight stage task is cancelled and
-        :class:`_RunStopped` raised. Stage exceptions and the timeout keep
-        their existing semantics. Without a control surface (tests/minimal
-        deps) this degrades to a plain wait_for.
+        :class:`_RunStopped` raised.
+
+        The timeout is PROGRESS-AWARE: a stage past its deadline whose agent
+        shows recent tool activity (the tool layer heartbeats
+        ``devai:run:<id>:activity``) is extended, up to ``timeout × hard cap
+        multiplier`` — long builds finish; a stage that goes silent for the
+        inactivity grace window dies at its deadline as before. Without a
+        control surface (tests/minimal deps) this degrades to a plain
+        wait_for.
         """
         sm = self._deps.state_manager
         getter = getattr(sm, "get_pipeline_control", None) if sm is not None else None
         if getter is None:
             return await asyncio.wait_for(stage.execute(task), timeout=timeout)
 
+        grace = max(30.0, float(getattr(self._deps.config, "pipeline_stage_inactivity_grace", 240) or 240))
+        hard_mult = max(1, int(getattr(self._deps.config, "pipeline_stage_hard_cap_multiplier", 4) or 4))
+
         exec_task = asyncio.create_task(stage.execute(task), name=f"stage-{spec.name}-{task.id}")
         deadline = time.monotonic() + timeout
+        hard_deadline = time.monotonic() + timeout * hard_mult
+        extended = False
         try:
             while True:
                 done, _ = await asyncio.wait({exec_task}, timeout=self._CONTROL_POLL_SECONDS)
                 if done:
                     return exec_task.result()  # re-raises stage exceptions naturally
-                if time.monotonic() >= deadline:
-                    raise TimeoutError
+                now = time.monotonic()
+                if now >= deadline:
+                    if now < hard_deadline and await self._recent_activity(task.id, grace):
+                        # Actively working — extend in one-minute slices.
+                        deadline = now + 60.0
+                        if not extended:
+                            extended = True
+                            logger.info(
+                                "stage %s past its %.0fs timeout but actively working — "
+                                "extending (hard cap %.0fs)",
+                                spec.name,
+                                timeout,
+                                timeout * hard_mult,
+                            )
+                    else:
+                        raise TimeoutError
                 try:
                     if await getter(task.id) == "stopped":
                         raise _RunStopped
@@ -364,6 +389,19 @@ class BlueprintExecutor:
                 exec_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await exec_task
+
+    async def _recent_activity(self, task_id: str, grace_seconds: float) -> bool:
+        """True when the agent's tool-layer heartbeat is fresher than the
+        grace window — the liveness signal behind progress-aware timeouts."""
+        sm = self._deps.state_manager
+        redis = getattr(sm, "redis", None) if sm is not None else None
+        if redis is None:
+            return False
+        try:
+            ts = await redis.get(f"devai:run:{task_id}:activity")
+            return ts is not None and (time.time() - float(ts)) < grace_seconds
+        except Exception:  # noqa: BLE001 — liveness read failure ≠ alive
+            return False
 
     async def _attempt_with_retries(
         self,

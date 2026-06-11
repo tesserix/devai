@@ -408,10 +408,13 @@ class RateLimiter:
 
 
 # Global singletons used by every LLM provider so concurrent agents
-# share a single budget. Tuned for the Anthropic Free Tier (5 RPM,
-# 10K input-tokens-per-minute on Sonnet/Opus/Haiku 4). Override at
-# runtime via DEVAI_CLAUDE_RPM / DEVAI_CLAUDE_TPM environment variables
-# when on a paid tier with higher headroom.
+# share a single budget. Defaults sized for a standard PAID Anthropic
+# tier (Tier 1: 50 RPM / 30k input-TPM on Sonnet) — the old free-tier
+# defaults (5 RPM / 10k TPM) throttled implement loops to ~1 tool turn
+# per minute once the conversation grew past 10k tokens, which is what
+# timed whole runs out. Override at runtime via DEVAI_CLAUDE_RPM /
+# DEVAI_CLAUDE_TPM. With prompt caching the per-turn token DELTA is
+# small, so these budgets go a long way.
 import os as _os  # noqa: E402
 
 _claude_rate_limiter: RateLimiter | None = None
@@ -423,8 +426,8 @@ def get_claude_rate_limiter() -> RateLimiter:
     """
     global _claude_rate_limiter
     if _claude_rate_limiter is None:
-        rpm = int(_os.environ.get("DEVAI_CLAUDE_RPM", "5"))
-        tpm = int(_os.environ.get("DEVAI_CLAUDE_TPM", "10000"))
+        rpm = int(_os.environ.get("DEVAI_CLAUDE_RPM", "30"))
+        tpm = int(_os.environ.get("DEVAI_CLAUDE_TPM", "40000"))
         _claude_rate_limiter = RateLimiter(name="anthropic", rpm=rpm, tpm=tpm)
     return _claude_rate_limiter
 

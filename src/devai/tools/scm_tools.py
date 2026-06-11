@@ -258,6 +258,19 @@ class SCMToolExecutor:
         """Execute an SCM tool and return the result as a string."""
         import json
 
+        # Liveness heartbeat: every tool call proves the agent is actively
+        # working. The executor's stage supervision reads this to extend the
+        # stage deadline while progress continues (and to kill stalls fast).
+        if self._run_id and self._redis is not None:
+            import time as _time
+
+            try:
+                await self._redis.set(
+                    f"devai:run:{self._run_id}:activity", str(_time.time()), ex=3600
+                )
+            except Exception:  # noqa: BLE001 — heartbeat is best-effort
+                pass
+
         # Support both scm_* and legacy github_* tool names
         normalized = tool_name.replace("github_", "scm_")
         handler = getattr(self, f"_handle_{normalized}", None)
