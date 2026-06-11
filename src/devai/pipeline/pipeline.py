@@ -390,6 +390,29 @@ class Pipeline:
                 await sm.ack_task(task_id)  # type: ignore[union-attr]
                 continue
 
+            # Stop-guard at the claim choke point: the user's stop flag lives
+            # 24h in Redis, so a stopped run can NEVER be resurrected by any
+            # requeue path (reaper reclaim, boot reconcile, manual re-enqueue)
+            # even if a stale snapshot write made it look non-terminal again —
+            # which is exactly what happened during a pod roll: the draining
+            # pod's persist overwrote the cancellation and the reaper re-ran
+            # the run.
+            try:
+                ctrl = await sm.get_pipeline_control(task_id)  # type: ignore[union-attr]
+            except Exception:  # noqa: BLE001
+                ctrl = None
+            if ctrl == "stopped":
+                logger.info("worker %s: %s is flagged stopped — finalizing cancel instead of executing", worker_name, task_id)
+                task.error = task.error or "stopped by user"
+                task.failed_stage = task.failed_stage or task.current_stage or ""
+                task.current_stage = ""
+                if not task.is_terminal:
+                    task.transition(TaskState.CANCELLED)
+                await self._persist(task)
+                with contextlib.suppress(Exception):
+                    await sm.ack_task(task_id)  # type: ignore[union-attr]
+                continue
+
             hb = asyncio.create_task(self._heartbeat(task_id, worker_name), name=f"hb-{task_id}")
             try:
                 async with self._semaphore:

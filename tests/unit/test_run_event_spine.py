@@ -388,6 +388,110 @@ async def test_worker_releases_unknown_blueprint_instead_of_crashing():
 
 
 @pytest.mark.asyncio
+async def test_worker_finalizes_stopped_run_instead_of_resurrecting():
+    """A stopped run must NEVER be resurrected by a requeue path. The stop
+    flag is checked at the claim choke point: the worker finalizes CANCELLED
+    and acks instead of executing — even when a stale snapshot write made
+    the run look non-terminal again (the zombie-writer race during a pod
+    roll that re-ran a cancelled run in prod)."""
+    import asyncio
+
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.pipeline import Pipeline
+
+    # Snapshot looks RUNNING (the stale overwrite) but control says stopped.
+    task_obj = DevAITask(intent="x", blueprint="bp", repo="org/app")
+    task_obj.state = TaskState.IMPLEMENTING
+    task_dict = task_obj.to_dict()
+    acked: list[str] = []
+    persisted: list[dict] = []
+    executed = {"flag": False}
+
+    class _SM:
+        async def claim_next_task(self, worker_id, *, claim_ttl=180):
+            if acked:
+                raise asyncio.CancelledError
+            return task_dict["id"]
+
+        async def get_pipeline_control(self, task_id):
+            return "stopped"
+
+        async def ack_task(self, task_id):
+            acked.append(task_id)
+
+        async def get_pipeline_task(self, task_id):
+            return task_dict
+
+        async def persist_task(self, d, **kw):
+            persisted.append(d)
+
+        async def heartbeat_task(self, *a, **kw):
+            return None
+
+        async def release_task(self, task_id):
+            return 1
+
+    class _Cfg2(_Cfg):
+        pipeline_durable_queue = True
+        pipeline_queue_poll_interval = 0.01
+
+    deps = StageDeps(config=_Cfg2(), state_manager=_SM())
+    pipe = Pipeline(deps)
+
+    # Register the blueprint so the claim guard passes and ONLY the stop
+    # guard can prevent execution.
+    class _BP:
+        name = "bp"
+        stages = []
+
+    pipe._blueprints["bp"] = _BP()
+
+    async def _explode(*a, **kw):
+        executed["flag"] = True
+
+    pipe._execute_task = _explode  # type: ignore[method-assign]
+
+    with pytest.raises(asyncio.CancelledError):
+        await pipe._durable_worker_loop(0)
+
+    assert executed["flag"] is False  # never re-executed
+    assert acked == [task_dict["id"]]
+    assert persisted and persisted[-1]["state"] == "cancelled"
+    assert persisted[-1]["error"] == "stopped by user"
+
+
+@pytest.mark.asyncio
+async def test_persist_task_never_regresses_terminal_state():
+    fakeredis = pytest.importorskip("fakeredis")
+    from devai.core.state import StateManager
+
+    sm = StateManager.__new__(StateManager)
+    sm.redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    sm.result_ttl = 3600
+
+    task = DevAITask(intent="x", blueprint="bp", repo="org/app")
+    task.state = TaskState.CANCELLED
+    terminal = task.to_dict()
+    await sm.persist_task(terminal)
+
+    # A zombie writer with a NEWER timestamp but non-terminal state loses.
+    zombie = dict(terminal)
+    zombie["state"] = "implementing"
+    zombie["updated_at"] = terminal["updated_at"] + 100
+    await sm.persist_task(zombie)
+    stored = await sm.get_pipeline_task(task.id)
+    assert stored["state"] == "cancelled"
+
+    # But terminal→terminal updates still apply.
+    done = dict(terminal)
+    done["state"] = "completed"
+    done["updated_at"] = terminal["updated_at"] + 200
+    await sm.persist_task(done)
+    stored = await sm.get_pipeline_task(task.id)
+    assert stored["state"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_execute_task_unknown_blueprint_fails_visibly():
     from devai.pipeline.interfaces import StageDeps
     from devai.pipeline.pipeline import Pipeline

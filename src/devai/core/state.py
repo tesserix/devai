@@ -15,6 +15,18 @@ from devai.models import AgentResult, PipelineContext
 
 logger = logging.getLogger(__name__)
 
+# Terminal task states — persist_task refuses to overwrite a terminal snapshot
+# with a non-terminal one (zombie-writer protection). Sourced from the pipeline
+# state machine; falls back to the literal set in slim environments.
+try:
+    from devai.pipeline.types import TERMINAL_STATES as _PIPELINE_TERMINAL_STATES
+
+    _TERMINAL_STATE_VALUES = frozenset(s.value for s in _PIPELINE_TERMINAL_STATES)
+except Exception:  # noqa: BLE001
+    _TERMINAL_STATE_VALUES = frozenset(
+        {"completed", "failed", "stage_failed", "agent_timeout", "budget_exceeded", "cancelled"}
+    )
+
 
 class StateManager:
     """Manages pipeline state in Redis."""
@@ -222,12 +234,31 @@ class StateManager:
                     current = await pipe.get(key)  # immediate read under WATCH
                     if current:
                         try:
-                            stored_ts = float(json.loads(current).get("updated_at") or 0.0)
+                            stored = json.loads(current)
+                            stored_ts = float(stored.get("updated_at") or 0.0)
+                            stored_state = str(stored.get("state") or "")
                         except (ValueError, TypeError):
-                            stored_ts = 0.0
+                            stored_ts, stored_state = 0.0, ""
                         if incoming_ts < stored_ts:
                             await pipe.unwatch()
                             return  # stale — a newer snapshot already stored
+                        # Terminal beats non-terminal REGARDLESS of timestamps.
+                        # updated_at ordering alone can't stop a zombie writer:
+                        # during a pod roll the draining pod keeps executing
+                        # (and persisting newer 'running' snapshots) AFTER the
+                        # new pod cancelled the run — the reaper then requeued
+                        # and resurrected a stopped run. Once a run is terminal,
+                        # only another terminal snapshot may replace it.
+                        incoming_state = str(task_dict.get("state") or "")
+                        if stored_state in _TERMINAL_STATE_VALUES and incoming_state not in _TERMINAL_STATE_VALUES:
+                            await pipe.unwatch()
+                            logger.info(
+                                "persist_task: dropping non-terminal write (%s) over terminal snapshot (%s) for %s",
+                                incoming_state,
+                                stored_state,
+                                task_id,
+                            )
+                            return
                     now = time.time()
                     pipe.multi()
                     pipe.set(key, payload, ex=ttl)

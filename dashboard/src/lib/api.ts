@@ -178,7 +178,14 @@ function normalizeRun(raw: unknown): PipelineRun {
   // "pending". That made finished runs read PENDING in the Fleet list (and hid
   // the Retry button, which is gated on isFailed). Fall through empty strings so
   // a failed/completed run surfaces its `state` (stage_failed / completed).
-  const stage = ((r.stage as string) || (r.current_stage as string) || (r.state as string) || "unknown");
+  // Terminal runs ALWAYS surface their state — a cancelled/failed task can
+  // legitimately still carry current_stage (the stage it died in), and the
+  // old precedence rendered a cancelled run as RUNNING in the list/header.
+  const TERMINAL = new Set(["completed", "failed", "stage_failed", "agent_timeout", "budget_exceeded", "cancelled"]);
+  const rawState = (r.state as string) || "";
+  const stage = TERMINAL.has(rawState)
+    ? rawState
+    : ((r.stage as string) || (r.current_stage as string) || rawState || "unknown");
   const agents =
     (r.agents as PipelineRun["agents"]) ??
     (r.agent_statuses as PipelineRun["agents"]) ??

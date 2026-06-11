@@ -171,6 +171,7 @@ class BlueprintExecutor:
             if ctrl == "stopped":
                 task.error = "stopped by user"
                 task.failed_stage = task.current_stage or ""
+                task.current_stage = ""
                 task.transition(TaskState.CANCELLED)
                 return False
             if ctrl == "paused" and waited < self._CONTROL_MAX_PAUSE_SECONDS:
