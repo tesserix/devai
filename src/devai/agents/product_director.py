@@ -59,6 +59,18 @@ Guidelines:
 - Use "As a [user], I want [goal], so that [benefit]" format"""
 
 
+def _parse_llm_json(text: str):
+    """Parse LLM JSON tolerating markdown code fences — models routinely wrap
+    valid JSON in ```json fences even when asked not to (the create-stories
+    failure raw output proved it)."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    return json.loads(t.strip())
+
+
 class ProductDirectorAgent(BaseAgent):
     """Creates Epics and User Stories using OpenAI Chat Completions API."""
 
@@ -127,7 +139,7 @@ should reflect the planning guidance above for this stack."""
         )
 
         try:
-            epic_data = json.loads(response)
+            epic_data = _parse_llm_json(response)
         except json.JSONDecodeError:
             epic_data = {"title": "Feature Epic", "description": requirements[:500], "labels": ["epic"]}
 
@@ -245,7 +257,7 @@ context and ensure stories are actionable for developers."""
         )
 
         try:
-            stories_data = json.loads(response)
+            stories_data = _parse_llm_json(response)
             if isinstance(stories_data, dict) and "stories" in stories_data:
                 stories_data = stories_data["stories"]
         except (json.JSONDecodeError, ValueError) as e:
