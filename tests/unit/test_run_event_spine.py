@@ -262,6 +262,75 @@ async def test_persist_run_log_appends_capped_ttl_lists():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Epic supervision — milestone comments + terminal labels on the epic
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _RecordingSCM:
+    def __init__(self):
+        self.comments: list[tuple[str, int, str]] = []
+        self.labels: list[tuple[str, int, list[str]]] = []
+
+    async def add_comment(self, repo, issue_id, body):
+        self.comments.append((repo, issue_id, body))
+        return {"id": 1}
+
+    async def add_labels(self, repo, issue_id, labels):
+        self.labels.append((repo, issue_id, list(labels)))
+
+
+@pytest.mark.asyncio
+async def test_epic_progress_posts_milestones_and_terminal_summary():
+    import asyncio
+
+    svc = _svc()
+    scm = _RecordingSCM()
+    svc.scm = scm
+    task = _task()
+    task.epic_issue_number = 42
+    task.pr_number = 7
+
+    # Milestone completion → one comment with agent + duration + PR ref.
+    svc._epic_progress(task, _event(phase=StageEventPhase.COMPLETED, duration_ms=142500, message="PR ready"))
+    # Non-milestone stage → no comment.
+    svc._epic_progress(task, _event(stage="hydrate-context", phase=StageEventPhase.COMPLETED))
+    # Duplicate of the same milestone (resume) → no second comment.
+    svc._epic_progress(task, _event(phase=StageEventPhase.COMPLETED, duration_ms=142500))
+    # Terminal summary + status label.
+    task.state = TaskState.COMPLETED
+    task.stages_completed = ["a", "b", "c"]
+    svc._epic_progress(task, _event(stage="cleanup", phase=StageEventPhase.COMPLETED))
+    await asyncio.sleep(0.02)  # let the spawned posts run
+
+    assert len(scm.comments) == 2
+    milestone, terminal = scm.comments
+    assert milestone[1] == 42
+    assert "Implement Code" in milestone[2]
+    assert "senior_developer" in milestone[2]
+    assert "142.5s" in milestone[2]
+    assert "pull request #7" in milestone[2]
+    assert "Pipeline run ✅ completed" in terminal[2]
+    assert "#7" in terminal[2]
+    assert scm.labels == [("org/app", 42, ["devai:done"])]
+
+
+@pytest.mark.asyncio
+async def test_epic_progress_skips_without_epic_or_on_dry_run():
+    import asyncio
+
+    svc = _svc()
+    scm = _RecordingSCM()
+    svc.scm = scm
+    task = _task()  # no epic_issue_number
+    svc._epic_progress(task, _event(phase=StageEventPhase.COMPLETED))
+    task.epic_issue_number = 42
+    task.dry_run = True
+    svc._epic_progress(task, _event(phase=StageEventPhase.COMPLETED))
+    await asyncio.sleep(0.01)
+    assert scm.comments == []
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Shared-queue claim guard — wrong service releases, never strands
 # ──────────────────────────────────────────────────────────────────────
 

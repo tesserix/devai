@@ -304,6 +304,23 @@ class SCMClient(ABC):
         """Add labels/tags to an issue."""
         ...
 
+    async def update_issue(
+        self,
+        repo: str,
+        issue_id: int | str,
+        *,
+        title: str | None = None,
+        body: str | None = None,
+        state: str | None = None,
+    ) -> dict[str, Any]:
+        """Edit an issue's title/body/state. Default: unsupported.
+
+        Concrete default (not abstract) so providers that haven't wired it
+        yet keep working — callers treat this as best-effort (e.g. appending
+        the story task-list to the epic body for GitHub tracked-issues).
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support update_issue")
+
     # --- Branches ---
 
     @abstractmethod

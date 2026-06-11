@@ -462,6 +462,27 @@ class GitHubSCMClient(SCMClient):
             return
         await self._request("POST", f"/repos/{repo}/issues/{issue_id}/labels", json={"labels": safe_labels})
 
+    async def update_issue(
+        self,
+        repo: str,
+        issue_id: int | str,
+        *,
+        title: str | None = None,
+        body: str | None = None,
+        state: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if title is not None:
+            payload["title"] = title
+        if body is not None:
+            payload["body"] = body
+        if state is not None:
+            payload["state"] = state
+        if not payload:
+            return await self.get_issue(repo, issue_id)
+        resp = await self._request("PATCH", f"/repos/{repo}/issues/{issue_id}", json=payload)
+        return resp.json()
+
     # --- Branches ---
 
     async def get_default_branch(self, repo: str) -> str:

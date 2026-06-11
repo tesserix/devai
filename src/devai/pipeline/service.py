@@ -898,6 +898,14 @@ class PipelineService:
             except RuntimeError:
                 pass
 
+        # Epic supervision: milestone progress lands as comments on the run's
+        # epic issue so the epic is the single supervised thread tying every
+        # story, PR, and stage outcome together.
+        try:
+            self._epic_progress(task, event)
+        except Exception:  # noqa: BLE001 — supervision must never break the run
+            logger.exception("epic progress sink failed for %s", task.id)
+
         # Mirror to NATS. Subject layout:
         #   devai.pipeline.stage.<stage>.<phase>   per-stage progress
         #   devai.pipeline.task.<completed|failed> on terminal transitions
@@ -1099,6 +1107,104 @@ class PipelineService:
             envelopes.append({"event_type": "a2a", **a2a})
 
         return envelopes
+
+    #: Stages whose completion/failure is worth a supervised epic comment.
+    _EPIC_MILESTONES = frozenset(
+        {
+            "create-plan",
+            "plan-approval",
+            "implement-code",
+            "db-engineering",
+            "review-code",
+            "security-scan",
+            "monitor-build",
+            "run-tests",
+            "staff-review",
+            "provision-infra",
+            "deploy-release",
+        }
+    )
+
+    def _epic_progress(self, task: DevAITask, event: StageEvent) -> None:
+        """Post supervised progress to the run's epic issue (best-effort).
+
+        One comment per milestone stage outcome + a final summary with a
+        devai:done / devai:failed label swap at terminal state. Posted-keys
+        are tracked on the task itself so resumes don't double-comment.
+        """
+        if self.scm is None or task.dry_run or not task.epic_issue_number or not task.repo:
+            return
+        phase = event.phase.value
+        if phase not in ("completed", "failed"):
+            return
+        terminal = task.state in TERMINAL_STATES
+        if event.stage not in self._EPIC_MILESTONES and not terminal:
+            return
+
+        posted = task.agent_context.setdefault("epic_progress_posted", [])
+        marker = f"{event.stage}:{phase}" if not terminal else "terminal"
+        if not isinstance(posted, list) or marker in posted:
+            return
+        posted.append(marker)
+
+        repo, epic = task.repo, task.epic_issue_number
+        scm = self.scm
+
+        if terminal:
+            ok = task.state not in FAILURE_STATES
+            status = "✅ completed" if ok else f"❌ {task.state.value}"
+            lines = [
+                f"## Pipeline run {status}",
+                "",
+                f"**Run:** `{task.id}`  ·  **Blueprint:** `{task.blueprint}`",
+                f"**Stages:** {len(task.stages_completed)} completed"
+                + (f", {len(task.stages_failed)} failed" if task.stages_failed else ""),
+            ]
+            if task.pr_number:
+                lines.append(f"**Pull request:** #{task.pr_number}")
+            if task.error:
+                lines.append(f"**Error:** {task.error[:300]}")
+            body = "\n".join(lines)
+            label = "devai:done" if ok else "devai:failed"
+
+            async def _post_terminal() -> None:
+                try:
+                    await scm.add_comment(repo, epic, body)
+                    await scm.add_labels(repo, epic, [label])
+                except Exception:  # noqa: BLE001
+                    logger.debug("epic terminal comment failed for #%s", epic, exc_info=True)
+
+            try:
+                self._spawn(_post_terminal())
+            except RuntimeError:
+                pass
+            return
+
+        icon = "✅" if phase == "completed" else "❌"
+        title = event.stage.replace("-", " ").replace("_", " ").title()
+        parts = [f"{icon} **{title}**"]
+        if event.agent:
+            parts.append(f"by `{event.agent}`")
+        if event.duration_ms:
+            parts.append(f"in {event.duration_ms / 1000:.1f}s")
+        line = " ".join(parts)
+        if event.message:
+            line += f"\n> {event.message[:300]}"
+        if event.error:
+            line += f"\n> ⚠️ {event.error[:300]}"
+        if event.stage == "implement-code" and task.pr_number:
+            line += f"\n\nOpened pull request #{task.pr_number}."
+
+        async def _post() -> None:
+            try:
+                await scm.add_comment(repo, epic, line)
+            except Exception:  # noqa: BLE001
+                logger.debug("epic progress comment failed for #%s", epic, exc_info=True)
+
+        try:
+            self._spawn(_post())
+        except RuntimeError:
+            pass
 
     def _blueprint_stage_count(self, name: str) -> int:
         if not name or self._pipeline is None:

@@ -289,13 +289,28 @@ context and ensure stories are actionable for developers."""
             if project_id:
                 await self._add_to_project(repo, project_id, issue["number"])
 
-        # Update epic body with story references
+        # Link every story to the epic. The task-list goes in the epic BODY
+        # — GitHub only builds the tracked-issues relationship (progress bar,
+        # "Tracked by" backlinks on each story) from body task-lists, not
+        # comments. The comment stays as the human-readable announcement.
         if epic_number and created_stories:
             story_refs = "\n".join(f"- [ ] #{s['number']} — {s['title']}" for s in created_stories)
+            try:
+                epic_issue = await self.github.get_issue(repo, epic_number)
+                current_body = epic_issue.get("body") or ""
+                if "## User Stories" not in current_body:
+                    await self.github.update_issue(
+                        repo,
+                        epic_number,
+                        body=f"{current_body}\n\n## User Stories\n\n{story_refs}",
+                    )
+            except Exception:  # noqa: BLE001 — linking is best-effort, never fail the stage
+                logger.exception("epic body task-list update failed for #%s", epic_number)
             await self.github.add_comment(
                 repo,
                 epic_number,
-                f"## User Stories\n\n{story_refs}",
+                f"## User Stories\n\n{story_refs}\n\n"
+                f"_Each story is tracked on this epic — progress updates will be posted here as the pipeline executes._",
             )
 
         # Handoff to Engineering Manager
