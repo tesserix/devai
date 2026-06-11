@@ -53,7 +53,7 @@ export default function SettingsPage() {
   const secretsWritable = catalog?.secrets_writable ?? false;
 
   return (
-    <div className="p-7 max-w-4xl">
+    <div className="p-7 w-full">
       <div className="label-eyebrow">Mission control</div>
       <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1">Settings</h1>
       <p className="text-sm text-[var(--ink-300)] mt-1">

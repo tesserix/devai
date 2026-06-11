@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # on_failure semantics apply. Per-stage `retries:` in the blueprint
     # overrides. Stages are resume-idempotent, so retries are safe.
     pipeline_stage_retries: int = 1
+    # Autonomous failure recovery: when a stage exhausts its retries, a
+    # recovery agent reviews the failure (LLM root-cause), injects corrective
+    # guidance, and re-runs the stage — pausing for human approval only when
+    # the fix genuinely needs a decision. Runs BEFORE on_failure semantics.
+    pipeline_heal_on_failure: bool = True
+    pipeline_heal_attempts: int = 1  # recovery rounds per stage
 
     # --- NATS ---
     nats_url: str = "nats://localhost:4222"

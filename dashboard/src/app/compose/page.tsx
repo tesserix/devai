@@ -292,7 +292,7 @@ function ComposeInner() {
   const selectedCrew = crews.find((c) => c.id === crewId);
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div className="w-full p-6">
       <header className="mb-5">
         <h1
           className="flex items-center gap-1.5 text-xl font-semibold"

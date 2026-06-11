@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from collections.abc import Callable, Iterable
@@ -57,6 +58,16 @@ EventCallback = Callable[[DevAITask, StageEvent], None]
 
 
 
+def _parse_json_lenient(text: str) -> Any:
+    """Parse LLM JSON tolerating markdown code fences."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    return json.loads(t.strip())
+
+
 def _finalize_agent_statuses(task: DevAITask, status: str = "cancelled") -> None:
     """Close out lingering 'running' agent statuses when a run stops — the
     cards must never pulse on a terminal run."""
@@ -91,6 +102,12 @@ class BlueprintExecutor:
         # Autonomy default for gate stages: "full" self-approves gates so
         # runs flow end-to-end; "gated" pauses for a human decision.
         self._default_autonomy = str(getattr(deps.config, "pipeline_default_autonomy", "full") or "full").lower()
+        # Autonomous failure recovery: rounds the recovery agent gets per
+        # stage AFTER transient retries exhaust, before on_failure applies.
+        heal_enabled = bool(getattr(deps.config, "pipeline_heal_on_failure", True))
+        self._heal_rounds = (
+            max(0, int(getattr(deps.config, "pipeline_heal_attempts", 1) or 0)) if heal_enabled else 0
+        )
 
     async def execute(self, blueprint: Blueprint, task: DevAITask) -> DevAITask:
         """Execute every stage in topo order. Returns the (mutated) task.
@@ -269,48 +286,28 @@ class BlueprintExecutor:
         # resume-idempotent by design — a retry is no riskier than the
         # pod-restart resume path that already re-runs unfinished stages.
         max_attempts = 1 + (spec.retries if spec.retries > 0 else self._default_retries)
+        heal_rounds_left = self._heal_rounds
         result: StageResult | object | None = None
-        for attempt in range(1, max_attempts + 1):
-            try:
-                result = await self._execute_supervised(stage, spec, task, timeout)
-                break
-            except _RunStopped:
-                # User pressed STOP while the stage was executing. The old
-                # behavior only honored stop at LEVEL boundaries, so a
-                # long-running agent stage kept going for up to its full
-                # timeout after the user stopped the run.
-                duration_ms = (time.monotonic() - start) * 1000.0
-                task.error = "stopped by user"
-                task.failed_stage = spec.name
-                task.current_stage = ""
-                _finalize_agent_statuses(task)
-                task.transition(TaskState.CANCELLED)
-                self._emit(
-                    task,
-                    _ev(StageEventPhase.FAILED, duration_ms=duration_ms, error="stopped by user mid-stage"),
-                )
+        while True:
+            outcome, payload = await self._attempt_with_retries(stage, spec, task, timeout, max_attempts, start, _ev)
+            if outcome == "stopped":
                 return
-            except TimeoutError:
-                duration_ms = (time.monotonic() - start) * 1000.0
-                err = f"timed out after {timeout}s"
-                logger.error("stage %s: %s (attempt %d/%d)", spec.name, err, attempt, max_attempts)
-                if attempt >= max_attempts:
-                    await self._handle_failure(spec, stage, task, err, TaskState.AGENT_TIMEOUT, duration_ms)
-                    return
-            except Exception as e:  # noqa: BLE001 — we want to catch all stage errors
-                duration_ms = (time.monotonic() - start) * 1000.0
-                logger.exception("stage %s raised (attempt %d/%d)", spec.name, attempt, max_attempts)
-                if attempt >= max_attempts:
-                    await self._handle_failure(spec, stage, task, str(e), TaskState.STAGE_FAILED, duration_ms)
-                    return
-            self._emit(
-                task,
-                _ev(
-                    StageEventPhase.STARTED,
-                    message=f"retrying after failure (attempt {attempt + 1}/{max_attempts})",
-                ),
+            if outcome == "ok":
+                result = payload
+                break
+            # Retries exhausted — autonomous recovery BEFORE on_failure
+            # semantics: a recovery agent reviews the failure, injects
+            # corrective guidance, and the stage re-runs. Only when recovery
+            # is impossible (or rejected) does the failure stand.
+            error, failure_state = payload
+            if heal_rounds_left > 0 and await self._heal_stage(spec, task, str(error), _ev):
+                heal_rounds_left -= 1
+                max_attempts = 1  # one healed attempt per recovery round
+                continue
+            await self._handle_failure(
+                spec, stage, task, str(error), failure_state, (time.monotonic() - start) * 1000.0
             )
-            await asyncio.sleep(min(5.0 * attempt, 30.0))
+            return
 
         duration_ms = (time.monotonic() - start) * 1000.0
 
@@ -367,6 +364,258 @@ class BlueprintExecutor:
                 exec_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await exec_task
+
+    async def _attempt_with_retries(
+        self,
+        stage: PipelineStage,
+        spec: StageSpec,
+        task: DevAITask,
+        timeout: float,
+        max_attempts: int,
+        start: float,
+        _ev: Any,
+    ) -> tuple[str, Any]:
+        """Run the stage with transient retries.
+
+        Returns ``("ok", result)``, ``("stopped", None)`` (task already
+        CANCELLED + event emitted), or ``("failed", (error, TaskState))``
+        when every attempt failed — the caller decides recovery/on_failure.
+        """
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return ("ok", await self._execute_supervised(stage, spec, task, timeout))
+            except _RunStopped:
+                # User pressed STOP while the stage was executing. The old
+                # behavior only honored stop at LEVEL boundaries, so a
+                # long-running agent stage kept going for up to its full
+                # timeout after the user stopped the run.
+                duration_ms = (time.monotonic() - start) * 1000.0
+                task.error = "stopped by user"
+                task.failed_stage = spec.name
+                task.current_stage = ""
+                _finalize_agent_statuses(task)
+                task.transition(TaskState.CANCELLED)
+                self._emit(
+                    task,
+                    _ev(StageEventPhase.FAILED, duration_ms=duration_ms, error="stopped by user mid-stage"),
+                )
+                return ("stopped", None)
+            except TimeoutError:
+                err = f"timed out after {timeout}s"
+                logger.error("stage %s: %s (attempt %d/%d)", spec.name, err, attempt, max_attempts)
+                if attempt >= max_attempts:
+                    return ("failed", (err, TaskState.AGENT_TIMEOUT))
+            except Exception as e:  # noqa: BLE001 — we want to catch all stage errors
+                logger.exception("stage %s raised (attempt %d/%d)", spec.name, attempt, max_attempts)
+                if attempt >= max_attempts:
+                    return ("failed", (str(e), TaskState.STAGE_FAILED))
+            self._emit(
+                task,
+                _ev(
+                    StageEventPhase.STARTED,
+                    message=f"retrying after failure (attempt {attempt + 1}/{max_attempts})",
+                ),
+            )
+            await asyncio.sleep(min(5.0 * attempt, 30.0))
+        return ("failed", ("retries exhausted", TaskState.STAGE_FAILED))
+
+    # ──────────────────────────────────────────────────────────────────
+    # Internal: autonomous failure recovery
+    # ──────────────────────────────────────────────────────────────────
+
+    _HEAL_AGENT = "recovery_specialist"
+
+    async def _heal_stage(self, spec: StageSpec, task: DevAITask, error: str, _ev: Any) -> bool:
+        """A recovery agent reviews the failed stage and decides how to fix it.
+
+        retry    — corrective guidance is injected into ``agent_context`` (the
+                   AgentAdapter folds it into the stage's next prompt) and the
+                   stage re-runs.
+        ask_user — the proposed fix needs a human decision: a dynamic gate is
+                   raised with the diagnosis + proposal; approval re-runs the
+                   stage, rejection lets the failure stand.
+        abort    — recovery impossible; the failure stands.
+
+        Returns True when the caller should re-run the stage.
+        """
+        heal_stage = f"heal:{spec.name}"
+
+        def _hev(phase: StageEventPhase, **kw: Any) -> StageEvent:
+            return StageEvent(
+                heal_stage, phase, stage_type="recovery", agent=self._HEAL_AGENT, lane=spec.lane, **kw
+            )
+
+        self._emit(
+            task,
+            _hev(
+                StageEventPhase.STARTED,
+                message=f"recovery agent reviewing failure of {spec.name}: {error[:160]}",
+            ),
+        )
+        start = time.monotonic()
+        decision = await self._diagnose_failure(spec, task, error)
+        duration_ms = (time.monotonic() - start) * 1000.0
+
+        if decision is None or decision.get("action") == "abort":
+            why = str((decision or {}).get("diagnosis") or "no recovery path found")
+            self._emit(
+                task,
+                _hev(StageEventPhase.FAILED, duration_ms=duration_ms, error=f"recovery abandoned: {why[:300]}"),
+            )
+            return False
+
+        diagnosis = str(decision.get("diagnosis") or "")
+        history = task.agent_context.setdefault("heal_history", [])
+        if isinstance(history, list):
+            history.append(
+                {
+                    "stage": spec.name,
+                    "error": error[:500],
+                    "diagnosis": diagnosis[:500],
+                    "action": decision.get("action"),
+                    "at": time.time(),
+                }
+            )
+        task.agent_context[f"heal:{spec.name}"] = {
+            "error": error[:800],
+            "diagnosis": diagnosis[:1200],
+            "guidance": str(decision.get("guidance") or "")[:2000],
+        }
+
+        autonomy = str(task.agent_context.get("autonomy") or self._default_autonomy).lower()
+        if decision.get("action") == "ask_user" and autonomy != "full":
+            if not await self._await_heal_approval(spec, task, decision, _hev):
+                self._emit(
+                    task,
+                    _hev(StageEventPhase.FAILED, duration_ms=duration_ms, error="recovery plan rejected"),
+                )
+                return False
+
+        self._emit(
+            task,
+            _hev(
+                StageEventPhase.COMPLETED,
+                duration_ms=duration_ms,
+                message=f"recovery: re-running {spec.name} — {diagnosis[:200]}",
+            ),
+        )
+        self._emit(task, _ev(StageEventPhase.STARTED, message="retrying with recovery guidance"))
+        return True
+
+    async def _diagnose_failure(self, spec: StageSpec, task: DevAITask, error: str) -> dict[str, Any] | None:
+        """LLM root-cause + recovery plan. None when no usable LLM or the
+        response is unusable — recovery degrades to plain on_failure."""
+        llm = self._deps.llm
+        if llm is None or getattr(llm, "provider_name", "noop") == "noop":
+            return None
+        try:
+            from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+            prior = [
+                h
+                for h in (task.agent_context.get("heal_history") or [])
+                if isinstance(h, dict) and h.get("stage") == spec.name
+            ]
+            prior_txt = (
+                "\nPrior recovery attempts on this stage (they did NOT fix it — propose something DIFFERENT):\n"
+                + "\n".join(f"- {h.get('diagnosis', '')[:200]}" for h in prior[-3:])
+                if prior
+                else ""
+            )
+            completed = ", ".join(task.stages_completed[-12:]) or "none"
+            prompt = (
+                "You are the recovery specialist of an autonomous software-delivery pipeline. "
+                f"Stage {spec.name!r} (agent: {spec.resolved_agent() or 'n/a'}, handler: {spec.stage}) "
+                "failed after all retries.\n\n"
+                f"Error:\n{error[:1500]}\n\n"
+                f"Run intent: {(task.intent or '')[:400]}\n"
+                f"Repo: {task.repo}\nStages completed so far: {completed}{prior_txt}\n\n"
+                "Decide how to recover. Reply with STRICT JSON only (no markdown fences):\n"
+                '{"diagnosis": "<2-3 sentence root cause>",\n'
+                ' "action": "retry" | "ask_user" | "abort",\n'
+                ' "guidance": "<concrete corrective instructions injected into the stage\'s next attempt>",\n'
+                ' "user_message": "<only for ask_user: the decision you need from the human, with details>"}\n\n'
+                'Prefer "retry" with concrete guidance whenever the failure is autonomously fixable '
+                "(malformed output, missing field, contract violation, transient API error, bad assumption). "
+                'Use "ask_user" ONLY when a human decision is genuinely required (credentials, destructive '
+                'action, conflicting requirements). Use "abort" only when re-running cannot possibly help.'
+            )
+            response = await llm.generate(
+                LLMRequest(
+                    messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                    max_tokens=700,
+                    temperature=0.0,
+                    extra={"agent": self._HEAL_AGENT},
+                )
+            )
+            data = _parse_json_lenient(response.text or "")
+            if not isinstance(data, dict) or data.get("action") not in ("retry", "ask_user", "abort"):
+                logger.warning("recovery diagnosis for %s unusable: %r", spec.name, str(data)[:200])
+                return None
+            return data
+        except Exception:  # noqa: BLE001 — recovery must never crash the run
+            logger.exception("recovery diagnosis failed for stage %s", spec.name)
+            return None
+
+    async def _await_heal_approval(
+        self, spec: StageSpec, task: DevAITask, decision: dict[str, Any], _hev: Any
+    ) -> bool:
+        """Raise a dynamic gate with the recovery proposal and wait for the
+        human decision (same key the dashboard Approve/Reject writes)."""
+        sm = self._deps.state_manager
+        redis = getattr(sm, "redis", None) if sm is not None else None
+        if redis is None:
+            return True  # no decision surface (tests) — degrade open
+        gate_name = f"heal-{spec.name}"
+        gates = task.agent_context.setdefault("dynamic_gates", [])
+        if isinstance(gates, list) and not any(
+            isinstance(g, dict) and g.get("gate") == gate_name for g in gates
+        ):
+            gates.append(
+                {
+                    "gate": gate_name,
+                    "title": f"Recovery plan: {spec.name}",
+                    "kind": "heal_approval",
+                    "stage": spec.name,
+                    "agent": self._HEAL_AGENT,
+                    "intent": (task.intent or "")[:300],
+                    "error": str(decision.get("error") or task.agent_context.get(f"heal:{spec.name}", {}).get("error") or "")[:600],
+                    "diagnosis": str(decision.get("diagnosis") or "")[:800],
+                    "plan_summary": str(decision.get("guidance") or "")[:800],
+                    "questions": [q for q in [str(decision.get("user_message") or "").strip()] if q],
+                    "requested_at": time.time(),
+                }
+            )
+        key = f"devai:pipeline:gate:{task.id}:{gate_name}"
+        prior_state = task.state
+        task.transition(TaskState.AWAITING_APPROVAL)
+        self._emit(
+            task,
+            _hev(
+                StageEventPhase.STARTED,
+                message=f"recovery needs your approval: {str(decision.get('user_message') or '')[:200]}",
+            ),
+        )
+        waited = 0.0
+        while waited < self._GATE_MAX_WAIT_SECONDS:
+            if not await self._check_run_control(task):
+                return False  # stopped by user while waiting
+            try:
+                verdict = await redis.get(key)
+            except Exception:  # noqa: BLE001 — a Redis blip must not kill the wait
+                verdict = None
+            if verdict is not None:
+                approved = str(verdict).lower() == "approved"
+                if approved:
+                    task.transition(
+                        prior_state
+                        if prior_state not in (TaskState.PENDING, TaskState.QUEUED)
+                        else TaskState.RUNNING
+                    )
+                return approved
+            await asyncio.sleep(self._GATE_POLL_SECONDS)
+            waited += self._GATE_POLL_SECONDS
+        return False
 
     _GATE_POLL_SECONDS = 3.0
     _GATE_MAX_WAIT_SECONDS = 24 * 3600.0

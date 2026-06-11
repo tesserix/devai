@@ -737,7 +737,7 @@ function ConfigTab({ repo }: { repo: string }) {
   if (!loaded) return <div className="text-sm text-gray-400">Loading config...</div>;
 
   return (
-    <div className="max-w-lg space-y-6">
+    <div className="w-full max-w-3xl space-y-6">
       <div>
         <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
           Pipeline Configuration

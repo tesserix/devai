@@ -16,12 +16,16 @@ export interface Approval {
   requested_at?: number | null;
   summary?: string;
   timestamp?: number;
-  /** Dynamic plan-approval context (kind=plan_approval). */
+  /** Dynamic gate context (kind=plan_approval | heal_approval). */
   kind?: string;
   questions?: string[];
   plan_summary?: string;
   tech_stack?: unknown;
   epic_issue_number?: number | null;
+  /** Recovery gate (kind=heal_approval): what broke + proposed fix. */
+  stage?: string;
+  error?: string;
+  diagnosis?: string;
 }
 
 interface ApprovalBannerProps {
@@ -67,7 +71,15 @@ export function ApprovalBanner({ approvals, onApprove, onReject }: ApprovalBanne
     <div className="space-y-2">
       {pending.map((a) => {
         const agentInfo = a.agent ? AGENT_INFO[a.agent] : undefined;
-        const explain = GATE_EXPLAINERS[a.gate];
+        const explain =
+          GATE_EXPLAINERS[a.gate] ??
+          (a.kind === "heal_approval"
+            ? {
+                what: `Stage "${a.stage || a.gate}" failed — the recovery agent diagnosed it and proposes a fix below.`,
+                approve: "Approve to apply the fix and re-run the failed stage.",
+                reject: "Reject to let the failure stand — the run stops at this stage.",
+              }
+            : undefined);
         return (
           <div
             key={a.gate}
@@ -134,6 +146,40 @@ export function ApprovalBanner({ approvals, onApprove, onReject }: ApprovalBanne
                     >
                       Request: {a.intent}
                     </p>
+                  )}
+                  {a.kind === "heal_approval" && (
+                    <div
+                      className="mt-2 rounded p-2.5 space-y-1.5"
+                      style={{ background: "var(--surface-raised)", fontSize: 12 }}
+                    >
+                      {a.error && (
+                        <p className="font-mono" style={{ color: "var(--error-ink)", maxHeight: 80, overflowY: "auto" }}>
+                          {a.error}
+                        </p>
+                      )}
+                      {a.diagnosis && (
+                        <p style={{ color: "var(--ink-soft)" }}>
+                          <span style={{ color: "var(--ink-muted)" }}>Diagnosis: </span>
+                          {a.diagnosis}
+                        </p>
+                      )}
+                      {a.plan_summary && (
+                        <p className="whitespace-pre-wrap" style={{ color: "var(--ink-soft)", maxHeight: 110, overflowY: "auto" }}>
+                          <span style={{ color: "var(--ink-muted)" }}>Proposed fix: </span>
+                          {a.plan_summary}
+                        </p>
+                      )}
+                      {(a.questions ?? []).length > 0 && (
+                        <div>
+                          <p style={{ color: "var(--warn-ink)", fontWeight: 600 }}>Decision needed:</p>
+                          <ul className="list-disc ml-4" style={{ color: "var(--ink-soft)" }}>
+                            {(a.questions ?? []).map((q, i) => (
+                              <li key={i}>{q}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {a.kind === "plan_approval" && (
                     <div

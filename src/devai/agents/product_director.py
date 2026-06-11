@@ -26,14 +26,19 @@ logger = logging.getLogger(__name__)
 
 EPIC_SYSTEM_PROMPT = """You are a Senior Product Director. Create a GitHub Epic from analyzed requirements.
 
-An Epic is a large body of work that groups multiple user stories.
+An Epic is the supervised master issue for the whole delivery — engineers, QA and
+stakeholders must be able to read it ALONE and understand what is being built, with
+which technologies and skills, and how "done" will be proven. Thin one-line epics
+are unacceptable.
 
 Output ONLY valid JSON:
 {
-    "title": "Epic title — concise and descriptive",
-    "description": "Detailed epic description with context, goals, and scope",
+    "title": "Epic title — concise and specific (NEVER generic like 'Feature Epic')",
+    "description": "Rich markdown containing ALL of these sections:\\n## Overview\\n<what and why, 2-4 sentences>\\n## Goals & Success Metrics\\n<bulleted, measurable>\\n## Scope\\n### In scope\\n### Out of scope\\n## Technical Approach\\n<concrete frameworks, services, data model, integration points>\\n## Skills & Agents Involved\\n<which specialist roles deliver which part: frontend, api, database, qa, security, infra>",
     "labels": ["epic", "feature-area"],
-    "milestones": ["key milestone 1", "key milestone 2"]
+    "milestones": ["key milestone 1", "key milestone 2"],
+    "acceptance_criteria": ["Given/When/Then criteria proving the epic as a whole is done"],
+    "testing_criteria": ["how QA verifies it: unit, integration, e2e expectations"]
 }"""
 
 STORIES_SYSTEM_PROMPT = """You are a Senior Product Director at a world-class software company.
@@ -46,6 +51,8 @@ Output ONLY valid JSON — an array of user story objects:
     "title": "User story title",
     "description": "As a [user type], I want [goal] so that [benefit].\\n\\nContext: ...",
     "acceptance_criteria": ["Given X, when Y, then Z", ...],
+    "testing_criteria": ["unit/integration/e2e checks that prove this story works"],
+    "skills": ["frontend", "api", "database"],
     "priority": "high",
     "labels": ["feature", "frontend"]
   }
@@ -55,6 +62,8 @@ Guidelines:
 - Each story should be independently deliverable
 - Stories should be small enough for 1-3 days of work
 - Acceptance criteria must be specific and testable
+- Testing criteria say HOW each acceptance criterion will be verified
+- "skills" names the specialist capabilities the story needs (frontend, api, database, qa, security, infra)
 - Include edge cases and error scenarios
 - Use "As a [user], I want [goal], so that [benefit]" format"""
 
@@ -140,8 +149,11 @@ should reflect the planning guidance above for this stack."""
 
         try:
             epic_data = _parse_llm_json(response)
-        except json.JSONDecodeError:
-            epic_data = {"title": "Feature Epic", "description": requirements[:500], "labels": ["epic"]}
+        except (json.JSONDecodeError, ValueError) as e:
+            # Raise instead of silently shipping a thin "Feature Epic" with the
+            # raw prompt as its body — that empty epic IS the failure. Raising
+            # lets the executor retry / the recovery agent fix the prompt.
+            raise ValueError(f"epic response unparseable: {e}; raw[:200]={response[:200]!r}") from e
 
         # Ensure title is valid (AI sometimes returns empty/None)
         if not epic_data.get("title", "").strip():
@@ -152,7 +164,14 @@ should reflect the planning guidance above for this stack."""
         run_id = str(state.get("run_id") or "")
         if run_id:
             labels.append(f"devai:run:{run_id.removeprefix('devai-')[:10]}")
-        body = f"{epic_data.get('description', '')}\n\n## Milestones\n"
+        body = epic_data.get("description", "")
+        ac = [c for c in epic_data.get("acceptance_criteria", []) if isinstance(c, str)]
+        if ac:
+            body += "\n\n## Acceptance Criteria\n" + "\n".join(f"- [ ] {c}" for c in ac)
+        tc = [c for c in epic_data.get("testing_criteria", []) if isinstance(c, str)]
+        if tc:
+            body += "\n\n## Testing Criteria\n" + "\n".join(f"- [ ] {c}" for c in tc)
+        body += "\n\n## Milestones\n"
         for m in epic_data.get("milestones", []):
             body += f"\n- [ ] {m}"
 
@@ -280,6 +299,12 @@ context and ensure stories are actionable for developers."""
             body = f"{story.get('description', '')}\n\n## Acceptance Criteria\n"
             for criterion in ac:
                 body += f"\n- [ ] {criterion}"
+            tc = [c for c in story.get("testing_criteria", []) if isinstance(c, str)]
+            if tc:
+                body += "\n\n## Testing Criteria\n" + "\n".join(f"- [ ] {c}" for c in tc)
+            skills = [s for s in story.get("skills", []) if isinstance(s, str)][:5]
+            if skills:
+                body += "\n\n**Skills:** " + ", ".join(skills)
             body += f"\n\n**Priority:** {story.get('priority', 'medium')}"
             if epic_number:
                 body += f"\n\n**Epic:** #{epic_number}"
@@ -287,6 +312,7 @@ context and ensure stories are actionable for developers."""
             labels = [lbl for lbl in story.get("labels", []) if isinstance(lbl, str)] + [
                 "devai:user-story",
                 f"priority:{story.get('priority', 'medium')}",
+                *[f"skill:{s}" for s in skills[:4]],
             ]
             run_id = str(state.get("run_id") or "")
             if run_id:

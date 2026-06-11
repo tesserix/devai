@@ -150,7 +150,7 @@ export default function NewWorkflowPage() {
   }
 
   return (
-    <div className="p-7 space-y-5 max-w-5xl">
+    <div className="p-7 space-y-5 w-full">
       <Breadcrumbs
         items={[
           { label: "Fleet", href: "/" },

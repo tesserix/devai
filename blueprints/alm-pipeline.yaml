@@ -79,7 +79,6 @@ stages:
     lane: plan
     depends_on: [create-epic]
     timeout: 5m
-    on_failure: continue
 
   - name: create-plan
     type: agentic
@@ -117,7 +116,6 @@ stages:
     title: DB Engineering
     depends_on: [implement-code]
     timeout: 10m
-    on_failure: continue
 
   # ─── Quality gates ──────────────────────────────────────────────────
   - name: review-code
@@ -152,7 +150,9 @@ stages:
     lane: review
     depends_on: [monitor-build]
     timeout: 20m
-    on_failure: continue   # failures become data — the diagnose/fix loop handles them
+    # NOTE: no on_failure:continue — a stage failure (harness broke) goes to
+    # the recovery agent; FAILING TESTS are stage *output* (test_failed) and
+    # flow into the diagnose→fix→retest loop below.
 
   # ─── Self-healing test loop ─────────────────────────────────────────
   # Failing tests don't kill the run: diagnose WHY (root cause), file a
@@ -165,7 +165,6 @@ stages:
     depends_on: [run-tests]
     condition: "output.test_failed"
     timeout: 10m
-    on_failure: continue
 
   - name: fix-test-failures
     type: agentic
@@ -175,7 +174,6 @@ stages:
     depends_on: [diagnose-test-failures]
     condition: "output.bug_issue_number"
     timeout: 30m
-    on_failure: continue
 
   - name: rerun-tests
     type: review

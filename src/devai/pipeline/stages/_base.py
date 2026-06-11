@@ -125,7 +125,7 @@ class AgentAdapter(PipelineStage):
         `analyze_requirements` / `create_epic` / etc. can run. Subclasses
         can override to pass additional context.
         """
-        return {
+        state = {
             "run_id": task.id,
             "repo_full_name": task.repo,
             "requirements": task.intent,
@@ -139,6 +139,20 @@ class AgentAdapter(PipelineStage):
             # their inputs from here under role-namespaced keys.
             **task.agent_context,
         }
+        # Recovery guidance: the executor's recovery agent diagnosed a prior
+        # failed attempt of THIS stage and injected corrective instructions —
+        # fold them into the requirements so the agent actually changes
+        # behavior instead of repeating the same failure.
+        heal = task.agent_context.get(f"heal:{task.current_stage or self.name()}")
+        if isinstance(heal, dict) and heal.get("guidance"):
+            state["requirements"] = (
+                f"{state.get('requirements') or task.intent}\n\n"
+                "## RECOVERY GUIDANCE — the previous attempt of this stage FAILED\n"
+                f"Failure: {heal.get('error', '')}\n"
+                f"Diagnosis: {heal.get('diagnosis', '')}\n"
+                f"Corrective instructions (follow these): {heal['guidance']}"
+            )
+        return state
 
     async def _post_validate(self, task: DevAITask, patch: dict[str, Any]) -> None:
         """Override to enforce the stage's output contract. Default: no-op."""

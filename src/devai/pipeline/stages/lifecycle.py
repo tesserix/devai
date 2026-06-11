@@ -435,6 +435,7 @@ class _PlanApprovalStage(PipelineStage):
 
         decision = await self._await_decision(task)
         if decision == "approved":
+            await self._record_approval_on_epic(task, request)
             return StageResult(
                 message="plan approved by human — proceeding",
                 data={"plan_approved": "human", "plan_approval_request": request},
@@ -511,6 +512,34 @@ class _PlanApprovalStage(PipelineStage):
             "questions": questions,
             "requested_at": time.time(),
         }
+
+    async def _record_approval_on_epic(self, task: DevAITask, request: dict[str, Any]) -> None:
+        """The human just confirmed the proposal — fold it into the epic
+        description so the supervised issue is the single source of truth
+        for what was approved (tech choices, scope confirmations, plan)."""
+        scm = self.deps.scm
+        if scm is None or not task.epic_issue_number or getattr(task, "dry_run", False):
+            return
+        lines = ["## Approved Plan", "", "_Confirmed by the user at the plan-approval gate._", ""]
+        if request.get("tech_stack"):
+            lines.append(f"**Tech stack:** {str(request['tech_stack'])[:300]}")
+        for q in request.get("questions") or []:
+            lines.append(f"- [x] {q}")
+        if request.get("plan_summary"):
+            lines += ["", "### Technical plan", str(request["plan_summary"])[:1500]]
+        section = "\n".join(lines)
+        try:
+            issue = await scm.get_issue(task.repo, task.epic_issue_number)
+            body = issue.get("body") or ""
+            if "## Approved Plan" not in body:
+                await scm.update_issue(task.repo, task.epic_issue_number, body=f"{body}\n\n{section}")
+            await scm.add_comment(
+                task.repo,
+                task.epic_issue_number,
+                f"{section}\n\n_Run `{task.id}` is proceeding to implementation._",
+            )
+        except Exception:  # noqa: BLE001 — supervision is best-effort, never fail the gate
+            logger.exception("plan_approval: epic update failed for #%s", task.epic_issue_number)
 
     async def _await_decision(self, task: DevAITask) -> str | None:
         """Poll the gate decision key, honoring run-control stop. The stage's
