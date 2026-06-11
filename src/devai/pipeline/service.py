@@ -205,6 +205,21 @@ class PipelineService:
         # any stranded BEFORE the durable queue existed). enqueue_task is
         # idempotent, so all replicas booting at once converge to one enqueue.
         await self._reconcile_orphans()
+        # Orphan reconciliation must be CONTINUOUS, not boot-only: a dispatch
+        # can persist the snapshot and then fail the enqueue (Redis blip), or
+        # an ack path can drop a run — leaving it 'pending' forever with an
+        # empty queue. Re-running the reconciler periodically re-enqueues any
+        # non-terminal, non-active run; idempotent via the SADD guard, and
+        # the claim/stop guards make resurrection of finished runs impossible.
+        async def _reconcile_loop() -> None:
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    await self._reconcile_orphans()
+                except Exception:  # noqa: BLE001
+                    logger.exception("periodic reconcile failed (non-fatal)")
+
+        self._spawn(_reconcile_loop())
 
     async def _reconcile_orphans(self) -> None:
         """Find non-terminal persisted runs that no worker owns and re-enqueue
