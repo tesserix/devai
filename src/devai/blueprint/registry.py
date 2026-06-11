@@ -78,6 +78,7 @@ def register_defaults(registry: StageRegistry) -> None:
     registry.register("cleanup", _lifecycle.cleanup_stage)
     registry.register("context_hydration", _lifecycle.context_hydration_stage)
     registry.register("memory_injection", _lifecycle.memory_injection_stage)
+    registry.register("alm_learn", _lifecycle.alm_learn_stage)
     registry.register("post_report", _lifecycle.post_report_stage)
     registry.register("noop", _lifecycle.noop_stage)
 

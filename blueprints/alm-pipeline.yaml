@@ -154,7 +154,7 @@ stages:
     depends_on: [provision-infra]
     timeout: 20m
 
-  # ─── Reporting + cleanup ────────────────────────────────────────────
+  # ─── Reporting + learning + cleanup ─────────────────────────────────
   - name: post-report
     type: deterministic
     stage: post_report
@@ -165,9 +165,16 @@ stages:
       title: "DevAI ALM Pipeline Report"
       target: pr
 
+  - name: learn
+    type: deterministic
+    stage: alm_learn
+    lane: deploy
+    depends_on: [post-report]
+    on_failure: continue
+
   - name: cleanup
     type: deterministic
     stage: cleanup
     lane: deploy
-    depends_on: [post-report]
+    depends_on: [learn]
     on_failure: continue

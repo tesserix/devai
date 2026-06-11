@@ -555,7 +555,15 @@ class Settings(BaseSettings):
     # Single switch picks the backend; the rest of DevAI talks only to
     # `devai.adapters.memory.MemoryAdapter`. Swap providers with one env var,
     # no code changes. Missing SDKs / config degrade gracefully to "noop".
-    memory_provider: str = "redis"  # noop | redis | pgvector | mem0 | zep
+    memory_provider: str = "redis"  # noop | redis | pgvector | mem0 | zep | hondo
+
+    # Embedding provider for memory semantic search (pgvector). `auto` uses
+    # OpenAI when DEVAI_OPENAI_API_KEY is set, otherwise disables embeddings
+    # and pgvector degrades to keyword recall. `none` disables explicitly.
+    # Dimensions must match the agent_memories.embedding column: vector(1536).
+    embedding_provider: str = "auto"  # auto | openai | none
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
 
     # mem0 (cloud or self-hosted). Cloud needs only DEVAI_MEM0_API_KEY;
     # self-hosted needs DEVAI_MEM0_HOST (and optionally an API key).

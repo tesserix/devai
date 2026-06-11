@@ -8,6 +8,13 @@ one of:
     pgvector  → PgVectorMemoryAdapter
     mem0      → Mem0MemoryAdapter
     zep       → ZepMemoryAdapter
+    hondo     → HondoMemoryAdapter
+
+Every successfully built backend is wrapped in `InstrumentedMemoryAdapter`
+so memory ops emit count/latency/hit metrics into the global telemetry sink.
+For pgvector, the factory also builds an embedder from the LLM adapter
+family per `DEVAI_EMBEDDING_PROVIDER` (see `_build_embedder`) — without one,
+semantic search degrades to keyword recall.
 
 Graceful degradation rules:
   - If the selected provider's SDK isn't installed, factory falls back to
@@ -60,7 +67,9 @@ def _build_pgvector(settings: Any) -> MemoryAdapter:
     db = _resolve_database(settings)
     if db is None:
         raise AdapterNotConfigured("pgvector memory adapter requires a connected Database")
-    embedder = getattr(settings, "memory_embedder", None)
+    # An explicitly attached embedder (tests, custom wiring) wins; otherwise
+    # build one from the LLM adapter family per DEVAI_EMBEDDING_PROVIDER.
+    embedder = getattr(settings, "memory_embedder", None) or _build_embedder(settings)
     return PgVectorMemoryAdapter(db, embedder=embedder)
 
 
@@ -94,6 +103,54 @@ def _build_hondo(settings: Any) -> MemoryAdapter:
     return HondoMemoryAdapter(url=url, api_key=api_key)
 
 
+def _build_embedder(settings: Any) -> Any | None:
+    """Build an `embed(text)` object from the LLM adapter family.
+
+    Controlled by `DEVAI_EMBEDDING_PROVIDER`:
+        auto    → use OpenAI when DEVAI_OPENAI_API_KEY is set, else None
+        openai  → require the OpenAI key, warn + None when missing
+        none    → explicitly disabled
+
+    Never raises — without an embedder pgvector degrades to keyword recall,
+    which is the documented fallback, not an error.
+    """
+    provider = (getattr(settings, "embedding_provider", "auto") or "auto").lower()
+    if provider in ("none", "off", "noop", "disabled"):
+        return None
+
+    api_key = getattr(settings, "openai_api_key", "") or ""
+    if not api_key:
+        if provider == "openai":
+            logger.warning(
+                "embedding_provider=openai but DEVAI_OPENAI_API_KEY is unset — semantic search degrades to keyword recall"
+            )
+        else:
+            logger.info(
+                "embedding_provider=auto with no OpenAI key — semantic search degrades to keyword recall"
+            )
+        return None
+
+    try:
+        from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
+        from devai.adapters.memory.embedder import LLMEmbedder
+
+        llm = OpenAILLMAdapter(
+            api_key=api_key,
+            base_url=getattr(settings, "openai_base_url", "") or "",
+            organization=getattr(settings, "openai_organization", "") or "",
+        )
+        model = getattr(settings, "embedding_model", "") or "text-embedding-3-small"
+        dimensions = int(getattr(settings, "embedding_dimensions", 0) or 0)
+        logger.info("memory embedder active: openai model=%s dims=%s", model, dimensions or "unchecked")
+        return LLMEmbedder(llm, model=model, dimensions=dimensions)
+    except (AdapterNotInstalled, AdapterNotConfigured) as e:
+        logger.warning("memory embedder unavailable (%s) — semantic search degrades to keyword recall", e)
+        return None
+    except Exception:  # noqa: BLE001
+        logger.exception("memory embedder construction crashed — semantic search degrades to keyword recall")
+        return None
+
+
 memory_registry: AdapterRegistry[MemoryAdapter] = AdapterRegistry("memory")
 memory_registry.register("noop", _build_noop)
 memory_registry.register("redis", _build_redis)
@@ -121,7 +178,12 @@ def create_memory_adapter(settings: Any) -> MemoryAdapter:
     try:
         adapter = memory_registry.resolve(provider, settings)
         logger.info("MemoryAdapter active: %s", adapter.provider_name)
-        return adapter
+        # Wrap every backend in the telemetry delegate so EVERY caller —
+        # memory_injection, learn stages, chat tools — emits per-op
+        # count/latency/hit metrics. Free when telemetry is Noop.
+        from devai.adapters.memory.instrumented import InstrumentedMemoryAdapter
+
+        return InstrumentedMemoryAdapter(adapter)
     except AdapterNotInstalled as e:
         logger.warning("memory_provider=%s: %s — using Noop", provider, e)
         return NoopMemoryAdapter()

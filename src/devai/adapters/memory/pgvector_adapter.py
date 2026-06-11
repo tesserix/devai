@@ -151,19 +151,14 @@ class PgVectorMemoryAdapter(MemoryAdapter):
             # No embedder available — degrade to keyword recall
             return await self.recall(query=query, agent=agent, repo=repo, memory_type=memory_type, limit=k)
 
-        rows = await self._db.semantic_search(embedding=embedding, repo=repo, limit=k)
-        # Database.semantic_search ignores agent/memory_type filters — apply them in Python
-        results: list[MemoryRecord] = []
-        wanted_type = MemoryType.parse(memory_type) if memory_type else None
-        for row in rows:
-            if agent and row.get("agent") != agent:
-                continue
-            if wanted_type and row.get("memory_type") != wanted_type.value:
-                continue
-            results.append(self._row_to_record(row))
-            if len(results) >= k:
-                break
-        return results
+        rows = await self._db.semantic_search(
+            embedding=embedding,
+            repo=repo,
+            limit=k,
+            agent=agent,
+            memory_type=MemoryType.parse(memory_type).value if memory_type else None,
+        )
+        return [self._row_to_record(row) for row in rows]
 
     # ── Delete ────────────────────────────────────────────────────────
 
@@ -180,18 +175,27 @@ class PgVectorMemoryAdapter(MemoryAdapter):
     # ── Adapter contract ──────────────────────────────────────────────
 
     async def close(self) -> None:
-        # Database pool is owned by the host — don't close it here.
-        return None
+        # Database pool is owned by the host — don't close it here. The
+        # embedder is ours though (the factory builds it for this adapter),
+        # and it may hold an HTTP client that must be released.
+        closer = getattr(self._embedder, "close", None)
+        if closer is not None:
+            try:
+                await closer()
+            except Exception:  # noqa: BLE001
+                logger.debug("embedder close failed", exc_info=True)
 
     async def health_check(self) -> dict[str, Any]:
         try:
             if self._db is None or self._db.pool is None:
                 return {"ok": False, "provider": self.provider_name, "detail": "db not connected"}
-            count = await self._db.pool.fetchval("SELECT COUNT(*) FROM agent_memories WHERE is_active")
+            # Connectivity probe only — this runs on every /readyz poll, so a
+            # COUNT(*) over a growing table would tax the DB for no signal.
+            await self._db.pool.fetchval("SELECT 1")
             return {
                 "ok": True,
                 "provider": self.provider_name,
-                "detail": f"agent_memories active count={count}",
+                "detail": f"connected (embeddings {'on' if self._embedder is not None else 'off'})",
             }
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "provider": self.provider_name, "detail": str(e)}

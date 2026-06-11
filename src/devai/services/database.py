@@ -390,30 +390,35 @@ class Database:
         embedding: list[float],
         repo: str | None = None,
         limit: int = 5,
+        agent: str | None = None,
+        memory_type: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Find memories by semantic similarity using pgvector."""
+        """Find memories by semantic similarity using pgvector.
+
+        All filters are applied in SQL so the caller always gets up to
+        `limit` matching rows — post-filtering in Python silently shrinks
+        the result set below the requested k.
+        """
+        clauses = ["is_active = TRUE", "embedding IS NOT NULL"]
+        params: list[Any] = [embedding]
         if repo:
-            rows = await self.pool.fetch(
-                """SELECT *, 1 - (embedding <=> $1::vector) AS similarity
-                   FROM agent_memories
-                   WHERE is_active = TRUE AND embedding IS NOT NULL
-                     AND (repo = $2 OR repo = 'global')
-                   ORDER BY embedding <=> $1::vector
-                   LIMIT $3""",
-                embedding,
-                repo,
-                limit,
-            )
-        else:
-            rows = await self.pool.fetch(
-                """SELECT *, 1 - (embedding <=> $1::vector) AS similarity
-                   FROM agent_memories
-                   WHERE is_active = TRUE AND embedding IS NOT NULL
-                   ORDER BY embedding <=> $1::vector
-                   LIMIT $2""",
-                embedding,
-                limit,
-            )
+            params.append(repo)
+            clauses.append(f"(repo = ${len(params)} OR repo = 'global')")
+        if agent:
+            params.append(agent)
+            clauses.append(f"agent = ${len(params)}")
+        if memory_type:
+            params.append(memory_type)
+            clauses.append(f"memory_type = ${len(params)}")
+        params.append(limit)
+        rows = await self.pool.fetch(
+            f"""SELECT *, 1 - (embedding <=> $1::vector) AS similarity
+                FROM agent_memories
+                WHERE {" AND ".join(clauses)}
+                ORDER BY embedding <=> $1::vector
+                LIMIT ${len(params)}""",
+            *params,
+        )
         return [dict(r) for r in rows]
 
     # =========================================================================

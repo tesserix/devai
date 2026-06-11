@@ -696,7 +696,21 @@ def create_app(
             except Exception as e:
                 checks["event_bus_adapter"] = f"error: {e}"
 
-        all_ok = all(v == "ok" or v.startswith("ok ") for v in checks.values())
+        # Memory adapter — reported for visibility but never fails readiness:
+        # memory degrades to noop by design and must not block rollout.
+        memory_adapter = getattr(app.state, "memory_adapter", None)
+        if memory_adapter is not None:
+            try:
+                mem_health = await memory_adapter.health_check()
+                checks["memory"] = (
+                    f"ok ({mem_health.get('provider')})"
+                    if mem_health.get("ok")
+                    else f"degraded: {mem_health.get('detail', 'unhealthy')}"
+                )
+            except Exception as e:
+                checks["memory"] = f"degraded: {e}"
+
+        all_ok = all(v == "ok" or v.startswith("ok ") for k, v in checks.items() if k != "memory")
         return JSONResponse(
             content={"status": "ready" if all_ok else "not_ready", "checks": checks},
             status_code=200 if all_ok else 503,

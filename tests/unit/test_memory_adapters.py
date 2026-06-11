@@ -302,3 +302,343 @@ def test_registry_register_or_replace_swaps_factory():
     reg.register_or_replace("noop", lambda _s: NoopMemoryAdapter(keep_in_memory=True))
     adapter = reg.resolve("noop", _Settings())
     assert isinstance(adapter, NoopMemoryAdapter)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# LLMEmbedder — single-text facade over the LLM family's batch embed()
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _FakeEmbedLLM:
+    """Stands in for an LLMAdapter that supports embeddings."""
+
+    def __init__(self, vector=None):
+        self.vector = vector if vector is not None else [0.1, 0.2, 0.3]
+        self.closed = False
+        self.calls: list[tuple[list[str], str]] = []
+
+    async def embed(self, texts, *, model=""):
+        self.calls.append((texts, model))
+        return [list(self.vector) for _ in texts]
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_embedder_returns_single_vector():
+    from devai.adapters.memory.embedder import LLMEmbedder
+
+    llm = _FakeEmbedLLM()
+    embedder = LLMEmbedder(llm, model="test-model", dimensions=3)
+    vec = await embedder.embed("hello")
+    assert vec == [0.1, 0.2, 0.3]
+    assert llm.calls == [(["hello"], "test-model")]
+
+
+@pytest.mark.asyncio
+async def test_embedder_raises_on_dimension_mismatch():
+    from devai.adapters.memory.embedder import LLMEmbedder
+
+    embedder = LLMEmbedder(_FakeEmbedLLM(), model="m", dimensions=1536)
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        await embedder.embed("hello")
+
+
+@pytest.mark.asyncio
+async def test_embedder_raises_on_empty_result():
+    from devai.adapters.memory.embedder import LLMEmbedder
+
+    class _EmptyLLM:
+        async def embed(self, texts, *, model=""):
+            return []
+
+    embedder = LLMEmbedder(_EmptyLLM(), model="m")
+    with pytest.raises(ValueError, match="no vector"):
+        await embedder.embed("hello")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Factory embedder wiring
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_build_embedder_disabled_returns_none():
+    from devai.adapters.memory.factory import _build_embedder
+
+    settings = _Settings()
+    settings.embedding_provider = "none"
+    assert _build_embedder(settings) is None
+
+
+def test_build_embedder_auto_without_key_returns_none():
+    from devai.adapters.memory.factory import _build_embedder
+
+    settings = _Settings()
+    settings.embedding_provider = "auto"
+    settings.openai_api_key = ""
+    assert _build_embedder(settings) is None
+
+
+def test_pgvector_factory_prefers_explicit_memory_embedder():
+    """An embedder attached to settings wins over factory construction."""
+    from devai.adapters.memory.factory import _build_pgvector
+
+    sentinel = object()
+
+    class _Db:
+        pool = None
+
+    settings = _Settings()
+    settings.memory_provider = "pgvector"
+    settings.database = _Db()
+    settings.memory_embedder = sentinel
+    adapter = _build_pgvector(settings)
+    assert adapter._embedder is sentinel
+
+
+def test_pgvector_factory_without_key_degrades_to_keyword():
+    """No embedder anywhere → adapter built with embedder=None (keyword recall)."""
+    from devai.adapters.memory.factory import _build_pgvector
+
+    class _Db:
+        pool = None
+
+    settings = _Settings()
+    settings.memory_provider = "pgvector"
+    settings.database = _Db()
+    settings.embedding_provider = "auto"
+    settings.openai_api_key = ""
+    adapter = _build_pgvector(settings)
+    assert adapter._embedder is None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# InstrumentedMemoryAdapter — telemetry delegate applied by the factory
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _CaptureTelemetry:
+    """Duck-typed telemetry sink capturing incr/observe calls."""
+
+    def __init__(self):
+        self.counters: list[tuple[str, dict]] = []
+        self.observations: list[tuple[str, float, dict]] = []
+
+    def incr(self, name, value=1.0, attrs=None):
+        self.counters.append((name, dict(attrs or {})))
+
+    def observe(self, name, value, attrs=None):
+        self.observations.append((name, value, dict(attrs or {})))
+
+
+@pytest.fixture
+def capture_telemetry():
+    from devai.adapters.telemetry.runtime import set_global_telemetry
+
+    sink = _CaptureTelemetry()
+    set_global_telemetry(sink)  # type: ignore[arg-type]
+    yield sink
+    set_global_telemetry(None)
+
+
+@pytest.mark.asyncio
+async def test_instrumented_adapter_passes_through_and_records(capture_telemetry):
+    from devai.adapters.memory.instrumented import InstrumentedMemoryAdapter
+
+    inner = NoopMemoryAdapter(keep_in_memory=True)
+    adapter = InstrumentedMemoryAdapter(inner)
+    assert adapter.provider_name == "noop"
+
+    record = await adapter.remember("postgres pool exhaustion", agent="alm")
+    results = await adapter.recall(agent="alm")
+    found = await adapter.semantic_search("postgres", k=3)
+    assert record.content == "postgres pool exhaustion"
+    assert len(results) == 1
+    assert len(found) == 1
+    assert await adapter.forget(record.provider_id) is True
+
+    ops = [attrs["op"] for name, attrs in capture_telemetry.counters if name == "devai.memory.ops"]
+    assert ops == ["remember", "recall", "semantic_search", "forget"]
+    assert all(attrs["status"] == "ok" for _, attrs in capture_telemetry.counters)
+    result_obs = [(v, a["op"]) for n, v, a in capture_telemetry.observations if n == "devai.memory.results"]
+    assert (1.0, "recall") in result_obs
+    assert (1.0, "semantic_search") in result_obs
+
+
+@pytest.mark.asyncio
+async def test_instrumented_adapter_records_errors_and_reraises(capture_telemetry):
+    from devai.adapters.memory.instrumented import InstrumentedMemoryAdapter
+
+    class _Boom(NoopMemoryAdapter):
+        async def remember(self, *a, **kw):
+            raise RuntimeError("backend down")
+
+    adapter = InstrumentedMemoryAdapter(_Boom())
+    with pytest.raises(RuntimeError):
+        await adapter.remember("x")
+    assert any(attrs["status"] == "error" for _, attrs in capture_telemetry.counters)
+
+
+def test_factory_wraps_resolved_adapter_in_instrumented():
+    from devai.adapters.memory.instrumented import InstrumentedMemoryAdapter
+
+    settings = _Settings()
+    settings.memory_provider = "noop"
+    adapter = create_memory_adapter(settings)
+    assert isinstance(adapter, InstrumentedMemoryAdapter)
+    assert adapter.provider_name == "noop"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Database.semantic_search — filters pushed into SQL, not Python
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_database_semantic_search_pushes_filters_into_sql():
+    from devai.services.database import Database
+
+    captured: dict = {}
+
+    class _FakePool:
+        async def fetch(self, sql, *params):
+            captured["sql"] = sql
+            captured["params"] = params
+            return []
+
+    db = Database("postgresql://unused")
+    db._pool = _FakePool()
+
+    await db.semantic_search(
+        embedding=[0.0] * 3,
+        repo="org/repo",
+        limit=7,
+        agent="alm",
+        memory_type="procedural",
+    )
+
+    sql = captured["sql"]
+    assert "agent = $" in sql
+    assert "memory_type = $" in sql
+    assert "repo = $" in sql
+    # embedding, repo, agent, memory_type, limit
+    assert captured["params"] == ([0.0] * 3, "org/repo", "alm", "procedural", 7)
+
+
+@pytest.mark.asyncio
+async def test_pgvector_semantic_search_passes_filters_to_db():
+    from devai.adapters.memory.pgvector_adapter import PgVectorMemoryAdapter
+
+    captured: dict = {}
+
+    class _FakeDb:
+        pool = object()  # non-None so the adapter proceeds
+
+        async def semantic_search(self, *, embedding, repo, limit, agent, memory_type):
+            captured.update(embedding=embedding, repo=repo, limit=limit, agent=agent, memory_type=memory_type)
+            return []
+
+    adapter = PgVectorMemoryAdapter(_FakeDb(), embedder=_FakeSingleTextEmbedder())
+    await adapter.semantic_search("query", k=4, agent="alm", repo="org/r", memory_type="semantic")
+    assert captured["agent"] == "alm"
+    assert captured["memory_type"] == "semantic"
+    assert captured["limit"] == 4
+    assert captured["embedding"] == [0.5, 0.5]
+
+
+class _FakeSingleTextEmbedder:
+    """Object with the `embed(text)` surface pgvector expects."""
+
+    async def embed(self, text):
+        return [0.5, 0.5]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# ALM learn stage — the write half of the ALM memory loop
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_stage_writes_episodic_record():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    adapter = NoopMemoryAdapter(keep_in_memory=True)
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    deps = StageDeps(config=_Cfg(), memory=adapter)
+    stage = alm_learn_stage(deps, {})
+
+    task = DevAITask(intent="add login", blueprint="alm-pipeline", repo="org/app")
+    task.stages_completed = ["implement_code", "review_code", "run_tests"]
+    result = await stage.execute(task)
+
+    assert result.data["learn_done"] is True
+    written = await adapter.recall(agent="alm")
+    assert len(written) == 1
+    assert "succeeded" in written[0].content
+    assert written[0].memory_type == MemoryType.EPISODIC
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_stage_records_recovery_as_procedural():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    adapter = NoopMemoryAdapter(keep_in_memory=True)
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    deps = StageDeps(config=_Cfg(), memory=adapter)
+    stage = alm_learn_stage(deps, {})
+
+    task = DevAITask(intent="fix flaky test", blueprint="alm-pipeline", repo="org/app")
+    task.stages_completed = ["implement_code", "run_tests"]
+    task.stages_failed = ["run_tests"]  # failed mid-run, no terminal error → recovered
+    await stage.execute(task)
+
+    procedural = await adapter.recall(agent="alm", memory_type="procedural")
+    assert len(procedural) == 1
+    assert "run_tests" in procedural[0].content
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_stage_dry_run_writes_nothing():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    adapter = NoopMemoryAdapter(keep_in_memory=True)
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    deps = StageDeps(config=_Cfg(), memory=adapter)
+    stage = alm_learn_stage(deps, {})
+
+    task = DevAITask(intent="preview", blueprint="alm-pipeline", repo="org/app")
+    task.dry_run = True
+    result = await stage.execute(task)
+
+    assert result.data["dry_run"] is True
+    assert await adapter.recall(agent="alm") == []
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_stage_degrades_without_adapter():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    stage = alm_learn_stage(StageDeps(config=_Cfg()), {})
+    result = await stage.execute(DevAITask(intent="x", blueprint="alm-pipeline"))
+    assert result.data["learn_done"] is False

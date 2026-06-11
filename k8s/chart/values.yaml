@@ -33,10 +33,11 @@ env:
   DEVAI_GITHUB_ORG: "tesserix"
   DEVAI_CLAUDE_MODEL: "claude-sonnet-4-20250514"
   DEVAI_GROQ_MODEL: "llama-3.3-70b-versatile"
-  # Local = fewer moving parts: no NATS, no LangSmith, no K8s job runtime,
-  # in-process memory. Flip these on once the basics work.
+  # Local = fewer moving parts: no NATS, no LangSmith, no K8s job runtime.
+  # Memory runs on the sandbox Redis so the learn/inject loop is actually
+  # exercised in dev (noop would silently discard every write).
   DEVAI_EVENT_BUS_PROVIDER: "noop"
-  DEVAI_MEMORY_PROVIDER: "noop"
+  DEVAI_MEMORY_PROVIDER: "redis"
   DEVAI_LANGCHAIN_TRACING_V2: ""
   DEVAI_K8S_RUNTIME_ENABLED: "false"
   DEVAI_PIPELINE_ENABLED: "true"

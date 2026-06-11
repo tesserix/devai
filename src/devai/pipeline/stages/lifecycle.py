@@ -369,6 +369,108 @@ def memory_injection_stage(deps: StageDeps, config: dict[str, str]) -> PipelineS
     return _MemoryInjectionStage(deps, config)
 
 
+class _AlmLearnStage(PipelineStage):
+    """Distill the finished ALM run into agent memory so future runs benefit.
+
+    Counterpart of the SRE pipeline's `sre_learn` — without it the ALM
+    pipeline only ever reads memories that nothing produces. Writes:
+
+      - one EPISODIC record per run: outcome, stages completed/failed, error.
+        Episodic records expire (provider-side TTL), so routine run history
+        doesn't accumulate forever.
+      - one PROCEDURAL record when stages failed mid-run yet the run still
+        completed (review/fix loops, or on_failure:continue stages). Which
+        stages need iteration on this repo is exactly what the next run
+        should recall.
+
+    Dry-runs write nothing. No memory adapter → stage still succeeds,
+    just with no learning written (same degrade contract as injection).
+    """
+
+    def __init__(self, deps: StageDeps, config: dict[str, str]) -> None:
+        self.deps = deps
+
+    def name(self) -> str:
+        return "alm_learn"
+
+    async def execute(self, task: DevAITask) -> StageResult:
+        if getattr(task, "dry_run", False):
+            return StageResult(
+                message="[dry-run] would record run outcome to memory",
+                data={"learn_done": True, "dry_run": True},
+            )
+
+        if self.deps.memory is None:
+            return StageResult(
+                message="no memory adapter — nothing learned",
+                data={"learn_done": False},
+            )
+
+        completed = list(task.stages_completed or [])
+        failed = list(task.stages_failed or [])
+        outcome = "failed" if (task.error or failed) else "succeeded"
+        lines = [
+            f"ALM run {outcome}: blueprint={task.blueprint} repo={task.repo or 'n/a'} "
+            f"intent={task.intent or task.label or 'n/a'}"
+        ]
+        if completed:
+            lines.append(f"stages completed: {', '.join(completed)}")
+        if failed:
+            lines.append(f"stages failed: {', '.join(failed)}")
+        if task.error:
+            lines.append(f"error: {task.error}")
+        summary = "\n".join(lines)
+
+        meta = {
+            "task_id": task.id,
+            "blueprint": task.blueprint,
+            "stages_completed": completed,
+            "stages_failed": failed,
+            "error": task.error or "",
+        }
+
+        try:
+            await self.deps.memory.remember(
+                content=summary,
+                agent="alm",
+                repo=task.repo or "global",
+                memory_type="episodic",
+                tags=["alm", "run", task.blueprint, outcome],
+                metadata=meta,
+            )
+            if failed and not task.error:
+                # Careful with the claim: on_failure:continue stages land in
+                # stages_failed without ever being fixed, so record that these
+                # stages needed iteration — not that they were resolved.
+                await self.deps.memory.remember(
+                    content=(
+                        f"On {task.repo or 'this repo'}, stages [{', '.join(failed)}] failed mid-run "
+                        f"while the pipeline still completed. Expect these stages to need "
+                        f"iteration or manual attention on this repo."
+                    ),
+                    agent="alm",
+                    repo=task.repo or "global",
+                    memory_type="procedural",
+                    tags=["alm", "flaky-stages", task.blueprint],
+                    metadata={"task_id": task.id, "failed_stages": failed},
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("alm_learn: memory write failed — run completes regardless")
+            return StageResult(
+                message="memory write failed (see logs)",
+                data={"learn_done": False},
+            )
+
+        return StageResult(
+            message=f"learned via {self.deps.memory.provider_name}: run {outcome}",
+            data={"learn_done": True, "memory_provider": self.deps.memory.provider_name},
+        )
+
+
+def alm_learn_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return _AlmLearnStage(deps, config)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # post_report — render markdown report + (optionally) post as PR comment
 # ──────────────────────────────────────────────────────────────────────
@@ -449,6 +551,7 @@ def post_report_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
 
 
 __all__ = [
+    "alm_learn_stage",
     "await_merge_stage",
     "cleanup_stage",
     "context_hydration_stage",
