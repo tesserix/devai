@@ -113,36 +113,45 @@ existing column) via the OpenAI LLM adapter's `embed()`. Configurable via
 | A5 | `/readyz` surfaces `memory` check from `app.state.memory_adapter.health_check()` — reported but **non-fatal** (memory degrades, never blocks rollout) | `src/devai/webhook/app.py` |
 | A6 | Local sandbox: `DEVAI_MEMORY_PROVIDER=redis` (kind sandbox always has Redis; pgvector needs the connected `Database` attached, which only the pipeline path guarantees) | `k8s/chart/values.yaml` |
 
-### Phase B — close the learning loop  ✅ (this change, first slice)
+### Phase B — close the learning loop  ✅ shipped
 
 | # | Change | Files |
 |---|---|---|
-| B1 | `alm_learn` stage: distills run outcome (stages completed/failed, review iterations, security verdict, error) into one episodic record + one procedural record when the run produced a fix pattern. Dry-run writes nothing. | `src/devai/pipeline/stages/lifecycle.py`, `src/devai/blueprint/registry.py` |
-| B2 | Wire `alm_learn` into the ALM blueprint after the final stage | `blueprints/alm-pipeline.yaml` |
-| B3 | (next) LLM-assisted distillation: when `deps.llm` is real, summarize "what should future runs on this repo know" into a semantic record instead of raw blobs | follow-up |
-| B4 | (next) Chat session persistence: move `_conversations` to Redis (TTL) + end-of-session distill → memory | follow-up |
+| B1 | ✅ `alm_learn` stage: distills run outcome into one episodic record + one procedural record when stages failed mid-run yet the run completed. Dry-run writes nothing. | `src/devai/pipeline/stages/lifecycle.py`, `src/devai/blueprint/registry.py` |
+| B2 | ✅ `alm_learn` wired into the ALM blueprint between post-report and cleanup | `blueprints/alm-pipeline.yaml` |
+| B3 | ✅ LLM-assisted distillation: when `deps.llm` is real (non-noop), one call per run distills up to 3 standalone semantic facts (tags `alm/distilled`); NONE/noop/failure → skip | `lifecycle.py` (`_AlmLearnStage._distill`) |
+| B4 | ✅ Chat sessions persist to Redis (`devai:chat:history:<sid>`, 7d TTL), restored after pod restarts; clear_session deletes the key | `src/devai/chat/agent.py` |
 
-### Phase C — consolidate the dual system  (follow-up)
+### Phase C — consolidate the dual system  ✅ shipped
 
-- Migrate `chat/agent.py`, `graph/orchestrator.py`, `agents/db_engineer.py`,
-  `agents/tech_detector.py` off direct `AgentMemory` imports onto
-  `MemoryAdapter` (via app.state / StageDeps).
-- `AgentMemory` becomes a private implementation detail of
-  `redis_adapter.py`; delete the duplicate read/write paths.
-- Dashboard `/dashboard/api/memory` routes move to the adapter.
+- ✅ Process-global accessor `adapters/memory/runtime.py`
+  (set/get_global_memory, mirrors telemetry runtime), registered by the
+  webhook app + pipeline bootstrap.
+- ✅ Migrated every direct `AgentMemory` consumer: chat tools, LangGraph
+  orchestrator, db_engineer, tech_detector, `/dashboard/api/memory`.
+- ✅ `adapters/memory/helpers.py`: `format_memory_context` +
+  `remember_repo_pattern` (exact-content dedup for per-run writers).
+- `AgentMemory` survives only as the redis adapter's engine, as planned.
 
-### Phase D — lifecycle + governance  (follow-up)
+### Phase D — lifecycle + governance  ✅ shipped
 
-- Maintenance loop (reuse the SRE cron pattern): purge `expires_at` rows,
-  apply relevance decay, merge near-duplicates (cosine > 0.95).
-- Feedback scoring: bump `relevance_score` for memories present in
-  successful runs.
-- Dashboard memory panel: browse / search / edit / delete per agent/repo
-  (cursor-parity plan `docs/plans/cursor-parity/05-memories.md` Phase 3).
-- Schema additions (e.g. `embedding_model` column) go in
-  `tesserix-k8s/charts/apps/db-schema-bootstrap/schemas/devai/devai_db/`
-  (+ the `devai-api/files/devai_db.sql` local mirror) — never new
-  migrations in this repo.
+- ✅ Maintenance pass (`adapters/memory/maintenance.py`): episodic TTL
+  purge + `expires_at` sweep, relevance decay (×0.98 floor 0.1 for 30d+
+  idle), near-dup merge (cosine ≥ 0.95 same repo+type, older deactivated,
+  survivor boosted). Scheduled in the API lifespan every
+  `DEVAI_MEMORY_MAINTENANCE_HOURS` (default 6h; 0 disables). Emits
+  `devai.memory.maintenance` counters.
+- ✅ Feedback scoring: `MemoryAdapter.reinforce(ids)` (pgvector:
+  +0.1 relevance capped 2.0); `alm_learn` reinforces memories the
+  injection stage surfaced into runs that succeeded.
+- ✅ Memory panel on /analytics: provider+health, totals/type split/
+  embedding coverage, writes-per-day chart, by-agent bars, latest-memories
+  feed with confirm-and-forget delete (`DELETE /api/analytics/memory/{id}`).
+- Content *editing* deliberately skipped — delete + relearn is the safer
+  governance primitive for distilled facts.
+- Reminder: future schema additions (e.g. `embedding_model` column) go in
+  `tesserix-k8s/charts/apps/db-schema-bootstrap/schemas/devai/devai-db/`
+  — never new migrations in this repo.
 
 ---
 
