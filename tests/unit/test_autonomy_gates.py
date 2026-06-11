@@ -472,3 +472,24 @@ def test_fix_stage_briefs_developer_and_marks_fix_applied():
 
     result = stage._build_result(task, {"summary": "fixed"})
     assert result.data["test_fix_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_implement_stage_requires_pull_request():
+    """Implementation that produces no PR (no commits) must FAIL, not flow
+    downstream as narrative-only success (the 51-minute empty run)."""
+    from devai.pipeline.stages.alm import _ImplementCodeStage
+
+    stage = _ImplementCodeStage(StageDeps(config=_Cfg()), {})
+    task = DevAITask(intent="x", blueprint="alm-pipeline", repo="o/r")
+    with pytest.raises(RuntimeError, match="no pull request"):
+        await stage._post_validate(task, {"implementation_summary": "I looked around but committed nothing"})
+
+    # With a PR the contract passes (no SCM wired → labeling skipped).
+    await stage._post_validate(task, {"pr_number": 12})
+
+
+def test_run_correlation_label_format():
+    from devai.pipeline.stages._base import run_correlation_label
+
+    assert run_correlation_label("devai-c0ccd293f7b4") == "devai:run:c0ccd293f7"

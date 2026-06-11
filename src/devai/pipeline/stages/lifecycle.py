@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
+from devai.pipeline.stages._base import run_correlation_label
 from devai.pipeline.types import DevAITask, StageResult, TaskState
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,10 @@ class _CreateIssueStage(PipelineStage):
                 task.repo,
                 title=title,
                 body=body,
-                labels=[self.deps.config.pipeline_label] if hasattr(self.deps.config, "pipeline_label") else None,
+                labels=(
+                    [self.deps.config.pipeline_label] if hasattr(self.deps.config, "pipeline_label") else []
+                )
+                + [run_correlation_label(task.id)],
             )
         except Exception as e:  # noqa: BLE001
             logger.exception("create_issue: SCM call failed")

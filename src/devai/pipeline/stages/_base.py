@@ -35,6 +35,12 @@ from devai.pipeline.types import DevAITask, StageResult, TaskState
 logger = logging.getLogger(__name__)
 
 
+def run_correlation_label(task_id: str) -> str:
+    """Label tying every artifact (issues, epic, stories, bugs, PRs) back to
+    the fleet run that produced it — e.g. `devai:run:c0ccd293f7`."""
+    return f"devai:run:{(task_id or '').removeprefix('devai-')[:10]}"
+
+
 class AgentAdapter(PipelineStage):
     """Bridge from DevAITask → existing agent.run(ALMState) → StageResult.
 
@@ -82,7 +88,14 @@ class AgentAdapter(PipelineStage):
             logger.exception("stage %s: agent failed", self.name())
             raise
 
-        return self._build_result(task, patch)
+        result = self._build_result(task, patch)
+        # Output-contract validation: agents can finish their tool loop with
+        # narrative text but no real side effects (a 51-minute implement run
+        # produced NO branch/PR and still 'completed'). Subclasses raise here
+        # so the executor's retry kicks in and persistent emptiness fails
+        # VISIBLY instead of flowing downstream as success.
+        await self._post_validate(task, patch)
+        return result
 
     # ── Hooks subclasses override ───────────────────────────────────────
 
@@ -126,6 +139,10 @@ class AgentAdapter(PipelineStage):
             # their inputs from here under role-namespaced keys.
             **task.agent_context,
         }
+
+    async def _post_validate(self, task: DevAITask, patch: dict[str, Any]) -> None:
+        """Override to enforce the stage's output contract. Default: no-op."""
+        return None
 
     def _build_result(self, task: DevAITask, patch: dict[str, Any]) -> StageResult:
         """Translate the agent's patch dict → StageResult.

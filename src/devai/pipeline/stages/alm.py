@@ -17,6 +17,7 @@ from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.stages._base import AgentAdapter, _safe_agent
+from devai.pipeline.stages._base import run_correlation_label as _run_label
 from devai.pipeline.types import TaskState
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,9 @@ class _ImplementCodeStage(AgentAdapter):
     def name(self) -> str:
         return "implement_code"
 
+    async def _post_validate(self, task, patch) -> None:
+        await _require_pull_request(self, task, patch)
+
     def role_key(self) -> str:
         return "senior_developer"
 
@@ -178,6 +182,25 @@ class _ImplementCodeStage(AgentAdapter):
 
 def implement_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
     return _ImplementCodeStage(deps, config)
+
+
+async def _require_pull_request(stage: AgentAdapter, task, patch) -> None:
+    """Implementation stages MUST produce a pull request — narrative output
+    with no commits is a failed implementation, not a success."""
+    pr = patch.get("pr_number") or task.pr_number
+    if not isinstance(pr, int) or pr <= 0:
+        raise RuntimeError(
+            "implementation produced no pull request (no commits reached the repo) — "
+            f"summary was: {str(patch.get('implementation_summary') or patch.get('summary') or '')[:200]!r}"
+        )
+    # Correlate the PR to the fleet run + mark it agent-authored (best-effort).
+    if stage.deps.scm is not None and not task.dry_run:
+        from devai.pipeline.stages._base import run_correlation_label
+
+        try:
+            await stage.deps.scm.add_labels(task.repo, pr, ["devai:pr", run_correlation_label(task.id)])
+        except Exception:  # noqa: BLE001
+            logger.debug("PR labeling failed for #%s", pr, exc_info=True)
 
 
 class _DBEngineeringStage(AgentAdapter):
@@ -371,7 +394,7 @@ class _DiagnoseTestFailuresStage(PipelineStage):
                     task.repo,
                     title=f"[bug] {failed} failing test(s) on PR #{task.pr_number or '?'}: {(root_cause or 'test failures')[:80]}",
                     body=body,
-                    labels=["bug", "devai:bug", "devai:auto-diagnosed"],
+                    labels=["bug", "devai:bug", "devai:auto-diagnosed", _run_label(task.id)],
                 )
                 bug_number = issue.get("number")
                 bug_url = issue.get("html_url", "")

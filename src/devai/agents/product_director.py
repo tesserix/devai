@@ -137,6 +137,9 @@ should reflect the planning guidance above for this stack."""
 
         # Create the Epic as a GitHub issue
         labels = [lbl for lbl in epic_data.get("labels", []) if isinstance(lbl, str)] + ["epic", "devai:epic"]
+        run_id = str(state.get("run_id") or "")
+        if run_id:
+            labels.append(f"devai:run:{run_id.removeprefix('devai-')[:10]}")
         body = f"{epic_data.get('description', '')}\n\n## Milestones\n"
         for m in epic_data.get("milestones", []):
             body += f"\n- [ ] {m}"
@@ -273,6 +276,9 @@ context and ensure stories are actionable for developers."""
                 "devai:user-story",
                 f"priority:{story.get('priority', 'medium')}",
             ]
+            run_id = str(state.get("run_id") or "")
+            if run_id:
+                labels.append(f"devai:run:{run_id.removeprefix('devai-')[:10]}")
             story_title = (story.get("title") or "").strip() or "User Story"
 
             issue = await self._create_issue_safe(
