@@ -164,12 +164,16 @@ export function BlueprintDAG({
 
   return (
     <div className={clsx("w-full overflow-x-auto", className)}>
+      {/* block + auto margins center the graph when the panel is wider than
+          the drawing (the common case for single-lane blueprints); when the
+          graph is wider, overflow-x-auto still gives a horizontal scroll. */}
       <svg
         width={width}
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label={`${graph.title} stage graph`}
+        style={{ display: "block", margin: "0 auto" }}
       >
         {/* Lane headers */}
         {lanes.map((lane, i) => {
@@ -386,9 +390,13 @@ export function BlueprintDAG({
         })}
       </svg>
 
-      {/* Legend — quiet, only when an overlay is present (i.e. a live run). */}
+      {/* Legend — quiet, only when an overlay is present (i.e. a live run).
+          Centered to match the graph above it. */}
       {overlay && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 pt-2 text-[11px]" style={{ color: "var(--ink-muted)" }}>
+        <div
+          className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-1 pt-3 text-[11px]"
+          style={{ color: "var(--ink-muted)" }}
+        >
           <LegendDot color="#6366f1" label="Running" />
           <LegendDot color="#10b981" label="Done" />
           <LegendDot color="#ef4444" label="Failed" />
