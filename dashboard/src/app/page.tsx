@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type PipelineRun } from "@/lib/api";
+import { useRunEvents } from "@/lib/use-run-events";
 import { AGENT_INFO } from "@/lib/constants";
 import { PipelineFlow } from "@/components/pipeline-flow";
 import { AgentCard } from "@/components/agent-card";
@@ -46,22 +47,48 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchRuns]);
 
+  const refreshDetail = useCallback(async () => {
+    if (!selectedRunId) return;
+    try {
+      const run = await api.getRun(selectedRunId);
+      setSelectedRun(run);
+      const pendingApprovals = await api.getApprovals(selectedRunId);
+      setApprovals(pendingApprovals);
+    } catch {
+      // Run may not exist
+    }
+  }, [selectedRunId]);
+
+  // Live layer: one SSE subscription per selected run. The backend hub
+  // mutates the task (agents / a2a / routing) BEFORE emitting each
+  // envelope, so a debounced snapshot re-fetch right after any envelope
+  // gives every tab a consistent real-time view with zero client-side
+  // state merging. Polling below stays as the reconciliation fallback.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { connected: live } = useRunEvents(
+    selectedRunId ?? null,
+    useCallback(() => {
+      if (refreshTimer.current) return; // trailing debounce — one fetch per burst
+      refreshTimer.current = setTimeout(() => {
+        refreshTimer.current = null;
+        void refreshDetail();
+      }, 400);
+    }, [refreshDetail]),
+  );
+
   useEffect(() => {
     if (!selectedRunId) return;
-    const fetchDetail = async () => {
-      try {
-        const run = await api.getRun(selectedRunId);
-        setSelectedRun(run);
-        const pendingApprovals = await api.getApprovals(selectedRunId);
-        setApprovals(pendingApprovals);
-      } catch {
-        // Run may not exist
+    refreshDetail();
+    // SSE connected → slow reconciliation poll; disconnected → 3s fallback.
+    const interval = setInterval(refreshDetail, live ? 15000 : 3000);
+    return () => {
+      clearInterval(interval);
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
       }
     };
-    fetchDetail();
-    const interval = setInterval(fetchDetail, 3000);
-    return () => clearInterval(interval);
-  }, [selectedRunId]);
+  }, [selectedRunId, refreshDetail, live]);
 
   const handleTrigger = async (
     repo: string,
@@ -221,6 +248,20 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {live && (
+                    <span
+                      className="pill inline-flex items-center gap-1.5"
+                      title="Streaming live run events"
+                      style={{ color: "var(--ok-ink)" }}
+                    >
+                      <span
+                        className="inline-block w-1.5 h-1.5 rounded-full animate-pulse"
+                        style={{ background: "var(--ok)" }}
+                        aria-hidden
+                      />
+                      LIVE
+                    </span>
+                  )}
                   {orchestratorRouting?.progress_pct !== undefined && (
                     <span className="pill">{orchestratorRouting.progress_pct}%</span>
                   )}

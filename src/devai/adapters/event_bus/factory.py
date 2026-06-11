@@ -49,6 +49,7 @@ def _build_nats(settings: Any) -> EventBusAdapter:
         default_stream=getattr(settings, "nats_stream", "DEVAI"),
         default_max_deliver=getattr(settings, "nats_max_deliver", 3),
         default_ack_wait_seconds=getattr(settings, "nats_ack_wait", 300),
+        default_work_queue=bool(getattr(settings, "nats_stream_work_queue", False)),
     )
 
 

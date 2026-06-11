@@ -57,6 +57,7 @@ class NatsEventBusAdapter(EventBusAdapter):
         default_ack_wait_seconds: int = 300,
         default_max_age_seconds: int = 7 * 24 * 3600,
         default_replicas: int = 1,
+        default_work_queue: bool = False,
     ) -> None:
         # Lazy import — adapter is constructible even without nats-py;
         # connect() is where we materialize the client.
@@ -72,6 +73,12 @@ class NatsEventBusAdapter(EventBusAdapter):
         self.default_ack_wait_seconds = default_ack_wait_seconds
         self.default_max_age_seconds = default_max_age_seconds
         self.default_replicas = default_replicas
+        # LIMITS (False) is the right default for an observability fan-out
+        # bus: any number of consumers can read the same subjects and
+        # messages age out by the limits. WORK_QUEUE restricts overlapping
+        # consumers and assumes exactly-once consumption — only correct for
+        # actual job queues; opt back in via DEVAI_NATS_STREAM_WORK_QUEUE.
+        self.default_work_queue = default_work_queue
 
         self._nc: NATSClient | None = None
         self._js: JetStreamContext | None = None
@@ -103,6 +110,7 @@ class NatsEventBusAdapter(EventBusAdapter):
                 self.default_subjects,
                 max_age_seconds=self.default_max_age_seconds,
                 replicas=self.default_replicas,
+                work_queue=self.default_work_queue,
             )
         except Exception:
             logger.exception(
@@ -146,9 +154,30 @@ class NatsEventBusAdapter(EventBusAdapter):
         cfg = StreamConfig(**cfg_kwargs)
 
         try:
-            await self._js.stream_info(name)
-            await self._js.update_stream(cfg)
-            logger.info("NATS adapter: updated stream %s", name)
+            info = await self._js.stream_info(name)
+            try:
+                await self._js.update_stream(cfg)
+                logger.info("NATS adapter: updated stream %s", name)
+            except Exception as e:  # noqa: BLE001
+                # JetStream cannot change retention policy in place. Never
+                # delete+recreate here (that would drop retained messages) —
+                # keep the existing stream and tell the operator how to
+                # migrate (delete the stream once; it is recreated on the
+                # next connect with the new retention).
+                existing = getattr(getattr(info, "config", None), "retention", None)
+                if existing is not None and existing != retention:
+                    logger.warning(
+                        "NATS adapter: stream %s retention is %s, want %s — retention cannot be "
+                        "changed in place. Delete the stream (nats stream rm %s) to migrate; "
+                        "continuing with the existing config. (%s)",
+                        name,
+                        existing,
+                        retention,
+                        name,
+                        e,
+                    )
+                else:
+                    raise
         except nats.js.errors.NotFoundError:
             await self._js.add_stream(cfg)
             logger.info("NATS adapter: created stream %s with subjects=%s", name, subjects)

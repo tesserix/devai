@@ -30,6 +30,7 @@ import {
   type PreviewSession,
 } from "@/lib/api";
 import type { A2AMessage } from "@/lib/api";
+import { useRunEvents } from "@/lib/use-run-events";
 import { A2AFeed } from "@/components/a2a-feed";
 import { ChatPanel } from "@/components/chat-panel";
 import { LiveLogs } from "@/components/live-logs";
@@ -95,56 +96,59 @@ export default function RunDetailPage() {
   const [a2a, setA2a] = useState<A2AMessage[]>([]);
   const [delegation, setDelegation] = useState<DelegationPlan | null>(null);
 
-  // Poll the run + its gates. SSE could replace this; the 4s poll matches the
-  // rest of the dashboard and keeps the DAG filling in without a refresh.
-  useEffect(() => {
+  const refreshRun = useCallback(async () => {
     if (!runId) return;
-    let cancelled = false;
-
-    const refresh = async () => {
-      try {
-        const data = (await api.getRun(runId)) as RunDetail;
-        if (!cancelled) {
-          setRun(data);
-          setNotFound(false);
-        }
-      } catch (e) {
-        // 404 (unknown run) is terminal; transient errors just keep last data.
-        const msg = String((e as Error)?.message ?? e);
-        if (!cancelled && msg.includes("404")) setNotFound(true);
-      }
-      try {
-        const g = await api.getApprovals(runId);
-        if (!cancelled) setGates(Array.isArray(g) ? g : []);
-      } catch {
-        /* approvals endpoint optional — non-fatal */
-      }
-    };
-
-    refresh();
-    const id = window.setInterval(refresh, 4000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
+    try {
+      const data = (await api.getRun(runId)) as RunDetail;
+      setRun(data);
+      setNotFound(false);
+    } catch (e) {
+      // 404 (unknown run) is terminal; transient errors just keep last data.
+      const msg = String((e as Error)?.message ?? e);
+      if (msg.includes("404")) setNotFound(true);
+    }
+    try {
+      const g = await api.getApprovals(runId);
+      setGates(Array.isArray(g) ? g : []);
+    } catch {
+      /* approvals endpoint optional — non-fatal */
+    }
+    try {
+      const m = await api.getRunA2A(runId);
+      setA2a(Array.isArray(m) ? m : []);
+    } catch {
+      /* a2a optional — non-fatal */
+    }
   }, [runId]);
 
-  // A2A timeline (DASH-7) — via the api method, not a hardcoded /dashboard fetch.
+  // Live layer: SSE-triggered debounced refresh (the hub mutates the task
+  // before emitting, so one snapshot fetch per envelope burst gives the DAG,
+  // gates, and A2A timeline a consistent real-time view). The poll below is
+  // the reconciliation fallback — slow while connected, 4s otherwise.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { connected: live } = useRunEvents(
+    runId || null,
+    useCallback(() => {
+      if (refreshTimer.current) return;
+      refreshTimer.current = setTimeout(() => {
+        refreshTimer.current = null;
+        void refreshRun();
+      }, 400);
+    }, [refreshRun]),
+  );
+
   useEffect(() => {
     if (!runId) return;
-    let cancelled = false;
-    const load = () =>
-      api
-        .getRunA2A(runId)
-        .then((m) => !cancelled && setA2a(Array.isArray(m) ? m : []))
-        .catch(() => undefined);
-    load();
-    const id = window.setInterval(load, 6000);
+    refreshRun();
+    const id = window.setInterval(refreshRun, live ? 15000 : 4000);
     return () => {
-      cancelled = true;
       window.clearInterval(id);
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
     };
-  }, [runId]);
+  }, [runId, refreshRun, live]);
 
   // Advisory supervisor delegation plan (DASH-12). Prefer the dedicated
   // endpoint; fall back to whatever the run carries on its handover bag.

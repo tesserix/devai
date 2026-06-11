@@ -553,9 +553,14 @@ async def stream_events(request: Request, replay: int = Query(0, ge=0, le=1000))
         # Initial hello so the browser knows the stream is open.
         yield "event: hello\ndata: {}\n\n"
         try:
-            async for ts, task_id, payload in svc.event_stream(replay=replay):
+            async for ts, task_id, payload in svc.event_stream(replay=replay, heartbeat_seconds=15.0):
                 if await request.is_disconnected():
                     return
+                if payload is None:
+                    # Heartbeat sentinel — a comment keeps ingress proxies
+                    # (Istio/Envoy idle timeouts) from killing quiet streams.
+                    yield ": keep-alive\n\n"
+                    continue
                 event_id = f"{ts:.6f}-{task_id}"
                 data = json.dumps(
                     {"timestamp": ts, "task_id": task_id, **payload},

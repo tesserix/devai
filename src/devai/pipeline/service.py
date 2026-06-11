@@ -709,11 +709,20 @@ class PipelineService:
     def recent_events(self, limit: int = 200) -> list[dict[str, Any]]:
         return [{"timestamp": ts, "task_id": tid, **payload} for ts, tid, payload in list(self._ring)[-limit:]]
 
-    async def event_stream(self, *, replay: int = 0) -> AsyncIterator[tuple[float, str, dict[str, Any]]]:
-        """Async generator yielding live stage events.
+    async def event_stream(
+        self, *, replay: int = 0, heartbeat_seconds: float = 0.0
+    ) -> AsyncIterator[tuple[float, str, dict[str, Any] | None]]:
+        """Async generator yielding live run events (typed envelopes).
 
         `replay` — emit the last N events from the ring buffer before
         switching to live. Useful for SSE reconnects with Last-Event-ID.
+
+        `heartbeat_seconds` — when > 0, yield a `(now, "", None)` sentinel
+        after that much silence so the SSE route can emit a keep-alive
+        comment (proxy idle timeouts) and notice disconnects promptly. The
+        timeout lives HERE (around our own queue.get) because cancelling
+        the generator's __anext__ from outside would tear the generator
+        down on the first quiet period.
         """
         queue: asyncio.Queue[tuple[float, str, dict[str, Any]]] = asyncio.Queue()
         async with self._lock:
@@ -726,7 +735,13 @@ class PipelineService:
 
         try:
             while True:
-                yield await queue.get()
+                if heartbeat_seconds > 0:
+                    try:
+                        yield await asyncio.wait_for(queue.get(), timeout=heartbeat_seconds)
+                    except TimeoutError:
+                        yield (time.time(), "", None)
+                else:
+                    yield await queue.get()
         finally:
             async with self._lock:
                 if queue in self._sse_queues:

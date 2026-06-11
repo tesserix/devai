@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     nats_stream: str = "DEVAI"
     nats_max_deliver: int = 3
     nats_ack_wait: int = 300  # seconds
+    # Stream retention: False → LIMITS (observability fan-out: any number of
+    # consumers, messages age out). True → WORK_QUEUE (exactly-once job
+    # semantics). Retention can't change in place on an existing stream —
+    # the adapter logs the migration step instead of recreating.
+    nats_stream_work_queue: bool = False
 
     # --- Event-bus adapter ---
     # Single switch picks the pub/sub backend; the rest of DevAI talks

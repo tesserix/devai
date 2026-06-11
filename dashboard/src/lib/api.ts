@@ -183,6 +183,21 @@ function normalizeRun(raw: unknown): PipelineRun {
     (r.agents as PipelineRun["agents"]) ??
     (r.agent_statuses as PipelineRun["agents"]) ??
     {};
+  // Fiber tasks carry the handover bag as `agent_context` (a2a_messages,
+  // orchestrator_routing, …) where the legacy shape used `context` — map it
+  // so the Fleet tabs read blueprint runs identically.
+  const context = (r.context as object) ?? (r.agent_context as object) ?? {};
+  // Same for the Events tab: legacy runs had `events` [{step,status,detail,
+  // timestamp}]; Fiber tasks record `stage_events` [{stage,phase,message,…}].
+  const events =
+    (r.events as unknown[]) ??
+    ((r.stage_events as Array<Record<string, unknown>>) ?? []).map((e) => ({
+      step: (e.stage as string) ?? "",
+      status: (e.phase as string) ?? "",
+      detail: ((e.message as string) || (e.error as string) || "") as string,
+      timestamp: (e.timestamp as number) ?? 0,
+      agent: (e.agent as string) ?? "",
+    }));
   return {
     ...(r as object),
     run_id: runId,
@@ -190,6 +205,8 @@ function normalizeRun(raw: unknown): PipelineRun {
     repo: (r.repo as string) ?? "",
     created_at: (r.created_at as string) ?? "",
     agents,
+    context,
+    events,
   } as PipelineRun;
 }
 
