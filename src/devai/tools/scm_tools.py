@@ -11,10 +11,13 @@ delegating to the configured SCMClient.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from devai.scm.base import SCMClient
+
+logger = logging.getLogger(__name__)
 
 # Provider-agnostic tool schemas for Claude's tool-use API
 SCM_TOOLS: list[dict[str, Any]] = [
@@ -335,8 +338,20 @@ class SCMToolExecutor:
         tree = await self.scm.get_repo_tree(inp["repo"], inp.get("ref"))
         return [{"path": item["path"], "type": item["type"]} for item in tree]
 
+    async def _record_workbranch(self, branch: str) -> None:
+        """Record the branch the agent is ACTUALLY working on — ground truth
+        from real tool calls, not the briefed branch name (LLMs sometimes
+        pick their own). The dashboard's REPO tab follows this key live."""
+        if not branch or not self._run_id or self._redis is None:
+            return
+        try:
+            await self._redis.set(f"devai:run:{self._run_id}:workbranch", branch, ex=86400 * 7)
+        except Exception:  # noqa: BLE001 — visibility aid, never fail the tool
+            logger.debug("workbranch record failed for run=%s", self._run_id, exc_info=True)
+
     async def _handle_scm_create_branch(self, inp: dict[str, Any]) -> str:
         sha = await self.scm.create_branch(inp["repo"], inp["branch_name"], inp.get("from_branch"))
+        await self._record_workbranch(inp.get("branch_name", ""))
         return f"Branch '{inp['branch_name']}' created at {sha}"
 
     async def _handle_scm_commit_file(self, inp: dict[str, Any]) -> dict[str, Any]:
@@ -347,6 +362,7 @@ class SCMToolExecutor:
             inp["message"],
             inp["branch"],
         )
+        await self._record_workbranch(inp.get("branch", ""))
         # Fan out to the dashboard's REPO tab. The "kind" is best-effort:
         # GitHub returns a "type" field on create vs update, but most
         # providers don't — we treat every commit as a "modified" event

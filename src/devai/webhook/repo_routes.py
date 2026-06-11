@@ -289,10 +289,13 @@ async def stream_repo_events(request: Request, run_id: str, replay: int = 50) ->
     key = _REPO_EVENTS_KEY.format(run_id=run_id)
 
     async def iterator():
+        import time as _time
+
         # Hello frame so the browser flips EventSource to OPEN.
         yield "event: hello\ndata: {}\n\n"
 
         # Replay the last N entries first.
+        buffered: list[Any] = []
         if replay > 0:
             try:
                 buffered = await state.redis.lrange(key, -replay, -1)
@@ -303,8 +306,13 @@ async def stream_repo_events(request: Request, run_id: str, replay: int = 50) ->
 
         # Tail. Redis BLPOP returns (key, value); we use a short timeout
         # so we can check `is_disconnected()` between blocks instead of
-        # holding the connection forever.
+        # holding the connection forever. Keep-alive comments every 15s —
+        # without them every intermediate hop (Next rewrite proxy, Istio,
+        # Cloudflare) is free to kill the idle stream, which is exactly
+        # why the REPO tab badge sat at "offline" while the pipeline SSE
+        # (which heartbeats) stayed live.
         cursor = max(0, len(buffered) if replay > 0 else 0)
+        last_sent = _time.monotonic()
         while True:
             if await request.is_disconnected():
                 return
@@ -313,11 +321,15 @@ async def stream_repo_events(request: Request, run_id: str, replay: int = 50) ->
             except Exception:
                 entries = []
             if not entries:
+                if _time.monotonic() - last_sent >= 15.0:
+                    yield ": keep-alive\n\n"
+                    last_sent = _time.monotonic()
                 await asyncio.sleep(1.0)
                 continue
             for entry in entries:
                 yield f"event: repo\ndata: {entry}\n\n"
             cursor += len(entries)
+            last_sent = _time.monotonic()
 
     return StreamingResponse(
         iterator(),
