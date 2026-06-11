@@ -422,6 +422,7 @@ async def test_product_director_dispatches_epic_vs_stories_by_stage():
     """The blueprint adapter calls generic run() for BOTH planning stages —
     the old default always ran run_stories, so blueprint runs never created
     an epic (no epic issue → no story links, no supervision thread)."""
+    pytest.importorskip("ulid")  # slim envs lack the legacy agent deps
     from devai.agents.product_director import ProductDirectorAgent
 
     agent = ProductDirectorAgent.__new__(ProductDirectorAgent)
