@@ -344,6 +344,47 @@ class Pipeline:
                 self._tasks[task.id] = task
                 self._task_done.setdefault(task.id, asyncio.Event())
 
+            # Claim guard: the durable queue is SHARED across services
+            # (devai-api and devai-sre both run a PipelineService against the
+            # same Redis) and each loads a different blueprint set. A task we
+            # can't execute goes BACK on the queue for the right service —
+            # never crash-and-ack, which stranded runs in `pending` forever.
+            if task.blueprint not in self._blueprints:
+                try:
+                    releases = await sm.release_task(task_id)  # type: ignore[union-attr]
+                except Exception:  # noqa: BLE001 — releasing must not kill the worker
+                    logger.exception("worker %s: release_task failed for %s", worker_name, task_id)
+                    releases = 0
+                if releases > 50:
+                    # Nothing in the cluster can run this blueprint — fail it
+                    # visibly instead of ping-ponging it between services.
+                    logger.error(
+                        "worker %s: blueprint %r unknown to every live service after %d releases — failing %s",
+                        worker_name,
+                        task.blueprint,
+                        releases,
+                        task_id,
+                    )
+                    task.error = f"no live service can execute blueprint {task.blueprint!r}"
+                    task.failed_stage = ""
+                    task.transition(TaskState.STAGE_FAILED)
+                    await self._persist(task)
+                    with contextlib.suppress(Exception):
+                        await sm.ack_task(task_id)  # type: ignore[union-attr]
+                else:
+                    logger.info(
+                        "worker %s: blueprint %r not loaded here — released %s back to the shared queue (release #%d)",
+                        worker_name,
+                        task.blueprint,
+                        task_id,
+                        releases,
+                    )
+                # Drop our local copy so a later legitimate claim rebuilds
+                # from the snapshot, and give the right service a window.
+                self._tasks.pop(task_id, None)
+                await asyncio.sleep(self._poll_interval)
+                continue
+
             if task.is_terminal:
                 # Already finished (e.g. acked elsewhere) — clear and move on.
                 await sm.ack_task(task_id)  # type: ignore[union-attr]
@@ -396,7 +437,18 @@ class Pipeline:
         return None
 
     async def _execute_task(self, task: DevAITask) -> None:
-        blueprint = self._blueprints[task.blueprint]
+        # Defense in depth behind the worker's claim guard: an unknown
+        # blueprint here fails the task VISIBLY (persisted error state)
+        # instead of raising outside any persist path.
+        blueprint = self._blueprints.get(task.blueprint)
+        if blueprint is None:
+            task.error = f"unknown blueprint {task.blueprint!r}"
+            task.transition(TaskState.STAGE_FAILED)
+            await self._persist(task)
+            evt = self._task_done.get(task.id)
+            if evt is not None:
+                evt.set()
+            return
         task.transition(TaskState.QUEUED)
         try:
             await self._workflow_adapter.run_blueprint(blueprint, task)

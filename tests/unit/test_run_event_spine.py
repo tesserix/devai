@@ -261,6 +261,145 @@ async def test_persist_run_log_appends_capped_ttl_lists():
 # ──────────────────────────────────────────────────────────────────────
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Shared-queue claim guard — wrong service releases, never strands
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_worker_releases_unknown_blueprint_instead_of_crashing():
+    """devai-api and devai-sre share devai:pipeline:queue but load different
+    blueprint sets. A claimed task this service can't run must go BACK on the
+    queue (for the right service) — the old behavior crashed on the lookup,
+    acked, and stranded the run in `pending` forever."""
+    import asyncio
+
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.pipeline import Pipeline
+
+    released: list[str] = []
+    acked: list[str] = []
+    task_dict = DevAITask(intent="x", blueprint="alm-pipeline", repo="org/app").to_dict()
+
+    class _SM:
+        async def claim_next_task(self, worker_id, *, claim_ttl=180):
+            if released:  # second pass: stop the loop
+                raise asyncio.CancelledError
+            return task_dict["id"]
+
+        async def release_task(self, task_id):
+            released.append(task_id)
+            return len(released)
+
+        async def ack_task(self, task_id):
+            acked.append(task_id)
+
+        async def get_pipeline_task(self, task_id):
+            return task_dict
+
+        async def heartbeat_task(self, *a, **kw):
+            return None
+
+        async def persist_task(self, *a, **kw):
+            return None
+
+    class _Cfg2(_Cfg):
+        pipeline_durable_queue = True
+        pipeline_queue_poll_interval = 0.01
+
+    deps = StageDeps(config=_Cfg2(), state_manager=_SM())
+    pipe = Pipeline(deps)  # no blueprints registered — simulates the SRE pod
+    assert pipe._durable
+
+    with pytest.raises(asyncio.CancelledError):
+        await pipe._durable_worker_loop(0)
+
+    assert released == [task_dict["id"]]
+    assert acked == []  # never acked — stays available for the right service
+
+
+@pytest.mark.asyncio
+async def test_execute_task_unknown_blueprint_fails_visibly():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.pipeline import Pipeline
+
+    persisted: list[dict] = []
+
+    class _SM:
+        async def claim_next_task(self, *a, **kw):
+            return None
+
+        async def persist_task(self, d, **kw):
+            persisted.append(d)
+
+    deps = StageDeps(config=_Cfg(), state_manager=_SM())
+    pipe = Pipeline(deps)
+    task = DevAITask(intent="x", blueprint="ghost", repo="org/app")
+    pipe._tasks[task.id] = task
+    await pipe._execute_task(task)
+    assert task.state == TaskState.STAGE_FAILED
+    assert "unknown blueprint" in (task.error or "")
+    assert persisted  # failure state persisted, not lost
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Gate pending semantics — only prompt when the run reached the gate
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_gates_not_pending_before_run_reaches_them():
+    svc = _svc()
+
+    class _Stage:
+        def __init__(self, name, gate=False):
+            self.name = name
+            self.gate = gate
+            self.lane = "deploy"
+            self.type = "review"
+
+        def display_title(self):
+            return self.name.title()
+
+        def resolved_agent(self):
+            return "staff_reviewer"
+
+    class _BP:
+        stages = [_Stage("implement"), _Stage("staff-review", gate=True), _Stage("deploy-release", gate=True)]
+
+    class _Pipe:
+        def get_blueprint(self, name):
+            return _BP()
+
+    svc._pipeline = _Pipe()
+    svc._started = True
+
+    fresh = DevAITask(intent="ship", blueprint="alm-pipeline", repo="org/app").to_dict()
+
+    async def fake_get_task(task_id):
+        return fresh
+
+    svc.get_task = fake_get_task  # type: ignore[method-assign]
+
+    gates = await svc.list_gates("t1")
+    assert [g["gate"] for g in gates] == ["staff-review", "deploy-release"]
+    # Run hasn't started → NOTHING is pending (the old logic prompted both).
+    assert all(g["pending"] is False for g in gates)
+
+    # Now the run reaches staff-review: STARTED event + current_stage.
+    fresh["current_stage"] = "staff-review"
+    fresh["stage_events"] = [{"stage": "staff-review", "phase": "started", "timestamp": 1.0, "message": "review ok"}]
+    fresh["stages_completed"] = ["implement"]
+    gates = await svc.list_gates("t1")
+    by_name = {g["gate"]: g for g in gates}
+    assert by_name["staff-review"]["pending"] is True
+    assert by_name["deploy-release"]["pending"] is False  # still not reached
+    # Context the banner renders:
+    assert by_name["staff-review"]["agent"] == "staff_reviewer"
+    assert by_name["staff-review"]["requested_at"] == 1.0
+    assert by_name["staff-review"]["summary"] == "review ok"
+
+
 def test_agent_adapter_build_result_surfaces_a2a():
     from devai.pipeline.interfaces import StageDeps
     from devai.pipeline.stages._base import AgentAdapter

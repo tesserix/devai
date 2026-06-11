@@ -379,6 +379,31 @@ class StateManager:
         pipe.delete(self.PIPELINE_CLAIM_KEY.format(task_id=task_id))
         await pipe.execute()
 
+    async def release_task(self, task_id: str) -> int:
+        """Hand a claimed task back to the queue UNTOUCHED — for a worker
+        that claimed something it can't execute. The durable queue is shared
+        by every PipelineService in the cluster (devai-api AND devai-sre),
+        and each loads a different blueprint set; without a release path the
+        wrong service crashes on the claim, acks it, and strands the run in
+        `pending` forever.
+
+        Keeps the task in the active set, requeues at the BACK so another
+        service gets first crack, clears this worker's claim. Returns the
+        cumulative release count so callers can fail tasks that NO live
+        service can run instead of ping-ponging them forever."""
+        released_key = f"devai:pipeline:released:{task_id}"
+        pipe = self.redis.pipeline()
+        pipe.lrem(self.PIPELINE_PROCESSING_KEY, 0, task_id)
+        pipe.lpush(self.PIPELINE_QUEUE_KEY, task_id)
+        pipe.delete(self.PIPELINE_CLAIM_KEY.format(task_id=task_id))
+        pipe.incr(released_key)
+        pipe.expire(released_key, 3600)
+        results = await pipe.execute()
+        try:
+            return int(results[3])
+        except (IndexError, ValueError, TypeError):
+            return 0
+
     async def reclaim_stale_tasks(self) -> list[str]:
         """Move every processing task whose owner died (claim expired) back to
         the queue so a live worker picks it up. Returns the reclaimed ids.

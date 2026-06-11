@@ -22,7 +22,7 @@ export default function DashboardPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const [selectedRun, setSelectedRun] = useState<PipelineRun | null>(null);
-  const [approvals, setApprovals] = useState<Array<{ gate: string; agent: string; timestamp: number }>>([]);
+  const [approvals, setApprovals] = useState<Awaited<ReturnType<typeof api.getApprovals>>>([]);
   const [tab, setTab] = useState<Tab>("overview");
   const [triggerOpen, setTriggerOpen] = useState(false);
   const [loading, setLoading] = useState(true);

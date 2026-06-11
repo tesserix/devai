@@ -659,7 +659,15 @@ class PipelineService:
         return True
 
     async def list_gates(self, task_id: str) -> list[dict[str, Any]]:
-        """List a run's approval gates with their decision (best-effort)."""
+        """List a run's approval gates with decision/pending status + the
+        context a human needs to decide.
+
+        A gate is PENDING only when the run has actually REACHED it (the
+        stage has a STARTED event / is the current stage) and no decision is
+        recorded. The old check ("no decision and not completed yet") marked
+        every gate pending from the moment the run was created — users were
+        prompted to approve deploy-release before a single stage had run.
+        """
         snapshot = await self.get_task(task_id)
         if snapshot is None or self._pipeline is None:
             return []
@@ -668,6 +676,21 @@ class PipelineService:
         except Exception:  # noqa: BLE001
             return []
         redis = getattr(self.state_manager, "redis", None)
+
+        completed = set(snapshot.get("stages_completed") or [])
+        failed = set(snapshot.get("stages_failed") or [])
+        skipped = set(snapshot.get("stages_skipped") or [])
+        current = snapshot.get("current_stage") or ""
+        events = snapshot.get("stage_events") or []
+        started_at: dict[str, float] = {}
+        last_message: dict[str, str] = {}
+        for e in events:
+            stage = e.get("stage", "")
+            if e.get("phase") == "started" and stage not in started_at:
+                started_at[stage] = e.get("timestamp") or 0.0
+            if e.get("message"):
+                last_message[stage] = e.get("message", "")
+
         out: list[dict[str, Any]] = []
         for s in bp.stages:
             if not getattr(s, "gate", False):
@@ -675,12 +698,25 @@ class PipelineService:
             decision = None
             if redis is not None:
                 decision = await redis.get(f"devai:pipeline:gate:{task_id}:{s.name}")
+            reached = s.name == current or s.name in started_at
+            resolved = s.name in completed or s.name in failed or s.name in skipped
             out.append(
                 {
                     "gate": s.name,
                     "title": s.display_title(),
                     "decision": decision,
-                    "pending": decision is None and s.name not in snapshot.get("stages_completed", []),
+                    "pending": decision is None and reached and not resolved,
+                    # ── Context for the approval banner ──────────────
+                    "agent": s.resolved_agent(),
+                    "lane": s.lane,
+                    "stage_type": s.type,
+                    "blueprint": snapshot.get("blueprint", ""),
+                    "repo": snapshot.get("repo", ""),
+                    "intent": (snapshot.get("intent") or "")[:200],
+                    "pr_number": snapshot.get("pr_number"),
+                    "requested_at": started_at.get(s.name),
+                    "summary": last_message.get(s.name, ""),
+                    "stages_done": len(completed),
                 }
             )
         return out

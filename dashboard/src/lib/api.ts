@@ -391,7 +391,23 @@ export const api = {
 
   // Approvals
   getApprovals: (runId: string) =>
-    apiFetch<Array<{ gate: string; agent: string; timestamp: number }>>(`/pipeline/runs/${runId}/approvals`),
+    apiFetch<
+      Array<{
+        gate: string;
+        title?: string;
+        decision?: string | null;
+        pending?: boolean;
+        agent?: string;
+        lane?: string;
+        blueprint?: string;
+        repo?: string;
+        intent?: string;
+        pr_number?: number | null;
+        requested_at?: number | null;
+        summary?: string;
+        timestamp?: number;
+      }>
+    >(`/pipeline/runs/${runId}/approvals`),
 
   approveGate: (runId: string, gate: string) =>
     apiFetch<{ status: string }>(`/pipeline/runs/${runId}/approvals/${gate}/approve`, { method: "POST" }),

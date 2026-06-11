@@ -665,10 +665,18 @@ async def scan_repo(request: Request, owner: str, name: str) -> ScanResponse:
     try:
         memory = getattr(request.app.state, "memory_adapter", None)
         if memory is not None:
+            # MemoryAdapter contract: positional content string + repo/tags
+            # scoping. (The old category=/key= kwargs predate the adapter
+            # family and crashed every scan-profile write.)
+            import json as _json
+
             await memory.remember(
-                category="repo_profiles",
-                key=full,
-                content=profile,
+                f"Repo profile for {full}: {_json.dumps(profile, default=str)}",
+                agent="repo_scanner",
+                repo=full,
+                memory_type="semantic",
+                tags=["repo_profiles", "scan"],
+                metadata={"profile": profile},
             )
             stored = True
     except Exception:  # noqa: BLE001
