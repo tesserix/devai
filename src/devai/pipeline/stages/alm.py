@@ -184,6 +184,21 @@ def implement_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineSta
     return _ImplementCodeStage(deps, config)
 
 
+async def _require_outputs(stage: AgentAdapter, patch: dict, required: tuple[str, ...]) -> None:
+    """Quality-gate output contract: the agent must produce its verdict
+    fields. A 0.0s 'completed' review/scan/test stage with no decision is a
+    silent no-op, not a success — raise so the retry kicks in and persistent
+    emptiness fails visibly."""
+    if patch.get(f"{stage.role_key()}_stub"):
+        return  # stub path already announces itself
+    missing = [k for k in required if patch.get(k) in (None, "")]
+    if missing:
+        raise RuntimeError(
+            f"{stage.name()} produced no {'/'.join(missing)} — the agent returned "
+            f"narrative output without doing its job (keys present: {sorted(patch.keys())[:8]})"
+        )
+
+
 async def _require_pull_request(stage: AgentAdapter, task, patch) -> None:
     """Implementation stages MUST produce a pull request — narrative output
     with no commits is a failed implementation, not a success."""
@@ -232,6 +247,9 @@ class _ReviewCodeStage(AgentAdapter):
     def name(self) -> str:
         return "review_code"
 
+    async def _post_validate(self, task, patch) -> None:
+        await _require_outputs(self, patch, ("review_decision",))
+
     def role_key(self) -> str:
         return "staff_reviewer"
 
@@ -275,6 +293,9 @@ class _SecurityScanStage(AgentAdapter):
     def name(self) -> str:
         return "security_scan"
 
+    async def _post_validate(self, task, patch) -> None:
+        await _require_outputs(self, patch, ("security_decision",))
+
     def role_key(self) -> str:
         return "security_expert"
 
@@ -314,6 +335,17 @@ def monitor_build_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStag
 class _RunTestsStage(AgentAdapter):
     def name(self) -> str:
         return "run_tests"
+
+    async def _post_validate(self, task, patch) -> None:
+        # The QA agent must REPORT results (counts may legitimately be 0
+        # only alongside an explicit summary of what it did).
+        if patch.get(f"{self.role_key()}_stub"):
+            return
+        if patch.get("test_total") in (None, "") and patch.get("test_passed") in (None, ""):
+            raise RuntimeError(
+                "run_tests produced no test results — the QA agent must write/run "
+                f"tests and report counts (keys present: {sorted(patch.keys())[:8]})"
+            )
 
     def role_key(self) -> str:
         return "qa_tester"

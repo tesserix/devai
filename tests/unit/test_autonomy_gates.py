@@ -493,3 +493,27 @@ def test_run_correlation_label_format():
     from devai.pipeline.stages._base import run_correlation_label
 
     assert run_correlation_label("devai-c0ccd293f7b4") == "devai:run:c0ccd293f7"
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_stages_reject_empty_outputs():
+    """0.0s 'completed' reviews/scans/tests with no verdict are silent no-ops
+    — every quality-gate agent must produce its decision fields."""
+    from devai.pipeline.stages.alm import _ReviewCodeStage, _RunTestsStage, _SecurityScanStage
+
+    deps = StageDeps(config=_Cfg())
+    task = DevAITask(intent="x", blueprint="alm-pipeline", repo="o/r")
+
+    with pytest.raises(RuntimeError, match="review_decision"):
+        await _ReviewCodeStage(deps, {})._post_validate(task, {"summary": "looks fine"})
+    await _ReviewCodeStage(deps, {})._post_validate(task, {"review_decision": "approved"})
+
+    with pytest.raises(RuntimeError, match="security_decision"):
+        await _SecurityScanStage(deps, {})._post_validate(task, {})
+    await _SecurityScanStage(deps, {})._post_validate(task, {"security_decision": "pass"})
+
+    with pytest.raises(RuntimeError, match="no test results"):
+        await _RunTestsStage(deps, {})._post_validate(task, {"summary": "ran around"})
+    await _RunTestsStage(deps, {})._post_validate(task, {"test_total": 5, "test_passed": 5, "test_failed": 0})
+    # Stub path stays silent-tolerant (slim envs).
+    await _ReviewCodeStage(deps, {})._post_validate(task, {"staff_reviewer_stub": True})
