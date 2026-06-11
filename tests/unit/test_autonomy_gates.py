@@ -417,6 +417,45 @@ async def test_diagnose_dry_run_files_no_issue_but_briefs_the_fix():
     assert result.data["test_fix_brief"]
 
 
+@pytest.mark.asyncio
+async def test_product_director_dispatches_epic_vs_stories_by_stage():
+    """The blueprint adapter calls generic run() for BOTH planning stages —
+    the old default always ran run_stories, so blueprint runs never created
+    an epic (no epic issue → no story links, no supervision thread)."""
+    from devai.agents.product_director import ProductDirectorAgent
+
+    agent = ProductDirectorAgent.__new__(ProductDirectorAgent)
+    calls: list[str] = []
+
+    async def fake_epic(state, a2a=None):
+        calls.append("epic")
+        return {}
+
+    async def fake_stories(state, a2a=None):
+        calls.append("stories")
+        return {}
+
+    agent.run_epic = fake_epic  # type: ignore[method-assign]
+    agent.run_stories = fake_stories  # type: ignore[method-assign]
+
+    await agent._execute_graph({"stage": "create-epic"}, a2a=None)
+    await agent._execute_graph({"stage": "create_stories"}, a2a=None)
+    await agent._execute_graph({"stage": ""}, a2a=None)  # legacy default
+    assert calls == ["epic", "stories", "stories"]
+
+
+def test_create_stories_stage_constructs_real_agent():
+    """create_stories was a stub (_make_agent -> None) — it must run the
+    ProductDirector so run_stories executes with the epic handover."""
+    import inspect
+
+    from devai.pipeline.stages.alm import _CreateStoriesStage
+
+    src = inspect.getsource(_CreateStoriesStage._make_agent)
+    assert "ProductDirectorAgent" in src
+    assert "return None" not in src
+
+
 def test_fix_stage_briefs_developer_and_marks_fix_applied():
     from devai.pipeline.stages.alm import fix_test_failures_stage
 

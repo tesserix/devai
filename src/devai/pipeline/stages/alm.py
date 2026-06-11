@@ -112,10 +112,9 @@ def create_epic_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
 
 
 class _CreateStoriesStage(AgentAdapter):
-    """The current ProductDirector creates both epic and stories in a single
-    run; this stage exists so a blueprint can split them logically. By
-    default we reuse the product_director_output written by create_epic.
-    """
+    """Runs ProductDirectorAgent.run_stories (stage-aware dispatch routes on
+    the stage name) with the epic context from create_epic's handover — the
+    stories land as GitHub issues linked + tracked on the epic."""
 
     def name(self) -> str:
         return "create_stories"
@@ -127,9 +126,9 @@ class _CreateStoriesStage(AgentAdapter):
         return TaskState.PLANNING
 
     def _make_agent(self):
-        # No standalone agent — this is a sub-stage of product_director.
-        # We return None and rely on the handover from create_epic.
-        return None
+        from devai.agents.product_director import ProductDirectorAgent
+
+        return _make(ProductDirectorAgent, self.deps)
 
 
 def create_stories_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:

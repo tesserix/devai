@@ -67,7 +67,14 @@ class ProductDirectorAgent(BaseAgent):
     publish_subject = "devai.pipeline.stories_ready"
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
-        """Default execution — creates stories, passing A2A bus through."""
+        """Stage-aware dispatch. The blueprint adapter calls the generic
+        run() for BOTH the create-epic and create-stories stages — the old
+        default always ran run_stories, so blueprint runs never created an
+        epic at all (no epic issue, no story linking, nothing to supervise).
+        Route on the stage name; default to stories for legacy callers."""
+        stage = str(state.get("stage") or "").replace("-", "_").lower()
+        if "epic" in stage:
+            return await self.run_epic(state, a2a)
         return await self.run_stories(state, a2a)
 
     async def run_epic(self, state: ALMState, a2a: A2ABus | None = None) -> dict[str, Any]:
@@ -239,8 +246,11 @@ context and ensure stories are actionable for developers."""
             if isinstance(stories_data, dict) and "stories" in stories_data:
                 stories_data = stories_data["stories"]
         except (json.JSONDecodeError, ValueError) as e:
-            logger.error("Failed to parse stories: %s", e)
-            stories_data = []
+            # Raise instead of swallowing: a stage that "completes" with zero
+            # stories is invisible breakage. Raising lets the executor's
+            # transient retry re-ask the LLM, and a persistent failure shows
+            # up as a FAILED stage instead of an empty success.
+            raise ValueError(f"stories response unparseable: {e}; raw[:200]={response[:200]!r}") from e
 
         # Create GitHub issues for each story
         created_stories: list[dict[str, Any]] = []
