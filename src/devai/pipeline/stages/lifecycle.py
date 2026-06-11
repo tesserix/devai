@@ -456,15 +456,21 @@ class _PlanApprovalStage(PipelineStage):
         try:
             from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
 
+            detected = task.agent_context.get("detected_tech_stack") or ""
             prompt = (
                 "A user asked an autonomous software pipeline to do this:\n\n"
                 f"  {task.intent[:800]}\n\n"
-                "Is this request specific enough to implement end-to-end without "
-                "confirming anything with the user? Consider: are the tech stack, "
-                "scope boundaries, data model, and acceptance criteria stated or "
-                "safely inferable?\n\n"
-                "Reply with exactly CLEAR, or AMBIGUOUS followed by up to 4 short "
-                "questions (one per line, no numbering) the user should confirm."
+                + (f"Repo tech detected so far: {str(detected)[:200]}\n\n" if detected else "")
+                + "Reply CLEAR only when the user EXPLICITLY stated the tech stack/"
+                "framework, the scope boundaries, AND the core data model. If any "
+                "of those are unstated (even if inferable), reply AMBIGUOUS and "
+                "make up to 4 CONCRETE PROPOSALS the user can simply confirm — "
+                "fill the gaps with your recommended choices, one per line, no "
+                "numbering, phrased like: \"We'll build this with Next.js 16 + "
+                "FastAPI + PostgreSQL — confirm or name your preferred stack\" or "
+                "\"Cart + checkout will be guest-only with mock payments — confirm "
+                "or specify auth/payments\". The user should be able to approve "
+                "everything with one click."
             )
             response = await llm.generate(
                 LLMRequest(
