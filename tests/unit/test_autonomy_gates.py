@@ -264,3 +264,86 @@ async def test_plan_approval_no_llm_never_blocks():
     stage, task = _plan_stage(sm=_SM(), llm=None)
     result = await stage.execute(task)
     assert result.data["plan_approved"] == "auto-clear"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Self-healing test loop: diagnose → bug issue → fix brief → re-test
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _IssueSCM:
+    def __init__(self):
+        self.issues: list[dict] = []
+
+    async def create_issue(self, repo, title, body, labels=None):
+        n = 100 + len(self.issues)
+        self.issues.append({"repo": repo, "title": title, "body": body, "labels": labels})
+        return {"number": n, "html_url": f"https://github.com/{repo}/issues/{n}"}
+
+
+@pytest.mark.asyncio
+async def test_diagnose_skips_when_no_failures():
+    from devai.pipeline.stages.alm import diagnose_test_failures_stage
+
+    stage = diagnose_test_failures_stage(StageDeps(config=_Cfg()), {})
+    task = DevAITask(intent="x", blueprint="alm-pipeline", repo="o/r")
+    result = await stage.execute(task)
+    assert result.data.get("diagnosis_skipped") is True
+
+
+@pytest.mark.asyncio
+async def test_diagnose_files_linked_bug_with_root_cause():
+    from devai.pipeline.stages.alm import diagnose_test_failures_stage
+
+    scm = _IssueSCM()
+    llm = _FakeLLM("ROOT CAUSE: The cart total ignores quantity.\nFIX: Multiply unit price by quantity in cart.ts.")
+    stage = diagnose_test_failures_stage(StageDeps(config=_Cfg(), scm=scm, llm=llm), {})
+    task = DevAITask(intent="petstore", blueprint="alm-pipeline", repo="o/r")
+    task.agent_context["test_failed"] = 2
+    task.agent_context["qa_tester_output"] = {"failed": 2, "summary": "cart_total spec failing"}
+    task.epic_issue_number = 42
+    task.story_issue_numbers = [43, 44]
+    task.pr_number = 7
+
+    result = await stage.execute(task)
+
+    assert result.data["bug_issue_number"] == 100
+    assert "cart total ignores quantity" in result.data["test_fix_brief"]
+    issue = scm.issues[0]
+    assert "devai:bug" in issue["labels"]
+    assert "#42" in issue["body"]  # epic link
+    assert "#43" in issue["body"] and "#44" in issue["body"]  # story links
+    assert "#7" in issue["body"]  # PR link
+    assert "Root cause analysis" in issue["body"]
+
+
+@pytest.mark.asyncio
+async def test_diagnose_dry_run_files_no_issue_but_briefs_the_fix():
+    from devai.pipeline.stages.alm import diagnose_test_failures_stage
+
+    scm = _IssueSCM()
+    stage = diagnose_test_failures_stage(StageDeps(config=_Cfg(), scm=scm, llm=None), {})
+    task = DevAITask(intent="x", blueprint="alm-pipeline", repo="o/r")
+    task.dry_run = True
+    task.agent_context["test_failed"] = 1
+    result = await stage.execute(task)
+    assert scm.issues == []
+    assert result.data["bug_issue_number"] is None
+    assert result.data["test_fix_brief"]
+
+
+def test_fix_stage_briefs_developer_and_marks_fix_applied():
+    from devai.pipeline.stages.alm import fix_test_failures_stage
+
+    stage = fix_test_failures_stage(StageDeps(config=_Cfg()), {})
+    task = DevAITask(intent="petstore", blueprint="alm-pipeline", repo="o/r")
+    task.agent_context["bug_issue_number"] = 100
+    task.agent_context["test_fix_brief"] = "Multiply unit price by quantity."
+
+    state = stage._build_state(task)
+    assert "bug #100" in state["requirements"]
+    assert "Multiply unit price by quantity." in state["requirements"]
+    assert "SMALLEST fix" in state["requirements"]
+
+    result = stage._build_result(task, {"summary": "fixed"})
+    assert result.data["test_fix_applied"] is True

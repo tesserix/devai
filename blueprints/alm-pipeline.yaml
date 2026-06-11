@@ -152,6 +152,39 @@ stages:
     lane: review
     depends_on: [monitor-build]
     timeout: 20m
+    on_failure: continue   # failures become data — the diagnose/fix loop handles them
+
+  # ─── Self-healing test loop ─────────────────────────────────────────
+  # Failing tests don't kill the run: diagnose WHY (root cause), file a
+  # linked bug issue (epic + stories + PR), apply a focused fix on the PR
+  # branch, then re-run the tests. Bounded: one diagnose→fix→retest pass.
+  - name: diagnose-test-failures
+    type: analyst
+    stage: diagnose_test_failures
+    lane: review
+    depends_on: [run-tests]
+    condition: "output.test_failed"
+    timeout: 10m
+    on_failure: continue
+
+  - name: fix-test-failures
+    type: agentic
+    stage: fix_test_failures
+    agent: senior_developer
+    lane: build
+    depends_on: [diagnose-test-failures]
+    condition: "output.bug_issue_number"
+    timeout: 30m
+    on_failure: continue
+
+  - name: rerun-tests
+    type: review
+    stage: run_tests
+    agent: qa_tester
+    lane: review
+    depends_on: [fix-test-failures]
+    condition: "output.test_fix_applied"
+    timeout: 20m
 
   # ─── Final review + deploy ──────────────────────────────────────────
   - name: staff-review
@@ -160,7 +193,7 @@ stages:
     agent: staff_reviewer
     lane: review
     gate: true
-    depends_on: [run-tests]
+    depends_on: [rerun-tests]
     timeout: 15m
 
   - name: provision-infra

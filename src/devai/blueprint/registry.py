@@ -96,6 +96,8 @@ def register_defaults(registry: StageRegistry) -> None:
     registry.register("security_scan", _alm.security_scan_stage)
     registry.register("monitor_build", _alm.monitor_build_stage)
     registry.register("run_tests", _alm.run_tests_stage)
+    registry.register("diagnose_test_failures", _alm.diagnose_test_failures_stage)
+    registry.register("fix_test_failures", _alm.fix_test_failures_stage)
     registry.register("provision_infra", _alm.provision_infra_stage)
     registry.register("deploy_release", _alm.deploy_release_stage)
     registry.register("staff_review", _alm.staff_review_stage)
