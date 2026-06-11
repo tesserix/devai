@@ -516,8 +516,10 @@ def create_app(
     if not hasattr(app.state, "memory_adapter"):
         try:
             from devai.adapters.memory import create_memory_adapter
+            from devai.adapters.memory.runtime import set_global_memory
 
             app.state.memory_adapter = create_memory_adapter(config)
+            set_global_memory(app.state.memory_adapter)
         except Exception:
             logger.exception("memory adapter construction failed — scan results won't persist")
             app.state.memory_adapter = None
@@ -743,17 +745,17 @@ def create_app(
         memory_type: str = "",
         limit: int = Query(20, ge=1, le=500),
     ) -> list:
-        """List agent memories."""
-        from devai.services.memory import AgentMemory
+        """List agent memories via the configured MemoryAdapter (pgvector in
+        prod) — previously read the legacy Redis store regardless of provider."""
+        from devai.adapters.memory.runtime import get_global_memory
 
-        memory = AgentMemory(state.redis)
-        entries = await memory.recall(
+        records = await get_global_memory().recall(
             agent=agent or None,
             repo=repo or None,
             memory_type=memory_type or None,
             limit=limit,
         )
-        return [e.to_dict() for e in entries]
+        return [r.to_dict() for r in records]
 
     # --- Audit Trail API ---
 

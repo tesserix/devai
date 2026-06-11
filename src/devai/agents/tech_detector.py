@@ -191,13 +191,15 @@ Identify the complete tech stack.""",
 
         # Store as semantic memory for future runs
         try:
-            from devai.services.memory import AgentMemory
+            from devai.adapters.memory.helpers import remember_repo_pattern
+            from devai.adapters.memory.runtime import get_global_memory
 
-            memory = AgentMemory(self.state.redis)
-            await memory.learn_repo_pattern(
+            await remember_repo_pattern(
+                get_global_memory(),
                 repo=repo,
                 pattern_type="tech_stack",
                 description=f"Tech stack: {json.dumps(tech_stack)}",
+                agent="tech_detector",
             )
         except Exception:
             pass

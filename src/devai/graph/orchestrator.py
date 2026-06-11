@@ -998,15 +998,16 @@ class ALMOrchestrator:
 
     async def _get_memory_context(self, agent_name: str, state: ALMState) -> str:
         try:
-            from devai.services.memory import AgentMemory
+            from devai.adapters.memory.helpers import format_memory_context
+            from devai.adapters.memory.runtime import get_global_memory
 
-            memory = AgentMemory(self.state_manager.redis)
-            return await memory.build_context(
+            records = await get_global_memory().recall(
                 agent=agent_name,
-                repo=state.get("repo_full_name", ""),
-                query=state.get("requirements", "")[:200],
+                repo=state.get("repo_full_name", "") or None,
+                query=state.get("requirements", "")[:200] or None,
                 limit=5,
             )
+            return format_memory_context(records)
         except Exception:
             return ""
 
@@ -1018,12 +1019,11 @@ class ALMOrchestrator:
         elapsed: float,
     ) -> None:
         try:
-            from devai.services.memory import AgentMemory
+            from devai.adapters.memory.runtime import get_global_memory
 
-            memory = AgentMemory(self.state_manager.redis)
-            await memory.remember(
+            await get_global_memory().remember(
+                f"Successfully executed {node_name} in {elapsed:.1f}s for {state.get('repo_full_name', '')}",
                 agent=agent_name,
-                content=f"Successfully executed {node_name} in {elapsed:.1f}s for {state.get('repo_full_name', '')}",
                 memory_type="episodic",
                 repo=state.get("repo_full_name", "global"),
                 tags=["success", node_name],
@@ -1034,12 +1034,11 @@ class ALMOrchestrator:
 
     async def _record_failure(self, agent_name: str, state: ALMState, error: str) -> None:
         try:
-            from devai.services.memory import AgentMemory
+            from devai.adapters.memory.runtime import get_global_memory
 
-            memory = AgentMemory(self.state_manager.redis)
-            await memory.remember(
+            await get_global_memory().remember(
+                f"Failed on {state.get('repo_full_name', '')}: {error[:200]}",
                 agent=agent_name,
-                content=f"Failed on {state.get('repo_full_name', '')}: {error[:200]}",
                 memory_type="episodic",
                 repo=state.get("repo_full_name", "global"),
                 tags=["failure", agent_name],

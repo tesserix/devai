@@ -604,6 +604,68 @@ class Database:
         )
         return [dict(r) for r in rows]
 
+    async def analytics_memory_summary(self) -> dict[str, Any]:
+        """Corpus-level memory stats from agent_memories (pgvector store)."""
+        row = await self.pool.fetchrow(
+            """SELECT
+                 COUNT(*)::int                                                    AS total,
+                 COUNT(embedding)::int                                            AS embedded,
+                 COUNT(*) FILTER (WHERE memory_type = 'episodic')::int            AS episodic,
+                 COUNT(*) FILTER (WHERE memory_type = 'semantic')::int            AS semantic,
+                 COUNT(*) FILTER (WHERE memory_type = 'procedural')::int          AS procedural,
+                 COUNT(*) FILTER (WHERE created_at >= NOW() - interval '24 hours')::int AS last_24h,
+                 COUNT(*) FILTER (WHERE created_at >= NOW() - interval '7 days')::int   AS last_7d,
+                 COALESCE(AVG(relevance_score), 0)::float                         AS avg_relevance,
+                 COALESCE(SUM(access_count), 0)::bigint                           AS total_recalls
+               FROM agent_memories
+               WHERE is_active = TRUE"""
+        )
+        return dict(row) if row else {}
+
+    async def analytics_memory_by_agent(self, limit: int = 12) -> list[dict[str, Any]]:
+        """Memory counts + recall activity per writing agent."""
+        rows = await self.pool.fetch(
+            """SELECT agent,
+                      COUNT(*)::int                          AS memories,
+                      COUNT(embedding)::int                  AS embedded,
+                      COALESCE(SUM(access_count), 0)::bigint AS recalls,
+                      to_char(MAX(created_at), 'YYYY-MM-DD"T"HH24:MI:SSZ') AS last_written_at
+               FROM agent_memories
+               WHERE is_active = TRUE
+               GROUP BY agent ORDER BY memories DESC LIMIT $1""",
+            limit,
+        )
+        return [dict(r) for r in rows]
+
+    async def analytics_memory_by_repo(self, limit: int = 12) -> list[dict[str, Any]]:
+        """Memory counts per repo scope."""
+        rows = await self.pool.fetch(
+            """SELECT repo,
+                      COUNT(*)::int         AS memories,
+                      COUNT(embedding)::int AS embedded
+               FROM agent_memories
+               WHERE is_active = TRUE
+               GROUP BY repo ORDER BY memories DESC LIMIT $1""",
+            limit,
+        )
+        return [dict(r) for r in rows]
+
+    async def analytics_memory_timeseries(self, days: int = 30) -> list[dict[str, Any]]:
+        """Memories written per day, split by type."""
+        rows = await self.pool.fetch(
+            """SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS date,
+                      COUNT(*)::int                                            AS total,
+                      COUNT(*) FILTER (WHERE memory_type = 'episodic')::int    AS episodic,
+                      COUNT(*) FILTER (WHERE memory_type = 'semantic')::int    AS semantic,
+                      COUNT(*) FILTER (WHERE memory_type = 'procedural')::int  AS procedural
+               FROM agent_memories
+               WHERE is_active = TRUE
+                 AND created_at >= NOW() - make_interval(days => $1)
+               GROUP BY 1 ORDER BY 1""",
+            days,
+        )
+        return [dict(r) for r in rows]
+
     async def analytics_sre_summary(self) -> dict[str, Any]:
         """Best-effort SRE counts from the shared devai_db SRE tables."""
         row = await self.pool.fetchrow(

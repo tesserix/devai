@@ -630,6 +630,7 @@ export const api = {
     agents: (days = 30) => apiFetch<AgentStat[]>(`/analytics/agents?days=${days}`),
     llmCost: (days = 30) => apiFetch<LLMCost>(`/analytics/llm/cost?days=${days}`),
     sreSummary: () => apiFetch<AnalyticsSRESummary>("/analytics/sre/summary"),
+    memory: (days = 30) => apiFetch<MemoryAnalytics>(`/analytics/memory?days=${days}`),
     telemetry: () => apiFetch<TelemetryHealth>("/analytics/telemetry"),
     logs: (opts: { limit?: number; level?: string; q?: string } = {}) => {
       const p = new URLSearchParams();
@@ -1064,6 +1065,40 @@ export interface AnalyticsSRESummary {
   critical_incidents?: number;
   total_apps?: number;
   latest_daily_cost?: number;
+}
+
+export interface MemoryAnalytics {
+  provider: string;
+  health: { ok: boolean; provider?: string; detail?: string };
+  totals: {
+    total?: number;
+    embedded?: number;
+    episodic?: number;
+    semantic?: number;
+    procedural?: number;
+    last_24h?: number;
+    last_7d?: number;
+    avg_relevance?: number;
+    total_recalls?: number;
+  };
+  by_agent: {
+    agent: string;
+    memories: number;
+    embedded: number;
+    recalls: number;
+    last_written_at: string | null;
+  }[];
+  by_repo: { repo: string; memories: number; embedded: number }[];
+  timeseries: { date: string; total: number; episodic: number; semantic: number; procedural: number }[];
+  recent: {
+    agent: string;
+    repo: string;
+    type: string;
+    content: string;
+    tags: string[];
+    access_count: number;
+    created_at: number;
+  }[];
 }
 
 export interface TelemetryHealth {

@@ -239,13 +239,15 @@ Always include rollback/downgrade scripts."""
 
         # Record in memory for future reference
         try:
-            from devai.services.memory import AgentMemory
+            from devai.adapters.memory.helpers import remember_repo_pattern
+            from devai.adapters.memory.runtime import get_global_memory
 
-            memory = AgentMemory(self.state.redis)
-            await memory.learn_repo_pattern(
+            await remember_repo_pattern(
+                get_global_memory(),
                 repo=repo,
                 pattern_type="db_migration_pattern",
                 description=f"DB migration pattern in {repo}: {result_text[:200]}",
+                agent="db_engineer",
             )
         except Exception:
             pass

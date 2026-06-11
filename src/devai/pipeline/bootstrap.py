@@ -82,6 +82,16 @@ async def build_runtime(
     memory_adapter = create_memory_adapter(config)
     llm_adapter = create_llm_adapter(config)
 
+    # Register as the process-global memory so call sites without StageDeps
+    # injection (chat tools, legacy agents, dashboard routes) honor the same
+    # configured provider instead of constructing their own Redis-only store.
+    try:
+        from devai.adapters.memory.runtime import set_global_memory
+
+        set_global_memory(memory_adapter)
+    except Exception:  # noqa: BLE001
+        logger.exception("bootstrap: global memory registration failed")
+
     # Secrets backend — used (with settings_service) by stages to resolve a
     # per-user settings overlay at execution time. Degrades to Noop.
     secrets_adapter = None

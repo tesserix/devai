@@ -706,6 +706,54 @@ async def test_alm_learn_stage_dry_run_writes_nothing():
     assert await adapter.recall(agent="alm") == []
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Global memory runtime + helpers (Phase C consolidation surface)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_global_memory_defaults_to_noop_and_resets():
+    from devai.adapters.memory.runtime import get_global_memory, set_global_memory
+
+    assert get_global_memory().provider_name == "noop"
+    real = NoopMemoryAdapter(keep_in_memory=True)
+    set_global_memory(real)
+    assert get_global_memory() is real
+    set_global_memory(None)
+    assert get_global_memory().provider_name == "noop"
+
+
+@pytest.mark.asyncio
+async def test_format_memory_context_shape():
+    from devai.adapters.memory.helpers import format_memory_context
+
+    adapter = NoopMemoryAdapter(keep_in_memory=True)
+    await adapter.remember("uses pnpm not npm", memory_type="semantic")
+    records = await adapter.recall()
+    ctx = format_memory_context(records)
+    assert ctx.startswith("## Agent Memory")
+    assert "[semantic]" in ctx
+    assert "uses pnpm not npm" in ctx
+    assert format_memory_context([]) == ""
+
+
+@pytest.mark.asyncio
+async def test_remember_repo_pattern_dedups_exact_content():
+    from devai.adapters.memory.helpers import remember_repo_pattern
+
+    adapter = NoopMemoryAdapter(keep_in_memory=True)
+    first = await remember_repo_pattern(
+        adapter, repo="org/x", pattern_type="tech_stack", description="Tech stack: {}", agent="tech_detector"
+    )
+    second = await remember_repo_pattern(
+        adapter, repo="org/x", pattern_type="tech_stack", description="Tech stack: {}", agent="tech_detector"
+    )
+    assert first is True
+    assert second is False
+    stored = await adapter.recall(repo="org/x", memory_type="semantic")
+    assert len(stored) == 1
+    assert "tech_stack" in stored[0].tags
+
+
 @pytest.mark.asyncio
 async def test_alm_learn_stage_degrades_without_adapter():
     from devai.pipeline.interfaces import StageDeps

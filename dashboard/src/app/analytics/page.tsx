@@ -14,13 +14,14 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, RefreshCw, Radio, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Activity, BarChart3, Brain, RefreshCw, Radio, AlertTriangle, CheckCircle2 } from "lucide-react";
 import {
   api,
   type AgentStat,
   type AnalyticsSRESummary,
   type AnalyticsSummary,
   type LLMCost,
+  type MemoryAnalytics,
   type RunsTimeseriesPoint,
   type StageStat,
   type TelemetryHealth,
@@ -64,11 +65,12 @@ export default function AnalyticsPage() {
   const [llm, setLlm] = useState<LLMCost | null>(null);
   const [sre, setSre] = useState<AnalyticsSRESummary | null>(null);
   const [tel, setTel] = useState<TelemetryHealth | null>(null);
+  const [mem, setMem] = useState<MemoryAnalytics | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const settle = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback);
-    const [s, rt, st, ag, lc, sr, th] = await Promise.all([
+    const [s, rt, st, ag, lc, sr, th, mm] = await Promise.all([
       settle(api.analytics.summary(days), null as AnalyticsSummary | null),
       settle(api.analytics.runsTimeseries(days), [] as RunsTimeseriesPoint[]),
       settle(api.analytics.stages(), [] as StageStat[]),
@@ -76,6 +78,7 @@ export default function AnalyticsPage() {
       settle(api.analytics.llmCost(days), null as LLMCost | null),
       settle(api.analytics.sreSummary(), null as AnalyticsSRESummary | null),
       settle(api.analytics.telemetry(), null as TelemetryHealth | null),
+      settle(api.analytics.memory(days), null as MemoryAnalytics | null),
     ]);
     setSummary(s);
     setRunsTs(rt);
@@ -84,6 +87,7 @@ export default function AnalyticsPage() {
     setLlm(lc);
     setSre(sr && Object.keys(sr).length ? sr : null);
     setTel(th);
+    setMem(mm);
     setLoading(false);
   }, [days]);
 
@@ -251,6 +255,9 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      {/* Agentic memory */}
+      <MemoryPanel mem={mem} days={days} />
+
       {/* By blueprint + SRE strip */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="panel" style={{ padding: 16 }}>
@@ -355,6 +362,102 @@ function Td({ children, style }: { children: React.ReactNode; style?: React.CSSP
     >
       {children}
     </td>
+  );
+}
+
+function MemoryPanel({ mem, days }: { mem: MemoryAnalytics | null; days: number }) {
+  const t = mem?.totals ?? {};
+  const healthOk = !!mem?.health?.ok;
+  const embeddedPct = t.total ? Math.round(((t.embedded ?? 0) / t.total) * 100) : null;
+  const fmtAge = (epoch: number) => {
+    const d = (Date.now() / 1000 - epoch) / 86400;
+    if (d < 1 / 24) return "just now";
+    if (d < 1) return `${Math.round(d * 24)}h ago`;
+    return `${Math.round(d)}d ago`;
+  };
+  return (
+    <div className="panel" style={{ padding: 16 }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="label-eyebrow flex items-center gap-2">
+          <Brain className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} /> Agentic memory
+        </div>
+        <span className={`pill ${healthOk ? "pill-ok" : "pill-warn"}`}>
+          {mem ? `${mem.provider}${healthOk ? "" : " — degraded"}` : "unavailable"}
+        </span>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+        <Stat label="Memories" value={fmtNum(t.total)} />
+        <Stat label="Embedded" value={embeddedPct == null ? "—" : `${embeddedPct}%`} />
+        <Stat label="Episodic" value={fmtNum(t.episodic)} />
+        <Stat label="Semantic" value={fmtNum(t.semantic)} />
+        <Stat label="Procedural" value={fmtNum(t.procedural)} />
+        <Stat label="Recalls served" value={fmtNum(t.total_recalls)} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Writes over time */}
+        <div>
+          <div className="label-eyebrow mb-2">Memories written ({days}d)</div>
+          <LineChart
+            height={160}
+            series={[
+              {
+                name: "Episodic",
+                color: "var(--info)",
+                points: (mem?.timeseries ?? []).map((p) => ({ label: p.date, value: p.episodic })),
+              },
+              {
+                name: "Semantic",
+                color: "var(--ok)",
+                points: (mem?.timeseries ?? []).map((p) => ({ label: p.date, value: p.semantic })),
+              },
+              {
+                name: "Procedural",
+                color: "var(--accent)",
+                points: (mem?.timeseries ?? []).map((p) => ({ label: p.date, value: p.procedural })),
+              },
+            ]}
+          />
+          <div className="label-eyebrow mt-4 mb-2">By agent</div>
+          <HBarChart
+            color="var(--accent)"
+            rows={(mem?.by_agent ?? []).slice(0, 6).map((a) => ({ label: a.agent || "(unscoped)", value: a.memories }))}
+            formatValue={(n) => fmtNum(n)}
+          />
+        </div>
+
+        {/* Recent memories */}
+        <div>
+          <div className="label-eyebrow mb-2">Latest memories</div>
+          {(mem?.recent ?? []).length === 0 && (
+            <div style={{ color: "var(--ink-muted)", fontSize: 12 }}>
+              Nothing written yet — memories appear after SRE sweeps, finished ALM runs, and repo scans.
+            </div>
+          )}
+          <div className="flex flex-col gap-2" style={{ maxHeight: 320, overflowY: "auto" }}>
+            {(mem?.recent ?? []).map((r, i) => (
+              <div key={i} className="rounded" style={{ background: "var(--surface-muted)", padding: 10 }}>
+                <div className="flex items-center gap-2 mb-1" style={{ fontSize: 11 }}>
+                  <span className="pill">{r.type}</span>
+                  <span style={{ color: "var(--ink)" }}>{r.agent || "—"}</span>
+                  <span className="truncate" style={{ color: "var(--ink-muted)" }} title={r.repo}>
+                    {r.repo}
+                  </span>
+                  <span style={{ marginLeft: "auto", color: "var(--ink-muted)", whiteSpace: "nowrap" }}>
+                    {fmtAge(r.created_at)}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {r.content}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

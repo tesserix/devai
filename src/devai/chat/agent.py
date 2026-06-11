@@ -118,6 +118,9 @@ class DevAIChatAgent:
         )
         self._tools = self._build_tools()
         self._conversations: dict[str, list] = {}  # session_id -> message history
+        # Strong refs to fire-and-forget persistence tasks (asyncio holds
+        # only weak refs; without this a GC could cancel them mid-write).
+        self._bg_tasks: set = set()
         # Per-call identity context, set by chat() / stream_chat(). Tools
         # that mutate platform state read these so the resulting A2A
         # messages are attributed to the human, not the chat agent.
@@ -222,10 +225,10 @@ class DevAIChatAgent:
             limit: int = 10,
         ) -> str:
             """Search agent memory. Filter by agent name, repo, type (episodic/semantic/procedural), or free-text query."""
-            from devai.services.memory import AgentMemory
+            from devai.adapters.memory.runtime import get_global_memory
 
-            memory = AgentMemory(state.redis)
-            entries = await memory.recall(
+            memory = get_global_memory()
+            records = await memory.recall(
                 agent=agent or None,
                 repo=repo or None,
                 memory_type=memory_type or None,
@@ -234,16 +237,16 @@ class DevAIChatAgent:
             )
 
             results = []
-            for e in entries:
+            for r in records:
                 results.append(
                     {
-                        "agent": e.agent,
-                        "repo": e.repo,
-                        "type": e.memory_type,
-                        "content": e.content,
-                        "tags": e.tags,
-                        "access_count": e.access_count,
-                        "age_days": round(((__import__("time").time() - e.created_at) / 86400), 1),
+                        "agent": r.agent,
+                        "repo": r.repo,
+                        "type": getattr(r.memory_type, "value", r.memory_type),
+                        "content": r.content,
+                        "tags": r.tags,
+                        "access_count": r.access_count,
+                        "age_days": round(((__import__("time").time() - r.created_at) / 86400), 1),
                     }
                 )
 
@@ -385,10 +388,9 @@ class DevAIChatAgent:
             results: dict[str, Any] = {}
 
             # Search memory
-            from devai.services.memory import AgentMemory
+            from devai.adapters.memory.runtime import get_global_memory
 
-            memory = AgentMemory(state.redis)
-            mem_hits = await memory.recall(query=query, limit=5)
+            mem_hits = await get_global_memory().recall(query=query, limit=5)
             if mem_hits:
                 results["memory"] = [{"content": m.content, "agent": m.agent, "repo": m.repo} for m in mem_hits]
 
@@ -713,13 +715,7 @@ class DevAIChatAgent:
         self._principal = principal
         self._trace_id = trace_id
 
-        # Get or create conversation history
-        if session_id not in self._conversations:
-            self._conversations[session_id] = [
-                SystemMessage(content=SYSTEM_PROMPT),
-            ]
-
-        history = self._conversations[session_id]
+        history = await self._restore_or_init_history(session_id)
         history.append(HumanMessage(content=message))
 
         # Bind tools to the model
@@ -774,6 +770,7 @@ class DevAIChatAgent:
                 recent = recent[1:]
             self._conversations[session_id] = [system] + recent
 
+        await self._persist_history(session_id)
         return response_text
 
     async def stream_chat(
@@ -792,12 +789,7 @@ class DevAIChatAgent:
         self._principal = principal
         self._trace_id = trace_id
 
-        if session_id not in self._conversations:
-            self._conversations[session_id] = [
-                SystemMessage(content=SYSTEM_PROMPT),
-            ]
-
-        history = self._conversations[session_id]
+        history = await self._restore_or_init_history(session_id)
         history.append(HumanMessage(content=message))
 
         llm_with_tools = self.llm.bind_tools(self._tools)
@@ -843,6 +835,55 @@ class DevAIChatAgent:
                 recent = recent[1:]
             self._conversations[session_id] = [system] + recent
 
+        await self._persist_history(session_id)
+
+    # ------------------------------------------------------------------
+    # Session persistence — history survives pod restarts via Redis
+    # ------------------------------------------------------------------
+
+    _HISTORY_TTL_SECONDS = 86400 * 7
+
+    @staticmethod
+    def _history_key(session_id: str) -> str:
+        return f"devai:chat:history:{session_id}"
+
+    async def _restore_or_init_history(self, session_id: str) -> list:
+        """In-proc history if present, else Redis, else a fresh session."""
+        if session_id in self._conversations:
+            return self._conversations[session_id]
+
+        history: list | None = None
+        try:
+            raw = await self.state.redis.get(self._history_key(session_id))
+            if raw:
+                from langchain_core.messages import messages_from_dict
+
+                history = messages_from_dict(json.loads(raw))
+        except Exception:  # noqa: BLE001 — a corrupt/missing blob means a fresh session
+            logger.debug("chat history restore failed for %s", session_id, exc_info=True)
+
+        if not history:
+            history = [SystemMessage(content=SYSTEM_PROMPT)]
+        self._conversations[session_id] = history
+        return history
+
+    async def _persist_history(self, session_id: str) -> None:
+        try:
+            from langchain_core.messages import messages_to_dict
+
+            raw = json.dumps(messages_to_dict(self._conversations.get(session_id) or []), default=str)
+            await self.state.redis.set(self._history_key(session_id), raw, ex=self._HISTORY_TTL_SECONDS)
+        except Exception:  # noqa: BLE001 — persistence is best-effort
+            logger.debug("chat history persist failed for %s", session_id, exc_info=True)
+
     def clear_session(self, session_id: str = "default") -> None:
-        """Clear conversation history for a session."""
+        """Clear conversation history for a session (in-proc + Redis)."""
         self._conversations.pop(session_id, None)
+        try:
+            import asyncio
+
+            task = asyncio.get_running_loop().create_task(self.state.redis.delete(self._history_key(session_id)))
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
+        except Exception:  # noqa: BLE001 — no running loop (tests) or redis down
+            pass

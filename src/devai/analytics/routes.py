@@ -152,6 +152,78 @@ async def sre_summary(request: Request) -> dict[str, Any]:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Memory (adapter health + corpus stats + recent records)
+# ────────────────────────────────────────────────────────────────────
+
+
+@router.get("/memory")
+async def memory(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
+    """Memory analytics: configured provider + health, corpus totals
+    (by type / embedding coverage / recency), per-agent + per-repo
+    breakdowns, a writes-per-day timeseries, and the latest records.
+
+    Corpus sections come from agent_memories (pgvector store) and degrade
+    to empty when Postgres is unreachable; provider/health and the recent
+    list always come from the configured MemoryAdapter so the panel is
+    honest about what the runtime actually uses.
+    """
+    from devai.adapters.memory.runtime import get_global_memory
+
+    adapter = get_global_memory()
+    out: dict[str, Any] = {
+        "provider": adapter.provider_name,
+        "health": {"ok": False, "detail": "unavailable"},
+        "totals": {},
+        "by_agent": [],
+        "by_repo": [],
+        "timeseries": [],
+        "recent": [],
+    }
+    try:
+        out["health"] = await adapter.health_check()
+    except Exception:  # noqa: BLE001
+        logger.debug("memory analytics: health_check failed", exc_info=True)
+
+    try:
+        records = await adapter.recall(limit=15)
+        out["recent"] = [
+            {
+                "agent": r.agent,
+                "repo": r.repo,
+                "type": getattr(r.memory_type, "value", r.memory_type),
+                "content": r.content[:280],
+                "tags": r.tags,
+                "access_count": r.access_count,
+                "created_at": r.created_at,
+            }
+            for r in records
+        ]
+    except Exception:  # noqa: BLE001
+        logger.debug("memory analytics: recent recall failed", exc_info=True)
+
+    db = await _db(request)
+    if db is not None:
+        try:
+            out["totals"] = await db.analytics_memory_summary()
+        except Exception:  # noqa: BLE001
+            logger.debug("memory analytics: summary query failed", exc_info=True)
+        try:
+            out["by_agent"] = await db.analytics_memory_by_agent()
+        except Exception:  # noqa: BLE001
+            logger.debug("memory analytics: by-agent query failed", exc_info=True)
+        try:
+            out["by_repo"] = await db.analytics_memory_by_repo()
+        except Exception:  # noqa: BLE001
+            logger.debug("memory analytics: by-repo query failed", exc_info=True)
+        try:
+            out["timeseries"] = await db.analytics_memory_timeseries(days)
+        except Exception:  # noqa: BLE001
+            logger.debug("memory analytics: timeseries query failed", exc_info=True)
+
+    return out
+
+
+# ────────────────────────────────────────────────────────────────────
 # Telemetry / OTel collector health
 # ────────────────────────────────────────────────────────────────────
 
