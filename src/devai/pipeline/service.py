@@ -297,6 +297,7 @@ class PipelineService:
         trace_id: str | None = None,
         team_id: str = "",
         crew_id: str = "",
+        autonomy: str = "",
     ) -> str:
         """Enqueue a new task. Returns its id.
 
@@ -335,6 +336,11 @@ class PipelineService:
             task.agent_context.setdefault("principal", dict(principal))
         if trace_id:
             task.agent_context.setdefault("trace_id", trace_id)
+        # Per-run gate behavior: "full" (self-approving gates, end-to-end) or
+        # "gated" (pause at every gate). Empty → executor falls back to
+        # DEVAI_PIPELINE_DEFAULT_AUTONOMY.
+        if autonomy in ("full", "gated"):
+            task.agent_context["autonomy"] = autonomy
         await self._pipeline.submit(task)
         await self._publish_task_event("created", task)
         return task.id
@@ -716,6 +722,27 @@ class PipelineService:
                     "pr_number": snapshot.get("pr_number"),
                     "requested_at": started_at.get(s.name),
                     "summary": last_message.get(s.name, ""),
+                    "stages_done": len(completed),
+                }
+            )
+
+        # Dynamic gates — raised at runtime by stages that need human input
+        # (plan_approval, or any future stage). Each carries its own context
+        # (questions, plan summary, tech stack) for the approval banner.
+        for dyn in (snapshot.get("agent_context") or {}).get("dynamic_gates") or []:
+            if not isinstance(dyn, dict) or not dyn.get("gate"):
+                continue
+            decision = None
+            if redis is not None:
+                decision = await redis.get(f"devai:pipeline:gate:{task_id}:{dyn['gate']}")
+            out.append(
+                {
+                    **dyn,
+                    "decision": decision,
+                    "pending": decision is None
+                    and TaskState(snapshot.get("state", "pending")) not in TERMINAL_STATES,
+                    "blueprint": snapshot.get("blueprint", ""),
+                    "repo": snapshot.get("repo", ""),
                     "stages_done": len(completed),
                 }
             )

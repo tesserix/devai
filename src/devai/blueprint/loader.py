@@ -85,6 +85,11 @@ class StageSpec:
     depends_on: list[str] = field(default_factory=list)
     condition: str | None = None
     timeout_seconds: float | None = None
+    # Transient-failure retries for this stage (exceptions/timeouts re-run
+    # the stage with backoff before on_failure applies). 0 = use the global
+    # default (config.pipeline_stage_retries). Stages are resume-idempotent
+    # by design, so a retry is no riskier than a pod-restart resume.
+    retries: int = 0
     on_failure: str = "stop"  # stop | rollback | continue
     config: dict[str, str] = field(default_factory=dict)
     parallel: bool = False  # marks this stage as part of a parallel level
@@ -270,6 +275,7 @@ def load_blueprint_from_string(text: str, *, source: str = "<inline>") -> Bluepr
                 color=str(entry.get("color", "")),
                 agent=str(entry.get("agent", "")),
                 gate=bool(entry.get("gate", False)),
+                retries=int(entry.get("retries", 0) or 0),
             )
         )
 

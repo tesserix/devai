@@ -295,6 +295,9 @@ class TriggerBody(BaseModel):
     requirements: str = ""
     issue_number: int | None = None
     blueprint: str | None = None
+    # "full" → gates self-approve, run flows end-to-end (default);
+    # "gated" → pause at every approval gate for a human decision.
+    autonomy: str | None = None
 
 
 @router.post("/trigger")
@@ -320,6 +323,7 @@ async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
             agent_context=agent_context,
             principal=principal.to_dict() if principal else None,
             trace_id=trace_id_from_request(request),
+            autonomy=(body.autonomy or "").lower(),
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(e)) from e

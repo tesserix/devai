@@ -48,7 +48,7 @@ interface TriggerDialogProps {
   onTrigger: (
     repo: string,
     requirements: string,
-    opts?: { blueprint?: string },
+    opts?: { blueprint?: string; autonomy?: string },
   ) => Promise<void>;
 }
 
@@ -59,6 +59,9 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   const [selectedRepo, setSelectedRepo] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
   const [requirements, setRequirements] = useState("");
+  // "full" → gates self-approve, the run flows end-to-end (default);
+  // "gated" → pause at each approval gate for a human decision.
+  const [autonomy, setAutonomy] = useState<"auto" | "full" | "gated">("auto");
   const [loading, setLoading] = useState(false);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
@@ -300,6 +303,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
 
       await onTrigger(selectedRepo, requirements, {
         blueprint: blueprint ?? undefined,
+        autonomy,
       });
       setSelectedRepo("");
       setSearch("");
@@ -309,6 +313,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
       setScaffold(false);
       setBlueprint(null);
       setBlueprintTouched(false);
+      setAutonomy("auto");
       onClose();
     } finally {
       setLoading(false);
@@ -750,6 +755,46 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
             loading={loadingBlueprints}
             loadGraph={(name) => api.getBlueprintGraph(name)}
           />
+
+          {/* Autonomy — whether approval gates pause the run */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--ink-strong)" }}>
+              Autonomy
+            </label>
+            <div className="seg" role="group" aria-label="Autonomy mode">
+              <button
+                type="button"
+                onClick={() => setAutonomy("auto")}
+                data-active={autonomy === "auto"}
+                aria-pressed={autonomy === "auto"}
+              >
+                Smart
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutonomy("full")}
+                data-active={autonomy === "full"}
+                aria-pressed={autonomy === "full"}
+              >
+                Fully autonomous
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutonomy("gated")}
+                data-active={autonomy === "gated"}
+                aria-pressed={autonomy === "gated"}
+              >
+                Ask at every gate
+              </button>
+            </div>
+            <p className="text-xs mt-1" style={{ color: "var(--ink-muted)" }}>
+              {autonomy === "auto"
+                ? "Clear requests run end-to-end; ambiguous ones pause ONCE with a full plan (epic, tech stack, open questions) for your approval."
+                : autonomy === "full"
+                  ? "Runs end-to-end — every gate self-approves with an audit trail."
+                  : "The run pauses at each gate (plan, staff review, deploy) until you decide."}
+            </p>
+          </div>
 
           {/* Requirements */}
           <div>

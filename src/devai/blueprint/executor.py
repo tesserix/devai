@@ -71,6 +71,11 @@ class BlueprintExecutor:
         self._deps = deps
         self._event_cb = event_callback
         self._default_timeout = default_stage_timeout
+        # Global transient-retry default; per-stage `retries:` overrides.
+        self._default_retries = max(0, int(getattr(deps.config, "pipeline_stage_retries", 1) or 0))
+        # Autonomy default for gate stages: "full" self-approves gates so
+        # runs flow end-to-end; "gated" pauses for a human decision.
+        self._default_autonomy = str(getattr(deps.config, "pipeline_default_autonomy", "full") or "full").lower()
 
     async def execute(self, blueprint: Blueprint, task: DevAITask) -> DevAITask:
         """Execute every stage in topo order. Returns the (mutated) task.
@@ -229,25 +234,50 @@ class BlueprintExecutor:
             self._emit(task, _ev(StageEventPhase.FAILED, error=str(e)))
             return
 
+        # Human approval gate. `gate: true` stages WAIT for a decision when
+        # the run's autonomy mode asks for it; in full-autonomy mode (the
+        # default) the gate self-approves with an audit trail and the run
+        # flows end-to-end without prompting.
+        if spec.gate and not await self._resolve_gate(spec, task, _ev):
+            return  # rejected/stopped at the gate — task already transitioned
+
         # Run it.
         task.current_stage = spec.name
         start = time.monotonic()
         self._emit(task, _ev(StageEventPhase.STARTED, message=spec.stage))
 
         timeout = spec.timeout_seconds or self._default_timeout
-        try:
-            result = await asyncio.wait_for(stage.execute(task), timeout=timeout)
-        except TimeoutError:
-            duration_ms = (time.monotonic() - start) * 1000.0
-            err = f"timed out after {timeout}s"
-            logger.error("stage %s: %s", spec.name, err)
-            await self._handle_failure(spec, stage, task, err, TaskState.AGENT_TIMEOUT, duration_ms)
-            return
-        except Exception as e:  # noqa: BLE001 — we want to catch all stage errors
-            duration_ms = (time.monotonic() - start) * 1000.0
-            logger.exception("stage %s raised", spec.name)
-            await self._handle_failure(spec, stage, task, str(e), TaskState.STAGE_FAILED, duration_ms)
-            return
+        # Transient-failure resilience: exceptions/timeouts re-run the stage
+        # (with linear backoff) before on_failure semantics apply. Stages are
+        # resume-idempotent by design — a retry is no riskier than the
+        # pod-restart resume path that already re-runs unfinished stages.
+        max_attempts = 1 + (spec.retries if spec.retries > 0 else self._default_retries)
+        result: StageResult | object | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await asyncio.wait_for(stage.execute(task), timeout=timeout)
+                break
+            except TimeoutError:
+                duration_ms = (time.monotonic() - start) * 1000.0
+                err = f"timed out after {timeout}s"
+                logger.error("stage %s: %s (attempt %d/%d)", spec.name, err, attempt, max_attempts)
+                if attempt >= max_attempts:
+                    await self._handle_failure(spec, stage, task, err, TaskState.AGENT_TIMEOUT, duration_ms)
+                    return
+            except Exception as e:  # noqa: BLE001 — we want to catch all stage errors
+                duration_ms = (time.monotonic() - start) * 1000.0
+                logger.exception("stage %s raised (attempt %d/%d)", spec.name, attempt, max_attempts)
+                if attempt >= max_attempts:
+                    await self._handle_failure(spec, stage, task, str(e), TaskState.STAGE_FAILED, duration_ms)
+                    return
+            self._emit(
+                task,
+                _ev(
+                    StageEventPhase.STARTED,
+                    message=f"retrying after failure (attempt {attempt + 1}/{max_attempts})",
+                ),
+            )
+            await asyncio.sleep(min(5.0 * attempt, 30.0))
 
         duration_ms = (time.monotonic() - start) * 1000.0
 
@@ -264,6 +294,79 @@ class BlueprintExecutor:
         task.current_stage = ""
 
         self._emit(task, _ev(StageEventPhase.COMPLETED, duration_ms=duration_ms, message=result.message))
+
+    _GATE_POLL_SECONDS = 3.0
+    _GATE_MAX_WAIT_SECONDS = 24 * 3600.0
+
+    async def _resolve_gate(self, spec: StageSpec, task: DevAITask, _ev: Any) -> bool:
+        """Resolve a human-approval gate before the stage runs.
+
+        Returns True to proceed, False when the run stops here (rejected or
+        stopped by run-control). Decision key:
+        ``devai:pipeline:gate:{task_id}:{stage}`` — the same key the
+        dashboard's Approve/Reject endpoints write.
+
+        Autonomy (per-run ``agent_context['autonomy']``, falling back to
+        ``DEVAI_PIPELINE_DEFAULT_AUTONOMY``):
+          full   — self-approve with an audit decision; never prompt.
+          gated  — transition to AWAITING_APPROVAL and poll for the human
+                   decision (the dashboard banner is driven by this state).
+        No Redis (tests/minimal deps) → proceed.
+        """
+        sm = self._deps.state_manager
+        redis = getattr(sm, "redis", None) if sm is not None else None
+        if redis is None:
+            return True
+        key = f"devai:pipeline:gate:{task.id}:{spec.name}"
+
+        try:
+            decision = await redis.get(key)
+        except Exception:  # noqa: BLE001 — a Redis blip must not kill the run
+            logger.exception("gate %s: decision read failed — proceeding", spec.name)
+            return True
+        autonomy = str(task.agent_context.get("autonomy") or self._default_autonomy).lower()
+
+        if decision is None and autonomy != "gated":
+            try:
+                await redis.set(key, "approved", ex=86400)
+                await redis.set(f"{key}:approver", "autonomy:full", ex=86400)
+            except Exception:  # noqa: BLE001
+                logger.exception("gate %s: auto-approve write failed — proceeding", spec.name)
+            self._emit(task, _ev(StageEventPhase.STARTED, message="gate auto-approved (autonomy=full)"))
+            return True
+
+        if decision is None:
+            # Pause for the human. The state flip is what makes the dashboard
+            # banner appear (list_gates: reached + undecided = pending).
+            prior_state = task.state
+            task.current_stage = spec.name
+            task.transition(TaskState.AWAITING_APPROVAL)
+            self._emit(task, _ev(StageEventPhase.STARTED, message="waiting for human approval"))
+            waited = 0.0
+            while decision is None and waited < self._GATE_MAX_WAIT_SECONDS:
+                if not await self._check_run_control(task):
+                    return False  # stopped by user while waiting
+                await asyncio.sleep(self._GATE_POLL_SECONDS)
+                waited += self._GATE_POLL_SECONDS
+                try:
+                    decision = await redis.get(key)
+                except Exception:  # noqa: BLE001
+                    logger.exception("gate %s: decision poll failed", spec.name)
+            if decision is None:
+                task.error = f"approval gate {spec.name!r} timed out"
+                task.failed_stage = spec.name
+                task.transition(TaskState.CANCELLED)
+                self._emit(task, _ev(StageEventPhase.FAILED, error=task.error))
+                return False
+            task.transition(prior_state if prior_state not in (TaskState.PENDING, TaskState.QUEUED) else TaskState.RUNNING)
+
+        if str(decision).lower() == "rejected":
+            task.error = f"rejected at gate {spec.name!r}"
+            task.failed_stage = spec.name
+            task.transition(TaskState.CANCELLED)
+            self._emit(task, _ev(StageEventPhase.FAILED, error=task.error))
+            return False
+        return True
 
     async def _handle_failure(
         self,

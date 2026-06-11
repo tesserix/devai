@@ -10,7 +10,10 @@ PipelineStage instance configured with the StageDeps + per-stage config.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.types import DevAITask, StageResult, TaskState
@@ -369,6 +372,167 @@ def memory_injection_stage(deps: StageDeps, config: dict[str, str]) -> PipelineS
     return _MemoryInjectionStage(deps, config)
 
 
+class _PlanApprovalStage(PipelineStage):
+    """Smart plan gate — pause for a human ONLY when the request needs it.
+
+    Runs right after planning, before implementation. Behavior by the run's
+    autonomy mode (``agent_context['autonomy']`` → DEVAI_PIPELINE_DEFAULT_AUTONOMY):
+
+      full   — never pause; note + continue.
+      gated  — always pause with the full plan context.
+      auto   — (default) one cheap LLM call judges whether the intent is
+               specific enough to implement without confirmation. CLEAR →
+               continue (audited). AMBIGUOUS → pause with a proper approval
+               request: the epic, the technical plan, the detected tech
+               stack, and the LLM's open questions — everything a human
+               needs to say "yes, proceed exactly like this".
+
+    The pause uses the same decision key the dashboard's Approve/Reject
+    endpoints write (``devai:pipeline:gate:{task}:{stage-name}``) and
+    registers a DYNAMIC gate in ``agent_context['dynamic_gates']`` so the
+    approvals API surfaces it with its context. This mechanism is generic:
+    any stage that needs human input can register a dynamic gate the same
+    way.
+    """
+
+    _POLL_SECONDS = 3.0
+
+    def __init__(self, deps: StageDeps, config: dict[str, str]) -> None:
+        self.deps = deps
+        self.config = config
+
+    def name(self) -> str:
+        return str(self.config.get("__stage_name") or "plan-approval")
+
+    async def execute(self, task: DevAITask) -> StageResult:
+        autonomy = str(
+            task.agent_context.get("autonomy")
+            or getattr(self.deps.config, "pipeline_default_autonomy", "auto")
+            or "auto"
+        ).lower()
+
+        if autonomy == "full":
+            return StageResult(message="plan approval skipped (autonomy=full)", data={"plan_approved": "auto"})
+
+        questions: list[str] = []
+        if autonomy != "gated":
+            verdict, questions = await self._assess_clarity(task)
+            if verdict == "clear":
+                return StageResult(
+                    message="intent judged CLEAR — proceeding without approval",
+                    data={"plan_approved": "auto-clear"},
+                )
+
+        # Pause: build the approval request a human can actually decide on.
+        request = self._build_request(task, questions)
+        gates = task.agent_context.setdefault("dynamic_gates", [])
+        if isinstance(gates, list):
+            gates.append(request)
+
+        decision = await self._await_decision(task)
+        if decision == "approved":
+            return StageResult(
+                message="plan approved by human — proceeding",
+                data={"plan_approved": "human", "plan_approval_request": request},
+            )
+        task.error = "plan rejected at approval" if decision == "rejected" else "plan approval timed out"
+        task.failed_stage = self.name()
+        return StageResult(
+            next_state=TaskState.CANCELLED,
+            message=task.error,
+            data={"plan_approved": decision or "timeout"},
+        )
+
+    async def _assess_clarity(self, task: DevAITask) -> tuple[str, list[str]]:
+        """LLM judges intent completeness. No usable LLM → CLEAR (never block
+        a run on missing infrastructure)."""
+        llm = self.deps.llm
+        if llm is None or getattr(llm, "provider_name", "noop") == "noop":
+            return "clear", []
+        try:
+            from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+            prompt = (
+                "A user asked an autonomous software pipeline to do this:\n\n"
+                f"  {task.intent[:800]}\n\n"
+                "Is this request specific enough to implement end-to-end without "
+                "confirming anything with the user? Consider: are the tech stack, "
+                "scope boundaries, data model, and acceptance criteria stated or "
+                "safely inferable?\n\n"
+                "Reply with exactly CLEAR, or AMBIGUOUS followed by up to 4 short "
+                "questions (one per line, no numbering) the user should confirm."
+            )
+            response = await llm.generate(
+                LLMRequest(
+                    messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                    max_tokens=250,
+                    temperature=0.0,
+                    extra={"agent": "plan_approval"},
+                )
+            )
+            text = (response.text or "").strip()
+            if text.upper().startswith("CLEAR"):
+                return "clear", []
+            questions = [
+                line.strip().lstrip("-•* ").strip()
+                for line in text.splitlines()[1:]
+                if len(line.strip()) > 8
+            ][:4]
+            return "ambiguous", questions
+        except Exception:  # noqa: BLE001 — assessment failure must not block the run
+            logger.exception("plan_approval: clarity assessment failed — treating as clear")
+            return "clear", []
+
+    def _build_request(self, task: DevAITask, questions: list[str]) -> dict[str, Any]:
+        ctx = task.agent_context
+        plan = ctx.get("engineering_manager_output") or {}
+        plan_summary = ""
+        if isinstance(plan, dict):
+            plan_summary = str(plan.get("technical_plan") or plan.get("summary") or "")[:1200]
+        return {
+            "gate": self.name(),
+            "title": "Plan Approval",
+            "kind": "plan_approval",
+            "intent": (task.intent or "")[:400],
+            "tech_stack": ctx.get("detected_tech_stack"),
+            "epic_issue_number": task.epic_issue_number,
+            "story_issue_numbers": list(task.story_issue_numbers or []),
+            "plan_summary": plan_summary,
+            "questions": questions,
+            "requested_at": time.time(),
+        }
+
+    async def _await_decision(self, task: DevAITask) -> str | None:
+        """Poll the gate decision key, honoring run-control stop. The stage's
+        blueprint timeout (set generously in YAML) bounds the wait."""
+        sm = self.deps.state_manager
+        redis = getattr(sm, "redis", None) if sm is not None else None
+        if redis is None:
+            return "approved"  # no decision surface (tests) — degrade open
+        key = f"devai:pipeline:gate:{task.id}:{self.name()}"
+        task.transition(TaskState.AWAITING_APPROVAL)
+        getter = getattr(sm, "get_pipeline_control", None)
+        while True:
+            try:
+                decision = await redis.get(key)
+            except Exception:  # noqa: BLE001
+                logger.exception("plan_approval: decision poll failed")
+                decision = None
+            if decision:
+                return str(decision).lower()
+            if getter is not None:
+                try:
+                    if await getter(task.id) == "stopped":
+                        return "rejected"
+                except Exception:  # noqa: BLE001
+                    pass
+            await asyncio.sleep(self._POLL_SECONDS)
+
+
+def plan_approval_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return _PlanApprovalStage(deps, config)
+
+
 class _AlmLearnStage(PipelineStage):
     """Distill the finished ALM run into agent memory so future runs benefit.
 
@@ -634,6 +798,7 @@ def post_report_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
 
 __all__ = [
     "alm_learn_stage",
+    "plan_approval_stage",
     "await_merge_stage",
     "cleanup_stage",
     "context_hydration_stage",

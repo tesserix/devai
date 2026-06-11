@@ -17,6 +17,21 @@ class Settings(BaseSettings):
     # --- PostgreSQL (persistent lifecycle store) ---
     database_url: str = "postgresql://devai:devai@localhost:5432/devai"
 
+    # --- Pipeline autonomy + resilience ---
+    # Gate stages (gate: true) under "full" autonomy self-approve with an
+    # audit trail so runs flow end-to-end without prompting; "gated" pauses
+    # at every gate for a human decision. Per-run override via the trigger
+    # request's `autonomy` field.
+    pipeline_default_autonomy: str = "auto"  # auto | full | gated
+    # auto  — smart: the plan-approval stage pauses only when the intent is
+    #         judged ambiguous; static gates (staff-review/deploy) self-approve.
+    # full  — never pause anywhere.
+    # gated — pause at every gate.
+    # Transient-failure retries per stage (exceptions/timeouts) before
+    # on_failure semantics apply. Per-stage `retries:` in the blueprint
+    # overrides. Stages are resume-idempotent, so retries are safe.
+    pipeline_stage_retries: int = 1
+
     # --- NATS ---
     nats_url: str = "nats://localhost:4222"
     nats_stream: str = "DEVAI"

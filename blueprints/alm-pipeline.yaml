@@ -89,13 +89,24 @@ stages:
     depends_on: [create-stories]
     timeout: 15m
 
+  # ─── Smart plan gate ────────────────────────────────────────────────
+  # Pauses ONLY when the intent is judged ambiguous (autonomy=auto): the
+  # human gets the epic + technical plan + tech stack + the open questions
+  # in one approval request. Clear intents flow straight through.
+  - name: plan-approval
+    type: review
+    stage: plan_approval
+    lane: plan
+    depends_on: [create-plan]
+    timeout: 24h
+
   # ─── Implementation ─────────────────────────────────────────────────
   - name: implement-code
     type: agentic
     stage: implement_code
     agent: senior_developer
     lane: build
-    depends_on: [create-plan]
+    depends_on: [plan-approval]
     timeout: 30m
 
   - name: db-engineering

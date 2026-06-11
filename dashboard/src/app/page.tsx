@@ -93,7 +93,7 @@ export default function DashboardPage() {
   const handleTrigger = async (
     repo: string,
     requirements: string,
-    opts?: { blueprint?: string },
+    opts?: { blueprint?: string; autonomy?: string },
   ) => {
     // Forward the blueprint picked in the dialog (DASH-6) so the backend no
     // longer silently falls back to the default blueprint.

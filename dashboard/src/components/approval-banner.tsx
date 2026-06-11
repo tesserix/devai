@@ -16,6 +16,12 @@ export interface Approval {
   requested_at?: number | null;
   summary?: string;
   timestamp?: number;
+  /** Dynamic plan-approval context (kind=plan_approval). */
+  kind?: string;
+  questions?: string[];
+  plan_summary?: string;
+  tech_stack?: unknown;
+  epic_issue_number?: number | null;
 }
 
 interface ApprovalBannerProps {
@@ -26,6 +32,11 @@ interface ApprovalBannerProps {
 
 /** What each well-known gate is actually asking the human to sign off on. */
 const GATE_EXPLAINERS: Record<string, { what: string; approve: string; reject: string }> = {
+  "plan-approval": {
+    what: "Your request needs confirmation before the agents build — review the plan below.",
+    approve: "Approve to build exactly this plan, end to end.",
+    reject: "Reject to cancel — refine your request and run again.",
+  },
   "staff-review": {
     what: "The staff reviewer finished its final pass over the generated changes.",
     approve: "Approve accepts the review — the run continues to infrastructure + deploy.",
@@ -123,6 +134,51 @@ export function ApprovalBanner({ approvals, onApprove, onReject }: ApprovalBanne
                     >
                       Request: {a.intent}
                     </p>
+                  )}
+                  {a.kind === "plan_approval" && (
+                    <div
+                      className="mt-2 rounded p-2.5 space-y-1.5"
+                      style={{ background: "var(--surface-raised)", fontSize: 12 }}
+                    >
+                      {a.tech_stack ? (
+                        <p style={{ color: "var(--ink-soft)" }}>
+                          <span style={{ color: "var(--ink-muted)" }}>Proposed tech: </span>
+                          {typeof a.tech_stack === "string" ? a.tech_stack : JSON.stringify(a.tech_stack).slice(0, 160)}
+                        </p>
+                      ) : null}
+                      {a.plan_summary && (
+                        <p
+                          className="whitespace-pre-wrap"
+                          style={{ color: "var(--ink-soft)", maxHeight: 130, overflowY: "auto" }}
+                        >
+                          {a.plan_summary}
+                        </p>
+                      )}
+                      {(a.questions ?? []).length > 0 && (
+                        <div>
+                          <p style={{ color: "var(--warn-ink)", fontWeight: 600 }}>Please confirm:</p>
+                          <ul className="list-disc ml-4" style={{ color: "var(--ink-soft)" }}>
+                            {(a.questions ?? []).map((q, i) => (
+                              <li key={i}>{q}</li>
+                            ))}
+                          </ul>
+                          <p className="mt-1 text-[11px]" style={{ color: "var(--ink-muted)" }}>
+                            Approving accepts the agents' assumptions on these points.
+                          </p>
+                        </div>
+                      )}
+                      {typeof a.epic_issue_number === "number" && a.repo && (
+                        <a
+                          href={`https://github.com/${a.repo}/issues/${a.epic_issue_number}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                          style={{ color: "var(--accent)" }}
+                        >
+                          View epic #{a.epic_issue_number} ↗
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
