@@ -339,6 +339,43 @@ def create_app(
                 _reconcile_poller(app.state.onboarding_service, reconcile_interval)
             )
 
+        # Memory lifecycle maintenance — periodic TTL purge / decay / dedup
+        # over the pgvector store. Single-replica service (KEDA pins 1), so
+        # an in-process loop is the simplest correct scheduler. No-op when
+        # Postgres is unreachable or DEVAI_MEMORY_MAINTENANCE_HOURS=0.
+        memory_maintenance_task = None
+        maintenance_hours = max(0, int(getattr(config, "memory_maintenance_hours", 6)))
+        if maintenance_hours > 0:
+
+            async def _memory_maintenance_loop(hours: int) -> None:
+                await asyncio.sleep(120)  # let pools settle after boot
+                from devai.adapters.memory.maintenance import run_memory_maintenance
+                from devai.services.database import Database
+
+                db: Database | None = None
+                while True:
+                    try:
+                        if db is None and getattr(config, "database_url", ""):
+                            db = Database(config.database_url)
+                            await db.connect()
+                        await run_memory_maintenance(
+                            db,
+                            episodic_ttl_days=int(getattr(config, "memory_episodic_ttl_days", 90)),
+                            decay_idle_days=int(getattr(config, "memory_decay_idle_days", 30)),
+                            dedup_similarity=float(getattr(config, "memory_dedup_similarity", 0.95)),
+                        )
+                    except asyncio.CancelledError:
+                        if db is not None:
+                            with suppress(Exception):
+                                await db.close()
+                        raise
+                    except Exception:  # noqa: BLE001
+                        logger.exception("memory maintenance pass failed (non-fatal)")
+                        db = None  # reconnect on the next pass
+                    await asyncio.sleep(hours * 3600)
+
+            memory_maintenance_task = asyncio.create_task(_memory_maintenance_loop(maintenance_hours))
+
         # Per-domain downstream MCP servers (/mcp/scm, /mcp/sample) the MCP Hub
         # federates. Mounted BEFORE the messaging /mcp mount: Starlette is
         # first-match-wins and Mount("/mcp") greedily matches "/mcp/scm" as a
@@ -415,6 +452,10 @@ def create_app(
                 onboarding_reconcile_task.cancel()
                 with suppress(asyncio.CancelledError, Exception):
                     await onboarding_reconcile_task
+            if memory_maintenance_task is not None:
+                memory_maintenance_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await memory_maintenance_task
             if onboarding_db is not None:
                 try:
                     await onboarding_db.close()

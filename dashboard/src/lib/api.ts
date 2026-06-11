@@ -631,6 +631,11 @@ export const api = {
     llmCost: (days = 30) => apiFetch<LLMCost>(`/analytics/llm/cost?days=${days}`),
     sreSummary: () => apiFetch<AnalyticsSRESummary>("/analytics/sre/summary"),
     memory: (days = 30) => apiFetch<MemoryAnalytics>(`/analytics/memory?days=${days}`),
+    memoryForget: (id: string) =>
+      apiFetch<{ removed: boolean; provider: string; id: string }>(
+        `/analytics/memory/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      ),
     telemetry: () => apiFetch<TelemetryHealth>("/analytics/telemetry"),
     logs: (opts: { limit?: number; level?: string; q?: string } = {}) => {
       const p = new URLSearchParams();
@@ -1091,6 +1096,7 @@ export interface MemoryAnalytics {
   by_repo: { repo: string; memories: number; embedded: number }[];
   timeseries: { date: string; total: number; episodic: number; semantic: number; procedural: number }[];
   recent: {
+    provider_id: string;
     agent: string;
     repo: string;
     type: string;

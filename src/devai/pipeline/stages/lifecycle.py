@@ -461,10 +461,92 @@ class _AlmLearnStage(PipelineStage):
                 data={"learn_done": False},
             )
 
+        reinforced = await self._reinforce_recalled(task, outcome)
+        distilled = await self._distill(task, summary)
+
         return StageResult(
             message=f"learned via {self.deps.memory.provider_name}: run {outcome}",
-            data={"learn_done": True, "memory_provider": self.deps.memory.provider_name},
+            data={
+                "learn_done": True,
+                "memory_provider": self.deps.memory.provider_name,
+                "memories_reinforced": reinforced,
+                "memories_distilled": distilled,
+            },
         )
+
+    async def _reinforce_recalled(self, task: DevAITask, outcome: str) -> int:
+        """Feedback loop: memories the injection stage surfaced into a run
+        that SUCCEEDED get a relevance bump — recall that correlates with
+        success should rank higher next time."""
+        if outcome != "succeeded":
+            return 0
+        injected = task.agent_context.get("memories") or []
+        ids = [m.get("provider_id") for m in injected if isinstance(m, dict) and m.get("provider_id")]
+        if not ids:
+            return 0
+        try:
+            return await self.deps.memory.reinforce(ids)
+        except Exception:  # noqa: BLE001
+            logger.exception("alm_learn: reinforce failed — non-fatal")
+            return 0
+
+    async def _distill(self, task: DevAITask, summary: str) -> int:
+        """LLM-assisted distillation: one cheap call turning the raw run
+        record into standalone facts future runs on this repo should know.
+        Raw event blobs are what make recall noisy — this is the signal.
+
+        Requires a real LLM adapter; Noop (or any failure) → 0 records,
+        the stage still succeeds.
+        """
+        llm = self.deps.llm
+        if llm is None or getattr(llm, "provider_name", "noop") == "noop":
+            return 0
+
+        try:
+            from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+            prompt = (
+                "You are distilling the outcome of an automated software-delivery "
+                "pipeline run into durable knowledge.\n\n"
+                f"Run record:\n{summary}\n\n"
+                "Write up to 3 standalone facts that would help FUTURE runs on this "
+                "repository (conventions discovered, stages that need iteration, "
+                "root causes, decisions made). One per line, no numbering, no "
+                "preamble. Each must make sense without this run's context. "
+                "If nothing is worth remembering, reply exactly NONE."
+            )
+            response = await llm.generate(
+                LLMRequest(
+                    messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                    max_tokens=300,
+                    temperature=0.2,
+                    extra={"agent": "alm_learn"},
+                )
+            )
+            text = (response.text or "").strip()
+            if not text or text.upper().startswith("NONE"):
+                return 0
+
+            written = 0
+            for line in text.splitlines():
+                fact = line.strip().lstrip("-•* ").strip()
+                if len(fact) < 16:  # skip fragments / stray bullets
+                    continue
+                await self.deps.memory.remember(
+                    fact,
+                    agent="alm",
+                    repo=task.repo or "global",
+                    memory_type="semantic",
+                    tags=["alm", "distilled", task.blueprint],
+                    metadata={"task_id": task.id, "source": "alm_learn_distill"},
+                )
+                written += 1
+                if written >= 3:
+                    break
+            return written
+        except Exception:  # noqa: BLE001
+            logger.exception("alm_learn: distillation failed — non-fatal")
+            return 0
 
 
 def alm_learn_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:

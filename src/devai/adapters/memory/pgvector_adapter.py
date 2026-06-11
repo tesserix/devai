@@ -198,6 +198,24 @@ class PgVectorMemoryAdapter(MemoryAdapter):
         )
         return [self._row_to_record(row) for row in rows]
 
+    async def reinforce(self, provider_ids: list[str]) -> int:
+        if not provider_ids or not await self._ensure_db():
+            return 0
+        # Cap at 2.0 so a frequently-recalled memory can't drown out
+        # everything else in similarity-tied ranking.
+        result = await self._db.pool.execute(
+            """UPDATE agent_memories
+               SET relevance_score = LEAST(relevance_score + 0.1, 2.0),
+                   access_count   = access_count + 1,
+                   last_accessed  = NOW()
+               WHERE id::text = ANY($1) AND is_active = TRUE""",
+            [str(p) for p in provider_ids],
+        )
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError, AttributeError):
+            return 0
+
     # ── Delete ────────────────────────────────────────────────────────
 
     async def forget(self, provider_id: str) -> bool:

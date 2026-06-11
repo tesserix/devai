@@ -120,6 +120,16 @@ class InstrumentedMemoryAdapter(MemoryAdapter):
         self._record("forget", started)
         return removed
 
+    async def reinforce(self, provider_ids: list[str]) -> int:
+        started = time.perf_counter()
+        try:
+            count = await self._inner.reinforce(provider_ids)
+        except Exception:
+            self._record("reinforce", started, status="error")
+            raise
+        self._record("reinforce", started, results=count)
+        return count
+
     # ── Pass-throughs ────────────────────────────────────────────────
 
     async def close(self) -> None:

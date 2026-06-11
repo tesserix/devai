@@ -707,6 +707,223 @@ async def test_alm_learn_stage_dry_run_writes_nothing():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Reinforce (feedback scoring) — default no-op, pgvector bumps relevance
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_reinforce_default_is_noop(noop_adapter):
+    r = await noop_adapter.remember("x")
+    assert await noop_adapter.reinforce([r.provider_id]) == 0
+
+
+@pytest.mark.asyncio
+async def test_pgvector_reinforce_bumps_relevance():
+    from devai.adapters.memory.pgvector_adapter import PgVectorMemoryAdapter
+
+    captured: dict = {}
+
+    class _Pool:
+        async def execute(self, sql, *params):
+            captured["sql"] = sql
+            captured["params"] = params
+            return "UPDATE 2"
+
+    class _Db:
+        pool = _Pool()
+
+    adapter = PgVectorMemoryAdapter(_Db())
+    count = await adapter.reinforce(["id-1", "id-2"])
+    assert count == 2
+    assert "relevance_score" in captured["sql"]
+    assert captured["params"] == (["id-1", "id-2"],)
+    # Empty input short-circuits without touching the DB
+    assert await adapter.reinforce([]) == 0
+
+
+@pytest.mark.asyncio
+async def test_instrumented_adapter_forwards_reinforce(capture_telemetry):
+    from devai.adapters.memory.instrumented import InstrumentedMemoryAdapter
+
+    adapter = InstrumentedMemoryAdapter(NoopMemoryAdapter(keep_in_memory=True))
+    assert await adapter.reinforce(["a"]) == 0
+    ops = [attrs["op"] for name, attrs in capture_telemetry.counters if name == "devai.memory.ops"]
+    assert "reinforce" in ops
+
+
+# ──────────────────────────────────────────────────────────────────────
+# ALM learn: feedback loop + LLM distillation (B3 / Phase D)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _RecordingMemory(NoopMemoryAdapter):
+    def __init__(self):
+        super().__init__(keep_in_memory=True)
+        self.reinforced: list[list[str]] = []
+
+    async def reinforce(self, provider_ids):
+        self.reinforced.append(list(provider_ids))
+        return len(provider_ids)
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_reinforces_injected_memories_on_success():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    adapter = _RecordingMemory()
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    stage = alm_learn_stage(StageDeps(config=_Cfg(), memory=adapter), {})
+    task = DevAITask(intent="ship feature", blueprint="alm-pipeline", repo="org/app")
+    task.stages_completed = ["implement_code"]
+    task.agent_context["memories"] = [
+        {"provider_id": "m1", "content": "a"},
+        {"provider_id": "m2", "content": "b"},
+        {"content": "no id — skipped"},
+    ]
+    result = await stage.execute(task)
+    assert result.data["memories_reinforced"] == 2
+    assert adapter.reinforced == [["m1", "m2"]]
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_does_not_reinforce_failed_runs():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    adapter = _RecordingMemory()
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    stage = alm_learn_stage(StageDeps(config=_Cfg(), memory=adapter), {})
+    task = DevAITask(intent="x", blueprint="alm-pipeline", repo="org/app")
+    task.error = "boom"
+    task.agent_context["memories"] = [{"provider_id": "m1"}]
+    await stage.execute(task)
+    assert adapter.reinforced == []
+
+
+class _FakeLLM:
+    provider_name = "anthropic"
+
+    def __init__(self, text):
+        self._text = text
+        self.requests = []
+
+    async def generate(self, request):
+        self.requests.append(request)
+
+        class _Resp:
+            text = self._text
+
+        return _Resp()
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_distills_semantic_facts_via_llm():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    adapter = NoopMemoryAdapter(keep_in_memory=True)
+    llm = _FakeLLM("- repo org/app uses pnpm workspaces, not npm\n- run_tests is flaky on this repo\nshort")
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    stage = alm_learn_stage(StageDeps(config=_Cfg(), memory=adapter, llm=llm), {})
+    task = DevAITask(intent="ship", blueprint="alm-pipeline", repo="org/app")
+    task.stages_completed = ["implement_code"]
+    result = await stage.execute(task)
+
+    assert result.data["memories_distilled"] == 2  # "short" filtered out
+    semantic = await adapter.recall(memory_type="semantic")
+    contents = {r.content for r in semantic}
+    assert "repo org/app uses pnpm workspaces, not npm" in contents
+    assert all("distilled" in r.tags for r in semantic)
+
+
+@pytest.mark.asyncio
+async def test_alm_learn_skips_distillation_on_noop_llm_or_none_reply():
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.stages.lifecycle import alm_learn_stage
+    from devai.pipeline.types import DevAITask
+
+    class _Cfg:
+        pipeline_label = "x"
+
+    # Noop LLM → no call at all
+    adapter = NoopMemoryAdapter(keep_in_memory=True)
+    noop_llm = _FakeLLM("anything")
+    noop_llm.provider_name = "noop"
+    stage = alm_learn_stage(StageDeps(config=_Cfg(), memory=adapter, llm=noop_llm), {})
+    result = await stage.execute(DevAITask(intent="x", blueprint="alm-pipeline", repo="org/app"))
+    assert result.data["memories_distilled"] == 0
+    assert noop_llm.requests == []
+
+    # Real LLM replying NONE → nothing written
+    adapter2 = NoopMemoryAdapter(keep_in_memory=True)
+    stage2 = alm_learn_stage(StageDeps(config=_Cfg(), memory=adapter2, llm=_FakeLLM("NONE")), {})
+    result2 = await stage2.execute(DevAITask(intent="x", blueprint="alm-pipeline", repo="org/app"))
+    assert result2.data["memories_distilled"] == 0
+    assert await adapter2.recall(memory_type="semantic") == []
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Maintenance: purge / decay / dedup (Phase D)
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_memory_maintenance_runs_all_passes():
+    from devai.adapters.memory.maintenance import run_memory_maintenance
+
+    executed: list[str] = []
+
+    class _Pool:
+        async def execute(self, sql, *params):
+            executed.append(" ".join(sql.split()))
+            return "UPDATE 3"
+
+        async def fetch(self, sql, *params):
+            executed.append(" ".join(sql.split()))
+            return [{"old_id": "a", "keep_id": "b"}]
+
+    class _Db:
+        pool = _Pool()
+
+    stats = await run_memory_maintenance(_Db(), episodic_ttl_days=90, decay_idle_days=30, dedup_similarity=0.95)
+    assert stats["purged"] == 3
+    assert stats["expired"] == 3
+    assert stats["decayed"] == 3
+    assert stats["deduped"] == 1
+    joined = "\n".join(executed)
+    assert "memory_type = 'episodic'" in joined
+    assert "expires_at" in joined
+    assert "relevance_score * 0.98" in joined
+    assert "embedding <=> b.embedding" in joined
+
+
+@pytest.mark.asyncio
+async def test_memory_maintenance_degrades_without_db():
+    from devai.adapters.memory.maintenance import run_memory_maintenance
+
+    class _Unconnected:
+        @property
+        def pool(self):
+            raise RuntimeError("Database not connected")
+
+    assert await run_memory_maintenance(None) == {"purged": 0, "expired": 0, "decayed": 0, "deduped": 0}
+    assert (await run_memory_maintenance(_Unconnected()))["purged"] == 0
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Global memory runtime + helpers (Phase C consolidation surface)
 # ──────────────────────────────────────────────────────────────────────
 

@@ -174,6 +174,15 @@ class MemoryAdapter(Adapter):
     # Adapter contract — implemented as defaults; subclasses override.
     # ──────────────────────────────────────────────────────────────────
 
+    async def reinforce(self, provider_ids: list[str]) -> int:
+        """Feedback signal: these memories were recalled into a run that
+        succeeded — bump their relevance so future ranking favors them.
+
+        Default no-op (backends without mutable scoring return 0).
+        Returns the number of records reinforced.
+        """
+        return 0
+
     async def close(self) -> None:
         """No-op by default — subclasses that hold connections override."""
         return None

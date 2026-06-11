@@ -256,7 +256,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Agentic memory */}
-      <MemoryPanel mem={mem} days={days} />
+      <MemoryPanel mem={mem} days={days} onChanged={load} />
 
       {/* By blueprint + SRE strip */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -365,7 +365,15 @@ function Td({ children, style }: { children: React.ReactNode; style?: React.CSSP
   );
 }
 
-function MemoryPanel({ mem, days }: { mem: MemoryAnalytics | null; days: number }) {
+function MemoryPanel({
+  mem,
+  days,
+  onChanged,
+}: {
+  mem: MemoryAnalytics | null;
+  days: number;
+  onChanged: () => void;
+}) {
   const t = mem?.totals ?? {};
   const healthOk = !!mem?.health?.ok;
   const embeddedPct = t.total ? Math.round(((t.embedded ?? 0) / t.total) * 100) : null;
@@ -374,6 +382,15 @@ function MemoryPanel({ mem, days }: { mem: MemoryAnalytics | null; days: number 
     if (d < 1 / 24) return "just now";
     if (d < 1) return `${Math.round(d * 24)}h ago`;
     return `${Math.round(d)}d ago`;
+  };
+  const forget = async (id: string) => {
+    if (!window.confirm("Forget this memory? Future runs will no longer recall it.")) return;
+    try {
+      await api.analytics.memoryForget(id);
+      onChanged();
+    } catch {
+      // panel reload on next refresh — deletion errors are non-fatal here
+    }
   };
   return (
     <div className="panel" style={{ padding: 16 }}>
@@ -448,6 +465,20 @@ function MemoryPanel({ mem, days }: { mem: MemoryAnalytics | null; days: number 
                   <span style={{ marginLeft: "auto", color: "var(--ink-muted)", whiteSpace: "nowrap" }}>
                     {fmtAge(r.created_at)}
                   </span>
+                  <button
+                    onClick={() => forget(r.provider_id)}
+                    title="Forget this memory"
+                    aria-label="Forget this memory"
+                    style={{
+                      color: "var(--ink-muted)",
+                      fontSize: 11,
+                      padding: "0 2px",
+                      lineHeight: 1,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ✕
+                  </button>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-soft)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                   {r.content}

@@ -583,6 +583,14 @@ class Settings(BaseSettings):
     # silently accumulate memories in process memory.
     memory_noop_keep_in_memory: bool = False
 
+    # --- Memory lifecycle maintenance (pgvector store) ---
+    # Periodic pass run by the API server: purges expired episodic records,
+    # decays relevance of idle ones, and merges near-duplicates. 0 disables.
+    memory_maintenance_hours: int = 6
+    memory_episodic_ttl_days: int = 90
+    memory_decay_idle_days: int = 30
+    memory_dedup_similarity: float = 0.95
+
     @property
     def is_github_app_configured(self) -> bool:
         return self.github_app_id > 0 and len(self.github_app_private_key) > 0

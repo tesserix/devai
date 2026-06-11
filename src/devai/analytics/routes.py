@@ -1,6 +1,8 @@
 """FastAPI routes for the analytics surface.
 
-Mounted at `/api/analytics/*` by `devai.webhook.app.create_app`. Read-only.
+Mounted at `/api/analytics/*` by `devai.webhook.app.create_app`. Read-only,
+with one governance exception: DELETE /memory/{id} (the dashboard's memory
+panel removes wrong/stale learnings through it).
 
 Sources, in order of reliability:
   - pipeline runtime (Redis-persisted Fiber tasks) — run/stage stats; the
@@ -188,6 +190,7 @@ async def memory(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[
         records = await adapter.recall(limit=15)
         out["recent"] = [
             {
+                "provider_id": r.provider_id,
                 "agent": r.agent,
                 "repo": r.repo,
                 "type": getattr(r.memory_type, "value", r.memory_type),
@@ -221,6 +224,25 @@ async def memory(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[
             logger.debug("memory analytics: timeseries query failed", exc_info=True)
 
     return out
+
+
+@router.delete("/memory/{provider_id}")
+async def memory_forget(provider_id: str) -> dict[str, Any]:
+    """Governance: delete one memory record by id (soft delete on pgvector).
+
+    The one mutating endpoint on this router — it exists so the dashboard's
+    memory panel can remove a wrong or stale learning before it keeps
+    getting injected into future runs.
+    """
+    from devai.adapters.memory.runtime import get_global_memory
+
+    adapter = get_global_memory()
+    try:
+        removed = await adapter.forget(provider_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("memory forget failed for %s", provider_id)
+        removed = False
+    return {"removed": removed, "provider": adapter.provider_name, "id": provider_id}
 
 
 # ────────────────────────────────────────────────────────────────────
