@@ -25,10 +25,18 @@ logger = logging.getLogger(__name__)
 
 
 class FallbackLLMAdapter(LLMAdapter):
-    """Try each adapter in order; the first healthy answer wins."""
+    """Try each adapter in order; the first healthy answer wins.
 
-    def __init__(self, primary: LLMAdapter, *fallbacks: LLMAdapter) -> None:
+    ``preserve_model=True`` keeps the request's model id down the chain —
+    used by role routes where the fallback provider serves the SAME models
+    (the gateway routes Claude on Vertex, so `claude-fable-5` is valid on
+    both links). Default behavior clears the model so heterogeneous
+    fallbacks use their own defaults.
+    """
+
+    def __init__(self, primary: LLMAdapter, *fallbacks: LLMAdapter, preserve_model: bool = False) -> None:
         self._chain: list[LLMAdapter] = [primary, *[f for f in fallbacks if f is not None]]
+        self._preserve_model = preserve_model
 
     @property
     def provider_name(self) -> str:  # type: ignore[override]
@@ -46,7 +54,7 @@ class FallbackLLMAdapter(LLMAdapter):
     def _request_for(self, adapter: LLMAdapter, request: LLMRequest, *, is_primary: bool) -> LLMRequest:
         """Fallback providers can't serve the primary's model id — clear it
         so the fallback's own default model applies."""
-        if is_primary or not request.model:
+        if is_primary or not request.model or self._preserve_model:
             return request
         return replace(request, model="")
 

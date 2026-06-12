@@ -181,13 +181,46 @@ class _BoardroomDebateStage(PipelineStage):
         llm = self.deps.llm
         return llm is not None and getattr(llm, "provider_name", "noop") != "noop"
 
-    async def _say(self, system: str, prompt: str, *, max_tokens: int = 700) -> str:
+    def _chain(self):
+        """Role-routed adapter (anthropic → gateway/Vertex, same model id);
+        degrades to deps.llm when the role factory can't build."""
+        cached = getattr(self, "_role_chain", None)
+        if cached is not None:
+            return cached
+        try:
+            from devai.adapters.llm import create_role_llm
+
+            chain = create_role_llm(self.deps.config, "")
+            # Tests/minimal deps inject deps.llm directly with no provider
+            # keys configured — a noop role chain must not shadow it.
+            if "noop" in str(getattr(chain, "provider_name", "noop")):
+                chain = self.deps.llm
+            self._role_chain = chain
+        except Exception:  # noqa: BLE001
+            self._role_chain = self.deps.llm
+        return self._role_chain
+
+    async def _say(
+        self, system: str, prompt: str, *, max_tokens: int = 700, moderator: bool = False
+    ) -> str:
+        """Panel seats run on the CHEAP boardroom model (many parallel
+        debater calls); the moderator's syntheses and the decision document
+        get the stronger one."""
         from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
 
-        response = await self.deps.llm.generate(
+        model = str(
+            getattr(
+                self.deps.config,
+                "llm_model_boardroom_moderator" if moderator else "llm_model_boardroom_panel",
+                "",
+            )
+            or ""
+        )
+        response = await self._chain().generate(
             LLMRequest(
                 system=system,
                 messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                model=model,
                 max_tokens=max_tokens,
                 temperature=0.4,
                 extra={"agent": "boardroom"},
@@ -230,6 +263,7 @@ class _BoardroomDebateStage(PipelineStage):
                 '{"recruit": [{"name": "<Role Title>", "brief": "<1-2 sentence persona: what they own and challenge>"}]}\n'
                 "Maximum 2 recruits; reply {'recruit': []} when the table is sufficient.",
                 max_tokens=300,
+                moderator=True,
             )
             t = text.strip()
             if t.startswith("```"):
@@ -371,6 +405,7 @@ class _BoardroomDebateStage(PipelineStage):
                     + "\n\n".join(f"**{w}**: {t[:500]}" for w, t in new_positions.items())
                     + "\n\nReply with:\nAGREED: <bullet list>\nDISPUTED: <bullet list with names, or 'nothing'>",
                     max_tokens=400,
+                    moderator=True,
                 )
                 transcript.append(f"[round {round_no}] Supervisor synthesis: {summary}")
                 self._a2a(task, a2a_bag, "supervisor", "boardroom", f"Round {round_no} synthesis", summary)
@@ -453,6 +488,7 @@ class _BoardroomDebateStage(PipelineStage):
                 "## Risks & mitigations\n## Plan outline (numbered, buildable steps)\n"
                 "## Dissent\n(name who disagreed and with what — 'none' only if the table truly agreed)",
                 max_tokens=1200,
+                moderator=True,
             )
         except Exception:  # noqa: BLE001 — degrade to a mechanical digest
             logger.exception("boardroom: final decision synthesis failed")

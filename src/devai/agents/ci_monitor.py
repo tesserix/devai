@@ -498,7 +498,7 @@ class CIMonitorAgent(BaseAgent):
         - ``retry``    — transient infra failure; orchestrator should retry
         """
         try:
-            claude = ClaudeProvider(self.config)
+            claude = ClaudeProvider(self.config, model=getattr(self.config, "llm_model_review", None))
         except Exception as e:
             logger.warning("Cannot init Claude for CI fix: %s — escalating", e)
             return None

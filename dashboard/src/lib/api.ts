@@ -721,6 +721,13 @@ export const api = {
       apiFetch<{ unit: string; rates: { model_prefix: string; input_per_1m_usd: number; output_per_1m_usd: number }[] }>(
         "/analytics/pricing",
       ),
+    evals: (days = 30) =>
+      apiFetch<{
+        scope: string;
+        summary: { evals: number; avg_score: number; pass_rate: number };
+        by_evaluator: { evaluator: string; evals: number; avg_score: number; pass_rate: number }[];
+        recent: { run_id: string; stage: string; evaluator: string; score: number; passed: boolean; created_at: string }[];
+      }>(`/analytics/evals?days=${days}`),
     sreSummary: () => apiFetch<AnalyticsSRESummary>("/analytics/sre/summary"),
     memory: (days = 30) => apiFetch<MemoryAnalytics>(`/analytics/memory?days=${days}`),
     memoryForget: (id: string) =>

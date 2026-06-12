@@ -85,11 +85,14 @@ _CHECKPOINT_INSTRUCTION = (
 class ClaudeProvider:
     """Anthropic Claude Messages API with a session-chained tool-use loop."""
 
-    def __init__(self, config: Settings) -> None:
+    def __init__(self, config: Settings, model: str | None = None) -> None:
+        """``model`` overrides the global default per role — the dev agent
+        runs claude-fable-5 for UI work and claude-opus-4-8 for API work,
+        reviewers run the review model, etc. (config llm_model_* fields)."""
         from devai.services.tracing import wrap_anthropic_client
 
         self.client = wrap_anthropic_client(AsyncAnthropic(api_key=config.anthropic_api_key))
-        self.model = config.claude_model
+        self.model = model or config.claude_model
         self.max_tokens = config.claude_max_tokens
         self.max_iterations = config.claude_max_iterations
         self.session_iterations = max(1, int(getattr(config, "claude_session_iterations", 15) or 15))

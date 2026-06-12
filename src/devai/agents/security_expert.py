@@ -148,7 +148,7 @@ class SecurityExpertAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Run comprehensive security scans and make pass/block decision."""
-        claude = ClaudeProvider(self.config)
+        claude = ClaudeProvider(self.config, model=getattr(self.config, "llm_model_review", None))
         github_tools = GitHubToolExecutor(self.github)
         security_tools = SecurityToolExecutor(self.github)
 

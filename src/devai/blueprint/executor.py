@@ -759,6 +759,7 @@ class BlueprintExecutor:
                         messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
                         max_tokens=500,
                         temperature=0.0,
+                        model=str(getattr(self._deps.config, "llm_model_utility", "") or ""),
                         extra={"agent": self._HEAL_AGENT},
                     )
                 )
@@ -818,6 +819,7 @@ class BlueprintExecutor:
                     messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
                     max_tokens=700,
                     temperature=0.0,
+                    model=str(getattr(self._deps.config, "llm_model_utility", "") or ""),
                     extra={"agent": self._HEAL_AGENT},
                 )
             )

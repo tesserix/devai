@@ -67,11 +67,12 @@ export default function AnalyticsPage() {
   const [tel, setTel] = useState<TelemetryHealth | null>(null);
   const [mem, setMem] = useState<MemoryAnalytics | null>(null);
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.analytics.usage>> | null>(null);
+  const [evals, setEvals] = useState<Awaited<ReturnType<typeof api.analytics.evals>> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const settle = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback);
-    const [s, rt, st, ag, lc, sr, th, mm, us] = await Promise.all([
+    const [s, rt, st, ag, lc, sr, th, mm, us, ev] = await Promise.all([
       settle(api.analytics.summary(days), null as AnalyticsSummary | null),
       settle(api.analytics.runsTimeseries(days), [] as RunsTimeseriesPoint[]),
       settle(api.analytics.stages(), [] as StageStat[]),
@@ -81,6 +82,7 @@ export default function AnalyticsPage() {
       settle(api.analytics.telemetry(), null as TelemetryHealth | null),
       settle(api.analytics.memory(days), null as MemoryAnalytics | null),
       settle(api.analytics.usage(days), null as Awaited<ReturnType<typeof api.analytics.usage>> | null),
+      settle(api.analytics.evals(days), null as Awaited<ReturnType<typeof api.analytics.evals>> | null),
     ]);
     setSummary(s);
     setRunsTs(rt);
@@ -91,6 +93,7 @@ export default function AnalyticsPage() {
     setTel(th);
     setMem(mm);
     setUsage(us);
+    setEvals(ev);
     setLoading(false);
   }, [days]);
 
@@ -290,6 +293,47 @@ export default function AnalyticsPage() {
           </div>
         </section>
       )}
+
+      {/* Evals — quality scores (pass rate, by evaluator) */}
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="label-eyebrow mb-3">Quality evals {evals?.scope === "me" ? "· your runs" : ""}</div>
+        {!evals || evals.summary.evals === 0 ? (
+          <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
+            No evals recorded yet. Quality gates (review, security, tests) score each run; scores will
+            appear here as runs complete.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-3 lg:col-span-1">
+              <Kpi label="Evals" value={fmtNum(evals.summary.evals)} />
+              <Kpi label="Pass rate" value={`${Math.round((evals.summary.pass_rate || 0) * 100)}%`} />
+              <Kpi label="Avg score" value={(evals.summary.avg_score || 0).toFixed(2)} />
+            </div>
+            <div className="lg:col-span-2 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left" style={{ color: "var(--ink-soft)" }}>
+                    <th className="pb-2 font-normal">Evaluator</th>
+                    <th className="pb-2 font-normal text-right">Evals</th>
+                    <th className="pb-2 font-normal text-right">Pass rate</th>
+                    <th className="pb-2 font-normal text-right">Avg score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evals.by_evaluator.map((e) => (
+                    <tr key={e.evaluator} className="border-t" style={{ borderColor: "var(--surface-border)" }}>
+                      <td className="py-1.5" style={{ color: "var(--ink-strong)" }}>{e.evaluator}</td>
+                      <td className="py-1.5 text-right">{fmtNum(e.evals)}</td>
+                      <td className="py-1.5 text-right">{Math.round((e.pass_rate || 0) * 100)}%</td>
+                      <td className="py-1.5 text-right">{(e.avg_score || 0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* Agents + Stages */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">

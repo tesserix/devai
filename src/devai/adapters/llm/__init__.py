@@ -40,6 +40,8 @@ from devai.adapters.llm.base import (
 from devai.adapters.llm.factory import (
     KNOWN_PROVIDERS,
     create_llm_adapter,
+    create_llm_chain,
+    create_role_llm,
     llm_registry,
 )
 
@@ -53,5 +55,7 @@ __all__ = [
     "ToolCall",
     "ToolSpec",
     "create_llm_adapter",
+    "create_llm_chain",
+    "create_role_llm",
     "llm_registry",
 ]

@@ -94,7 +94,7 @@ class QATesterAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Write and run E2E tests for the implemented changes."""
-        claude = ClaudeProvider(self.config)
+        claude = ClaudeProvider(self.config, model=getattr(self.config, "llm_model_review", None))
         github_tools = GitHubToolExecutor(self.github)
         test_tools = TestToolExecutor(self.github)
         latest_test_summary: dict[str, Any] = {}

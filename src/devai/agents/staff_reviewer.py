@@ -45,7 +45,7 @@ class StaffReviewerAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Review the PR code for the active story using Claude tool-use loop."""
-        claude = ClaudeProvider(self.config)
+        claude = ClaudeProvider(self.config, model=getattr(self.config, "llm_model_review", None))
         tool_executor = GitHubToolExecutor(self.github)
 
         pr_number = state.get("pr_number")

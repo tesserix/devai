@@ -389,3 +389,90 @@ def test_anthropic_kwargs_never_forward_bookkeeping_extras():
     # SYSTEM messages are PROMOTED to the system param, never dropped.
     assert kwargs["system"] == "You are the QA lead."
     assert all(m["role"] != "system" for m in kwargs["messages"])
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Per-role model routing
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_pinned_model_defaults_but_never_overrides():
+    import asyncio
+
+    from devai.adapters.llm.factory import PinnedModelLLMAdapter
+
+    seen = {}
+
+    class _Inner(NoopLLMAdapter):
+        async def generate(self, request):
+            seen["model"] = request.model
+            return await super().generate(request)
+
+    pinned = PinnedModelLLMAdapter(_Inner(), "claude-fable-5")
+    asyncio.run(pinned.generate(LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")])))
+    assert seen["model"] == "claude-fable-5"
+    asyncio.run(
+        pinned.generate(
+            LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8")
+        )
+    )
+    assert seen["model"] == "claude-opus-4-8"  # explicit request wins
+
+
+def test_fallback_preserve_model_keeps_id_down_the_chain():
+    import asyncio
+
+    from devai.adapters.llm.fallback import FallbackLLMAdapter
+
+    seen = {}
+
+    class _Dead(NoopLLMAdapter):
+        provider_name = "dead"
+
+        async def generate(self, request):
+            raise RuntimeError("primary down")
+
+    class _Vertex(NoopLLMAdapter):
+        provider_name = "gateway"
+
+        async def generate(self, request):
+            seen["model"] = request.model
+            return await super().generate(request)
+
+    chain = FallbackLLMAdapter(_Dead(), _Vertex(), preserve_model=True)
+    asyncio.run(
+        chain.generate(
+            LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-fable-5")
+        )
+    )
+    # Same model id served by the Vertex-routing gateway — NOT cleared.
+    assert seen["model"] == "claude-fable-5"
+
+
+def test_role_routing_defaults_match_the_strategy():
+    from devai.config import Settings
+
+    s = Settings()
+    assert s.llm_model_dev_ui == "claude-fable-5"
+    assert s.llm_model_dev_api == "claude-opus-4-8"
+    assert s.llm_model_boardroom_panel.startswith("claude-haiku")
+    assert s.llm_model_boardroom_moderator.startswith("claude-sonnet")
+    assert s.llm_model_utility.startswith("claude-haiku")
+    assert s.llm_role_chain_provider == "gateway"
+
+
+def test_dev_model_picker_routes_ui_vs_api():
+    pytest.importorskip("ulid")  # slim local env — CI runs it
+    from devai.agents.senior_developer import SeniorDeveloperAgent
+
+    agent = SeniorDeveloperAgent.__new__(SeniorDeveloperAgent)
+
+    class _Cfg2:
+        llm_model_dev_ui = "claude-fable-5"
+        llm_model_dev_api = "claude-opus-4-8"
+
+    agent.config = _Cfg2()
+    ui_state = {"stories": [{"title": "Storefront layout and navigation", "skills": ["frontend"]}], "active_story_index": 0}
+    api_state = {"stories": [{"title": "Order processing endpoints", "skills": ["api", "database"]}], "active_story_index": 0}
+    assert agent._model_for_story(ui_state) == "claude-fable-5"
+    assert agent._model_for_story(api_state) == "claude-opus-4-8"

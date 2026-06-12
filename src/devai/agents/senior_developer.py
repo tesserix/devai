@@ -154,9 +154,42 @@ class SeniorDeveloperAgent(BaseAgent):
     subscribe_subject = "devai.pipeline.plan_ready"
     publish_subject = "devai.pipeline.code_ready"
 
+
+    _UI_HINTS = (
+        "ui", "ux", "frontend", "component", "page", "layout", "design", "css",
+        "tailwind", "responsive", "storefront", "navigation", "form", "modal",
+    )
+
+    def _model_for_story(self, state: ALMState) -> str | None:
+        """Pick the implementation model from the active story's nature.
+
+        UI work → config.llm_model_dev_ui (claude-fable-5: strongest design
+        intuition); everything else → config.llm_model_dev_api
+        (claude-opus-4-8: deepest coding). Empty config → provider default.
+        """
+        stories = state.get("stories") or []
+        idx = state.get("active_story_index", 0)
+        story = stories[idx] if isinstance(stories, list) and idx < len(stories) else {}
+        haystack = " ".join(
+            str(x).lower()
+            for x in (
+                story.get("title", ""),
+                story.get("description", "")[:300] if isinstance(story.get("description"), str) else "",
+                " ".join(story.get("skills") or []) if isinstance(story.get("skills"), list) else "",
+                " ".join(story.get("labels") or []) if isinstance(story.get("labels"), list) else "",
+            )
+        )
+        is_ui = any(h in haystack for h in self._UI_HINTS)
+        field = "llm_model_dev_ui" if is_ui else "llm_model_dev_api"
+        return getattr(self.config, field, None) or None
+
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Implement the active story on its own feature branch."""
-        claude = ClaudeProvider(self.config)
+        # Model routing: UI/frontend stories get the design-strongest model
+        # (claude-fable-5); API/backend/data stories get the deep-coding one
+        # (claude-opus-4-8). Routed per STORY, not per run — a full-stack
+        # epic uses the right specialist model for each piece.
+        claude = ClaudeProvider(self.config, model=self._model_for_story(state))
         # Pre-wire the executor with run_id + redis + identity so every
         # scm_commit_file call shows up in the dashboard's REPO tab in
         # real time, attributed to this agent + the originating user.

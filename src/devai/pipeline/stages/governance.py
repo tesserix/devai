@@ -173,6 +173,7 @@ class _UpdateGovernanceStage(PipelineStage):
                         messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
                         max_tokens=2500,
                         temperature=0.2,
+                        model=str(getattr(self.deps.config, "llm_model_utility", "") or ""),
                         extra={"agent": "governance"},
                     )
                 )

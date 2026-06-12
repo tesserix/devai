@@ -638,6 +638,29 @@ class Settings(BaseSettings):
     # vertex_gemini primary. Unconfigured links are skipped; empty disables.
     llm_fallback_provider: str = ""
 
+    # --- per-ROLE model routing ---
+    # Each role resolves to a model + a provider failover chain:
+    #   configured primary (anthropic) → llm_role_chain_provider — the
+    # gateway routes Claude on VERTEX server-side, so the SAME model id is
+    # preserved down the chain (Fable 5 on Anthropic → Fable 5 on Vertex).
+    # Unconfigured fallback links skip with a log; empty disables the link.
+    llm_role_chain_provider: str = "gateway"
+    # Frontend/UI implementation — intuitive, design-strong output.
+    llm_model_dev_ui: str = "claude-fable-5"
+    # Backend/API + DB + infra implementation — deepest coding model.
+    llm_model_dev_api: str = "claude-opus-4-8"
+    # Code review / security / QA verdicts.
+    llm_model_review: str = "claude-sonnet-4-6"
+    # Epics / stories / engineering plans.
+    llm_model_planning: str = "claude-sonnet-4-6"
+    # High-volume utility calls (clarity checks, heal diagnosis, runbooks,
+    # governance compose) — capable but cheap.
+    llm_model_utility: str = "claude-haiku-4-5-20251001"
+    # Boardroom: many parallel debater calls → good but LOW-COST seats;
+    # the moderator (synthesis + decision document) gets a stronger model.
+    llm_model_boardroom_panel: str = "claude-haiku-4-5-20251001"
+    llm_model_boardroom_moderator: str = "claude-sonnet-4-6"
+
     # Require interactive users to bring their own LLM connector: when true,
     # principals with no Settings LLM connector get a clear "configure your
     # connector" stub instead of silently riding the shared platform key.

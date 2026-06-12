@@ -150,29 +150,47 @@ def _ledger(request: Request):
     return getattr(request.app.state, "usage_ledger", None)
 
 
+async def _usage_scope(request: Request) -> tuple[str, bool]:
+    """(user_email_to_scope_to, is_admin). A non-admin only ever sees their
+    OWN usage; an admin sees the global view (and the per-user breakdown).
+    Unauthenticated → scope to "" which has no data."""
+    from devai.identity import extract_principal
+
+    principal = await extract_principal(request)
+    if principal is None:
+        return "", False
+    is_admin = "admin" in (getattr(principal, "roles", None) or [])
+    return ("" if is_admin else (principal.email or principal.uid or "")), is_admin
+
+
 @router.get("/usage")
 async def usage(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
-    """Everything the analytics page needs in one call: totals, per-model,
-    per-user, daily timeseries — all with real USD cost."""
+    """Cost / tokens / latency the caller is allowed to see: their OWN usage
+    (per-model + timeseries), or — for admins — the global view plus the
+    per-user breakdown. All with real USD cost."""
     ledger = _ledger(request)
     if ledger is None:
-        return {"summary": {}, "by_model": [], "by_user": [], "timeseries": [], "enabled": False}
+        return {"summary": {}, "by_model": [], "by_user": [], "timeseries": [], "enabled": False, "scope": "none"}
+    scope_user, is_admin = await _usage_scope(request)
     return {
-        "summary": await ledger.summary(),
-        "by_model": await ledger.by_model(),
-        "by_user": await ledger.by_user(),
-        "timeseries": await ledger.timeseries(days),
+        "summary": await ledger.summary(scope_user),
+        "by_model": await ledger.by_model(scope_user),
+        # Cross-tenant per-user table is admin-only; a regular user sees just themselves.
+        "by_user": await ledger.by_user() if is_admin else [],
+        "timeseries": await ledger.timeseries(days, scope_user),
         "enabled": True,
+        "scope": "all" if is_admin else "me",
     }
 
 
 @router.get("/usage/recent")
 async def usage_recent(request: Request, limit: int = Query(100, ge=1, le=300)) -> list[dict[str, Any]]:
-    """The most recent LLM calls with model, tokens, cost, latency, user."""
+    """The caller's most recent LLM calls (admins see the global stream)."""
     ledger = _ledger(request)
     if ledger is None:
         return []
-    return await ledger.recent(limit)
+    scope_user, _ = await _usage_scope(request)
+    return await ledger.recent(limit, scope_user)
 
 
 @router.get("/pricing")
@@ -181,6 +199,19 @@ async def pricing(request: Request) -> dict[str, Any]:
     from devai.analytics.pricing import rate_card
 
     return {"unit": "USD per 1,000,000 tokens", "rates": rate_card()}
+
+
+@router.get("/evals")
+async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
+    """Quality eval scores the caller may see — their OWN runs, or (admin)
+    everyone's. Pass-rate, average score, by-evaluator, recent."""
+    db = await _db(request)
+    if db is None:
+        return {"summary": {"evals": 0, "avg_score": 0, "pass_rate": 0}, "by_evaluator": [], "recent": [], "scope": "none"}
+    scope_user, is_admin = await _usage_scope(request)
+    out = await db.analytics_evals(days, scope_user)
+    out["scope"] = "all" if is_admin else "me"
+    return out
 
 
 @router.get("/sre/summary")

@@ -616,6 +616,86 @@ class Database:
         )
         return [dict(r) for r in rows]
 
+    # ── Evals ─────────────────────────────────────────────────────────
+
+    async def record_eval(
+        self,
+        *,
+        run_id: str,
+        evaluator: str,
+        score: float,
+        passed: bool,
+        stage: str = "",
+        agent_name: str = "",
+        triggered_by: str = "",
+        detail: dict | None = None,
+    ) -> None:
+        """Persist one quality eval (review/security/tests → 0..1 score).
+
+        Best-effort: a missing table (pre-bootstrap) or any failure is
+        swallowed so capturing an eval never breaks a run.
+        """
+        try:
+            await self.pool.execute(
+                """INSERT INTO agent_evals
+                   (run_id, stage, agent_name, evaluator, score, passed, triggered_by, detail)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+                run_id,
+                stage,
+                agent_name,
+                evaluator,
+                float(max(0.0, min(1.0, score))),
+                bool(passed),
+                triggered_by,
+                json.dumps(detail or {}),
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("record_eval failed (evaluator=%s)", evaluator, exc_info=True)
+
+    async def analytics_evals(self, days: int = 30, user: str = "") -> dict[str, Any]:
+        """Eval summary + by-evaluator + recent, optionally scoped to a user.
+
+        When ``user`` is set, only that user's runs are included — this is
+        what makes the Evals analytics tenant-isolated.
+        """
+        try:
+            where = "created_at >= NOW() - make_interval(days => $1)"
+            args: list[Any] = [days]
+            if user:
+                where += " AND triggered_by = $2"
+                args.append(user)
+            summary = await self.pool.fetchrow(
+                f"""SELECT COUNT(*)::int AS evals,
+                           COALESCE(AVG(score), 0)::float AS avg_score,
+                           COALESCE(AVG(CASE WHEN passed THEN 1.0 ELSE 0.0 END), 0)::float AS pass_rate
+                    FROM agent_evals WHERE {where}""",
+                *args,
+            )
+            by_eval = await self.pool.fetch(
+                f"""SELECT evaluator,
+                           COUNT(*)::int AS evals,
+                           COALESCE(AVG(score), 0)::float AS avg_score,
+                           COALESCE(AVG(CASE WHEN passed THEN 1.0 ELSE 0.0 END), 0)::float AS pass_rate
+                    FROM agent_evals WHERE {where}
+                    GROUP BY evaluator ORDER BY evals DESC""",
+                *args,
+            )
+            recent = await self.pool.fetch(
+                f"""SELECT run_id, stage, evaluator, score, passed,
+                           to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SSZ') AS created_at
+                    FROM agent_evals WHERE {where}
+                    ORDER BY created_at DESC LIMIT 50""",
+                *args,
+            )
+            return {
+                "summary": dict(summary) if summary else {"evals": 0, "avg_score": 0, "pass_rate": 0},
+                "by_evaluator": [dict(r) for r in by_eval],
+                "recent": [dict(r) for r in recent],
+            }
+        except Exception:  # noqa: BLE001
+            logger.debug("analytics_evals query failed", exc_info=True)
+            return {"summary": {"evals": 0, "avg_score": 0, "pass_rate": 0}, "by_evaluator": [], "recent": []}
+
     async def analytics_memory_summary(self) -> dict[str, Any]:
         """Corpus-level memory stats from agent_memories (pgvector store)."""
         row = await self.pool.fetchrow(

@@ -123,7 +123,7 @@ class InfraProvisionerAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Generate infrastructure code based on deployment target."""
-        claude = ClaudeProvider(self.config)
+        claude = ClaudeProvider(self.config, model=getattr(self.config, "llm_model_dev_api", None))
         tool_executor = GitHubToolExecutor(self.github)
 
         repo = state.get("repo_full_name", "")

@@ -253,6 +253,75 @@ def create_llm_chain(settings: Any) -> LLMAdapter:
     return wrapped
 
 
+_ROLE_CHAIN_CACHE: dict[str, LLMAdapter] = {}
+
+
+def create_role_llm(settings: Any, role: str) -> LLMAdapter:
+    """Role-routed adapter: pins the role's configured model and fails over
+    primary (anthropic) → llm_role_chain_provider (gateway = Claude on
+    Vertex) with the SAME model id preserved down the chain.
+
+    Role fields: llm_model_<role> on Settings — dev_ui (claude-fable-5),
+    dev_api (claude-opus-4-8), review/planning (claude-sonnet-4-6),
+    utility/boardroom_panel (claude-haiku-4-5), boardroom_moderator.
+    Unknown/empty role → the plain configured adapter. Cached per role.
+    """
+    cache_key = role or "_default"
+    cached = _ROLE_CHAIN_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    primary = create_llm_adapter(settings)
+    chain: list[LLMAdapter] = [primary]
+    fb_name = str(getattr(settings, "llm_role_chain_provider", "") or "").lower()
+    if fb_name and llm_registry.has(fb_name) and fb_name != primary.provider_name:
+        fb = create_llm_adapter(settings, provider=fb_name)
+        if fb.provider_name != "noop":
+            chain.append(fb)
+
+    base: LLMAdapter = primary
+    if len(chain) > 1:
+        from devai.adapters.llm.fallback import FallbackLLMAdapter
+
+        base = FallbackLLMAdapter(*chain, preserve_model=True)
+
+    model = str(getattr(settings, f"llm_model_{role}", "") or "")
+    adapter = PinnedModelLLMAdapter(base, model) if model else base
+    _ROLE_CHAIN_CACHE[cache_key] = adapter
+    logger.info("role LLM route %r: %s (model=%s)", role, adapter.provider_name, model or "default")
+    return adapter
+
+
+class PinnedModelLLMAdapter(LLMAdapter):
+    """Delegate that defaults requests to a pinned model (explicit
+    request.model still wins — callers can override per call)."""
+
+    def __init__(self, inner: LLMAdapter, model: str) -> None:
+        self._inner = inner
+        self._model = model
+
+    @property
+    def provider_name(self) -> str:  # type: ignore[override]
+        return self._inner.provider_name
+
+    @property
+    def default_model(self) -> str:  # type: ignore[override]
+        return self._model or self._inner.default_model
+
+    async def generate(self, request):  # type: ignore[override]
+        from dataclasses import replace
+
+        if not request.model and self._model:
+            request = replace(request, model=self._model)
+        return await self._inner.generate(request)
+
+    async def health_check(self):  # type: ignore[override]
+        return await self._inner.health_check()
+
+    async def close(self) -> None:  # type: ignore[override]
+        await self._inner.close()
+
+
 def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdapter:
     """Resolve `settings.llm_provider` (or explicit override) to an adapter.
 
@@ -298,6 +367,7 @@ __all__ = [
     "LLM_TIERS",
     "create_llm_adapter",
     "create_llm_chain",
+    "create_role_llm",
     "llm_registry",
     "resolve_llm_tier",
     "resolve_spec_provider",

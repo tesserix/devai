@@ -89,7 +89,7 @@ class EngineeringManagerAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Analyze stories and create per-story technical plans."""
-        claude = ClaudeProvider(self.config)
+        claude = ClaudeProvider(self.config, model=getattr(self.config, "llm_model_planning", None))
         tool_executor = GitHubToolExecutor(self.github)
 
         repo = state.get("repo_full_name", "")
