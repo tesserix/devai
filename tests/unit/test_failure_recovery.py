@@ -162,7 +162,12 @@ async def test_recovery_rounds_are_bounded():
     await ex.execute(_bp(), task)
 
     assert task.state == TaskState.STAGE_FAILED
-    assert len(llm.calls) == 1  # exactly one recovery round, no infinite loop
+    # Exactly one DIAGNOSIS round (no infinite loop); the runbook-advice call
+    # after exhaustion shares the same fake LLM, so filter by prompt.
+    diagnosis_calls = [c for c in llm.calls if "Decide how to recover" in c]
+    assert len(diagnosis_calls) == 1
+    # Exhaustion leaves the runbook on the task for the dashboard/human.
+    assert "runbook:build" in task.agent_context
 
 
 @pytest.mark.asyncio
@@ -323,6 +328,55 @@ async def test_stalled_stage_still_dies_at_timeout():
 
     assert task.state == TaskState.AGENT_TIMEOUT
     assert "build" in task.stages_failed
+
+
+class _FakeSCM:
+    def __init__(self):
+        self.issues: list[dict] = []
+        self.comments: list[tuple[int, str]] = []
+        self.labels: list[tuple[int, list[str]]] = []
+
+    async def create_issue(self, repo, title, body, labels=None):
+        self.issues.append({"title": title, "body": body, "labels": labels or []})
+        return {"number": 99, "html_url": "https://github.com/o/r/issues/99"}
+
+    async def add_comment(self, repo, issue_id, body):
+        self.comments.append((issue_id, body))
+        return {}
+
+    async def add_labels(self, repo, issue_id, labels):
+        self.labels.append((issue_id, labels))
+
+
+@pytest.mark.asyncio
+async def test_bug_issue_filed_updated_and_runbook_on_exhaustion():
+    """The recovery agent's durable trail: round 1 files a labeled bug, each
+    further round comments the new diagnosis, exhaustion posts the runbook
+    and flags the bug for a human."""
+    llm = _FakeLLM({"diagnosis": "still broken", "action": "retry", "guidance": "try again"})
+    scm = _FakeSCM()
+    reg = StageRegistry()
+    reg.register("work", lambda deps, cfg: _AlwaysFails())
+    cfg = _Cfg()
+    cfg.pipeline_heal_attempts = 2
+    deps = StageDeps(config=cfg, state_manager=_SM(), llm=llm, scm=scm)
+    ex = BlueprintExecutor(reg, deps)
+    task = DevAITask(intent="ship", blueprint="t", repo="o/r")
+    task.epic_issue_number = 26
+    await ex.execute(_bp(), task)
+
+    assert task.state == TaskState.STAGE_FAILED
+    # Round 1 filed the bug with run-correlation + failure labels.
+    assert len(scm.issues) == 1
+    assert "devai:stage-failure" in scm.issues[0]["labels"]
+    assert any(lbl.startswith("devai:run:") for lbl in scm.issues[0]["labels"])
+    assert "Epic:** #26" in scm.issues[0]["body"]
+    # Round 2 commented; exhaustion posted the runbook comment.
+    bodies = [b for _, b in scm.comments]
+    assert any("Recovery attempt 2" in b for b in bodies)
+    assert any("Runbook" in b for b in bodies)
+    assert ("devai:needs-human" in lbls for _, lbls in scm.labels)
+    assert task.agent_context["heal:build"]["bug_issue"] == 99
 
 
 @pytest.mark.asyncio

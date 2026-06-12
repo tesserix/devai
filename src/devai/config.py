@@ -36,7 +36,11 @@ class Settings(BaseSettings):
     # guidance, and re-runs the stage — pausing for human approval only when
     # the fix genuinely needs a decision. Runs BEFORE on_failure semantics.
     pipeline_heal_on_failure: bool = True
-    pipeline_heal_attempts: int = 1  # recovery rounds per stage
+    # Recovery rounds per stage: each round files/updates a GitHub bug issue
+    # with the diagnosis, injects corrective guidance, and re-runs the stage.
+    # Exhausting all rounds posts a RUNBOOK (everything tried + what a human
+    # should check) on the bug issue. Clamped to 5 by the executor.
+    pipeline_heal_attempts: int = 3
     # Progress-aware stage liveness: a stage past its timeout is NOT killed
     # while its agent shows recent tool activity (devai:run:<id>:activity,
     # stamped by the tool layer) — it gets extended up to timeout × the hard

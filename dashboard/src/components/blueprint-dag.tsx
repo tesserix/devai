@@ -34,6 +34,10 @@ export interface StageOverlay {
   state: RunState;
   /** Optional duration in seconds, shown under the node. */
   durationSeconds?: number;
+  /** Recovery agent activity on this stage (heal:<stage> events):
+   *  active = diagnosing/retrying now · recovered = fixed and re-ran ·
+   *  exhausted = gave up, runbook posted for a human. */
+  recovery?: "active" | "recovered" | "exhausted";
 }
 
 /** name → overlay. Stages absent from the map render as `pending`. */
@@ -257,6 +261,7 @@ export function BlueprintDAG({
           const color = laneColor(n.lane || "_", laneIdx[n.lane || "_"]);
           const stroke = STATE_STROKE[state];
           const duration = overlay?.[n.name]?.durationSeconds;
+          const recovery = overlay?.[n.name]?.recovery;
           const isGatePending = state === "gate-pending";
           const skipped = state === "skipped";
 
@@ -314,6 +319,52 @@ export function BlueprintDAG({
               <text x={n.x + 14} y={n.y + 34} style={{ fontSize: 9, fill: "var(--ink-muted)" }}>
                 {(n.agent || n.type) + (duration !== undefined ? ` · ${duration.toFixed(1)}s` : "")}
               </text>
+
+              {/* Recovery agent badge — the parallel specialist working this
+                  stage's failure is ALWAYS visible: pulsing amber while it
+                  diagnoses/retries, green once it recovered the stage, red
+                  when it exhausted its rounds and posted the runbook. */}
+              {recovery && (
+                <g>
+                  <rect
+                    x={n.x}
+                    y={n.y + NODE_H + 4}
+                    width={recovery === "active" ? 118 : recovery === "recovered" ? 78 : 132}
+                    height={15}
+                    rx={7.5}
+                    fill={
+                      recovery === "active"
+                        ? "rgba(245,158,11,0.16)"
+                        : recovery === "recovered"
+                          ? "rgba(16,185,129,0.14)"
+                          : "rgba(239,68,68,0.14)"
+                    }
+                    stroke={
+                      recovery === "active" ? "#f59e0b" : recovery === "recovered" ? "#10b981" : "#ef4444"
+                    }
+                    strokeWidth={1}
+                  >
+                    {recovery === "active" && (
+                      <animate attributeName="opacity" values="1;0.45;1" dur="1.2s" repeatCount="indefinite" />
+                    )}
+                  </rect>
+                  <text
+                    x={n.x + 7}
+                    y={n.y + NODE_H + 15}
+                    style={{
+                      fontSize: 8.5,
+                      fontWeight: 600,
+                      fill: recovery === "active" ? "#f59e0b" : recovery === "recovered" ? "#10b981" : "#ef4444",
+                    }}
+                  >
+                    {recovery === "active"
+                      ? "⚒ recovery agent active"
+                      : recovery === "recovered"
+                        ? "⚒ recovered"
+                        : "⚒ runbook → needs human"}
+                  </text>
+                </g>
+              )}
 
               {/* gate marker */}
               {n.gate && !isGatePending && (

@@ -64,8 +64,19 @@ export function buildRunOverlay(
   const failed = new Set(run.stages_failed ?? []);
 
   // Per-stage wall-clock from the last duration-bearing event per stage.
+  // Recovery-agent activity rides the same stream as synthetic
+  // `heal:<stage>` events — surface it on the FAILED/RETRYING stage's node
+  // so it's always visible WHO is working on a failure.
   const durations: Record<string, number> = {};
+  const recovery: Record<string, "active" | "recovered" | "exhausted"> = {};
   for (const e of run.stage_events ?? []) {
+    if (e.stage?.startsWith("heal:")) {
+      const target = e.stage.slice(5);
+      if (e.phase === "started") recovery[target] = "active";
+      else if (e.phase === "completed") recovery[target] = "recovered";
+      else if (e.phase === "failed") recovery[target] = "exhausted";
+      continue;
+    }
     if (typeof e.duration_ms === "number" && e.duration_ms > 0) {
       durations[e.stage] = e.duration_ms / 1000;
     }
@@ -108,6 +119,7 @@ export function buildRunOverlay(
     overlay[name] = {
       state,
       durationSeconds: durations[name],
+      recovery: recovery[name],
     };
   }
   return overlay;

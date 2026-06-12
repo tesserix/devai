@@ -377,6 +377,25 @@ async def _set_control(request: Request, task_id: str, value: str) -> dict[str, 
     return {"run_id": task_id, "control": value}
 
 
+@router.post("/runs/{task_id}/resume-failed")
+async def resume_failed(request: Request, task_id: str) -> dict[str, Any]:
+    """Continue a failed/cancelled run FROM WHERE IT LEFT OFF.
+
+    Completed stages are skipped on replay; execution picks up at the failed
+    stage with its full context (epic, stories, PR, branch, heal history).
+    Use /retrigger instead for a clean full re-run as a new run.
+    """
+    svc = _service(request)
+    task = await svc.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"run {task_id!r} not found")
+    await _authorize_run(request, task)
+    try:
+        return await svc.resume_from_failure(task_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+
 @router.post("/runs/{task_id}/pause")
 async def pause(request: Request, task_id: str) -> dict[str, Any]:
     """Pause a run at the next stage boundary (in-process executor)."""

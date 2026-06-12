@@ -106,7 +106,9 @@ class BlueprintExecutor:
         # stage AFTER transient retries exhaust, before on_failure applies.
         heal_enabled = bool(getattr(deps.config, "pipeline_heal_on_failure", True))
         self._heal_rounds = (
-            max(0, int(getattr(deps.config, "pipeline_heal_attempts", 1) or 0)) if heal_enabled else 0
+            min(5, max(0, int(getattr(deps.config, "pipeline_heal_attempts", 3) or 0)))
+            if heal_enabled
+            else 0
         )
 
     async def execute(self, blueprint: Blueprint, task: DevAITask) -> DevAITask:
@@ -296,14 +298,16 @@ class BlueprintExecutor:
                 result = payload
                 break
             # Retries exhausted — autonomous recovery BEFORE on_failure
-            # semantics: a recovery agent reviews the failure, injects
-            # corrective guidance, and the stage re-runs. Only when recovery
-            # is impossible (or rejected) does the failure stand.
+            # semantics: a recovery agent reviews the failure, files/updates
+            # the bug issue, injects corrective guidance, and the stage
+            # re-runs. When recovery exhausts its rounds (or is rejected),
+            # the runbook documents everything tried for the human.
             error, failure_state = payload
             if heal_rounds_left > 0 and await self._heal_stage(spec, task, str(error), _ev):
                 heal_rounds_left -= 1
                 max_attempts = 1  # one healed attempt per recovery round
                 continue
+            await self._write_runbook(spec, task, str(error))
             await self._handle_failure(
                 spec, stage, task, str(error), failure_state, (time.monotonic() - start) * 1000.0
             )
@@ -507,23 +511,34 @@ class BlueprintExecutor:
         decision = await self._diagnose_failure(spec, task, error)
         duration_ms = (time.monotonic() - start) * 1000.0
 
-        if decision is None and "timed out" in error.lower():
-            # A flaky diagnosis call must not doom a TIMEOUT — the recovery
-            # for "ran out of time" is always the same: continue the work
-            # incrementally (the implement agents read the committed-files
-            # ledger and skip finished work on retry).
-            decision = {
-                "action": "retry",
-                "diagnosis": "stage exceeded its time budget before finishing",
-                "guidance": (
-                    "Continue from the existing branch state. Do NOT recreate the "
-                    "branch or re-commit files that already exist — list the branch "
-                    "first, then finish ONLY the remaining work and open the PR."
-                ),
-            }
+        if decision is None:
+            # A flaky diagnosis call must never doom the recovery loop — the
+            # user contract is "retry with injected context, minimum 3
+            # rounds". Timeouts get the incremental-continuation brief; any
+            # other failure gets the error itself as corrective context.
+            if "timed out" in error.lower():
+                decision = {
+                    "action": "retry",
+                    "diagnosis": "stage exceeded its time budget before finishing",
+                    "guidance": (
+                        "Continue from the existing branch state. Do NOT recreate the "
+                        "branch or re-commit files that already exist — list the branch "
+                        "first, then finish ONLY the remaining work and open the PR."
+                    ),
+                }
+            else:
+                decision = {
+                    "action": "retry",
+                    "diagnosis": "automated diagnosis unavailable — retrying with the raw error as context",
+                    "guidance": (
+                        f"The previous attempt failed with: {error[:600]}\n"
+                        "Avoid repeating the exact operation that produced this error; "
+                        "work around it or use an alternative tool/approach."
+                    ),
+                }
 
-        if decision is None or decision.get("action") == "abort":
-            why = str((decision or {}).get("diagnosis") or "no recovery path found")
+        if decision.get("action") == "abort":
+            why = str(decision.get("diagnosis") or "no recovery path found")
             self._emit(
                 task,
                 _hev(StageEventPhase.FAILED, duration_ms=duration_ms, error=f"recovery abandoned: {why[:300]}"),
@@ -542,11 +557,19 @@ class BlueprintExecutor:
                     "at": time.time(),
                 }
             )
+        prev_rec = task.agent_context.get(f"heal:{spec.name}") or {}
         task.agent_context[f"heal:{spec.name}"] = {
+            # Bug-issue linkage survives across rounds.
+            **{k: prev_rec[k] for k in ("bug_issue", "bug_url") if prev_rec.get(k)},
             "error": error[:800],
             "diagnosis": diagnosis[:1200],
             "guidance": str(decision.get("guidance") or "")[:2000],
         }
+
+        # File/update the GitHub bug for this stage failure — the durable,
+        # human-visible track of what broke and what the recovery agent is
+        # doing about it. Best-effort: no SCM → recovery still proceeds.
+        await self._heal_bug_tracker(spec, task, error, decision, _hev)
 
         autonomy = str(task.agent_context.get("autonomy") or self._default_autonomy).lower()
         if decision.get("action") == "ask_user" and autonomy != "full":
@@ -567,6 +590,155 @@ class BlueprintExecutor:
         )
         self._emit(task, _ev(StageEventPhase.STARTED, message="retrying with recovery guidance"))
         return True
+
+    async def _heal_bug_tracker(
+        self, spec: StageSpec, task: DevAITask, error: str, decision: dict[str, Any], _hev: Any
+    ) -> None:
+        """File (round 1) or update (rounds 2+) the GitHub bug issue tracking
+        this stage failure — labeled, run-correlated, linked to the epic/PR,
+        and updated with every recovery attempt's diagnosis + plan."""
+        scm = self._deps.scm
+        if scm is None or getattr(task, "dry_run", False) or not task.repo:
+            return
+        from devai.pipeline.stages._base import run_correlation_label
+
+        rec = task.agent_context.get(f"heal:{spec.name}") or {}
+        attempt_no = len(
+            [h for h in (task.agent_context.get("heal_history") or []) if h.get("stage") == spec.name]
+        )
+        body_core = (
+            f"### Recovery attempt {attempt_no}\n\n"
+            f"**Error:**\n```\n{error[:800]}\n```\n\n"
+            f"**Diagnosis:** {str(decision.get('diagnosis') or '')[:800]}\n\n"
+            f"**Recovery action:** `{decision.get('action')}` — "
+            f"{str(decision.get('guidance') or '')[:800]}"
+        )
+        try:
+            bug = rec.get("bug_issue")
+            if not bug:
+                refs = []
+                if task.epic_issue_number:
+                    refs.append(f"**Epic:** #{task.epic_issue_number}")
+                if task.pr_number:
+                    refs.append(f"**Pull request:** #{task.pr_number}")
+                issue = await scm.create_issue(
+                    task.repo,
+                    title=f"[bug] stage {spec.name} failed on run {task.id}: {error[:70]}",
+                    body=(
+                        "Automated stage-failure bug filed by the recovery agent.\n\n"
+                        f"**Run:** `{task.id}`\n"
+                        f"**Stage:** `{spec.name}` (agent: {spec.resolved_agent() or 'n/a'})\n"
+                        + "\n".join(refs)
+                        + f"\n\n{body_core}\n\n"
+                        "_The recovery agent injects this diagnosis into the stage and retries; "
+                        "every further attempt is recorded here. If recovery exhausts its rounds, "
+                        "a runbook with everything tried is posted below._"
+                    ),
+                    labels=["bug", "devai:bug", "devai:stage-failure", run_correlation_label(task.id)],
+                )
+                rec["bug_issue"] = issue.get("number")
+                rec["bug_url"] = issue.get("html_url", "")
+                task.agent_context[f"heal:{spec.name}"] = rec
+                self._emit(
+                    task,
+                    _hev(
+                        StageEventPhase.STARTED,
+                        message=f"recovery bug filed: #{rec['bug_issue']} {rec['bug_url']}",
+                    ),
+                )
+            else:
+                await scm.add_comment(task.repo, bug, body_core)
+        except Exception:  # noqa: BLE001 — bug tracking must never break recovery
+            logger.exception("heal bug tracking failed for stage %s", spec.name)
+
+    async def _write_runbook(self, spec: StageSpec, task: DevAITask, error: str) -> None:
+        """Recovery exhausted — post the runbook: full chronology of what was
+        tried, the surviving error, and what a human should check next.
+        Lands on the stage's bug issue (labeled devai:needs-human) and in
+        agent_context['runbook:<stage>'] for the dashboard."""
+        history = [
+            h for h in (task.agent_context.get("heal_history") or []) if h.get("stage") == spec.name
+        ]
+        if not history:
+            return
+        chrono = "\n".join(
+            f"{i + 1}. **Error:** `{str(h.get('error') or '')[:140]}` → "
+            f"**diagnosis:** {str(h.get('diagnosis') or '')[:200]} → "
+            f"**action:** {h.get('action')}"
+            for i, h in enumerate(history)
+        )
+        runbook = (
+            f"## Runbook — stage `{spec.name}` could not self-heal\n\n"
+            f"**Run:** `{task.id}` · **Agent:** {spec.resolved_agent() or 'n/a'} · "
+            f"**Recovery rounds used:** {len(history)}\n\n"
+            f"**Final error:**\n```\n{error[:700]}\n```\n\n"
+            f"### What the recovery agent tried\n{chrono}\n\n"
+            f"{await self._runbook_advice(spec, error, history)}"
+        )
+        task.agent_context[f"runbook:{spec.name}"] = runbook[:6000]
+
+        rec = task.agent_context.get(f"heal:{spec.name}") or {}
+        bug = rec.get("bug_issue")
+        scm = self._deps.scm
+        if scm is not None and bug and not getattr(task, "dry_run", False):
+            try:
+                await scm.add_comment(task.repo, bug, runbook)
+                await scm.add_labels(task.repo, bug, ["devai:needs-human", "devai:runbook"])
+            except Exception:  # noqa: BLE001
+                logger.exception("runbook post failed for stage %s", spec.name)
+        self._emit(
+            task,
+            StageEvent(
+                f"heal:{spec.name}",
+                StageEventPhase.FAILED,
+                stage_type="recovery",
+                agent=self._HEAL_AGENT,
+                lane=spec.lane,
+                error=(
+                    f"recovery exhausted after {len(history)} round(s) — runbook posted"
+                    + (f" to bug #{bug}" if bug else "")
+                ),
+            ),
+        )
+
+    async def _runbook_advice(
+        self, spec: StageSpec, error: str, history: list[dict[str, Any]]
+    ) -> str:
+        """LLM-drafted 'what a human should check' section; mechanical
+        fallback when no LLM is usable."""
+        llm = self._deps.llm
+        if llm is not None and getattr(llm, "provider_name", "noop") != "noop":
+            try:
+                from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+                tried = "; ".join(str(h.get("diagnosis") or "")[:150] for h in history[-4:])
+                prompt = (
+                    f"An autonomous pipeline stage {spec.name!r} failed repeatedly and automated "
+                    f"recovery gave up.\nFinal error:\n{error[:1000]}\n\nDiagnoses already tried "
+                    f"(none worked): {tried}\n\nWrite EXACTLY two markdown sections:\n"
+                    "### Likely root cause\n<2-3 sentences>\n"
+                    "### What a human should check\n<numbered list of up to 5 concrete steps>"
+                )
+                response = await llm.generate(
+                    LLMRequest(
+                        messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                        max_tokens=500,
+                        temperature=0.0,
+                        extra={"agent": self._HEAL_AGENT},
+                    )
+                )
+                text = (response.text or "").strip()
+                if text:
+                    return text
+            except Exception:  # noqa: BLE001
+                logger.exception("runbook advice generation failed")
+        return (
+            "### What a human should check\n"
+            "1. Read the final error above — it survived every automated diagnosis.\n"
+            "2. Check the stage's agent logs (Logs tab, errors filter) for the failing tool calls.\n"
+            "3. Re-run the failing operation manually with the same inputs.\n"
+            "4. Resume the run from the failed stage once fixed."
+        )
 
     async def _diagnose_failure(self, spec: StageSpec, task: DevAITask, error: str) -> dict[str, Any] | None:
         """LLM root-cause + recovery plan. None when no usable LLM or the

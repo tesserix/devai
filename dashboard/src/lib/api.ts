@@ -373,6 +373,15 @@ export const api = {
       { method: "POST" },
     ),
 
+  // Continue a failed/cancelled run from the failed stage (completed stages
+  // skip on replay). Retry = full re-run as a new run; this = pick up where
+  // it left off with epic/stories/PR/branch context intact.
+  resumeFailedRun: (runId: string) =>
+    apiFetch<{ run_id: string; state: string; resumed: boolean; was: string }>(
+      `/pipeline/runs/${runId}/resume-failed`,
+      { method: "POST" },
+    ),
+
   pauseRun: (runId: string) =>
     apiFetch<{ run_id: string; control: string }>(`/pipeline/runs/${runId}/pause`, {
       method: "POST",

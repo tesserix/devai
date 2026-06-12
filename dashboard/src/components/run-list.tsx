@@ -36,6 +36,8 @@ interface RunListProps {
   onSelect?: (runId: string) => void;
   // Retrigger by run id (server replays the original requirements).
   onRetrigger?: (runId: string) => Promise<void> | void;
+  // Continue a failed run from the failed stage (completed stages skip).
+  onResumeFailed?: (runId: string) => Promise<void> | void;
   // Pause / resume / stop a running pipeline. Take effect at the next
   // agent boundary (never mid-Claude-call).
   onPause?: (runId: string) => Promise<void> | void;
@@ -57,6 +59,7 @@ export function RunList({
   selectedRunId,
   onSelect,
   onRetrigger,
+  onResumeFailed,
   onPause,
   onResume,
   onStop,
@@ -98,6 +101,18 @@ export function RunList({
     const isBusy = busyId === run.run_id;
     return (
       <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+        {isFailed && onResumeFailed && (
+          <ControlPill
+            label="Continue"
+            color="ok"
+            busy={isBusy}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleControl(run.run_id, onResumeFailed);
+            }}
+          />
+        )}
         {isFailed && onRetrigger && (
           <ControlPill
             label="Retry"

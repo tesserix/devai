@@ -200,7 +200,9 @@ class StateManager:
     PIPELINE_ACTIVE_KEY = "devai:pipeline:active"
     PIPELINE_CLAIM_KEY = "devai:pipeline:claim:{task_id}"
 
-    async def persist_task(self, task_dict: dict[str, Any], *, ttl: int | None = None) -> None:
+    async def persist_task(
+        self, task_dict: dict[str, Any], *, ttl: int | None = None, force: bool = False
+    ) -> None:
         """Write a DevAITask dict to Redis, last-writer-wins by `updated_at`.
 
         The Pipeline persists after every state mutation, but some of those
@@ -214,6 +216,10 @@ class StateManager:
         already stored is dropped, so the newest mutation always wins
         regardless of the order persists actually land. The recent /
         by_blueprint / by_repo indices are updated only when we write.
+
+        ``force=True`` bypasses BOTH guards — used exclusively by the
+        deliberate resume-from-failure path, which legitimately moves a
+        terminal run back to ``queued``.
         """
         task_id = task_dict.get("id")
         if not task_id:
@@ -232,7 +238,7 @@ class StateManager:
                 try:
                     await pipe.watch(key)
                     current = await pipe.get(key)  # immediate read under WATCH
-                    if current:
+                    if current and not force:
                         try:
                             stored = json.loads(current)
                             stored_ts = float(stored.get("updated_at") or 0.0)

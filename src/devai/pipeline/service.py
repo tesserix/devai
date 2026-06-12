@@ -674,6 +674,44 @@ class PipelineService:
                     logger.debug("clear control flag failed for %s", task_id, exc_info=True)
         return True
 
+    async def resume_from_failure(self, task_id: str) -> dict[str, Any]:
+        """Continue a FAILED (or cancelled) run from where it left off.
+
+        The complement of retrigger: retrigger replays the whole intent as a
+        NEW run; this re-enqueues the SAME run — completed stages are skipped
+        on replay (``stages_completed``), so execution picks up at the failed
+        stage with all its context (epic, stories, PR, branch, heal history)
+        intact. The recovery agent gets a fresh round budget.
+        """
+        snapshot = await self.get_task(task_id)
+        if snapshot is None:
+            raise ValueError(f"run {task_id!r} not found")
+        state = str(snapshot.get("state") or "")
+        resumable = {"failed", "stage_failed", "agent_timeout", "cancelled"}
+        if state not in resumable:
+            raise ValueError(f"run is {state!r} — only failed/cancelled runs can be resumed")
+
+        snapshot["state"] = "queued"
+        snapshot["error"] = ""
+        snapshot["failed_stage"] = ""
+        snapshot["current_stage"] = ""
+        snapshot["updated_at"] = time.time()
+        ctx = snapshot.setdefault("agent_context", {})
+        ctx["resumed_from_failure_at"] = time.time()
+        sm = self.state_manager
+        # Deliberate terminal→queued transition — force past the zombie guard.
+        await sm.persist_task(snapshot, ttl=self.config.pipeline_task_ttl, force=True)
+        # A lingering "stopped" control flag would cancel the run at claim.
+        ctrl = getattr(sm, "set_pipeline_control", None)
+        if ctrl is not None:
+            try:
+                await ctrl(task_id, "")
+            except Exception:  # noqa: BLE001
+                logger.debug("control clear failed for %s", task_id, exc_info=True)
+        await sm.enqueue_task(task_id)
+        logger.info("run %s resumed from failure (was %s)", task_id, state)
+        return {"run_id": task_id, "state": "queued", "resumed": True, "was": state}
+
     async def approve_gate(
         self, task_id: str, gate: str, decision: str, *, approver: dict[str, Any] | None = None
     ) -> bool:

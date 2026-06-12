@@ -534,7 +534,23 @@ class GitHubSCMClient(SCMClient):
         payload: dict[str, Any] = {"message": message, "content": encoded, "branch": branch}
         if sha:
             payload["sha"] = sha
-        resp = await self._request("PUT", f"/repos/{repo}/contents/{path}", json=payload)
+        try:
+            resp = await self._request("PUT", f"/repos/{repo}/contents/{path}", json=payload)
+        except Exception as e:  # noqa: BLE001
+            # UPDATING an existing file requires its current blob sha; agents
+            # never pass one, so every update 422'd ("sha wasn't supplied")
+            # and they burned turns fighting it. Fetch the sha and retry once
+            # — the "or update" half of this method's contract.
+            if "422" not in str(e) or sha:
+                raise
+            lookup = await self._request(
+                "GET", f"/repos/{repo}/contents/{path}", params={"ref": branch}
+            )
+            current_sha = (lookup.json() or {}).get("sha")
+            if not current_sha:
+                raise
+            payload["sha"] = current_sha
+            resp = await self._request("PUT", f"/repos/{repo}/contents/{path}", json=payload)
         return resp.json()
 
     # --- Pull Requests ---

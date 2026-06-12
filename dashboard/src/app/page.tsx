@@ -133,6 +133,12 @@ export default function DashboardPage() {
   const handlePause = (runId: string) => runControl(runId, "paused", api.pauseRun);
   const handleResume = (runId: string) => runControl(runId, "resumed", api.resumeRun);
   const handleStop = (runId: string) => runControl(runId, "stopped", api.stopRun);
+  // Continue a failed run from its failed stage (vs Retry = full new run).
+  const handleResumeFailed = (runId: string) =>
+    runControl(runId, "continued from the failed stage", async (id) => {
+      await api.resumeFailedRun(id);
+      setSelectedRunId(id);
+    });
 
   const handleDelete = async (runId: string) => {
     await runControl(runId, "deleted", api.deleteRun);
@@ -221,6 +227,7 @@ export default function DashboardPage() {
               selectedRunId={selectedRunId}
               onSelect={setSelectedRunId}
               onRetrigger={handleRetrigger}
+              onResumeFailed={handleResumeFailed}
               onPause={handlePause}
               onResume={handleResume}
               onStop={handleStop}
