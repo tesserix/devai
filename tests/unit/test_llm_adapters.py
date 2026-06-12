@@ -260,3 +260,37 @@ def test_stagedeps_carries_llm_adapter_field():
     # And it's None when not provided — stages must tolerate
     no_llm = StageDeps(config=_Cfg())
     assert no_llm.llm is None
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Anthropic adapter wire-format regressions
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_anthropic_kwargs_never_forward_bookkeeping_extras():
+    """extra={'agent': ...} is OUR telemetry attribution — forwarding it to
+    the SDK raised `unexpected keyword argument 'agent'` and silently broke
+    plan-approval clarity, recovery diagnosis, and the boardroom panel."""
+    anthropic = pytest.importorskip("anthropic")  # noqa: F841
+    from devai.adapters.llm.anthropic_adapter import AnthropicLLMAdapter
+    from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+    adapter = AnthropicLLMAdapter.__new__(AnthropicLLMAdapter)
+    adapter.default_model = "claude-test"
+    adapter.default_max_tokens = 100
+
+    req = LLMRequest(
+        messages=[
+            LLMMessage(role=LLMRole.SYSTEM, content="You are the QA lead."),
+            LLMMessage(role=LLMRole.USER, content="hello"),
+        ],
+        extra={"agent": "boardroom", "totally_unknown": True, "top_k": 5},
+    )
+    kwargs = adapter._build_kwargs(req)
+
+    assert "agent" not in kwargs and "totally_unknown" not in kwargs
+    assert kwargs["metadata"] == {"user_id": "devai:boardroom"}
+    assert kwargs["top_k"] == 5  # real API params still pass through
+    # SYSTEM messages are PROMOTED to the system param, never dropped.
+    assert kwargs["system"] == "You are the QA lead."
+    assert all(m["role"] != "system" for m in kwargs["messages"])

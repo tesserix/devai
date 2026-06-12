@@ -156,10 +156,8 @@ class _BoardroomDebateStage(PipelineStage):
 
         response = await self.deps.llm.generate(
             LLMRequest(
-                messages=[
-                    LLMMessage(role=LLMRole.SYSTEM, content=system),
-                    LLMMessage(role=LLMRole.USER, content=prompt),
-                ],
+                system=system,
+                messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
                 max_tokens=max_tokens,
                 temperature=0.4,
                 extra={"agent": "boardroom"},

@@ -117,8 +117,10 @@ class AnthropicLLMAdapter(LLMAdapter):
     # ── Internal ──────────────────────────────────────────────────────
 
     def _build_kwargs(self, request: LLMRequest) -> dict[str, Any]:
-        # Filter out SYSTEM messages — they go to the top-level
-        # `system` param, not into the messages list (Anthropic API).
+        # SYSTEM messages go to the top-level `system` param, not the
+        # messages list (Anthropic API). PROMOTE them rather than drop them —
+        # silently discarding a caller's system message erased agent personas.
+        system_texts = [m.content for m in request.messages if m.role == LLMRole.SYSTEM and m.content]
         wire_messages = [self._message_to_wire(m) for m in request.messages if m.role != LLMRole.SYSTEM]
 
         # Anthropic requires non-empty messages — if the caller passed
@@ -131,8 +133,9 @@ class AnthropicLLMAdapter(LLMAdapter):
             "max_tokens": request.max_tokens or self.default_max_tokens,
             "messages": wire_messages,
         }
-        if request.system:
-            kwargs["system"] = request.system
+        combined_system = "\n\n".join(filter(None, [request.system, *system_texts]))
+        if combined_system:
+            kwargs["system"] = combined_system
         if request.temperature is not None:
             kwargs["temperature"] = request.temperature
         if request.top_p is not None:
@@ -148,9 +151,20 @@ class AnthropicLLMAdapter(LLMAdapter):
                 }
                 for t in request.tools
             ]
-        # Per-call extras (cache_control, beta headers, …)
+        # Per-call extras — ONLY parameters the Messages API actually accepts.
+        # Callers across the codebase use `extra` for OUR bookkeeping too
+        # (`extra={"agent": "plan_approval"}` for telemetry attribution);
+        # forwarding those verbatim made the SDK raise `unexpected keyword
+        # argument 'agent'` — which silently broke every adapter-based LLM
+        # call that passed it (plan-approval clarity → always "clear",
+        # recovery diagnosis → "no usable diagnosis", boardroom panel →
+        # every seat absent). Bookkeeping keys map to Anthropic metadata.
+        _api_keys = {"metadata", "top_k", "stop_sequences", "service_tier", "betas"}
         for k, v in (request.extra or {}).items():
-            kwargs.setdefault(k, v)
+            if k in _api_keys:
+                kwargs.setdefault(k, v)
+            elif k == "agent" and isinstance(v, str):
+                kwargs.setdefault("metadata", {"user_id": f"devai:{v}"[:64]})
         return kwargs
 
     def _message_to_wire(self, m: Any) -> dict[str, Any]:
