@@ -7,6 +7,7 @@ import {
   type PipelineRun,
 } from "@/lib/api";
 import { BlueprintDAG, type RunStateOverlay } from "@/components/blueprint-dag";
+import { BlueprintMesh } from "@/components/blueprint-mesh";
 import { normalizeRunState, type RunState } from "@/components/run-state-badge";
 
 /**
@@ -144,6 +145,7 @@ export function RunDAG({
 }) {
   const [graph, setGraph] = useState<BlueprintGraph | null>(null);
   const [error, setError] = useState<string>("");
+  const [view, setView] = useState<"lanes" | "mesh">("lanes");
 
   useEffect(() => {
     if (!blueprint) return;
@@ -185,12 +187,23 @@ export function RunDAG({
   }
 
   return (
-    <BlueprintDAG
-      graph={graph}
-      overlay={overlay}
-      onApprove={onApprove}
-      onReject={onReject}
-    />
+    <div>
+      <div className="flex justify-end mb-2">
+        <div className="seg" role="group" aria-label="Graph view">
+          <button data-active={view === "lanes"} aria-pressed={view === "lanes"} onClick={() => setView("lanes")}>
+            Lanes
+          </button>
+          <button data-active={view === "mesh"} aria-pressed={view === "mesh"} onClick={() => setView("mesh")}>
+            Mesh
+          </button>
+        </div>
+      </div>
+      {view === "mesh" ? (
+        <BlueprintMesh graph={graph} overlay={overlay} />
+      ) : (
+        <BlueprintDAG graph={graph} overlay={overlay} onApprove={onApprove} onReject={onReject} />
+      )}
+    </div>
   );
 }
 
