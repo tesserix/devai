@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any
 
 from devai.pipeline.types import (
     FAILURE_STATES,
-    HUMAN_GATE_STATES,
     TERMINAL_STATES,
     DevAITask,
     StageEvent,
@@ -272,7 +271,15 @@ class PipelineService:
             logger.exception("reconcile: failed to list persisted tasks")
             return
 
-        skip_states = TERMINAL_STATES | FAILURE_STATES | HUMAN_GATE_STATES
+        # AWAITING_APPROVAL is NOT skipped: a run only legitimately awaits
+        # while a live worker holds the gate poll — after a pod roll that
+        # await is gone and the run is orphaned forever (live incident: the
+        # user approved, the gate key said 'approved', and nothing ever
+        # consumed it). The is_task_active check below protects runs whose
+        # worker is genuinely alive; orphans re-enqueue, the gate stage
+        # re-runs, reads the recorded decision, and proceeds (or re-pauses
+        # harmlessly when still undecided).
+        skip_states = TERMINAL_STATES | FAILURE_STATES
         resumed = 0
         for td in tasks:
             try:
