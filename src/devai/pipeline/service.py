@@ -49,6 +49,21 @@ logger = logging.getLogger(__name__)
 _TELEMETRY_STAGE_PHASES = frozenset({"completed", "failed", "skipped"})
 
 
+def _provider_for_model(model: str) -> str:
+    """Provider family from a model id — for ledger rows built from turn
+    envelopes, where the provider isn't otherwise visible."""
+    m = (model or "").lower()
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith("gemini"):
+        return "vertex_gemini"
+    if m.startswith(("llama", "mixtral")):
+        return "groq"
+    if m.startswith(("gpt", "o1", "o3", "o4")):
+        return "openai"
+    return "unknown"
+
+
 class PipelineService:
     """Operational facade over `Pipeline`.
 
@@ -137,6 +152,64 @@ class PipelineService:
                 self._persist_run_log(run_id, [payload], ts)
             except RuntimeError:
                 pass  # no running loop (test context)
+        if envelope.get("kind") == "turn":
+            self._account_turn_usage(run_id, envelope)
+
+    def _account_turn_usage(self, run_id: str, envelope: dict[str, Any]) -> None:
+        """Billing for the legacy provider loops (ClaudeProvider et al).
+
+        Adapter-path calls are accounted by InstrumentedLLMAdapter; the
+        legacy agents talk to the SDK directly and their only externally
+        visible usage signal is the per-turn envelope. Record it into the
+        usage ledger (per-user/per-model analytics) and, when the run is in
+        trial mode (no user connector), draw down that user's trial budget.
+        Best-effort and fire-and-forget — billing must never break the loop.
+        """
+        try:
+            tok_in = int(envelope.get("usage_in") or 0)
+            tok_out = int(envelope.get("usage_out") or 0)
+            if tok_in <= 0 and tok_out <= 0:
+                return
+            email = str(envelope.get("triggered_by") or "")
+            model = str(envelope.get("model") or "")
+            provider = _provider_for_model(model)
+            cost = 0.0
+            try:
+                from devai.analytics.pricing import estimate_cost
+
+                cost = estimate_cost(provider, model, tok_in, tok_out)
+            except Exception:  # noqa: BLE001
+                pass
+
+            from devai.analytics.usage_ledger import get_global_ledger
+
+            ledger = get_global_ledger()
+            if ledger is not None:
+                import datetime
+
+                self._spawn(
+                    ledger.record(
+                        day=datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d"),
+                        provider=provider,
+                        model=model,
+                        tokens_in=tok_in,
+                        tokens_out=tok_out,
+                        cost_usd=cost,
+                        duration_ms=0.0,
+                        triggered_by=email,
+                        agent=str(envelope.get("agent") or ""),
+                        run_id=run_id,
+                    )
+                )
+            if envelope.get("trial") and email:
+                from devai.settings.trial import get_trial_meter
+
+                meter = get_trial_meter(self.config)
+                self._spawn(meter.add(email, tok_in + tok_out))
+        except RuntimeError:
+            pass  # no running loop (sync test context)
+        except Exception:  # noqa: BLE001
+            logger.debug("turn usage accounting failed", exc_info=True)
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 

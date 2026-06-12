@@ -137,9 +137,7 @@ class _UpdateGovernanceStage(PipelineStage):
             "pr": task.pr_number,
         }
         skill_guidance = self._skill_guidance(ctx)
-        from devai.adapters.llm import role_llm_or
-
-        llm = role_llm_or(self.deps.config, "utility", self.deps.llm)
+        llm = await self.deps.role_llm_for_principal(task.triggered_by or "", "utility")
         if llm is not None and getattr(llm, "provider_name", "noop") != "noop":
             try:
                 from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
@@ -176,7 +174,11 @@ class _UpdateGovernanceStage(PipelineStage):
                         max_tokens=2500,
                         temperature=0.2,
                         model=str(getattr(self.deps.config, "llm_model_utility", "") or ""),
-                        extra={"agent": "governance"},
+                        extra={
+                            "agent": "governance",
+                            "triggered_by": task.triggered_by or "",
+                            "run_id": task.id,
+                        },
                     )
                 )
                 text = (response.text or "").strip()

@@ -168,6 +168,7 @@ class ClaudeProvider:
                         "turn",
                         turn=turns_used,
                         session=session_no,
+                        model=self.model,
                         usage_in=getattr(usage, "input_tokens", 0) or 0,
                         usage_out=getattr(usage, "output_tokens", 0) or 0,
                         cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0,

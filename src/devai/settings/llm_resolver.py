@@ -160,5 +160,20 @@ class PrincipalLLMResolver:
             logger.warning("settings: overlay fetch failed — using base settings", exc_info=True)
             return self._base
 
+    async def llm_overlay_for_email(self, email: str) -> tuple[Any, bool]:
+        """``(settings, has_own_llm_connector)`` for a user.
+
+        The bool is what policy decisions key on: True only when the user's
+        Settings actually overlay LLM-connector attributes (their own
+        provider/keys/model). A user who configured only SCM/MCP connectors
+        gets the base settings back so role-chain caches stay shared."""
+        overlay = await self.settings_for_email(email)
+        if overlay is self._base:
+            return self._base, False
+        relevant = set(getattr(overlay, "overlaid_attrs", ()) or ()) & _llm_attrs()
+        if not relevant:
+            return self._base, False
+        return overlay, True
+
 
 __all__ = ["PrincipalLLMResolver"]

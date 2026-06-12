@@ -50,6 +50,19 @@ def set_turn_context(run_id: str, agent: str, stage: str) -> contextvars.Token:
     return _turn_ctx.set({"run_id": run_id, "agent": agent or "", "stage": stage or ""})
 
 
+def update_turn_context(**fields: str) -> None:
+    """Merge extra fields into the CURRENT turn context (no-op without one).
+
+    Used by AgentAdapter to attach billing attribution — ``triggered_by``
+    (who the spend belongs to) and ``trial`` (meter this usage against
+    their free-trial budget) — so every envelope a legacy provider emits
+    carries enough for the sink to record usage per user."""
+    ctx = _turn_ctx.get()
+    if ctx is None:
+        return
+    _turn_ctx.set({**ctx, **{k: v for k, v in fields.items() if v}})
+
+
 def reset_turn_context(token: contextvars.Token) -> None:
     _turn_ctx.reset(token)
 
@@ -76,10 +89,15 @@ async def emit_turn(kind: str, **fields: Any) -> None:
         "timestamp": time.time(),
         **fields,
     }
+    # Billing attribution riding the context (update_turn_context): who the
+    # spend belongs to, and whether it draws down their trial budget.
+    for key in ("triggered_by", "trial"):
+        if ctx.get(key):
+            envelope.setdefault(key, ctx[key])
     try:
         await _sink(ctx["run_id"], envelope)
     except Exception:  # noqa: BLE001
         logger.debug("turn sink failed (kind=%s)", kind, exc_info=True)
 
 
-__all__ = ["emit_turn", "reset_turn_context", "set_turn_context", "set_turn_sink"]
+__all__ = ["emit_turn", "reset_turn_context", "set_turn_context", "set_turn_sink", "update_turn_context"]

@@ -225,3 +225,140 @@ async def test_overlay_bridges_uid_keyed_connector_to_email_at_runtime():
     assert overlay.llm_provider == "anthropic"
     assert overlay.claude_model == "claude-opus-4-8"
     assert overlay.anthropic_api_key == "sk-ant-mine"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# role_llm_for_principal — the one LLM-selection policy
+# ─────────────────────────────────────────────────────────────────────
+
+
+class _SentinelLLM:
+    provider_name = "sentinel"
+    default_model = "m"
+
+
+def _policy_deps(*, strict: bool, budget: int, has_own: bool, overlay=None):
+    from devai.pipeline.interfaces import StageDeps
+
+    class _Cfg:
+        llm_provider = "noop"
+        llm_noop_canned_text = "[noop]"
+        llm_require_user_connector = strict
+        llm_trial_token_budget = budget
+        redis_url = ""  # trial meter degrades to in-memory
+
+    cfg = _Cfg()
+
+    class _Resolver:
+        async def llm_overlay_for_email(self, email):
+            return (overlay if has_own else cfg), has_own
+
+        async def resolve_for_email(self, email):
+            return None
+
+        async def settings_for_email(self, email):
+            return overlay if has_own else cfg
+
+    return StageDeps(config=cfg, llm=_SentinelLLM(), llm_resolver=_Resolver())
+
+
+@pytest.mark.asyncio
+async def test_role_llm_trial_meters_humans_without_connector():
+    """Strict mode + no connector → platform chain METERED, not raw."""
+    from devai.settings.trial import TrialLLMAdapter
+
+    deps = _policy_deps(strict=True, budget=50_000, has_own=False)
+    adapter = await deps.role_llm_for_principal("new.user@example.com", "utility")
+    assert isinstance(adapter, TrialLLMAdapter)
+
+
+@pytest.mark.asyncio
+async def test_role_llm_refuses_humans_when_trial_disabled():
+    deps = _policy_deps(strict=True, budget=0, has_own=False)
+    assert await deps.role_llm_for_principal("new.user@example.com", "utility") is None
+
+
+@pytest.mark.asyncio
+async def test_role_llm_never_meters_system_principals():
+    from devai.settings.trial import TrialLLMAdapter
+
+    deps = _policy_deps(strict=True, budget=50_000, has_own=False)
+    adapter = await deps.role_llm_for_principal("webhook:tesserix/devai#1", "utility")
+    assert adapter is not None and not isinstance(adapter, TrialLLMAdapter)
+
+
+@pytest.mark.asyncio
+async def test_role_llm_user_connector_skips_the_meter():
+    """A user WITH their own connector is never trial-wrapped — their own
+    keys pay for the call."""
+    from devai.settings.trial import TrialLLMAdapter
+
+    class _Overlay:
+        llm_provider = "noop"
+        llm_noop_canned_text = "[noop]"
+        overlaid_attrs = ("llm_provider", "anthropic_api_key")
+        anthropic_api_key = "sk-ant-user-own"
+
+    deps = _policy_deps(strict=True, budget=50_000, has_own=True, overlay=_Overlay())
+    adapter = await deps.role_llm_for_principal("owner@example.com", "utility")
+    assert adapter is not None and not isinstance(adapter, TrialLLMAdapter)
+
+
+def test_role_chain_cache_is_isolated_per_credentials():
+    """Two settings objects with DIFFERENT keys must never share a cached
+    role chain — that would serve tenant A's API key to tenant B."""
+    from devai.adapters.llm.factory import _role_cache_key
+
+    class _A:
+        llm_provider = "anthropic"
+        anthropic_api_key = "sk-ant-tenant-a"
+
+    class _B:
+        llm_provider = "anthropic"
+        anthropic_api_key = "sk-ant-tenant-b"
+
+    assert _role_cache_key(_A(), "utility") != _role_cache_key(_B(), "utility")
+    # Same credentials → same slot (the cache still deduplicates).
+    assert _role_cache_key(_A(), "utility") == _role_cache_key(_A(), "utility")
+
+
+@pytest.mark.asyncio
+async def test_agent_adapter_fails_clearly_when_trial_exhausted():
+    """Legacy ALM agents must not silently ride the shared platform keys:
+    a human with no connector and a spent trial budget gets a clear,
+    actionable stage failure instead."""
+    from devai.pipeline.stages._base import AgentAdapter
+    from devai.pipeline.types import DevAITask
+    from devai.settings.trial import get_trial_meter
+
+    class _Cfg:
+        llm_provider = "noop"
+        llm_noop_canned_text = "[noop]"
+        llm_require_user_connector = True
+        llm_trial_token_budget = 100
+        redis_url = ""
+
+    cfg = _Cfg()
+
+    class _Resolver:
+        async def llm_overlay_for_email(self, email):
+            return cfg, False
+
+    from devai.pipeline.interfaces import StageDeps
+
+    deps = StageDeps(config=cfg, llm_resolver=_Resolver())
+
+    class _Stage(AgentAdapter):
+        def name(self):
+            return "implement-code"
+
+        def _make_agent(self):  # pragma: no cover — must not be reached
+            raise AssertionError("agent must not be built once the trial is spent")
+
+    meter = get_trial_meter(cfg)
+    await meter.add("spent.user@example.com", 10_000)  # way past the budget
+
+    task = DevAITask(intent="x", blueprint="b", repo="o/r")
+    task.triggered_by = "spent.user@example.com"
+    with pytest.raises(RuntimeError, match="Settings"):
+        await _Stage(deps, {}).execute(task)

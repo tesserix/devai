@@ -708,7 +708,7 @@ class BlueprintExecutor:
             f"**Recovery rounds used:** {len(history)}\n\n"
             f"**Final error:**\n```\n{error[:700]}\n```\n\n"
             f"### What the recovery agent tried\n{chrono}\n\n"
-            f"{await self._runbook_advice(spec, error, history)}"
+            f"{await self._runbook_advice(spec, error, history, task)}"
         )
         task.agent_context[f"runbook:{spec.name}"] = runbook[:6000]
 
@@ -737,13 +737,13 @@ class BlueprintExecutor:
         )
 
     async def _runbook_advice(
-        self, spec: StageSpec, error: str, history: list[dict[str, Any]]
+        self, spec: StageSpec, error: str, history: list[dict[str, Any]], task: DevAITask | None = None
     ) -> str:
         """LLM-drafted 'what a human should check' section; mechanical
         fallback when no LLM is usable."""
-        from devai.adapters.llm import role_llm_or
-
-        llm = role_llm_or(self._deps.config, "utility", self._deps.llm)
+        llm = await self._deps.role_llm_for_principal(
+            getattr(task, "triggered_by", "") or "", "utility"
+        )
         if llm is not None and getattr(llm, "provider_name", "noop") != "noop":
             try:
                 from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
@@ -762,7 +762,11 @@ class BlueprintExecutor:
                         max_tokens=500,
                         temperature=0.0,
                         model=str(getattr(self._deps.config, "llm_model_utility", "") or ""),
-                        extra={"agent": self._HEAL_AGENT},
+                        extra={
+                            "agent": self._HEAL_AGENT,
+                            "triggered_by": getattr(task, "triggered_by", "") or "",
+                            "run_id": getattr(task, "id", "") or "",
+                        },
                     )
                 )
                 text = (response.text or "").strip()
@@ -781,9 +785,7 @@ class BlueprintExecutor:
     async def _diagnose_failure(self, spec: StageSpec, task: DevAITask, error: str) -> dict[str, Any] | None:
         """LLM root-cause + recovery plan. None when no usable LLM or the
         response is unusable — recovery degrades to plain on_failure."""
-        from devai.adapters.llm import role_llm_or
-
-        llm = role_llm_or(self._deps.config, "utility", self._deps.llm)
+        llm = await self._deps.role_llm_for_principal(task.triggered_by or "", "utility")
         if llm is None or getattr(llm, "provider_name", "noop") == "noop":
             return None
         try:
@@ -824,7 +826,11 @@ class BlueprintExecutor:
                     max_tokens=700,
                     temperature=0.0,
                     model=str(getattr(self._deps.config, "llm_model_utility", "") or ""),
-                    extra={"agent": self._HEAL_AGENT},
+                    extra={
+                        "agent": self._HEAL_AGENT,
+                        "triggered_by": task.triggered_by or "",
+                        "run_id": task.id,
+                    },
                 )
             )
             data = _parse_json_lenient(response.text or "")

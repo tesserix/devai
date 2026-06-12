@@ -223,9 +223,13 @@ class _BoardroomDebateStage(PipelineStage):
                 model=model,
                 max_tokens=max_tokens,
                 temperature=0.4,
-                # triggered_by lets the usage ledger attribute boardroom spend
-                # to the user whose run this is.
-                extra={"agent": "boardroom", "triggered_by": getattr(self, "_triggered_by", "")},
+                # triggered_by/run_id let the usage ledger attribute boardroom
+                # spend to the user and run this debate belongs to.
+                extra={
+                    "agent": "boardroom",
+                    "triggered_by": getattr(self, "_triggered_by", ""),
+                    "run_id": getattr(self, "_run_id", ""),
+                },
             )
         )
         return (response.text or "").strip()
@@ -305,11 +309,22 @@ class _BoardroomDebateStage(PipelineStage):
     # ── the meeting ─────────────────────────────────────────────────
 
     async def execute(self, task: DevAITask) -> StageResult:
-        # Honor the triggering user's own LLM connector (their provider/keys/
-        # model) for the whole debate — not the global platform model. Set
-        # before any _say() so every seat + the moderator run on it.
+        # Honor the triggering user's own LLM connector (their keys, with the
+        # boardroom's role-priced models requested per call) for the whole
+        # debate. Set before any _say() so every seat + the moderator run on
+        # it. A user with no connector rides the trial-metered platform chain;
+        # at exhaustion the debate refuses clearly instead of leaking onto the
+        # shared keys.
         try:
-            user_llm = await self.deps.llm_for_principal(task.triggered_by or "")
+            user_llm = await self.deps.role_llm_for_principal(task.triggered_by or "", "")
+            if user_llm is None and self._llm_usable():
+                # A platform LLM exists but the policy refused it: the user has
+                # no connector and their trial budget is spent/disabled. (When
+                # NO LLM exists at all, fall through to the visible skip.)
+                raise RuntimeError(
+                    "no LLM available for this debate — your free trial allowance "
+                    "is used up. Add your own LLM API key in Settings → LLM Provider."
+                )
             if (
                 user_llm is not None
                 and getattr(user_llm, "provider_name", "noop") != "noop"
@@ -317,9 +332,12 @@ class _BoardroomDebateStage(PipelineStage):
             ):
                 self._role_chain = user_llm
                 logger.info("boardroom: using per-user LLM for %s", task.triggered_by)
+        except RuntimeError:
+            raise
         except Exception:  # noqa: BLE001
             logger.debug("boardroom: per-user LLM resolution failed — using role chain", exc_info=True)
         self._triggered_by = task.triggered_by or ""
+        self._run_id = task.id
 
         topic = (
             str(self.config.get("topic") or "")

@@ -129,6 +129,42 @@ class StageDeps:
                 return adapter
         return self.llm
 
+    async def role_llm_for_principal(self, email: str, role: str) -> LLMAdapter | None:
+        """Role-priced chain on the TRIGGERING USER's credentials.
+
+        The one policy every adapter-path LLM call should follow:
+          1. user has their own LLM connector → role chain built FROM THEIR
+             overlay (their keys, role-routed model);
+          2. no connector + strict mode (``DEVAI_LLM_REQUIRE_USER_CONNECTOR``)
+             → the platform role chain METERED against their trial budget,
+             or ``None`` once the budget is exhausted/disabled (callers must
+             degrade gracefully — skip the nicety or fail with a clear
+             "add your key in Settings" message);
+          3. no connector, permissive mode → platform role chain;
+          4. system/webhook principals → platform role chain, never metered.
+        """
+        from devai.adapters.llm import role_llm_or
+
+        is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
+        settings, has_own = self.config, False
+        if self.llm_resolver is not None and is_human:
+            try:
+                settings, has_own = await self.llm_resolver.llm_overlay_for_email(email)
+            except Exception:  # noqa: BLE001
+                settings, has_own = self.config, False
+
+        chain = role_llm_or(settings, role, self.llm)
+        if has_own or not is_human or self.llm_resolver is None:
+            return chain
+        if bool(getattr(self.config, "llm_require_user_connector", False)):
+            budget = int(getattr(self.config, "llm_trial_token_budget", 0) or 0)
+            if budget > 0 and chain is not None:
+                from devai.settings.trial import TrialLLMAdapter, get_trial_meter
+
+                return TrialLLMAdapter(chain, get_trial_meter(self.config), email)
+            return None
+        return chain
+
 
 class PipelineStage(ABC):
     """The contract every stage implements.

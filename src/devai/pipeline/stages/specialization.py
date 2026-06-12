@@ -200,7 +200,12 @@ class _RunSpecializationStage(PipelineStage):
                 src = await self.deps.llm_resolver.settings_for_email(task.triggered_by)
 
             cache: dict[str, Any] = self.__dict__.setdefault("_spec_llm_cache", {})
-            key = f"{provider}|{','.join(getattr(src, 'overlaid_attrs', []) or [])}"
+            # The user's identity MUST key the cache: two tenants overlaying
+            # the same attr names carry different key VALUES — colliding on
+            # attr names alone would serve one tenant's adapter (and API key)
+            # to the other.
+            who = (task.triggered_by or "").lower() if src is not self.deps.config else ""
+            key = f"{provider}|{who}|{','.join(getattr(src, 'overlaid_attrs', []) or [])}"
             adapter = cache.get(key)
             if adapter is None:
                 adapter = create_llm_adapter(src, provider=provider)
@@ -221,7 +226,15 @@ class _RunSpecializationStage(PipelineStage):
             # to the default backend instead of failing the workflow.
             from devai.adapters.llm.fallback import FallbackLLMAdapter
 
-            return FallbackLLMAdapter(adapter, base)
+            chained = FallbackLLMAdapter(adapter, base)
+            # Trial users stay metered even when the spec pins a provider —
+            # otherwise a YAML role would be a free side door to the shared
+            # platform keys.
+            from devai.settings.trial import TrialLLMAdapter, get_trial_meter
+
+            if isinstance(base, TrialLLMAdapter) and task.triggered_by:
+                return TrialLLMAdapter(chained, get_trial_meter(self.deps.config), task.triggered_by)
+            return chained
         except Exception:  # noqa: BLE001
             logger.warning("specialization %s: provider selection failed — using default", spec.name, exc_info=True)
             return base

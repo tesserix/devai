@@ -77,17 +77,56 @@ class AgentAdapter(PipelineStage):
         # Resolve the triggering user's settings overlay so the agent we build
         # uses THEIR provider/keys/model (their connector), not the global
         # platform config. Set as a contextvar that _safe_agent reads during
-        # construction. Falls back to deps.config when the user configured
-        # nothing or resolution fails.
+        # construction.
+        #
+        # Policy (same as StageDeps.role_llm_for_principal):
+        #   own connector → their overlay; no connector + strict mode → the
+        #   platform keys are TRIAL-metered (the turn sink draws their budget
+        #   down) and an exhausted budget fails the stage with a clear
+        #   "add your key in Settings" message instead of silently riding the
+        #   shared keys.
         agent_config = self.deps.config
+        email = str(getattr(task, "triggered_by", "") or "")
+        is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
+        has_own = False
         try:
             resolver = getattr(self.deps, "llm_resolver", None)
-            if resolver is not None and getattr(task, "triggered_by", ""):
-                overlay = await resolver.settings_for_email(task.triggered_by)
-                if overlay is not None and overlay is not self.deps.config:
+            if resolver is not None and is_human:
+                if hasattr(resolver, "llm_overlay_for_email"):
+                    overlay, has_own = await resolver.llm_overlay_for_email(email)
+                else:  # older resolver surface (tests/doubles)
+                    overlay = await resolver.settings_for_email(email)
+                    has_own = overlay is not None and overlay is not self.deps.config
+                if has_own and overlay is not None:
                     agent_config = overlay
         except Exception:  # noqa: BLE001
             logger.debug("stage %s: per-user config resolution failed", self.name(), exc_info=True)
+
+        if (
+            is_human
+            and not has_own
+            and getattr(self.deps, "llm_resolver", None) is not None
+            and bool(getattr(self.deps.config, "llm_require_user_connector", False))
+        ):
+            from devai.settings.trial import get_trial_meter
+
+            budget = int(getattr(self.deps.config, "llm_trial_token_budget", 0) or 0)
+            meter = get_trial_meter(self.deps.config)
+            if budget <= 0 or await meter.exhausted(email):
+                raise RuntimeError(
+                    f"stage {self.name()}: no LLM available for {email} — their free "
+                    "trial allowance is used up and no LLM connector is configured. "
+                    "Add an API key in Settings → LLM Provider to continue."
+                )
+            # Trial mode: mark the turn context so every usage envelope the
+            # agent's provider emits is metered against this user's budget.
+            from devai.services.agent_turns import update_turn_context
+
+            update_turn_context(triggered_by=email, trial="1")
+        else:
+            from devai.services.agent_turns import update_turn_context
+
+            update_turn_context(triggered_by=email)
 
         token = _agent_config_ctx.set(agent_config)
         try:

@@ -254,6 +254,28 @@ def create_llm_chain(settings: Any) -> LLMAdapter:
 
 
 _ROLE_CHAIN_CACHE: dict[str, LLMAdapter] = {}
+_ROLE_CHAIN_CACHE_MAX = 256
+
+# Settings attributes that change which CREDENTIALS a role chain dials with.
+# They key the cache alongside the role: per-user overlays (each user's own
+# keys) must never collide on the same cache slot, or one tenant's adapter —
+# and their API key — would silently serve every other tenant.
+_ROLE_CRED_ATTRS = (
+    "llm_provider",
+    "anthropic_api_key",
+    "anthropic_base_url",
+    "openai_api_key",
+    "groq_api_key",
+    "openrouter_api_key",
+    "vertex_project",
+    "vertex_location",
+    "llm_role_chain_provider",
+)
+
+
+def _role_cache_key(settings: Any, role: str) -> str:
+    fp = "|".join(str(getattr(settings, a, "") or "") for a in _ROLE_CRED_ATTRS)
+    return f"{role or '_default'}::{fp}"
 
 
 def create_role_llm(settings: Any, role: str) -> LLMAdapter:
@@ -266,7 +288,7 @@ def create_role_llm(settings: Any, role: str) -> LLMAdapter:
     utility/boardroom_panel (claude-haiku-4-5), boardroom_moderator.
     Unknown/empty role → the plain configured adapter. Cached per role.
     """
-    cache_key = role or "_default"
+    cache_key = _role_cache_key(settings, role)
     cached = _ROLE_CHAIN_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -300,6 +322,8 @@ def create_role_llm(settings: Any, role: str) -> LLMAdapter:
         base = FallbackLLMAdapter(*chain, preserve_model=True)
 
     adapter = PinnedModelLLMAdapter(base, model) if model else base
+    if len(_ROLE_CHAIN_CACHE) >= _ROLE_CHAIN_CACHE_MAX:
+        _ROLE_CHAIN_CACHE.clear()
     _ROLE_CHAIN_CACHE[cache_key] = adapter
     logger.info("role LLM route %r: %s (model=%s)", role, adapter.provider_name, model or "default")
     return adapter
