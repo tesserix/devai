@@ -86,10 +86,10 @@ function LoginPageInner() {
   }
 
   const inputCls =
-    "w-full px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500";
+    "w-full px-3 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--ink-strong)] text-sm placeholder-[var(--ink-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]";
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--canvas)] px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-600 mb-5">
@@ -99,16 +99,16 @@ function LoginPageInner() {
               <path d="M2 12l10 5 10-5" />
             </svg>
           </div>
-          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
+          <h1 className="text-2xl font-semibold text-[var(--ink-strong)] tracking-tight">
             DevAI Platform
           </h1>
-          <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+          <p className="mt-1.5 text-sm text-[var(--ink-muted)]">
             AI-powered Application Lifecycle Management
           </p>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-7 shadow-sm">
-          <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center mb-5">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-7 shadow-sm">
+          <h2 className="text-sm font-medium text-[var(--ink-soft)] text-center mb-5">
             Sign in to continue
           </h2>
 
@@ -145,7 +145,7 @@ function LoginPageInner() {
             <button
               onClick={handleGoogleSignIn}
               disabled={pending || mode === null}
-              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--ink)] text-sm font-medium hover:bg-[var(--surface-hover)] transition-colors shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-wait"
             >
               <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
                 <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
@@ -161,12 +161,12 @@ function LoginPageInner() {
             <p className="mt-4 text-xs text-red-600 dark:text-red-400 text-center">{error}</p>
           )}
 
-          <p className="mt-5 text-center text-xs text-gray-400 dark:text-gray-500">
+          <p className="mt-5 text-center text-xs text-[var(--ink-muted)]">
             Access restricted to authorized users
           </p>
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-400 dark:text-gray-500">
+        <p className="mt-6 text-center text-xs text-[var(--ink-muted)]">
           Tesserix Platform
         </p>
       </div>

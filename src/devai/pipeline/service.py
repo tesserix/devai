@@ -107,6 +107,38 @@ class PipelineService:
         # Per-blueprint stage counts, cached for progress derivation.
         self._bp_stage_counts: dict[str, int] = {}
 
+        # Turn-level agent observability: LLM providers emit per-turn
+        # envelopes (usage, narration, tool calls) through the process-
+        # global sink — register ours so they land on this run-event spine.
+        try:
+            from devai.services.agent_turns import set_turn_sink
+
+            set_turn_sink(self._on_agent_turn)
+        except Exception:  # noqa: BLE001 — observability must not break startup
+            logger.exception("turn sink registration failed")
+
+    async def _on_agent_turn(self, run_id: str, envelope: dict[str, Any]) -> None:
+        """Sink for turn-level agent envelopes (devai.services.agent_turns).
+
+        Same fan-out as stage events minus the heavyweight sinks: ring (SSE
+        replay) + live SSE queues + durable per-run Redis log. Turns are an
+        order of magnitude chattier than stages, so no NATS mirror, no
+        telemetry metric, no task mutation.
+        """
+        ts = float(envelope.get("timestamp") or time.time())
+        payload = {**envelope, "task_id": run_id}
+        self._ring.append((ts, run_id, payload))
+        for q in list(self._sse_queues):
+            try:
+                q.put_nowait((ts, run_id, payload))
+            except asyncio.QueueFull:
+                logger.debug("SSE queue full — dropping agent_turn")
+        if self.state_manager is not None:
+            try:
+                self._persist_run_log(run_id, [payload], ts)
+            except RuntimeError:
+                pass  # no running loop (test context)
+
     # ── Lifecycle ─────────────────────────────────────────────────────
 
     async def start(self) -> None:

@@ -22,7 +22,9 @@ const SSE_REPLAY = 200;
 type Conn = "connecting" | "open" | "closed";
 
 const eventKey = (e: StreamEvent) =>
-  `${e.stage ?? ""}|${e.phase ?? ""}|${e.message ?? ""}`;
+  e.event_type === "agent_turn"
+    ? `turn|${e.kind ?? ""}|${e.turn ?? ""}|${e.session ?? ""}|${e.tool ?? ""}|${e.stage ?? ""}|${e.timestamp ?? ""}`
+    : `${e.stage ?? ""}|${e.phase ?? ""}|${e.message ?? ""}`;
 
 function dedupeAppend(prev: StreamEvent[], next: StreamEvent): StreamEvent[] {
   const k = eventKey(next);
@@ -63,7 +65,7 @@ export function LiveLogs({ taskId, className }: { taskId: string; className?: st
         withCredentials: true,
       });
       es.onopen = () => setConn("open");
-      es.addEventListener("stage", (e) => {
+      const onFrame = (e: Event) => {
         const me = e as MessageEvent;
         if (me.lastEventId) lastEventIdRef.current = me.lastEventId;
         try {
@@ -73,7 +75,9 @@ export function LiveLogs({ taskId, className }: { taskId: string; className?: st
         } catch {
           /* ignore malformed frames */
         }
-      });
+      };
+      es.addEventListener("stage", onFrame);
+      es.addEventListener("agent_turn", onFrame);
       es.onerror = () => {
         if (!closedByUs) setConn("closed");
       };
@@ -86,36 +90,21 @@ export function LiveLogs({ taskId, className }: { taskId: string; className?: st
     };
   }, [taskId]);
 
-  // Reliable fallback: poll the run snapshot's stage_events over the plain GET
-  // path and merge them in. The SSE feed above is the nicer live layer, but it's
-  // proxied through Next.js rewrites that buffer streaming responses, so on its
-  // own the terminal can sit empty ("Waiting for the agent…") even while stages
-  // run. This poll guarantees the per-stage history shows up regardless.
+  // Reliable fallback: poll the DURABLE per-run event log (stage + agent_turn
+  // envelopes) over the plain GET path and merge it in. The SSE feed above is
+  // the nicer live layer, but it's proxied through Next.js rewrites that buffer
+  // streaming responses, so on its own the terminal can sit empty ("Waiting for
+  // the agent…") even while stages run. This poll guarantees history shows up.
   useEffect(() => {
     if (!taskId) return;
     let cancelled = false;
     const poll = async () => {
       try {
-        const run = (await api.getRun(taskId)) as {
-          stage_events?: Array<{
-            stage?: string;
-            phase?: string;
-            message?: string;
-            error?: string | null;
-            timestamp?: number;
-            duration_ms?: number;
-          }>;
-        };
-        const se = run?.stage_events ?? [];
-        if (cancelled || se.length === 0) return;
-        const batch: StreamEvent[] = se.map((e, i) => ({
-          timestamp: e.timestamp ?? i,
-          task_id: taskId,
-          stage: e.stage,
-          phase: e.phase,
-          message: e.message,
-          error: e.error ?? null,
-        }));
+        const log = await api.getRunEventLog(taskId);
+        if (cancelled || !Array.isArray(log) || log.length === 0) return;
+        const batch = log.filter(
+          (e) => !e.event_type || e.event_type === "stage" || e.event_type === "agent_turn",
+        );
         setEvents((prev) => mergeBatch(prev, batch));
       } catch {
         /* transient — keep last data */

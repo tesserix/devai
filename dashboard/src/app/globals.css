@@ -173,6 +173,29 @@
   --shadow-focus:  0 0 0 3px var(--border-focus);
 }
 
+/* ---------------- Legacy token aliases ----------------
+ * Older pages still reference the numeric ink scale and the --surface-2/3 /
+ * --text-* names from a previous design pass. Those variables were never
+ * defined here, so `var(--ink-50)` resolved to NOTHING — the property went
+ * invalid and the element inherited whatever color was above it. On dark
+ * that accident looked almost right; on light it broke the page. Alias them
+ * onto the canonical tokens (var() resolves per-theme automatically) so
+ * every legacy usage is atomically correct in BOTH themes. New code should
+ * use the canonical names. */
+:root, .dark {
+  --ink-50:  var(--ink-strong);
+  --ink-100: var(--ink);
+  --ink-300: var(--ink-soft);
+  --ink-400: var(--ink-muted);
+  --ink-500: var(--ink-muted);
+  --surface-2: var(--surface-muted);
+  --surface-3: var(--surface-hover);
+  --surface-border: var(--border);
+  --surface-border-strong: var(--border-strong);
+  --text-muted: var(--ink-muted);
+  --text-strong: var(--ink-strong);
+}
+
 /* ===========================================================================
  * Base
  * =========================================================================== */

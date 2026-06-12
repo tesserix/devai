@@ -27,7 +27,7 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
         isRunning && "border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/30 shadow-[0_0_0_1px_rgba(99,102,241,0.3)] animate-pulse",
         status === "failed" && "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30",
         status === "waiting_approval" && "border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30",
-        !status && "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800",
+        !status && "border-[var(--border)] bg-[var(--surface)]",
         isCoordinator && !status && "border-l-indigo-400 dark:border-l-indigo-500",
         isCoordinator && status === "completed" && "border-l-green-500",
         isCoordinator && isRunning && "border-l-indigo-500",
@@ -46,14 +46,14 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">{info.label}</h3>
+              <h3 className="text-sm font-medium text-[var(--ink-strong)]">{info.label}</h3>
               {isCoordinator && (
                 <span className="text-xs px-1 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-semibold uppercase border border-indigo-100 dark:border-indigo-900">
                   Coord
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-400 dark:text-gray-500">{info.provider}</p>
+            <p className="text-xs text-[var(--ink-muted)]">{info.provider}</p>
           </div>
         </div>
         <StatusBadge status={status} />
@@ -63,7 +63,7 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
         <p className="mt-2 text-xs text-red-600 dark:text-red-400 truncate">{error}</p>
       )}
 
-      <div className="mt-3 flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
+      <div className="mt-3 flex items-center gap-3 text-xs text-[var(--ink-muted)]">
         {timing !== undefined && (
           <span>{timing.toFixed(1)}s</span>
         )}
@@ -81,7 +81,7 @@ export function AgentCard({ agentKey, status, error, timing, messageCount }: Age
 function StatusBadge({ status }: { status?: string }) {
   if (!status) {
     return (
-      <span className="text-xs px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+      <span className="text-xs px-2 py-0.5 rounded-md bg-[var(--surface-hover)] text-[var(--ink-muted)]">
         Idle
       </span>
     );

@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from anthropic import AsyncAnthropic
 from anthropic.types import Message, TextBlock, ToolUseBlock
 
+from devai.services.agent_turns import emit_turn
 from devai.services.resilience import (
     CircuitBreaker,
     estimate_token_count,
@@ -59,6 +60,17 @@ _claude_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=120, name
 # Single API call timeout (3 minutes)
 API_CALL_TIMEOUT = 180
 DEFAULT_TOOL_TIMEOUT = 300
+
+def _compact_input(tool_input: Any) -> str:
+    """One-line summary of a tool call's input for the turn log — the path/
+    branch/title style fields humans scan for, never full file contents."""
+    if not isinstance(tool_input, dict):
+        return str(tool_input)[:120]
+    for key in ("path", "branch_name", "branch", "title", "issue_id", "pr_id", "repo"):
+        if tool_input.get(key):
+            return f"{key}={str(tool_input[key])[:100]}"
+    return ", ".join(list(tool_input.keys())[:5])[:120]
+
 
 _CHECKPOINT_INSTRUCTION = (
     "SESSION CHECKPOINT — do NOT call any more tools in this session. "
@@ -109,6 +121,14 @@ class ClaudeProvider:
             progress_notes: list[str] = []
             last_text = ""
 
+            await emit_turn(
+                "agent_start",
+                model=self.model,
+                max_turns=total_cap,
+                session_turns=session_cap,
+                max_sessions=self.max_sessions,
+            )
+
             for session_no in range(1, self.max_sessions + 1):
                 if turns_used >= total_cap:
                     break
@@ -140,12 +160,27 @@ class ClaudeProvider:
                         last_text = turn_text
 
                     tool_calls = [b for b in assistant_content if isinstance(b, ToolUseBlock)]
+                    usage = getattr(response, "usage", None)
+                    await emit_turn(
+                        "turn",
+                        turn=turns_used,
+                        session=session_no,
+                        usage_in=getattr(usage, "input_tokens", 0) or 0,
+                        usage_out=getattr(usage, "output_tokens", 0) or 0,
+                        cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0,
+                        text=turn_text.strip()[:400],
+                        tools=[
+                            {"name": tc.name, "input": _compact_input(tc.input)}
+                            for tc in tool_calls
+                        ],
+                    )
                     if not tool_calls:
                         logger.info(
                             "Claude agent completed naturally — session %d, %d total turns",
                             session_no,
                             turns_used,
                         )
+                        await emit_turn("agent_done", reason="natural", turns_used=turns_used)
                         return turn_text or last_text
 
                     # Session boundary (or global cap): checkpoint instead of
@@ -178,11 +213,20 @@ class ClaudeProvider:
                         if note_text.strip():
                             progress_notes.append(note_text.strip())
                             last_text = note_text
+                            await emit_turn(
+                                "checkpoint",
+                                session=session_no,
+                                turn=turns_used,
+                                text=note_text.strip()[:600],
+                            )
                             # The model itself declares completion at a boundary.
                             if "remaining: none" in note_text.lower():
                                 logger.info(
                                     "Claude agent declared completion at session %d boundary",
                                     session_no,
+                                )
+                                await emit_turn(
+                                    "agent_done", reason="remaining_none", turns_used=turns_used
                                 )
                                 return note_text
                         break  # next session
@@ -208,6 +252,12 @@ class ClaudeProvider:
                             )
                         except Exception as e:
                             logger.error("Tool %s failed: %s", tc.name, e)
+                            await emit_turn(
+                                "tool_result",
+                                turn=turns_used,
+                                tool=tc.name,
+                                error=str(e)[:300],
+                            )
                             tool_results.append(
                                 {
                                     "type": "tool_result",
@@ -226,6 +276,7 @@ class ClaudeProvider:
                     self.max_sessions,
                     turns_used,
                 )
+                await emit_turn("agent_done", reason="budget_exhausted", turns_used=turns_used)
                 return last_text
             raise RuntimeError(
                 f"Claude agent produced no text in {turns_used} turns across "

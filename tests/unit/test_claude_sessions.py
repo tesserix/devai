@@ -117,6 +117,43 @@ async def test_exhausted_sessions_return_last_note_as_partial():
 
 
 @pytest.mark.asyncio
+async def test_turn_envelopes_are_emitted_with_usage_and_tools():
+    from devai.services import agent_turns
+
+    captured: list[tuple[str, dict]] = []
+
+    async def sink(run_id, envelope):
+        captured.append((run_id, envelope))
+
+    token = agent_turns.set_turn_context("devai-test123", "senior_developer", "implement-code")
+    agent_turns.set_turn_sink(sink)
+    try:
+        scripted = [
+            _Resp([_text("Creating the config."), _tool("t1")]),
+            _Resp([_tool("t2")]),  # boundary
+            _Resp([_text("COMPLETED: x\nREMAINING: none")]),
+        ]
+        p, _ = _provider(scripted)
+
+        async def tool_executor(name, inp):
+            return "ok"
+
+        await p.run_agent_loop("sys", "build", [{"name": "scm_commit_file"}], tool_executor)
+    finally:
+        agent_turns.set_turn_sink(None)
+        agent_turns.reset_turn_context(token)
+
+    kinds = [e["kind"] for _, e in captured]
+    assert kinds[0] == "agent_start"
+    assert "turn" in kinds and "checkpoint" in kinds and kinds[-1] == "agent_done"
+    turn = next(e for _, e in captured if e["kind"] == "turn")
+    assert turn["agent"] == "senior_developer"
+    assert turn["stage"] == "implement-code"
+    assert turn["tools"][0]["name"] == "scm_commit_file"
+    assert all(rid == "devai-test123" for rid, _ in captured)
+
+
+@pytest.mark.asyncio
 async def test_cache_breakpoint_moves_to_newest_user_turn():
     p = ClaudeProvider(_Cfg())
     messages = [

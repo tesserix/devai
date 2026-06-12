@@ -437,7 +437,7 @@ function OverviewTab({
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
           Coordination Layer
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -460,7 +460,7 @@ function OverviewTab({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
           Specialist Agents
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -484,7 +484,7 @@ function OverviewTab({
 
       {a2aMessages.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+          <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
             Recent Agent Communication
           </h3>
           <A2AFeed messages={a2aMessages.slice(-5)} />
@@ -504,7 +504,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
     return (
       <div
         key={key}
-        className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+        className="p-4 rounded-lg border border-[var(--border)] bg-[var(--surface)]"
       >
         <div className="flex items-center gap-3">
           <div
@@ -514,8 +514,8 @@ function AgentsTab({ run }: { run: PipelineRun }) {
             {info.label.charAt(0)}
           </div>
           <div>
-            <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">{info.label}</h4>
-            <p className="text-xs text-gray-400 dark:text-gray-500">
+            <h4 className="text-sm font-medium text-[var(--ink-strong)]">{info.label}</h4>
+            <p className="text-xs text-[var(--ink-muted)]">
               {info.provider} &middot; {info.role}
             </p>
           </div>
@@ -546,7 +546,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
         </div>
       </div>
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
           Specialists ({specialists.length})
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -558,7 +558,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
 }
 
 function StatusBadgeInline({ status, color }: { status?: string; color: string }) {
-  if (!status) return <span className="text-xs px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Idle</span>;
+  if (!status) return <span className="text-xs px-2 py-0.5 rounded-md bg-[var(--surface-hover)] text-[var(--ink-muted)]">Idle</span>;
 
   const styles: Record<string, string> = {
     completed: "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-100 dark:border-green-900",
@@ -585,7 +585,7 @@ function A2ATab({ messages }: { messages: any[] }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider">
           Agent-to-Agent Messages ({messages.length})
         </h3>
       </div>
@@ -598,12 +598,12 @@ function EventsTab({ events }: { events: Array<{ step: string; status: string; d
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider">
           Pipeline Events ({events.length})
         </h3>
       </div>
       {events.length === 0 ? (
-        <div className="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+        <div className="text-center py-8 text-[var(--ink-muted)] text-sm">
           No events recorded yet
         </div>
       ) : (
@@ -619,7 +619,7 @@ function EventsTab({ events }: { events: Array<{ step: string; status: string; d
                     ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900"
                     : isRunning
                       ? "bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-900"
-                      : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                      : "bg-[var(--surface)] border-[var(--border)]"
                 }`}
               >
                 <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
@@ -627,7 +627,7 @@ function EventsTab({ events }: { events: Array<{ step: string; status: string; d
                 }`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                    <span className="text-sm font-medium text-[var(--ink)]">
                       {evt.step.replace(/_/g, " ")}
                     </span>
                     <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
@@ -640,11 +640,11 @@ function EventsTab({ events }: { events: Array<{ step: string; status: string; d
                       {evt.status}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">
+                  <p className="text-xs text-[var(--ink-muted)] mt-0.5 break-words">
                     {evt.detail}
                   </p>
                 </div>
-                <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0 whitespace-nowrap">
+                <span className="text-xs text-[var(--ink-muted)] shrink-0 whitespace-nowrap">
                   {new Date(evt.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </span>
               </div>
@@ -734,19 +734,19 @@ function ConfigTab({ repo }: { repo: string }) {
     },
   ];
 
-  if (!loaded) return <div className="text-sm text-gray-400">Loading config...</div>;
+  if (!loaded) return <div className="text-sm text-[var(--ink-muted)]">Loading config...</div>;
 
   return (
     <div className="w-full max-w-3xl space-y-6">
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
           Pipeline Configuration
         </h3>
-        <div className="space-y-3 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="space-y-3 p-4 rounded-lg border border-[var(--border)] bg-[var(--surface)]">
           <label className="flex items-center justify-between">
             <div>
-              <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Auto Mode</span>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Skip all approval gates — pipeline runs fully autonomous</p>
+              <span className="text-sm font-medium text-[var(--ink)]">Auto Mode</span>
+              <p className="text-xs text-[var(--ink-muted)] mt-0.5">Skip all approval gates — pipeline runs fully autonomous</p>
             </div>
             <input
               type="checkbox"
@@ -755,11 +755,11 @@ function ConfigTab({ repo }: { repo: string }) {
               className="w-4 h-4 rounded accent-indigo-600"
             />
           </label>
-          <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+          <div className="border-t border-[var(--border-subtle)] pt-3">
             <label className="flex items-center justify-between">
               <div>
-                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Max Review Iterations</span>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">How many review/fix cycles before escalating</p>
+                <span className="text-sm font-medium text-[var(--ink)]">Max Review Iterations</span>
+                <p className="text-xs text-[var(--ink-muted)] mt-0.5">How many review/fix cycles before escalating</p>
               </div>
               <input
                 type="number"
@@ -767,7 +767,7 @@ function ConfigTab({ repo }: { repo: string }) {
                 max={10}
                 value={config.max_review_iterations}
                 onChange={(e) => setConfig({ ...config, max_review_iterations: parseInt(e.target.value) || 3 })}
-                className="w-16 px-2 py-1 rounded bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-right text-gray-900 dark:text-gray-100 focus:outline-none focus:border-indigo-400"
+                className="w-16 px-2 py-1 rounded bg-[var(--surface-muted)] border border-[var(--border)] text-sm text-right text-[var(--ink-strong)] focus:outline-none focus:border-indigo-400"
               />
             </label>
           </div>
@@ -775,15 +775,15 @@ function ConfigTab({ repo }: { repo: string }) {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
           Approval Gates
         </h3>
-        <div className="divide-y divide-gray-100 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+        <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
           {Object.entries(config.gates).map(([gate, enabled]) => (
-            <label key={gate} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer">
+            <label key={gate} className="flex items-center justify-between px-4 py-3 hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
               <div>
-                <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">{gate.replace(/([A-Z])/g, " $1")}</span>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{gateDescriptions[gate] || ""}</p>
+                <span className="text-sm text-[var(--ink-soft)] capitalize">{gate.replace(/([A-Z])/g, " $1")}</span>
+                <p className="text-xs text-[var(--ink-muted)] mt-0.5">{gateDescriptions[gate] || ""}</p>
               </div>
               <input
                 type="checkbox"
@@ -802,25 +802,25 @@ function ConfigTab({ repo }: { repo: string }) {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
           LLM Providers
         </h3>
-        <div className="divide-y divide-gray-100 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+        <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
           {providers.map((p) => (
             <div key={p.name} className="px-4 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 shrink-0">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${p.dot}`} />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">{p.name}</span>
+                  <span className="text-sm text-[var(--ink-soft)]">{p.name}</span>
                 </div>
                 <input
                   type="text"
                   value={(config as any)[p.key] || ""}
                   onChange={(e) => setConfig({ ...config, [p.key]: e.target.value })}
-                  className="w-52 px-2 py-1 rounded bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-xs font-mono text-right text-gray-900 dark:text-gray-100 focus:outline-none focus:border-indigo-400"
+                  className="w-52 px-2 py-1 rounded bg-[var(--surface-muted)] border border-[var(--border)] text-xs font-mono text-right text-[var(--ink-strong)] focus:outline-none focus:border-indigo-400"
                 />
               </div>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 ml-4">{p.desc}</p>
+              <p className="text-xs text-[var(--ink-muted)] mt-1 ml-4">{p.desc}</p>
             </div>
           ))}
         </div>
@@ -847,7 +847,7 @@ function ConfigTab({ repo }: { repo: string }) {
           </span>
         )}
       </div>
-      <p className="text-xs text-gray-400 dark:text-gray-500">
+      <p className="text-xs text-[var(--ink-muted)]">
         Configuration is saved per repository ({repo}). Changes take effect on the next pipeline run.
       </p>
     </div>

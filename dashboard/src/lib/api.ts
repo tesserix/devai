@@ -267,6 +267,11 @@ export const api = {
   getRun: async (runId: string) =>
     normalizeRun(await apiFetch<unknown>(`/pipeline/runs/${runId}`)),
 
+  // Durable per-run event log (stage + agent_turn + a2a envelopes) — survives
+  // pod restarts; the reliable source behind the live Logs terminal.
+  getRunEventLog: (runId: string, limit = 1000) =>
+    apiFetch<StreamEvent[]>(`/pipeline/runs/${encodeURIComponent(runId)}/events?limit=${limit}`),
+
   // The supervisor stage's advisory delegation plan (DASH-12). Returns null when
   // the run carries none (e.g. a non-supervisor blueprint). Read from the run's
   // agent_context — the backend exposes it under the run detail.
@@ -920,6 +925,22 @@ export interface StreamEvent {
   error?: string | null;
   checkpoint?: string | null;
   type?: string;
+  /** Turn-level agent envelopes (event_type=agent_turn). */
+  event_type?: string;
+  kind?: string; // agent_start | turn | checkpoint | tool_result | agent_done
+  agent?: string;
+  turn?: number;
+  session?: number;
+  usage_in?: number;
+  usage_out?: number;
+  cache_read?: number;
+  text?: string;
+  tools?: Array<{ name: string; input?: string }>;
+  tool?: string;
+  reason?: string;
+  model?: string;
+  max_turns?: number;
+  turns_used?: number;
 }
 
 export type OnboardingStateValue =

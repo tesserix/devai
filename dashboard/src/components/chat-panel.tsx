@@ -75,7 +75,7 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
   }, [input, loading, runId, repo, stage]);
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className="flex flex-col h-full bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
       {/* Pipeline context banner */}
       {runId && (
         <div className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950 border-b border-indigo-100 dark:border-indigo-900 flex items-center gap-2">
@@ -101,7 +101,7 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
                 "max-w-[80%] rounded-xl px-4 py-3 text-sm",
                 msg.role === "user"
                   ? "bg-indigo-600 text-white rounded-br-sm"
-                  : "bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-600 rounded-bl-sm"
+                  : "bg-[var(--surface-muted)] text-[var(--ink)] border border-[var(--border)] rounded-bl-sm"
               )}
             >
               {msg.role === "assistant" ? (
@@ -120,7 +120,7 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl rounded-bl-sm px-4 py-3">
+            <div className="bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl rounded-bl-sm px-4 py-3">
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" />
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.15s]" />
@@ -132,14 +132,14 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-200 dark:border-gray-700 p-3 bg-white dark:bg-gray-800">
+      <div className="border-t border-[var(--border)] p-3 bg-[var(--surface)]">
         <div className="flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
             placeholder={runId ? "Ask questions or inject requirements into the pipeline..." : "Ask about pipelines, agents, security, code..."}
-            className="flex-1 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-100 dark:focus:ring-indigo-900 transition-colors"
+            className="flex-1 px-3 py-2 rounded-lg bg-[var(--surface-muted)] border border-[var(--border)] text-sm text-[var(--ink-strong)] placeholder:text-[var(--ink-muted)] focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent-soft-bg-2)] transition-colors"
             disabled={loading}
           />
           <button
@@ -150,7 +150,7 @@ export function ChatPanel({ runId, repo, stage }: ChatPanelProps) {
             Send
           </button>
         </div>
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5 px-1">
+        <p className="text-xs text-[var(--ink-muted)] mt-1.5 px-1">
           16 tools: pipelines, A2A messages, memory, security, SRE, source code, PRs, issues, inject requirements
         </p>
       </div>
@@ -193,9 +193,9 @@ function markdownToHtml(md: string): string {
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
     .replace(/^\|(.+)\|$/gm, (_, row) => {
       const cells = row.split("|").map((c: string) => c.trim());
-      return `<tr>${cells.map((c: string) => `<td class="px-2 py-1 border-b border-gray-200 dark:border-gray-600">${c}</td>`).join("")}</tr>`;
+      return `<tr>${cells.map((c: string) => `<td class="px-2 py-1 border-b border-[var(--border)]">${c}</td>`).join("")}</tr>`;
     })
-    .replace(/((<tr>.*<\/tr>\n?)+)/g, '<table class="w-full text-xs my-2 border border-gray-200 dark:border-gray-600 rounded">$1</table>')
+    .replace(/((<tr>.*<\/tr>\n?)+)/g, '<table class="w-full text-xs my-2 border border-[var(--border)] rounded">$1</table>')
     .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     .replace(/((<li.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
     .replace(/\n/g, "<br />");

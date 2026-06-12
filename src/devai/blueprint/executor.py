@@ -344,10 +344,22 @@ class BlueprintExecutor:
         control surface (tests/minimal deps) this degrades to a plain
         wait_for.
         """
+        # Turn-level observability: every LLM provider call made anywhere
+        # under this stage inherits the run/agent context via contextvars
+        # (set BEFORE create_task — task creation snapshots the context), so
+        # per-turn envelopes (usage, narration, tool calls) land on the
+        # run's event stream without the agents knowing about runs at all.
+        from devai.services.agent_turns import reset_turn_context, set_turn_context
+
+        ctx_token = set_turn_context(task.id, spec.resolved_agent() or "", spec.name)
+
         sm = self._deps.state_manager
         getter = getattr(sm, "get_pipeline_control", None) if sm is not None else None
         if getter is None:
-            return await asyncio.wait_for(stage.execute(task), timeout=timeout)
+            try:
+                return await asyncio.wait_for(stage.execute(task), timeout=timeout)
+            finally:
+                reset_turn_context(ctx_token)
 
         grace = max(30.0, float(getattr(self._deps.config, "pipeline_stage_inactivity_grace", 240) or 240))
         hard_mult = max(1, int(getattr(self._deps.config, "pipeline_stage_hard_cap_multiplier", 4) or 4))
@@ -385,6 +397,7 @@ class BlueprintExecutor:
                 except Exception:  # noqa: BLE001 — control-read blip ≠ stop
                     continue
         finally:
+            reset_turn_context(ctx_token)
             if not exec_task.done():
                 exec_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
