@@ -150,7 +150,14 @@ async def get_run_a2a(request: Request, task_id: str) -> list[dict[str, Any]]:
         raise HTTPException(status_code=404, detail=f"task {task_id!r} not found")
     ctx = task.get("agent_context") or {}
     msgs = ctx.get("a2a_messages") or task.get("a2a_messages") or []
-    return msgs if isinstance(msgs, list) else []
+    if not isinstance(msgs, list):
+        return []
+    # Cross-user surface: mask any credential or personal data that an agent
+    # turn / tool output may have echoed into a message before it reaches
+    # another user's dashboard timeline.
+    from devai.services.redact import scrub_structure
+
+    return scrub_structure(msgs)
 
 
 @router.get("/runs/{task_id}/delegation-plan")
@@ -172,7 +179,11 @@ async def get_run_delegation_plan(request: Request, task_id: str) -> dict[str, A
 @router.get("/events/recent")
 async def recent_events(request: Request, limit: int = Query(100, ge=1, le=1000)) -> list[dict[str, Any]]:
     """Return the last `limit` stage events from the ring buffer."""
-    return _service(request).recent_events(limit=limit)
+    from devai.services.redact import scrub_structure
+
+    # Stage events carry agent/tool text — scrub secrets + PII before they
+    # fan out to every dashboard viewer over SSE.
+    return scrub_structure(_service(request).recent_events(limit=limit))
 
 
 @router.get("/runs/{task_id}/events")

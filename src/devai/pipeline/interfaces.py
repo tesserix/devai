@@ -95,13 +95,29 @@ class StageDeps:
         key. Synthetic principals (webhook/system, non-email triggered_by)
         always keep the platform adapter so automation never breaks.
         """
-        if self.llm_resolver is not None and email:
+        if self.llm_resolver is None:
+            return self.llm
+
+        is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
+
+        if is_human:
             adapter = await self.llm_resolver.resolve_for_email(email)
             if adapter is not None:
                 return adapter
-            is_human = "@" in email and not email.startswith(("webhook:", "system:"))
-            if is_human and bool(getattr(self.config, "llm_require_user_connector", False)):
+            if bool(getattr(self.config, "llm_require_user_connector", False)):
                 return None
+            return self.llm
+
+        # System/webhook/cron runs (SRE, scheduled scans, automation). When a
+        # service principal is configured, these resolve ITS Settings
+        # connector through the same overlay/gateway path as a human user —
+        # so automation also runs on a tenant connector, not the raw shared
+        # keys. Falls back to the platform chain only when unset/unconfigured.
+        service_email = getattr(self.config, "llm_system_principal", "") or ""
+        if service_email:
+            adapter = await self.llm_resolver.resolve_for_email(service_email)
+            if adapter is not None:
+                return adapter
         return self.llm
 
 

@@ -641,8 +641,15 @@ class Settings(BaseSettings):
     # Require interactive users to bring their own LLM connector: when true,
     # principals with no Settings LLM connector get a clear "configure your
     # connector" stub instead of silently riding the shared platform key.
-    # System/webhook principals always keep the platform adapter.
     llm_require_user_connector: bool = False
+
+    # Service principal for system/webhook/cron runs (SRE scans, scheduled
+    # work, automation). When set to an email that owns a Settings LLM
+    # connector, those runs resolve THAT connector through the same overlay
+    # + gateway path as a human user — so even automation uses a tenant
+    # connector instead of the raw shared platform keys. Empty → automation
+    # uses the platform fallback chain.
+    llm_system_principal: str = ""
 
     # --- LLM cost tiers ---
     # "provider:model" pairs resolved by resolve_llm_tier(); lets stages and

@@ -18,6 +18,7 @@ comments on public GitHub issues, so they must be masked too.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # URL userinfo: scheme://user:password@host  →  scheme://user:***@host
 # Covers x-access-token:<tok>@ (GitHub) and oauth2:<tok>@ (GitLab).
@@ -89,4 +90,98 @@ def _mask_prefix(match: re.Match[str], prefix: str) -> str:
     return "***"
 
 
-__all__ = ["redact_secrets"]
+# ── PII masking ──────────────────────────────────────────────────────────
+# Distinct from secret redaction: personal data (emails, phone numbers, IPs)
+# is masked for display/log surfaces where the full value isn't needed, while
+# keeping enough to correlate (first char + domain for email).
+_EMAIL = re.compile(r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+_PHONE = re.compile(r"(?<!\d)(\+?\d[\d\s().-]{7,}\d)(?!\d)")
+_IPV4 = re.compile(r"\b(\d{1,3})\.\d{1,3}\.\d{1,3}\.(\d{1,3})\b")
+
+
+def mask_pii(text: str) -> str:
+    """Mask personal data for display/log surfaces.
+
+    - email  ``alice@corp.com``  → ``a***@corp.com`` (domain kept for ops)
+    - phone  ``+1 415 555 0100``  → ``***``
+    - IPv4   ``10.20.3.146``      → ``10.x.x.146``
+
+    Returns text unchanged when there's nothing to mask. Apply on top of
+    :func:`redact_secrets` for surfaces shown to other users.
+    """
+    if not text:
+        return text
+    text = _EMAIL.sub(lambda m: f"{m.group(1)}***{m.group(2)}", text)
+    text = _IPV4.sub(lambda m: f"{m.group(1)}.x.x.{m.group(2)}", text)
+    text = _PHONE.sub("***", text)
+    return text
+
+
+def mask_email(email: str) -> str:
+    """First char + domain only: ``alice@corp.com`` → ``a***@corp.com``.
+
+    For displaying a principal to OTHER users (audit feeds, A2A timelines)
+    without exposing the full address. The owner still sees their own.
+    """
+    if not email or "@" not in email:
+        return email
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}" if local else f"***@{domain}"
+
+
+def scrub(text: str) -> str:
+    """Both passes: credentials redacted AND personal data masked.
+
+    The one-call helper for any surface shown to a user other than the
+    owner (cross-user feeds, audit, logs, failure comments).
+    """
+    return mask_pii(redact_secrets(text))
+
+
+# Field names whose VALUE is always a secret regardless of content — masked
+# wholesale so a key that doesn't match a known prefix still never leaks.
+_SECRET_KEYS = (
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "authorization",
+    "private_key",
+    "client_secret",
+    "access_token",
+    "refresh_token",
+    "bot_token",
+    "signing_secret",
+)
+
+
+def scrub_structure(obj: Any, *, _depth: int = 0) -> Any:
+    """Recursively mask secrets + PII in any JSON-like structure.
+
+    Applied to API responses that aggregate agent/tool output (A2A feeds,
+    event streams) so neither a leaked credential nor personal data reaches
+    another user — regardless of which nested field it landed in. A field
+    whose NAME looks secret has its value masked wholesale; every other
+    string is run through :func:`scrub`. Bounded recursion depth.
+    """
+    if _depth > 12:
+        return obj
+    if isinstance(obj, str):
+        return scrub(obj)
+    if isinstance(obj, dict):
+        out: dict[Any, Any] = {}
+        for k, v in obj.items():
+            key_l = str(k).lower()
+            if isinstance(v, str) and any(s in key_l for s in _SECRET_KEYS):
+                out[k] = "***" if v else v
+            else:
+                out[k] = scrub_structure(v, _depth=_depth + 1)
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [scrub_structure(v, _depth=_depth + 1) for v in obj]
+    return obj
+
+
+__all__ = ["mask_email", "mask_pii", "redact_secrets", "scrub", "scrub_structure"]
