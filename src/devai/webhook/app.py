@@ -761,7 +761,27 @@ def create_app(
             except Exception as e:
                 checks["memory"] = f"degraded: {e}"
 
-        all_ok = all(v == "ok" or v.startswith("ok ") for k, v in checks.items() if k != "memory")
+        # Visibility-only integration surface (never gates readiness): the
+        # active LLM provider, the durable-workflow backend, and the Redis
+        # work-queue depth — one curl shows whether every backbone piece is
+        # the one you think it is.
+        visibility_only = {"memory", "llm", "workflow", "queue"}
+        llm_adapter = getattr(ps, "_llm_adapter", None) if ps is not None else None
+        if llm_adapter is not None:
+            checks["llm"] = f"ok ({getattr(llm_adapter, 'provider_name', 'unknown')})"
+        else:
+            checks["llm"] = f"configured ({getattr(config, 'llm_provider', 'unset')})"
+        checks["workflow"] = f"configured ({getattr(config, 'workflow_provider', 'inproc')})"
+        try:
+            depth = await state.redis.llen("devai:pipeline:queue")
+            processing = await state.redis.llen("devai:pipeline:processing")
+            checks["queue"] = f"ok (queued={depth}, processing={processing})"
+        except Exception as e:
+            checks["queue"] = f"degraded: {e}"
+
+        all_ok = all(
+            v == "ok" or v.startswith("ok ") for k, v in checks.items() if k not in visibility_only
+        )
         return JSONResponse(
             content={"status": "ready" if all_ok else "not_ready", "checks": checks},
             status_code=200 if all_ok else 503,

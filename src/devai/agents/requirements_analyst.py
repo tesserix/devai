@@ -75,13 +75,24 @@ class RequirementsAnalystAgent(BaseAgent):
         requirements = state.get("requirements", "")
         repo = state.get("repo_full_name", "")
 
+        # Stack-aware refinement: this stage runs AFTER tech detection, so
+        # the profile is known — requirements shaped to the actual stack
+        # (its natural module boundaries, test approach, deploy story) feed
+        # every downstream planner.
+        from devai.agents.skills import get_skill_profile
+
+        profile = get_skill_profile(state.get("skill_profile_name"))
+        stack_guidance = profile.render_for_planner()
+
         prompt = f"""Repository: {repo}
+
+{stack_guidance}
 
 Raw Requirements:
 {requirements}
 
 Analyze these requirements thoroughly. Break them down into structured, actionable items.
-Consider the repository context and identify any gaps or risks."""
+Consider the repository context and the stack guidance above; identify any gaps or risks."""
 
         response = await openai.generate(
             prompt=prompt,

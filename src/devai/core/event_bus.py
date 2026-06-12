@@ -52,10 +52,19 @@ class EventBus:
         self._nc = await nats.connect(nats_url)
         self._js = self._nc.jetstream()
 
+        # LIMITS retention, aligned with the event-bus ADAPTER's default. The
+        # old WORK_QUEUE policy on `devai.>` was the root cause of the
+        # "subjects overlap" failures: a work-queue stream claims exclusive
+        # ownership of its subjects (no other stream may overlap them, one
+        # consumer per subject), which broke every other component wanting a
+        # devai.* stream. The actual work queue moved to Redis
+        # (devai:pipeline:queue) long ago — NATS is the event MIRROR, and a
+        # mirror wants LIMITS. Migration: `nats stream rm DEVAI` once; it is
+        # recreated here with the right policy on the next connect.
         stream_config = StreamConfig(
             name=self.stream_name,
             subjects=["devai.>"],
-            retention=RetentionPolicy.WORK_QUEUE,
+            retention=RetentionPolicy.LIMITS,
             max_age=7 * 24 * 3600,  # 7 days in seconds
             storage=StorageType.FILE,
             num_replicas=1,
@@ -63,8 +72,17 @@ class EventBus:
 
         try:
             await self._js.find_stream_name_by_subject("devai.pipeline.trigger")
-            await self._js.update_stream(stream_config)
-            logger.info("Updated existing NATS stream: %s", self.stream_name)
+            try:
+                await self._js.update_stream(stream_config)
+                logger.info("Updated existing NATS stream: %s", self.stream_name)
+            except Exception as e:  # noqa: BLE001 — a config mismatch must never block boot
+                logger.warning(
+                    "NATS stream %s update skipped (%s) — continuing with the existing "
+                    "config; run `nats stream rm %s` once to migrate retention.",
+                    self.stream_name,
+                    e,
+                    self.stream_name,
+                )
         except nats.js.errors.NotFoundError:
             await self._js.add_stream(stream_config)
             logger.info("Created NATS stream: %s", self.stream_name)

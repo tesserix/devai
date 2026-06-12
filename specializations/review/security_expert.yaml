@@ -14,8 +14,8 @@ max_tokens: 8192
 allowed_tools:
   - scm_get_pr_diff
   - scm_get_repo_tree
-  - scm_read_file
-  - scm_post_pr_review
+  - scm_get_file_content
+  - scm_create_pr_review
   - scm_create_issue
   - security_scan_sast
   - security_scan_dependencies
@@ -67,7 +67,7 @@ system_prompt: |
 
   You DO:
   - Run SAST/SCA/secrets/container scans
-  - Read source files via scm_read_file to understand context
+  - Read source files via scm_get_file_content to understand context
   - Post review comments on the PR
   - Create issues for non-blocking findings
   - Set the security_decision (approved / blocked) so the orchestrator can gate

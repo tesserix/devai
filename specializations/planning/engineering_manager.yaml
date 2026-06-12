@@ -13,7 +13,7 @@ max_tokens: 8192
 
 allowed_tools:
   - scm_get_repo_tree
-  - scm_read_file
+  - scm_get_file_content
   - scm_list_files
   - repo_profile
 

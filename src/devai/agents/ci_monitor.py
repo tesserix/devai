@@ -522,6 +522,8 @@ Branch: {branch}
 Build run: {build_run_id}
 Active stack profile: {profile.display_name}
 
+{profile.render_for_planner()}
+
 ## What failed
 {failed_summary}
 

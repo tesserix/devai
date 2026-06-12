@@ -13,7 +13,7 @@ temperature: 0.3
 
 allowed_tools:
   - scm_get_repo_tree
-  - scm_read_file
+  - scm_get_file_content
   - scm_create_issue
   - scm_create_project_v2
 

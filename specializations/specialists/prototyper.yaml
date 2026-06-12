@@ -12,10 +12,10 @@ max_tokens: 8192
 
 allowed_tools:
   - scm_get_repo_tree
-  - scm_read_file
+  - scm_get_file_content
   - scm_create_branch
   - scm_commit_file
-  - scm_create_pr
+  - scm_create_pull_request
 
 max_turns: 100
 timeout: 25m

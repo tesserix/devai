@@ -317,8 +317,7 @@ Merged Stories:
 
 Total stories: {len(merged)} merged, {len(story_branches)} total
 
-Release flow for this stack:
-{profile.release_guidance or "(use the project's standard flow)"}
+{profile.render_for_release() or "Release flow: use the project's standard flow."}
 
 Write a concise 2-3 sentence release note suitable for a changelog.""",
                 system="You are a technical writer. Write concise, professional release notes.",

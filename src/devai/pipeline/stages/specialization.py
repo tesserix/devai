@@ -210,11 +210,26 @@ class _RunSpecializationStage(PipelineStage):
         tool_specs = dispatcher.build_tool_specs(spec.allowed_tools)
         messages = [LLMMessage(role=LLMRole.USER, content=self._build_user_prompt(spec, task))]
 
+        # Skill-profile parity with the bridged Python agents: YAML-only
+        # roles previously ran on spec.system_prompt alone — none of the
+        # stack guidance (directory layout, test framework, conventions)
+        # ever reached them, silently degrading their output quality.
+        system_prompt = spec.system_prompt
+        try:
+            from devai.agents.skills import get_skill_profile
+
+            profile = get_skill_profile(task.agent_context.get("skill_profile_name"))
+            guidance = profile.render_for_planner()
+            if guidance:
+                system_prompt = f"{system_prompt}\n\n{guidance}"
+        except Exception:  # noqa: BLE001 — guidance is an enhancer, never a blocker
+            logger.debug("skill profile injection failed for %s", spec.name, exc_info=True)
+
         final_text = ""
         turns = max(1, spec.max_turns or 8)
         for _ in range(turns):
             request = LLMRequest(
-                system=spec.system_prompt,
+                system=system_prompt,
                 messages=messages,
                 tools=tool_specs,
                 model=spec.llm_model or "",

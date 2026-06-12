@@ -13,9 +13,9 @@ temperature: 0.2
 
 allowed_tools:
   - scm_get_pr_diff
-  - scm_read_file
+  - scm_get_file_content
   - scm_get_repo_tree
-  - scm_post_pr_review
+  - scm_create_pr_review
 
 max_turns: 80
 timeout: 15m

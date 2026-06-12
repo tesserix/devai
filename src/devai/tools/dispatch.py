@@ -30,6 +30,10 @@ _SOURCES = (
     ("security", "devai.tools.security_tools", "SECURITY_TOOLS"),
     ("test", "devai.tools.test_tools", "TEST_TOOLS"),
     ("file", "devai.tools.file_tools", "FILE_TOOLS"),
+    # Agent memory (remember/recall against the process-global adapter) —
+    # the reflector role's whole job; previously these tool names existed
+    # only in YAML and silently resolved to nothing.
+    ("memory", "devai.tools.memory_tools", "MEMORY_TOOLS"),
     # SRE observability tools — k8s / Prometheus / GCP. These let YAML-only
     # SRE specializations (security_auditor, reliability_analyst, etc.) call
     # live cluster + cloud tools through the same tool-calling loop the ALM
