@@ -288,25 +288,29 @@ class PipelineService:
                 state = TaskState.PENDING
             if state in skip_states:
                 continue
-            if await sm.is_task_active(td["id"]):
+            tid = td["id"]
+            if await sm.is_task_active(tid):
                 # Active-set membership alone is NOT liveness: the set has no
-                # TTL, so a worker killed mid-run (pod roll during a gate
-                # wait — live incident) leaves a stale member behind and the
-                # run looks active forever. The claim key IS liveness (TTL
-                # heartbeat). Set member + expired claim = dead worker: clear
-                # the stale marker and resume.
-                claim_key = sm.PIPELINE_CLAIM_KEY.format(task_id=td["id"])
-                if await sm.redis.exists(claim_key):
+                # TTL, so a hard-killed worker (pod roll during a gate wait —
+                # live incident) leaves a stale member behind and the run
+                # looks active forever. The claim key IS liveness.
+                if await sm.is_task_live(tid):
                     continue  # genuinely executing on a live worker
+                # Already queued (graceful hand-off / reaper requeue) → a
+                # worker will claim it; clearing the member here would let a
+                # second enqueue through the dedup and double-execute.
+                try:
+                    if await sm.redis.lpos(sm.PIPELINE_QUEUE_KEY, tid) is not None:
+                        continue
+                except Exception:  # noqa: BLE001
+                    logger.debug("reconcile: queue check failed for %s", tid, exc_info=True)
+                    continue
                 logger.warning(
                     "reconcile: %s is in the active set but its claim expired — clearing stale marker and resuming",
-                    td["id"],
+                    tid,
                 )
-                try:
-                    await sm.redis.srem(sm.PIPELINE_ACTIVE_KEY, td["id"])
-                except Exception:  # noqa: BLE001
-                    logger.exception("reconcile: stale active-set clear failed for %s", td["id"])
-                    continue
+                if not await sm.clear_stale_active(tid):
+                    continue  # a live worker re-claimed in the race window
             if await pipe.resubmit_persisted(td):
                 resumed += 1
         if resumed:

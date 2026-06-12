@@ -417,17 +417,39 @@ class Pipeline:
                 continue
 
             hb = asyncio.create_task(self._heartbeat(task_id, worker_name), name=f"hb-{task_id}")
+            interrupted = False
             try:
                 async with self._semaphore:
                     await self._execute_task(task)
+            except asyncio.CancelledError:
+                # Graceful shutdown (SIGTERM / pipeline.stop) cancelled the
+                # in-flight run — hand it off, then keep unwinding.
+                interrupted = True
+                raise
             except Exception:  # noqa: BLE001
                 logger.exception("worker %s: task %s crashed", worker_name, task_id)
             finally:
                 hb.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await hb
-                with contextlib.suppress(Exception):
-                    await sm.ack_task(task_id)  # type: ignore[union-attr]
+                # Graceful hand-off: a run interrupted by shutdown (not
+                # completed, not crashed) goes straight back onto the durable
+                # queue so the NEXT pod resumes it immediately — no reconcile
+                # wait, no orphan window. Terminal runs ack as before.
+                handed_off = False
+                if (interrupted or self._stop_event.is_set()) and not task.is_terminal:
+                    with contextlib.suppress(Exception):
+                        await sm.handoff_task(task_id)  # type: ignore[union-attr]
+                        handed_off = True
+                        logger.warning(
+                            "worker %s: handed %s back to the queue on shutdown (stage=%s)",
+                            worker_name,
+                            task_id,
+                            task.current_stage,
+                        )
+                if not handed_off:
+                    with contextlib.suppress(Exception):
+                        await sm.ack_task(task_id)  # type: ignore[union-attr]
 
     async def _heartbeat(self, task_id: str, worker_name: str) -> None:
         """Refresh the task's liveness claim while it executes, at a quarter of

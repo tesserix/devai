@@ -464,6 +464,44 @@ class StateManager:
         """True if the task is currently queued or processing."""
         return bool(await self.redis.sismember(self.PIPELINE_ACTIVE_KEY, task_id))
 
+    async def is_task_live(self, task_id: str) -> bool:
+        """True only when a LIVE worker owns the task right now.
+
+        The canonical liveness primitive — use this (not is_task_active)
+        whenever the question is "is someone actually executing this?".
+        Active-set membership is intent, not liveness: the set has no TTL,
+        so a hard-killed worker (pod roll, OOM) leaves its member behind
+        forever. The claim key is the heartbeat (TTL-refreshed while the
+        worker runs, including gate waits) — member + claim = live;
+        member + expired claim = a dead worker's residue.
+        """
+        pipe = self.redis.pipeline()
+        pipe.sismember(self.PIPELINE_ACTIVE_KEY, task_id)
+        pipe.exists(self.PIPELINE_CLAIM_KEY.format(task_id=task_id))
+        member, claimed = await pipe.execute()
+        return bool(member) and bool(claimed)
+
+    async def clear_stale_active(self, task_id: str) -> bool:
+        """Remove a dead worker's active-set residue (claim must be gone).
+
+        Returns True when the member was removed. Refuses (False) while a
+        claim exists, so a racing live worker is never un-marked.
+        """
+        if await self.redis.exists(self.PIPELINE_CLAIM_KEY.format(task_id=task_id)):
+            return False
+        return bool(await self.redis.srem(self.PIPELINE_ACTIVE_KEY, task_id))
+
+    async def handoff_task(self, task_id: str) -> None:
+        """Graceful-shutdown hand-off: requeue a non-terminal task this worker
+        owns so the next pod resumes it IMMEDIATELY (no reconcile wait).
+        Clears this worker's claim and processing entry but keeps the task in
+        the active set (it's queued — still active intent)."""
+        pipe = self.redis.pipeline()
+        pipe.lrem(self.PIPELINE_PROCESSING_KEY, 0, task_id)
+        pipe.delete(self.PIPELINE_CLAIM_KEY.format(task_id=task_id))
+        pipe.lpush(self.PIPELINE_QUEUE_KEY, task_id)
+        await pipe.execute()
+
     # --- Cleanup ---
 
     async def close(self) -> None:
