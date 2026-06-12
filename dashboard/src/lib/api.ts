@@ -344,7 +344,7 @@ export const api = {
   triggerPipeline: (
     repo: string,
     requirements: string,
-    opts: { issueNumber?: number; blueprint?: string; autonomy?: string } = {},
+    opts: { issueNumber?: number; blueprint?: string; autonomy?: string; brainstorm?: boolean } = {},
   ) =>
     apiFetch<{ run_id: string; stage: string; blueprint?: string }>("/pipeline/trigger", {
       method: "POST",
@@ -354,6 +354,7 @@ export const api = {
         issue_number: opts.issueNumber,
         blueprint: opts.blueprint,
         autonomy: opts.autonomy,
+        brainstorm: opts.brainstorm || undefined,
       }),
     }),
 

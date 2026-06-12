@@ -48,7 +48,7 @@ interface TriggerDialogProps {
   onTrigger: (
     repo: string,
     requirements: string,
-    opts?: { blueprint?: string; autonomy?: string },
+    opts?: { blueprint?: string; autonomy?: string; brainstorm?: boolean },
   ) => Promise<void>;
 }
 
@@ -62,6 +62,9 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   // "full" → gates self-approve, the run flows end-to-end (default);
   // "gated" → pause at each approval gate for a human decision.
   const [autonomy, setAutonomy] = useState<"auto" | "full" | "gated">("auto");
+  // "Brainstorm first" — convene the boardroom (specialist panel debate)
+  // before planning; the agreed decision feeds every downstream agent.
+  const [brainstorm, setBrainstorm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
@@ -304,6 +307,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
       await onTrigger(selectedRepo, requirements, {
         blueprint: blueprint ?? undefined,
         autonomy,
+        brainstorm,
       });
       setSelectedRepo("");
       setSearch("");
@@ -314,6 +318,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
       setBlueprint(null);
       setBlueprintTouched(false);
       setAutonomy("auto");
+      setBrainstorm(false);
       onClose();
     } finally {
       setLoading(false);
@@ -795,6 +800,29 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
                   : "The run pauses at each gate (plan, staff review, deploy) until you decide."}
             </p>
           </div>
+
+          {/* Brainstorm first — boardroom debate before planning */}
+          <label
+            className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer"
+            style={{ borderColor: "var(--border)", background: "var(--surface-muted)" }}
+          >
+            <input
+              type="checkbox"
+              checked={brainstorm}
+              onChange={(e) => setBrainstorm(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block text-sm font-medium" style={{ color: "var(--ink-strong)" }}>
+                Brainstorm first (boardroom debate)
+              </span>
+              <span className="block text-xs mt-0.5" style={{ color: "var(--ink-muted)" }}>
+                A specialist panel (product, engineering, architecture, security — plus data/infra/QA
+                when the topic needs them) debates the approach before anything is planned or built.
+                The agreed decision, risks, and dissent feed every downstream agent and your approval gate.
+              </span>
+            </span>
+          </label>
 
           {/* Requirements */}
           <div>

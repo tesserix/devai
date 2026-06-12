@@ -72,12 +72,28 @@ stages:
     depends_on: [analyze-requirements]
     timeout: 10m
 
+  # ─── Optional boardroom (trigger's "Brainstorm first" toggle) ────────
+  # Runs ONLY when the dispatch sets agent_context.brainstorm — the panel
+  # debates the approach and its agreed decision lands in technical_plan /
+  # plan_summary, which stories, the plan, and the approval gate all read.
+  - name: boardroom-debate
+    type: review
+    stage: boardroom_debate
+    agent: supervisor
+    lane: plan
+    title: Boardroom Debate
+    depends_on: [create-epic]
+    condition: "output.brainstorm"
+    timeout: 30m
+    config:
+      rounds: "2"
+
   - name: create-stories
     type: agentic
     stage: create_stories
     agent: product_director_stories
     lane: plan
-    depends_on: [create-epic]
+    depends_on: [boardroom-debate]
     timeout: 5m
 
   - name: create-plan

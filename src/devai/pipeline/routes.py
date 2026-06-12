@@ -298,6 +298,10 @@ class TriggerBody(BaseModel):
     # "full" → gates self-approve, run flows end-to-end (default);
     # "gated" → pause at every approval gate for a human decision.
     autonomy: str | None = None
+    # "Brainstorm first": run the boardroom debate stage (condition:
+    # output.brainstorm in the blueprint) before planning/stories — the
+    # panel's agreed decision feeds every downstream agent.
+    brainstorm: bool = False
 
 
 @router.post("/trigger")
@@ -313,6 +317,8 @@ async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
     agent_context: dict[str, Any] = {"requirements": intent}
     if body.issue_number is not None:
         agent_context["trigger_ref"] = str(body.issue_number)
+    if body.brainstorm:
+        agent_context["brainstorm"] = True
     try:
         task_id = await svc.dispatch(
             intent=intent,
