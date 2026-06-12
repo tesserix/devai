@@ -24,6 +24,7 @@ Two output shapes:
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -207,6 +208,23 @@ def build_job_spec(
         {"name": "DEVAI_AGENTGATEWAY_URL", "value": inputs.agentgateway_url or ""},
         {"name": "DEVAI_KAGENT_URL", "value": inputs.kagent_url or ""},
     ]
+    # Keyless LLM config carried from the dispatching pod's own environment.
+    # Vertex needs no secret — the runner Job's KSA (devai-runner) is
+    # Workload-Identity-bound to the same GSA, so ADC works in-Job; these
+    # vars just tell the adapter which project/location/model to dial.
+    for plain_key in (
+        "DEVAI_LLM_PROVIDER",
+        "DEVAI_VERTEX_PROJECT",
+        "DEVAI_VERTEX_LOCATION",
+        "DEVAI_VERTEX_GEMINI_MODEL",
+        "DEVAI_VERTEX_EMBEDDING_MODEL",
+        "DEVAI_ANTHROPIC_BASE_URL",
+        "DEVAI_OPENAI_BASE_URL",
+    ):
+        value = os.environ.get(plain_key, "")
+        if value:
+            env.append({"name": plain_key, "value": value})
+
     # Secrets reused from devai-api-secrets so the runner can talk to the
     # same LLM gateways without holding a separate copy.
     for secret_key in (
