@@ -18,7 +18,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from devai.adapters.llm import create_llm_adapter
+from devai.adapters.llm.factory import create_llm_chain
 from devai.adapters.memory import create_memory_adapter
 from devai.blueprint.registry import StageRegistry, register_defaults
 from devai.pipeline.interfaces import StageDeps
@@ -80,7 +80,7 @@ async def build_runtime(
     subsystems — each degrades to None/Noop and the pipeline keeps running.
     """
     memory_adapter = create_memory_adapter(config)
-    llm_adapter = create_llm_adapter(config)
+    llm_adapter = create_llm_chain(config)
 
     # Register as the process-global memory so call sites without StageDeps
     # injection (chat tools, legacy agents, dashboard routes) honor the same

@@ -230,19 +230,33 @@ function ConnectorForm({
   // them as a datalist on *_model fields — free text stays allowed so
   // gateway aliases / brand-new models still work.
   const [modelOptions, setModelOptions] = useState<string[]>([]);
+  // Per-model enable/disable: null = no policy (everything enabled);
+  // a Set = only those models allowed. Saved as prefs.enabled_models.
+  const [disabledModels, setDisabledModels] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (spec.key !== "llm" || !provider) return;
     let cancelled = false;
     api
       .listProviderModels(provider)
       .then((r) => {
-        if (!cancelled) setModelOptions(r.models.map((m) => m.id));
+        if (cancelled) return;
+        setModelOptions(r.models.map((m) => m.id));
+        setDisabledModels(new Set(r.models.filter((m) => m.enabled === false).map((m) => m.id)));
       })
       .catch(() => setModelOptions([]));
     return () => {
       cancelled = true;
     };
   }, [spec.key, provider]);
+
+  const toggleModel = (id: string) => {
+    setDisabledModels((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const save = async () => {
     setSaving(true);
@@ -255,6 +269,11 @@ function ConnectorForm({
         if (!v || !visibleKeys.has(k)) continue; // only the selected provider's fields
         if (secretKeys.has(k)) secrets[k] = v;
         else prefs[k] = v;
+      }
+      // Model policy: persist the ENABLED set only when something is
+      // disabled — no policy means every model stays available.
+      if (spec.key === "llm" && disabledModels.size > 0 && modelOptions.length > 0) {
+        prefs["enabled_models"] = modelOptions.filter((m) => !disabledModels.has(m)).join(",");
       }
       await api.saveConnector({
         scope,
@@ -359,6 +378,34 @@ function ConnectorForm({
             <option key={m} value={m} />
           ))}
         </datalist>
+      )}
+
+      {spec.key === "llm" && modelOptions.length > 0 && (
+        <div>
+          <span className="text-xs text-[var(--ink-300)]">
+            Available models — click to enable/disable for your account
+          </span>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {modelOptions.map((m) => {
+              const off = disabledModels.has(m);
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => toggleModel(m)}
+                  className={`px-2 py-0.5 rounded-full text-xs border transition-colors ${
+                    off
+                      ? "border-[var(--surface-border)] text-[var(--ink-400)] line-through opacity-60"
+                      : "border-emerald-500/40 text-emerald-300 bg-emerald-500/10"
+                  }`}
+                  title={off ? "Disabled — click to enable" : "Enabled — click to disable"}
+                >
+                  {m}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {err && <p className="text-sm text-red-300">{err}</p>}

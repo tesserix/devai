@@ -162,6 +162,20 @@ async def build_overlay(
                 if value:
                     overrides[fld.settings_attr] = value
 
+        # LLM model policy: the user's enabled-models choice (Settings UI
+        # toggles). Stored as a list or comma-joined string in prefs;
+        # exposed as `llm_enabled_models` for the resolver's allowlist wrap.
+        if connector_key == "llm":
+            raw_enabled = c.prefs.get("enabled_models")
+            if isinstance(raw_enabled, str):
+                enabled = [m.strip() for m in raw_enabled.split(",") if m.strip()]
+            elif isinstance(raw_enabled, list):
+                enabled = [str(m).strip() for m in raw_enabled if str(m).strip()]
+            else:
+                enabled = []
+            if enabled:
+                overrides["llm_enabled_models"] = enabled
+
     return PrincipalSettingsOverlay(
         base_settings,
         overrides,

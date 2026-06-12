@@ -206,7 +206,21 @@ async def list_provider_models(provider: str, request: Request) -> dict[str, Any
         if len(_MODELS_CACHE) > 32:
             _MODELS_CACHE.clear()
         _MODELS_CACHE[cache_key] = (now + _MODELS_TTL_S, models)
-    return {"provider": provider, "configured": configured, "models": models}
+
+    # Per-model enable/disable state from the caller's LLM connector
+    # (prefs.enabled_models). No list stored → everything enabled.
+    raw_enabled = getattr(overlay, "llm_enabled_models", None) or []
+    enabled_list = [str(m).strip() for m in raw_enabled if str(m).strip()]
+    models_out = [
+        {**m, "enabled": (not enabled_list) or m.get("id") in enabled_list}
+        for m in models
+    ]
+    return {
+        "provider": provider,
+        "configured": configured,
+        "models": models_out,
+        "enabled_models": enabled_list,
+    }
 
 
 # ── delete ──────────────────────────────────────────────────────────────────

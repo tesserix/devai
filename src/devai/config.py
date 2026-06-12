@@ -632,6 +632,12 @@ class Settings(BaseSettings):
     # groq base URL (key/model fields live in the legacy provider block above).
     groq_base_url: str = "https://api.groq.com/openai/v1"
 
+    # Runtime fallback: when the primary provider errors on a call, retry it
+    # on this provider (the fallback's own default model) instead of failing
+    # the agent/stage. Empty disables chaining. e.g. "vertex_gemini" backs
+    # up the Anthropic default with the keyless in-VPC path.
+    llm_fallback_provider: str = ""
+
     # Require interactive users to bring their own LLM connector: when true,
     # principals with no Settings LLM connector get a clear "configure your
     # connector" stub instead of silently riding the shared platform key.

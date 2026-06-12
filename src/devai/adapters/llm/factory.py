@@ -214,6 +214,28 @@ def resolve_llm_tier(settings: Any, tier: str) -> tuple[str, str]:
     return (getattr(settings, "llm_provider", "noop") or "noop").lower(), ""
 
 
+def create_llm_chain(settings: Any) -> LLMAdapter:
+    """The default adapter wrapped with the configured runtime fallback.
+
+    ``DEVAI_LLM_FALLBACK_PROVIDER`` names a second backend that picks up a
+    call when the primary raises or answers with an error — outages degrade
+    instead of failing the workflow. Same provider / unset / unconfigured
+    fallback → just the primary.
+    """
+    primary = create_llm_adapter(settings)
+    fb_name = (getattr(settings, "llm_fallback_provider", "") or "").lower()
+    if not fb_name or fb_name == primary.provider_name or not llm_registry.has(fb_name):
+        return primary
+    fallback = create_llm_adapter(settings, provider=fb_name)
+    if fallback.provider_name == "noop":
+        logger.warning("llm fallback provider %r is not configured — chain disabled", fb_name)
+        return primary
+    from devai.adapters.llm.fallback import FallbackLLMAdapter
+
+    logger.info("LLM fallback chain active: %s → %s", primary.provider_name, fallback.provider_name)
+    return FallbackLLMAdapter(primary, fallback)
+
+
 def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdapter:
     """Resolve `settings.llm_provider` (or explicit override) to an adapter.
 
@@ -258,6 +280,7 @@ __all__ = [
     "KNOWN_PROVIDERS",
     "LLM_TIERS",
     "create_llm_adapter",
+    "create_llm_chain",
     "llm_registry",
     "resolve_llm_tier",
     "resolve_spec_provider",

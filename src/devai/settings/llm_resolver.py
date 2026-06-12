@@ -45,6 +45,20 @@ class PrincipalLLMResolver:
         self._base = base_settings
         self._service = service
         self._cache: dict[str, LLMAdapter] = {}
+        self._platform: LLMAdapter | None = None
+
+    def _platform_adapter(self) -> LLMAdapter | None:
+        """Lazy platform-default adapter used as the resilience fallback
+        behind per-user providers. Never raises."""
+        if self._platform is None:
+            try:
+                from devai.adapters.llm.factory import create_llm_adapter
+
+                self._platform = create_llm_adapter(self._base)
+            except Exception:  # noqa: BLE001
+                logger.warning("settings: platform fallback adapter build failed", exc_info=True)
+                return None
+        return self._platform
 
     async def resolve(self, principal: Principal | None) -> LLMAdapter | None:
         """The principal's adapter, or None when nothing user-specific applies.
@@ -80,6 +94,24 @@ class PrincipalLLMResolver:
                     getattr(principal, "email", "?"),
                 )
                 return None
+
+            # The user's enabled-models policy (Settings toggles): requests
+            # for a disabled model clamp to the connector's default.
+            enabled = getattr(overlay, "llm_enabled_models", None) or []
+            if enabled:
+                from devai.adapters.llm.fallback import ModelAllowlistLLMAdapter
+
+                adapter = ModelAllowlistLLMAdapter(adapter, list(enabled))
+
+            # Runtime resilience: unless strict per-user isolation is on,
+            # chain the platform default behind the user's provider so an
+            # outage/misconfiguration degrades instead of failing their run.
+            if not bool(getattr(self._base, "llm_require_user_connector", False)):
+                platform = self._platform_adapter()
+                if platform is not None and platform.provider_name not in ("noop", adapter.provider_name):
+                    from devai.adapters.llm.fallback import FallbackLLMAdapter
+
+                    adapter = FallbackLLMAdapter(adapter, platform)
             if len(self._cache) >= _CACHE_MAX:
                 self._cache.clear()
             self._cache[fingerprint] = adapter

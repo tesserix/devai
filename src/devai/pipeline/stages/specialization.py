@@ -216,7 +216,12 @@ class _RunSpecializationStage(PipelineStage):
                 if len(cache) > 32:
                     cache.clear()
                 cache[key] = adapter
-            return adapter
+            # Resilience: chain the run's default adapter behind the
+            # spec-pinned provider so a provider outage degrades the role
+            # to the default backend instead of failing the workflow.
+            from devai.adapters.llm.fallback import FallbackLLMAdapter
+
+            return FallbackLLMAdapter(adapter, base)
         except Exception:  # noqa: BLE001
             logger.warning("specialization %s: provider selection failed — using default", spec.name, exc_info=True)
             return base
