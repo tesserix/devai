@@ -92,6 +92,17 @@ class ConversationGateway:
             logger.warning("overlay agent resolution failed — using shared agent", exc_info=True)
             return self._get_agent()
 
+    async def agent_for(self, principal: Principal) -> DevAIChatAgent:
+        """Public surface for transports that manage their own turn loop
+        (REST/SSE/WS chat routes): the principal's overlay agent — their
+        own LLM creds — or the shared platform agent."""
+        return await self._agent_for(principal)
+
+    async def trial_guard(self, principal: Principal) -> ConversationReply | None:
+        """Public trial enforcement for transports that bypass handle_turn.
+        None → the turn may proceed; a reply → return it verbatim."""
+        return await self._trial_guard(principal)
+
     async def handle_turn(self, turn: ConversationTurn) -> ConversationReply:
         """Run one conversational turn. Never raises — returns a friendly error.
 

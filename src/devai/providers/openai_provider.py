@@ -25,6 +25,18 @@ class OpenAIProvider:
         self.client = AsyncOpenAI(api_key=config.openai_api_key)
         self.model = config.openai_model
 
+    def _user_pinned_elsewhere(self) -> bool:
+        """True when this run's config is a USER's settings overlay whose
+        LLM connector pins a non-OpenAI provider (and they brought no
+        OpenAI key). Their connector choice wins over this agent's
+        hardcoded provider preference — never dial the platform OpenAI
+        key for a user who set up their own LLM."""
+        overlaid = set(getattr(self._config, "overlaid_attrs", ()) or ())
+        if not overlaid or "openai_api_key" in overlaid:
+            return False
+        provider = str(getattr(self._config, "llm_provider", "") or "").lower()
+        return "llm_provider" in overlaid and provider not in ("", "openai")
+
     async def generate(
         self,
         prompt: str,
@@ -34,6 +46,8 @@ class OpenAIProvider:
         response_format: dict[str, Any] | None = None,
     ) -> str:
         """Generate a response using OpenAI Chat Completions."""
+        if self._user_pinned_elsewhere():
+            return await self._fallback_to_claude(prompt, system, max_tokens)
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})

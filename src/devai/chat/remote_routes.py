@@ -85,23 +85,24 @@ async def stream_thread_message(thread_id: str, request: Request) -> StreamingRe
     clients (which can't send a body) work. Reuses the chat agent's streaming.
     """
     principal = _check_token(request)
-    config = request.app.state.config
-    state = request.app.state.state_manager
-    db = getattr(request.app.state, "database", None)
 
     text = (request.query_params.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Query param 'text' is required")
 
-    from devai.chat.agent import DevAIChatAgent
+    # Same policy point as every chat transport: per-user overlay agent
+    # (their own LLM creds) + trial enforcement, via the gateway.
+    from devai.chat.routes import _resolve_chat
 
-    if not hasattr(request.app.state, "chat_agent"):
-        request.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
-    agent = request.app.state.chat_agent
+    agent, trial_block = await _resolve_chat(request.app.state, principal)
     trace_id = trace_id_from_request(request)
     session_id = f"url:{thread_id}"
 
     async def event_stream():
+        if agent is None:
+            yield f"data: {json.dumps({'text': trial_block})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
         try:
             async for chunk in agent.stream_chat(text, session_id, principal=principal, trace_id=trace_id):
                 yield f"data: {json.dumps({'text': chunk})}\n\n"

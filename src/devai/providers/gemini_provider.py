@@ -55,6 +55,25 @@ class GeminiProvider:
         """Generate a response using Google Gemini."""
         import asyncio
 
+        # A user whose LLM connector pins a non-Gemini provider gets THEIR
+        # provider, not the platform Gemini key — the connector choice wins
+        # over this agent's hardcoded preference.
+        overlaid = set(getattr(self._config, "overlaid_attrs", ()) or ())
+        pinned = str(getattr(self._config, "llm_provider", "") or "").lower()
+        if (
+            overlaid
+            and "gemini_api_key" not in overlaid
+            and "llm_provider" in overlaid
+            and pinned not in ("", "gemini", "vertex_gemini")
+        ):
+            from devai.providers.anthropic_claude import ClaudeProvider
+
+            claude = ClaudeProvider(self._config)
+            return await claude.generate(
+                system_prompt=system or "You are a helpful assistant.",
+                user_message=prompt,
+            )
+
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
 
         try:

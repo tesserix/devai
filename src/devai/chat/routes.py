@@ -20,6 +20,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+def _gateway(state) -> "object":
+    """The app-wide ConversationGateway (lazily created) — the single
+    policy point for chat: per-user overlay agents (their own LLM creds)
+    + trial enforcement. Every chat transport resolves its agent here so
+    no endpoint can hand a user the raw shared-key agent."""
+    gw = getattr(state, "chat_gateway", None)
+    if gw is None:
+        from devai.chat.gateway import ConversationGateway
+
+        gw = ConversationGateway(
+            state.config,
+            state.state_manager,
+            database=getattr(state, "database", None),
+            settings_service=getattr(state, "settings_service", None),
+        )
+        state.chat_gateway = gw
+    return gw
+
+
+async def _resolve_chat(state, principal: Principal):
+    """(agent, trial_block_text) for this principal. agent is None only
+    when the trial budget is spent — return the block text verbatim."""
+    gw = _gateway(state)
+    block = await gw.trial_guard(principal)
+    if block is not None:
+        return None, block.text
+    return await gw.agent_for(principal), None
+
+
 @router.post("/api/message")
 async def chat_message(request: Request) -> dict[str, str]:
     """Send a message to the chat agent and get a response."""
@@ -30,18 +59,12 @@ async def chat_message(request: Request) -> dict[str, str]:
     if not message:
         return {"response": "Please send a message."}
 
-    from devai.chat.agent import DevAIChatAgent
-
-    config = request.app.state.config
-    state = request.app.state.state_manager
-    db = getattr(request.app.state, "database", None)
-
     principal = await extract_principal(request) or Principal.system()
     trace_id = trace_id_from_request(request)
 
-    if not hasattr(request.app.state, "chat_agent"):
-        request.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
-    agent = request.app.state.chat_agent
+    agent, trial_block = await _resolve_chat(request.app.state, principal)
+    if agent is None:
+        return {"response": trial_block, "session_id": session_id}
     try:
         response = await agent.chat(message, session_id, principal=principal, trace_id=trace_id)
     except Exception as exc:
@@ -62,22 +85,18 @@ async def chat_stream(request: Request) -> StreamingResponse:
     message = body.get("message", "")
     session_id = body.get("session_id", "default")
 
-    from devai.chat.agent import DevAIChatAgent
-
-    config = request.app.state.config
-    state = request.app.state.state_manager
-    db = getattr(request.app.state, "database", None)
-
     principal = await extract_principal(request) or Principal.system()
     trace_id = trace_id_from_request(request)
 
-    if not hasattr(request.app.state, "chat_agent"):
-        request.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
-    agent = request.app.state.chat_agent
+    agent, trial_block = await _resolve_chat(request.app.state, principal)
 
     async def event_stream():
         from devai.services.redact import redact_secrets
 
+        if agent is None:
+            yield f"data: {json.dumps({'text': trial_block})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
         try:
             async for chunk in agent.stream_chat(message, session_id, principal=principal, trace_id=trace_id):
                 # Redact each streamed chunk — tool output / error text can
@@ -104,21 +123,17 @@ async def chat_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = "ws-" + str(id(websocket))
 
-    from devai.chat.agent import DevAIChatAgent
-
-    config = websocket.app.state.config
-    state = websocket.app.state.state_manager
-    db = getattr(websocket.app.state, "database", None)
-
     # Resolve principal from the upgrade request. WebSocket exposes
     # headers/cookies through the same API as Request — we duck-type
     # rather than importing Request to keep the surface small.
     principal = await extract_principal(websocket) or Principal.system()  # type: ignore[arg-type]
     trace_id = trace_id_from_request(websocket)  # type: ignore[arg-type]
 
-    if not hasattr(websocket.app.state, "chat_agent"):
-        websocket.app.state.chat_agent = DevAIChatAgent(config, state, database=db)
-    agent = websocket.app.state.chat_agent
+    agent, trial_block = await _resolve_chat(websocket.app.state, principal)
+    if agent is None:
+        await websocket.send_json({"type": "error", "text": trial_block})
+        await websocket.close()
+        return
 
     from devai.services.redact import redact_secrets
 
