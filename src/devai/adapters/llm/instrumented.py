@@ -82,6 +82,9 @@ class InstrumentedLLMAdapter(LLMAdapter):
     async def embed(self, texts: list[str], *, model: str = "") -> list[list[float]]:
         return await self._inner.embed(texts, model=model)
 
+    async def list_models(self) -> list[dict[str, str]]:
+        return await self._inner.list_models()
+
     async def close(self) -> None:
         await self._inner.close()
 

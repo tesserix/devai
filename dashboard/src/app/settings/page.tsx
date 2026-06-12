@@ -225,6 +225,25 @@ function ConnectorForm({
     [spec.fields, provider]
   );
 
+  // Live model suggestions for LLM connectors: ask the backend which models
+  // this provider serves (evaluated against the caller's own keys) and offer
+  // them as a datalist on *_model fields — free text stays allowed so
+  // gateway aliases / brand-new models still work.
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  useEffect(() => {
+    if (spec.key !== "llm" || !provider) return;
+    let cancelled = false;
+    api
+      .listProviderModels(provider)
+      .then((r) => {
+        if (!cancelled) setModelOptions(r.models.map((m) => m.id));
+      })
+      .catch(() => setModelOptions([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [spec.key, provider]);
+
   const save = async () => {
     setSaving(true);
     setErr(null);
@@ -318,6 +337,11 @@ function ConnectorForm({
               type={f.secret ? "password" : "text"}
               autoComplete={f.secret ? "new-password" : "off"}
               disabled={f.secret && !secretsWritable}
+              list={
+                !f.secret && f.key.endsWith("_model") && modelOptions.length > 0
+                  ? `models-${spec.key}-${provider}`
+                  : undefined
+              }
               placeholder={
                 f.secret && !secretsWritable ? "secret storage read-only" : f.placeholder
               }
@@ -328,6 +352,14 @@ function ConnectorForm({
           </label>
         ))}
       </div>
+
+      {modelOptions.length > 0 && (
+        <datalist id={`models-${spec.key}-${provider}`}>
+          {modelOptions.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+      )}
 
       {err && <p className="text-sm text-red-300">{err}</p>}
 

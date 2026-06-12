@@ -212,6 +212,16 @@ class LLMAdapter(Adapter):
         """Default: not supported. Override in backends that do."""
         raise NotImplementedError(f"{self.provider_name} adapter does not implement embeddings")
 
+    async def list_models(self) -> list[dict[str, str]]:
+        """Models this backend's credentials can use.
+
+        Each entry: {"id": ..., "display_name": ...}. Default: empty —
+        backends without a discovery API (or Noop) return []. Used by the
+        Settings models endpoint so the UI can offer real choices per
+        provider, evaluated against the CALLER's own keys.
+        """
+        return []
+
     # ── Adapter contract ──────────────────────────────────────────────
 
     async def close(self) -> None:

@@ -55,6 +55,7 @@ class OpenAILLMAdapter(LLMAdapter):
         organization: str = "",
         default_model: str = "",
         timeout_seconds: float | None = None,
+        provider_name: str = "",
     ) -> None:
         if not api_key:
             raise AdapterNotConfigured("openai adapter requires DEVAI_OPENAI_API_KEY")
@@ -73,6 +74,23 @@ class OpenAILLMAdapter(LLMAdapter):
         self._client = AsyncOpenAI(**kwargs)
         if default_model:
             self.default_model = default_model
+        if provider_name:
+            # OpenAI-compatible backends (groq, openrouter, gateway) reuse
+            # this adapter; the name keeps telemetry/metrics honest.
+            self.provider_name = provider_name
+
+    async def list_models(self) -> list[dict[str, str]]:
+        """`GET /models` — identical wire shape for OpenAI/Groq/OpenRouter."""
+        try:
+            out: list[dict[str, str]] = []
+            async for m in self._client.models.list():
+                mid = getattr(m, "id", "") or ""
+                if mid:
+                    out.append({"id": mid, "display_name": getattr(m, "display_name", "") or mid})
+            return sorted(out, key=lambda x: x["id"])
+        except Exception:  # noqa: BLE001
+            logger.warning("%s adapter list_models failed", self.provider_name, exc_info=True)
+            return []
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         kwargs = self._build_kwargs(request)

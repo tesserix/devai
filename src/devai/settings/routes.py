@@ -154,6 +154,61 @@ async def upsert_connector(request: Request) -> dict[str, Any]:
     return {"status": "saved", "connector": connector.public_dict()}
 
 
+# ── model discovery ──────────────────────────────────────────────────────────
+
+# (provider, used_user_key) → (expires_monotonic, models). Discovery hits
+# external APIs; a short TTL keeps the Settings UI snappy without hammering.
+_MODELS_CACHE: dict[tuple[str, bool], tuple[float, list[dict[str, str]]]] = {}
+_MODELS_TTL_S = 60.0
+
+
+@router.get("/models/{provider}")
+async def list_provider_models(provider: str, request: Request) -> dict[str, Any]:
+    """Models the caller can use on ``provider``, evaluated against THEIR
+    keys (Settings overlay; platform credentials only as fallback). Secret
+    values never appear in the response.
+    """
+    import time as _time
+
+    principal = await _require_principal(request)
+    svc = _svc(request)
+
+    from devai.adapters.llm.factory import KNOWN_PROVIDERS, create_llm_adapter
+
+    provider = provider.lower()
+    if provider not in KNOWN_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"unknown provider: {provider} (known: {', '.join(KNOWN_PROVIDERS)})")
+
+    from devai.config import settings as base_settings
+    from devai.settings.overlay import PrincipalSettingsOverlay, build_overlay
+
+    overlay = await build_overlay(base_settings, principal, svc)
+    has_user_key = isinstance(overlay, PrincipalSettingsOverlay)
+
+    cache_key = (provider, has_user_key)
+    cached = _MODELS_CACHE.get(cache_key)
+    now = _time.monotonic()
+    if cached and cached[0] > now and not has_user_key:
+        # Only platform-credential results are shared across callers.
+        return {"provider": provider, "configured": True, "models": cached[1], "cached": True}
+
+    adapter = create_llm_adapter(overlay, provider=provider)
+    try:
+        configured = adapter.provider_name != "noop" or provider == "noop"
+        models = await adapter.list_models() if configured else []
+    finally:
+        try:
+            await adapter.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not has_user_key and configured:
+        if len(_MODELS_CACHE) > 32:
+            _MODELS_CACHE.clear()
+        _MODELS_CACHE[cache_key] = (now + _MODELS_TTL_S, models)
+    return {"provider": provider, "configured": configured, "models": models}
+
+
 # ── delete ──────────────────────────────────────────────────────────────────
 
 

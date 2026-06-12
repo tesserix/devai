@@ -133,3 +133,24 @@ def test_user_cannot_save_foreign_team():
         json={"connector_key": "llm", "provider": "openai", "scope": "team", "scope_id": "teamZ"},
     )
     assert r.status_code == 403
+
+
+def test_models_discovery_unknown_provider_400():
+    client = TestClient(_app(ALICE))
+    r = client.get("/api/settings/models/no-such-provider")
+    assert r.status_code == 400
+
+
+def test_models_discovery_unconfigured_provider_reports_not_configured():
+    client = TestClient(_app(ALICE))
+    # groq has no key in test settings → noop adapter → configured: false
+    r = client.get("/api/settings/models/groq")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["configured"] is False
+    assert body["models"] == []
+
+
+def test_models_discovery_requires_auth():
+    client = TestClient(_app(None))
+    assert client.get("/api/settings/models/anthropic").status_code == 401

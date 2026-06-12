@@ -624,6 +624,20 @@ class Settings(BaseSettings):
     vertex_api_key: str = ""  # direct API-key auth (local dev); ADC is the keyless default
     gcp_secret_vertex_api_key: str = "prod-devai-vertex-api-key"
 
+    # openrouter — OpenAI-compatible aggregator (hundreds of models, one key).
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = ""  # e.g. meta-llama/llama-3.3-70b-instruct
+
+    # groq base URL (key/model fields live in the legacy provider block above).
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+
+    # Require interactive users to bring their own LLM connector: when true,
+    # principals with no Settings LLM connector get a clear "configure your
+    # connector" stub instead of silently riding the shared platform key.
+    # System/webhook principals always keep the platform adapter.
+    llm_require_user_connector: bool = False
+
     # --- LLM cost tiers ---
     # "provider:model" pairs resolved by resolve_llm_tier(); lets stages and
     # specializations ask for a cost class instead of naming a provider.

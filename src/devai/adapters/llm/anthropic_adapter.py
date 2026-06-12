@@ -88,6 +88,19 @@ class AnthropicLLMAdapter(LLMAdapter):
         latency_ms = (time.monotonic() - started) * 1000.0
         return self._normalize(raw, latency_ms)
 
+    async def list_models(self) -> list[dict[str, str]]:
+        """Anthropic's /v1/models — every model this key can call."""
+        try:
+            out: list[dict[str, str]] = []
+            async for m in self._client.models.list(limit=100):
+                mid = getattr(m, "id", "") or ""
+                if mid:
+                    out.append({"id": mid, "display_name": getattr(m, "display_name", "") or mid})
+            return out
+        except Exception:  # noqa: BLE001
+            logger.warning("anthropic adapter list_models failed", exc_info=True)
+            return []
+
     async def health_check(self) -> dict[str, Any]:
         try:
             # Tiny ping — 1-token completion is the cheapest sanity check

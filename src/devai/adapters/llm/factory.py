@@ -38,7 +38,7 @@ from devai.adapters.llm.noop import NoopLLMAdapter
 
 logger = logging.getLogger(__name__)
 
-KNOWN_PROVIDERS = ("noop", "anthropic", "openai", "gateway", "vertex_gemini")
+KNOWN_PROVIDERS = ("noop", "anthropic", "openai", "gateway", "vertex_gemini", "groq", "openrouter")
 
 
 def _build_noop(settings: Any) -> LLMAdapter:
@@ -94,6 +94,7 @@ def _build_gateway(settings: Any) -> LLMAdapter:
         api_key=getattr(settings, "llm_gateway_api_key", "") or "not-needed",
         base_url=base_url,
         default_model=getattr(settings, "llm_gateway_model", "") or "",
+        provider_name="gateway",
     )
 
 
@@ -115,12 +116,45 @@ def _build_vertex_gemini(settings: Any) -> LLMAdapter:
     )
 
 
+def _build_groq(settings: Any) -> LLMAdapter:
+    """Groq — OpenAI-compatible wire format, just a different base URL."""
+    from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
+
+    api_key = getattr(settings, "groq_api_key", "") or ""
+    if not api_key:
+        raise AdapterNotConfigured("groq adapter requires DEVAI_GROQ_API_KEY")
+    return OpenAILLMAdapter(
+        api_key=api_key,
+        base_url=getattr(settings, "groq_base_url", "") or "https://api.groq.com/openai/v1",
+        default_model=getattr(settings, "groq_model", "") or "",
+        provider_name="groq",
+    )
+
+
+def _build_openrouter(settings: Any) -> LLMAdapter:
+    """OpenRouter — one OpenAI-compatible key for hundreds of models
+    (Llama, Mistral, DeepSeek, …) without per-vendor accounts."""
+    from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
+
+    api_key = getattr(settings, "openrouter_api_key", "") or ""
+    if not api_key:
+        raise AdapterNotConfigured("openrouter adapter requires DEVAI_OPENROUTER_API_KEY")
+    return OpenAILLMAdapter(
+        api_key=api_key,
+        base_url=getattr(settings, "openrouter_base_url", "") or "https://openrouter.ai/api/v1",
+        default_model=getattr(settings, "openrouter_model", "") or "",
+        provider_name="openrouter",
+    )
+
+
 llm_registry: AdapterRegistry[LLMAdapter] = AdapterRegistry("llm")
 llm_registry.register("noop", _build_noop)
 llm_registry.register("anthropic", _build_anthropic)
 llm_registry.register("openai", _build_openai)
 llm_registry.register("gateway", _build_gateway)
 llm_registry.register("vertex_gemini", _build_vertex_gemini)
+llm_registry.register("groq", _build_groq)
+llm_registry.register("openrouter", _build_openrouter)
 
 
 LLM_TIERS = ("light", "standard", "heavy", "frontier")
@@ -138,6 +172,8 @@ _SPEC_PROVIDER_ALIASES = {
     "gemini": "vertex_gemini",  # Vertex is the live Gemini path (PSC + WI)
     "vertex_gemini": "vertex_gemini",
     "gateway": "gateway",
+    "groq": "groq",
+    "openrouter": "openrouter",
     "noop": "noop",
 }
 

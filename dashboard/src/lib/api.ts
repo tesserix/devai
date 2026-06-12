@@ -240,6 +240,11 @@ export const api = {
       { method: "DELETE" }
     ),
 
+  listProviderModels: (provider: string) =>
+    apiFetch<{ provider: string; configured: boolean; models: { id: string; display_name: string }[] }>(
+      `/settings/models/${encodeURIComponent(provider)}`
+    ),
+
   // Pipeline. The Fiber pipeline serializes a task as {id, state, current_stage,
   // …} but the dashboard's PipelineRun shape is {run_id, stage, agents}. Normalize
   // at the boundary so a missing run_id never reaches run.run_id.slice() and

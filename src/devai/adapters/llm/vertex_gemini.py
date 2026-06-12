@@ -265,6 +265,41 @@ class VertexGeminiLLMAdapter(LLMAdapter):
             for p in resp.json().get("predictions", [])
         ]
 
+    async def list_models(self) -> list[dict[str, str]]:
+        """Text-generation models from the Vertex publisher catalog.
+
+        Lists google + anthropic publishers (the two MaaS families this
+        project uses). Catalog listing works with any valid credential;
+        whether a given model SERVES still depends on per-model enablement.
+        """
+        import httpx  # noqa: PLC0415
+
+        out: list[dict[str, str]] = []
+        skip = ("tts", "image", "live", "exp", "embedding", "ocr")
+        try:
+            host = self._base.split("/v1/")[0]
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                for publisher in ("google", "anthropic"):
+                    resp = await client.get(
+                        f"{host}/v1beta1/publishers/{publisher}/models",
+                        params={"pageSize": 200, "listAllVersions": "false"},
+                        headers=self._headers(),
+                    )
+                    if resp.status_code != 200:
+                        continue
+                    for m in resp.json().get("publisherModels", []):
+                        mid = m.get("name", "").split("/")[-1]
+                        stage = m.get("launchStage", "")
+                        if not mid or any(s in mid for s in skip):
+                            continue
+                        if stage not in ("GA", "PUBLIC_PREVIEW"):
+                            continue
+                        out.append({"id": mid, "display_name": f"{mid} ({publisher}, {stage})"})
+            return out
+        except Exception:  # noqa: BLE001
+            logger.warning("vertex_gemini adapter list_models failed", exc_info=True)
+            return []
+
     async def health_check(self) -> dict[str, Any]:
         try:
             self._headers()

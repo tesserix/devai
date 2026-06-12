@@ -199,6 +199,20 @@ def test_factory_vertex_gemini_without_project_falls_back_to_noop():
     assert a.provider_name == "noop"
 
 
+def test_factory_groq_and_openrouter_without_keys_fall_back_to_noop():
+    for provider in ("groq", "openrouter"):
+        s = _Settings()
+        s.llm_provider = provider
+        assert create_llm_adapter(s).provider_name == "noop"
+
+
+@pytest.mark.asyncio
+async def test_list_models_default_is_empty():
+    from devai.adapters.llm.noop import NoopLLMAdapter
+
+    assert await NoopLLMAdapter().list_models() == []
+
+
 def test_vertex_gemini_gateway_mode_needs_no_credentials():
     from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
 

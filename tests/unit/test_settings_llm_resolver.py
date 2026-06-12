@@ -127,9 +127,10 @@ def test_resolve_spec_provider_aliases():
     assert resolve_spec_provider("CODEX") == "openai"
     assert resolve_spec_provider("gemini") == "vertex_gemini"
     assert resolve_spec_provider("gateway") == "gateway"
+    assert resolve_spec_provider("groq") == "groq"
+    assert resolve_spec_provider("openrouter") == "openrouter"
     # No opinion → None (default adapter), never a silent noop:
     assert resolve_spec_provider("auto") is None
-    assert resolve_spec_provider("groq") is None
     assert resolve_spec_provider("nemoclaw") is None
     assert resolve_spec_provider("") is None
 
@@ -173,3 +174,28 @@ async def test_overlay_resolves_rows_keyed_by_uid_or_email():
     overlay = await build_overlay(_Settings(), Principal(email="a@example.com", uid="uid-123"), svc)
     assert isinstance(overlay, PrincipalSettingsOverlay)
     assert overlay.claude_model == "claude-sonnet-4-20250514"
+
+
+@pytest.mark.asyncio
+async def test_require_user_connector_blocks_humans_not_systems():
+    from devai.pipeline.interfaces import StageDeps
+
+    class _Cfg:
+        llm_provider = "noop"
+        llm_noop_canned_text = "[noop]"
+        llm_require_user_connector = True
+
+    class _NoneResolver:
+        async def resolve_for_email(self, email):
+            return None
+
+    sentinel = object()
+    deps = StageDeps(config=_Cfg(), llm=sentinel, llm_resolver=_NoneResolver())
+    # Human with no connector → blocked (None), platform key NOT used.
+    assert await deps.llm_for_principal("human@example.com") is None
+    # Synthetic principals keep the platform adapter.
+    assert await deps.llm_for_principal("webhook:tesserix/devai#42") is sentinel
+    assert await deps.llm_for_principal("") is sentinel
+    # Flag off → platform fallback for everyone.
+    deps2 = StageDeps(config=type("C", (), {"llm_require_user_connector": False})(), llm=sentinel, llm_resolver=_NoneResolver())
+    assert await deps2.llm_for_principal("human@example.com") is sentinel

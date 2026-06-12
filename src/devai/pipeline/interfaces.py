@@ -87,11 +87,21 @@ class StageDeps:
     async def llm_for_principal(self, email: str) -> LLMAdapter | None:
         """The triggering user's own LLM adapter (their Settings connectors),
         falling back to the platform default. Stages that talk to an LLM
-        should prefer this over reading ``deps.llm`` directly."""
+        should prefer this over reading ``deps.llm`` directly.
+
+        With ``DEVAI_LLM_REQUIRE_USER_CONNECTOR=true``, a human principal
+        with no LLM connector gets ``None`` (→ a clear stub telling them to
+        configure Settings) instead of silently riding the shared platform
+        key. Synthetic principals (webhook/system, non-email triggered_by)
+        always keep the platform adapter so automation never breaks.
+        """
         if self.llm_resolver is not None and email:
             adapter = await self.llm_resolver.resolve_for_email(email)
             if adapter is not None:
                 return adapter
+            is_human = "@" in email and not email.startswith(("webhook:", "system:"))
+            if is_human and bool(getattr(self.config, "llm_require_user_connector", False)):
+                return None
         return self.llm
 
 
