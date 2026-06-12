@@ -289,7 +289,24 @@ class PipelineService:
             if state in skip_states:
                 continue
             if await sm.is_task_active(td["id"]):
-                continue  # already queued or executing on a live worker
+                # Active-set membership alone is NOT liveness: the set has no
+                # TTL, so a worker killed mid-run (pod roll during a gate
+                # wait — live incident) leaves a stale member behind and the
+                # run looks active forever. The claim key IS liveness (TTL
+                # heartbeat). Set member + expired claim = dead worker: clear
+                # the stale marker and resume.
+                claim_key = sm.PIPELINE_CLAIM_KEY.format(task_id=td["id"])
+                if await sm.redis.exists(claim_key):
+                    continue  # genuinely executing on a live worker
+                logger.warning(
+                    "reconcile: %s is in the active set but its claim expired — clearing stale marker and resuming",
+                    td["id"],
+                )
+                try:
+                    await sm.redis.srem(sm.PIPELINE_ACTIVE_KEY, td["id"])
+                except Exception:  # noqa: BLE001
+                    logger.exception("reconcile: stale active-set clear failed for %s", td["id"])
+                    continue
             if await pipe.resubmit_persisted(td):
                 resumed += 1
         if resumed:
