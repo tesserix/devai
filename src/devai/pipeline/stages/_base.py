@@ -24,6 +24,7 @@ without rewriting them.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from abc import abstractmethod
 from collections.abc import Callable
@@ -33,6 +34,19 @@ from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.types import DevAITask, StageResult, TaskState
 
 logger = logging.getLogger(__name__)
+
+# The settings the CURRENT agent should construct its LLM from. AgentAdapter
+# sets this to the triggering user's settings overlay for the duration of the
+# agent run, so the legacy agents (which build their LLM from `config`) use the
+# USER's provider/keys/model — not the global platform config. async-safe and
+# per-task (each run executes in its own context), so concurrent runs never
+# cross creds.
+_agent_config_ctx: contextvars.ContextVar[Any] = contextvars.ContextVar("devai_agent_config", default=None)
+
+
+def current_agent_config(default: Any) -> Any:
+    """The per-run agent config override, or ``default`` (deps.config)."""
+    return _agent_config_ctx.get(None) or default
 
 
 def run_correlation_label(task_id: str) -> str:
@@ -60,6 +74,22 @@ class AgentAdapter(PipelineStage):
         # langgraph, …) is missing in a slim environment. Swallow both
         # here so a missing optional dep degrades to a stub rather than
         # halting the whole blueprint.
+        # Resolve the triggering user's settings overlay so the agent we build
+        # uses THEIR provider/keys/model (their connector), not the global
+        # platform config. Set as a contextvar that _safe_agent reads during
+        # construction. Falls back to deps.config when the user configured
+        # nothing or resolution fails.
+        agent_config = self.deps.config
+        try:
+            resolver = getattr(self.deps, "llm_resolver", None)
+            if resolver is not None and getattr(task, "triggered_by", ""):
+                overlay = await resolver.settings_for_email(task.triggered_by)
+                if overlay is not None and overlay is not self.deps.config:
+                    agent_config = overlay
+        except Exception:  # noqa: BLE001
+            logger.debug("stage %s: per-user config resolution failed", self.name(), exc_info=True)
+
+        token = _agent_config_ctx.set(agent_config)
         try:
             agent = self._make_agent()
         except Exception as e:  # noqa: BLE001
@@ -69,6 +99,8 @@ class AgentAdapter(PipelineStage):
                 e,
             )
             agent = None
+        finally:
+            _agent_config_ctx.reset(token)
 
         if agent is None:
             logger.warning(
@@ -227,7 +259,10 @@ def _safe_agent(factory: Callable[[Any, Any, Any, Any], Any], deps: StageDeps) -
     if deps.scm is None or deps.state_manager is None:
         return None
     try:
-        return factory(deps.scm, deps.state_manager, deps.config, deps.event_bus)
+        # Build with the per-run config (the triggering user's overlay when
+        # present), so the agent's LLM uses the user's keys/model.
+        config = current_agent_config(deps.config)
+        return factory(deps.scm, deps.state_manager, config, deps.event_bus)
     except Exception:  # noqa: BLE001 — agent construction is allowed to fail in tests
         logger.exception("agent construction failed")
         return None

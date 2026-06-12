@@ -223,7 +223,9 @@ class _BoardroomDebateStage(PipelineStage):
                 model=model,
                 max_tokens=max_tokens,
                 temperature=0.4,
-                extra={"agent": "boardroom"},
+                # triggered_by lets the usage ledger attribute boardroom spend
+                # to the user whose run this is.
+                extra={"agent": "boardroom", "triggered_by": getattr(self, "_triggered_by", "")},
             )
         )
         return (response.text or "").strip()
@@ -303,6 +305,22 @@ class _BoardroomDebateStage(PipelineStage):
     # ── the meeting ─────────────────────────────────────────────────
 
     async def execute(self, task: DevAITask) -> StageResult:
+        # Honor the triggering user's own LLM connector (their provider/keys/
+        # model) for the whole debate — not the global platform model. Set
+        # before any _say() so every seat + the moderator run on it.
+        try:
+            user_llm = await self.deps.llm_for_principal(task.triggered_by or "")
+            if (
+                user_llm is not None
+                and getattr(user_llm, "provider_name", "noop") != "noop"
+                and user_llm is not self.deps.llm
+            ):
+                self._role_chain = user_llm
+                logger.info("boardroom: using per-user LLM for %s", task.triggered_by)
+        except Exception:  # noqa: BLE001
+            logger.debug("boardroom: per-user LLM resolution failed — using role chain", exc_info=True)
+        self._triggered_by = task.triggered_by or ""
+
         topic = (
             str(self.config.get("topic") or "")
             or str(task.agent_context.get("technical_plan") or "")[:500]
