@@ -120,6 +120,41 @@ async def test_resolver_caches_by_fingerprint():
     assert one is two
 
 
+def test_resolve_spec_provider_aliases():
+    from devai.adapters.llm.factory import resolve_spec_provider
+
+    assert resolve_spec_provider("claude") == "anthropic"
+    assert resolve_spec_provider("CODEX") == "openai"
+    assert resolve_spec_provider("gemini") == "vertex_gemini"
+    assert resolve_spec_provider("gateway") == "gateway"
+    # No opinion → None (default adapter), never a silent noop:
+    assert resolve_spec_provider("auto") is None
+    assert resolve_spec_provider("groq") is None
+    assert resolve_spec_provider("nemoclaw") is None
+    assert resolve_spec_provider("") is None
+
+
+@pytest.mark.asyncio
+async def test_settings_for_email_returns_overlay_or_base():
+    from devai.settings.models import Scope
+    from devai.settings.overlay import PrincipalSettingsOverlay
+
+    svc = SettingsService(secrets=_MemSecrets())
+    base = _Settings()
+    resolver = PrincipalLLMResolver(base, svc)
+    # Nothing configured → base settings back.
+    assert await resolver.settings_for_email("nobody@example.com") is base
+    await svc.upsert_connector(
+        scope=Scope.USER,
+        scope_id="a@example.com",
+        connector_key="llm",
+        provider="anthropic",
+        prefs={"claude_model": "claude-sonnet-4-20250514"},
+    )
+    overlaid = await resolver.settings_for_email("a@example.com")
+    assert isinstance(overlaid, PrincipalSettingsOverlay)
+
+
 @pytest.mark.asyncio
 async def test_overlay_resolves_rows_keyed_by_uid_or_email():
     """Run records only carry the email; rows saved under the GIP uid must

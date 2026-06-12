@@ -101,5 +101,21 @@ class PrincipalLLMResolver:
 
         return await self.resolve(Principal(uid="", email=email))
 
+    async def settings_for_email(self, email: str) -> Any:
+        """The user's settings overlay (or the base settings when they have
+        nothing configured). Lets callers build adapters for a DIFFERENT
+        provider than the user's default while still honoring their keys —
+        e.g. a specialization that pins ``llm_provider`` per role."""
+        if self._service is None or not email or "@" not in email:
+            return self._base
+        try:
+            from devai.identity import Principal
+            from devai.settings.overlay import build_overlay
+
+            return await build_overlay(self._base, Principal(uid="", email=email), self._service)
+        except Exception:  # noqa: BLE001
+            logger.warning("settings: overlay fetch failed — using base settings", exc_info=True)
+            return self._base
+
 
 __all__ = ["PrincipalLLMResolver"]

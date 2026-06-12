@@ -125,6 +125,35 @@ llm_registry.register("vertex_gemini", _build_vertex_gemini)
 
 LLM_TIERS = ("light", "standard", "heavy", "frontier")
 
+# Specialization YAMLs declare providers by friendly names (the
+# LLMProvider enum: claude/openai/codex/groq/gemini/nemoclaw/auto).
+# Map them onto registered factory backends; None = "no opinion, use
+# whatever adapter the run already has" (auto, unknown, or a backend
+# that has no registered adapter yet).
+_SPEC_PROVIDER_ALIASES = {
+    "claude": "anthropic",
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "codex": "openai",
+    "gemini": "vertex_gemini",  # Vertex is the live Gemini path (PSC + WI)
+    "vertex_gemini": "vertex_gemini",
+    "gateway": "gateway",
+    "noop": "noop",
+}
+
+
+def resolve_spec_provider(name: str) -> str | None:
+    """Factory backend for a specialization's ``llm_provider``, or None.
+
+    Unknown/auto/unregistered names return None rather than noop so a
+    spec with an aspirational provider (groq, nemoclaw) runs on the
+    default adapter instead of silently answering with canned text.
+    """
+    mapped = _SPEC_PROVIDER_ALIASES.get((name or "").strip().lower())
+    if mapped and llm_registry.has(mapped):
+        return mapped
+    return None
+
 
 def resolve_llm_tier(settings: Any, tier: str) -> tuple[str, str]:
     """Map a cost tier to a ``(provider, model)`` pair.
@@ -189,4 +218,11 @@ def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdap
         return NoopLLMAdapter()
 
 
-__all__ = ["KNOWN_PROVIDERS", "LLM_TIERS", "create_llm_adapter", "llm_registry", "resolve_llm_tier"]
+__all__ = [
+    "KNOWN_PROVIDERS",
+    "LLM_TIERS",
+    "create_llm_adapter",
+    "llm_registry",
+    "resolve_llm_tier",
+    "resolve_spec_provider",
+]
