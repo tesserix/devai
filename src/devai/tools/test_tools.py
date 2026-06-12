@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -18,7 +20,12 @@ logger = logging.getLogger(__name__)
 TEST_TOOLS: list[dict[str, Any]] = [
     {
         "name": "run_playwright_test",
-        "description": "Run Playwright E2E tests headlessly and return results. Tests must be written first using github_commit_file.",
+        "description": (
+            "Run the repo's tests and return real results. Executes Playwright locally when a "
+            "node toolchain is available; otherwise runs via the repo's OWN CI workflow "
+            "(GitHub Actions) on the given branch — commit and push your test files first "
+            "(github_commit_file), then call this to wait for and read the CI verdict."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -63,7 +70,16 @@ class TestToolExecutor:
         return json.dumps(result, indent=2, default=str)
 
     async def _handle_run_playwright_test(self, inp: dict[str, Any]) -> dict[str, Any]:
-        """Clone repo, install deps, run Playwright tests headlessly."""
+        """Run the repo's tests — locally when a node toolchain exists,
+        otherwise through the repo's OWN CI (GitHub Actions).
+
+        The production api pod is a Python image with git but NO node/npm,
+        so the local path can never execute there — the QA agent used to get
+        a FileNotFoundError it misread as "repository access issues". The CI
+        path is the honest execution route: the agent has already pushed its
+        commits (which triggered the workflow), so we locate the branch's
+        workflow run, wait for it, and return the REAL job results.
+        """
         repo = inp["repo"]
         branch = inp["branch"]
         base_url = inp["base_url"]
@@ -76,6 +92,9 @@ class TestToolExecutor:
             branch = validate_ref(branch)
         except InvalidGitRef as e:
             return {"success": False, "error": str(e)}
+
+        if shutil.which("npm") is None or shutil.which("npx") is None:
+            return await self._run_via_ci(repo, branch)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Clone the repo (hardened: -- before args, no transport but https,
@@ -146,6 +165,97 @@ class TestToolExecutor:
                 results["summary"] = self._summarize_results(parsed_json)
 
             return results
+
+    _CI_POLL_SECONDS = 20.0
+    _CI_MAX_WAIT_SECONDS = 600.0
+
+    async def _run_via_ci(self, repo: str, branch: str) -> dict[str, Any]:
+        """Execute tests through the repo's own CI: find the branch's latest
+        workflow run (triggered by the agent's pushes), wait for completion,
+        and return the real per-job results."""
+        if self.scm is None:
+            return {
+                "success": False,
+                "mode": "ci",
+                "error": "no node toolchain in this runtime and no SCM client to read CI results",
+            }
+        deadline = time.monotonic() + self._CI_MAX_WAIT_SECONDS
+        run: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            try:
+                runs = await self.scm.get_pipeline_runs(repo, branch, limit=5)
+            except Exception as e:  # noqa: BLE001
+                return {"success": False, "mode": "ci", "error": f"could not list CI runs: {e}"}
+            run = runs[0] if runs else None
+            if run is None:
+                # No workflow run yet — the push may still be propagating.
+                await asyncio.sleep(self._CI_POLL_SECONDS)
+                continue
+            if str(run.get("status")) == "completed":
+                break
+            await asyncio.sleep(self._CI_POLL_SECONDS)
+
+        if run is None:
+            return {
+                "success": False,
+                "mode": "ci",
+                "error": (
+                    f"no CI workflow runs found for branch {branch!r} — ensure the repo has a "
+                    "workflow that runs tests on push (e.g. .github/workflows/ci.yml) and that "
+                    "your commits are pushed to that branch"
+                ),
+            }
+        if str(run.get("status")) != "completed":
+            return {
+                "success": False,
+                "mode": "ci",
+                "error": f"CI run {run.get('id')} still {run.get('status')} after "
+                f"{int(self._CI_MAX_WAIT_SECONDS)}s — check {run.get('html_url', '')}",
+            }
+
+        jobs: list[dict[str, Any]] = []
+        try:
+            jobs = await self.scm.get_pipeline_jobs(repo, run.get("id"))
+        except Exception:  # noqa: BLE001 — conclusion alone is still useful
+            logger.exception("CI job fetch failed for run %s", run.get("id"))
+
+        failures = []
+        passed = failed = 0
+        for job in jobs:
+            concl = str(job.get("conclusion") or "")
+            if concl == "success":
+                passed += 1
+            elif concl in ("failure", "timed_out", "cancelled"):
+                failed += 1
+                failed_steps = [
+                    s.get("name", "")
+                    for s in (job.get("steps") or [])
+                    if str(s.get("conclusion")) == "failure"
+                ]
+                failures.append(
+                    {
+                        "test": job.get("name", "job"),
+                        "error": ("failed steps: " + ", ".join(failed_steps))
+                        if failed_steps
+                        else f"job conclusion: {concl}",
+                        "url": job.get("html_url", ""),
+                    }
+                )
+        success = str(run.get("conclusion")) == "success"
+        return {
+            "success": success,
+            "mode": "ci",
+            "workflow": run.get("name", ""),
+            "run_url": run.get("html_url", ""),
+            "summary": {
+                "total": len(jobs) or 1,
+                "passed": passed if jobs else (1 if success else 0),
+                "failed": failed if jobs else (0 if success else 1),
+                "skipped": 0,
+                "failures": failures,
+                "pass_rate": f"{(passed / len(jobs) * 100) if jobs else (100.0 if success else 0.0):.1f}%",
+            },
+        }
 
     async def _handle_parse_test_results(self, inp: dict[str, Any]) -> dict[str, Any]:
         """Parse raw Playwright JSON results into a summary."""
