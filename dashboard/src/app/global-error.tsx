@@ -18,6 +18,20 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("Dashboard global error:", error);
+    // Stale-deploy chunk mismatch → one automatic reload fetches the new
+    // build (same self-heal as the segment-level boundary).
+    if (
+      /Loading chunk|Failed to load chunk|ChunkLoadError|Failed to fetch dynamically imported module/i.test(
+        error?.message || "",
+      )
+    ) {
+      const key = "devai:chunk-reload-at";
+      const last = Number(sessionStorage.getItem(key) || 0);
+      if (Date.now() - last > 30_000) {
+        sessionStorage.setItem(key, String(Date.now()));
+        window.location.reload();
+      }
+    }
   }, [error]);
 
   return (

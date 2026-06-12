@@ -9,6 +9,11 @@ import { RefreshCw, TriangleAlert } from "lucide-react";
  * of white-screening the whole app ("Application error: a client-side
  * exception has occurred"). `reset()` re-renders the segment.
  */
+const isStaleChunkError = (error: Error) =>
+  /Loading chunk|Failed to load chunk|ChunkLoadError|Failed to fetch dynamically imported module/i.test(
+    error?.message || "",
+  );
+
 export default function Error({
   error,
   reset,
@@ -19,6 +24,20 @@ export default function Error({
   useEffect(() => {
     // Surface to the console for debugging; a real telemetry sink can hook here.
     console.error("Dashboard route error:", error);
+
+    // Self-heal stale deploys: after a rollout the browser's cached HTML
+    // still references the OLD build's chunk hashes, and the first client
+    // navigation throws "Failed to load chunk …". A full reload fetches the
+    // new build and fixes it — do that automatically, once per 30s window,
+    // so users never have to know what a chunk is.
+    if (isStaleChunkError(error)) {
+      const key = "devai:chunk-reload-at";
+      const last = Number(sessionStorage.getItem(key) || 0);
+      if (Date.now() - last > 30_000) {
+        sessionStorage.setItem(key, String(Date.now()));
+        window.location.reload();
+      }
+    }
   }, [error]);
 
   return (
