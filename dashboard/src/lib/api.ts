@@ -709,6 +709,18 @@ export const api = {
     stages: () => apiFetch<StageStat[]>("/analytics/stages"),
     agents: (days = 30) => apiFetch<AgentStat[]>(`/analytics/agents?days=${days}`),
     llmCost: (days = 30) => apiFetch<LLMCost>(`/analytics/llm/cost?days=${days}`),
+    usage: (days = 30) =>
+      apiFetch<{
+        enabled: boolean;
+        summary: UsageRow;
+        by_model: (UsageRow & { model: string; provider: string })[];
+        by_user: (UsageRow & { user: string })[];
+        timeseries: (UsageRow & { day: string })[];
+      }>(`/analytics/usage?days=${days}`),
+    pricing: () =>
+      apiFetch<{ unit: string; rates: { model_prefix: string; input_per_1m_usd: number; output_per_1m_usd: number }[] }>(
+        "/analytics/pricing",
+      ),
     sreSummary: () => apiFetch<AnalyticsSRESummary>("/analytics/sre/summary"),
     memory: (days = 30) => apiFetch<MemoryAnalytics>(`/analytics/memory?days=${days}`),
     memoryForget: (id: string) =>
@@ -1159,6 +1171,15 @@ export interface LLMCost {
     cost_usd: number;
   }[];
   timeseries: { date: string; cost_usd: number; tokens: number }[];
+}
+
+export interface UsageRow {
+  calls: number;
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+  duration_ms: number;
+  errors: number;
 }
 
 export interface AnalyticsSRESummary {

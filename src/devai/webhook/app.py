@@ -541,6 +541,19 @@ def create_app(
         logger.exception("telemetry adapter construction failed — continuing without telemetry")
         app.state.telemetry = None
 
+    # LLM usage ledger (Redis) — queryable cost/tokens/latency per model and
+    # per user for the analytics page. Fed by the instrumented LLM adapter so
+    # it captures every call from every run (blueprint runs don't write
+    # agent_executions). Degrades to no-op without Redis.
+    try:
+        from devai.analytics.usage_ledger import UsageLedger, set_global_ledger
+
+        app.state.usage_ledger = UsageLedger(getattr(config, "redis_url", "") or "")
+        set_global_ledger(app.state.usage_ledger)
+    except Exception:  # noqa: BLE001
+        logger.exception("usage ledger init failed — analytics cost views may be empty")
+        app.state.usage_ledger = None
+
     # NOTE: app.state.registry_client is constructed in lifespan() above
     # alongside SpecializationService so the two share a single client +
     # cache. Set it to None here if the lifespan never ran (some test

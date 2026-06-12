@@ -297,6 +297,13 @@ class _RunSpecializationStage(PipelineStage):
                 model=spec.llm_model or "",
                 max_tokens=spec.max_tokens,
                 temperature=spec.temperature,
+                # Attribution for telemetry + the usage ledger (cost per agent,
+                # per user, per run).
+                extra={
+                    "agent": spec.name,
+                    "run_id": task.id,
+                    "triggered_by": task.triggered_by or "",
+                },
             )
             resp = await llm.generate(request)
             if resp.tool_calls:

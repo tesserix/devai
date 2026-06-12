@@ -182,7 +182,19 @@ class Database:
         tokens_output: int = 0,
         cost_usd: float = 0.0,
         error: str | None = None,
+        provider: str = "",
+        model: str = "",
     ) -> None:
+        # Compute USD from the rate card when the caller didn't supply a cost
+        # but we have tokens + a model — this is what turns the analytics cost
+        # views from $0 into real money.
+        if cost_usd <= 0 and (tokens_input or tokens_output) and model:
+            try:
+                from devai.analytics.pricing import estimate_cost
+
+                cost_usd = estimate_cost(provider, model, tokens_input, tokens_output)
+            except Exception:  # noqa: BLE001
+                logger.debug("cost estimate failed for %s/%s", provider, model, exc_info=True)
         await self.pool.execute(
             """UPDATE agent_executions SET
                status = $1, completed_at = NOW(),

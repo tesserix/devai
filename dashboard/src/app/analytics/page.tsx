@@ -66,11 +66,12 @@ export default function AnalyticsPage() {
   const [sre, setSre] = useState<AnalyticsSRESummary | null>(null);
   const [tel, setTel] = useState<TelemetryHealth | null>(null);
   const [mem, setMem] = useState<MemoryAnalytics | null>(null);
+  const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.analytics.usage>> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const settle = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback);
-    const [s, rt, st, ag, lc, sr, th, mm] = await Promise.all([
+    const [s, rt, st, ag, lc, sr, th, mm, us] = await Promise.all([
       settle(api.analytics.summary(days), null as AnalyticsSummary | null),
       settle(api.analytics.runsTimeseries(days), [] as RunsTimeseriesPoint[]),
       settle(api.analytics.stages(), [] as StageStat[]),
@@ -79,6 +80,7 @@ export default function AnalyticsPage() {
       settle(api.analytics.sreSummary(), null as AnalyticsSRESummary | null),
       settle(api.analytics.telemetry(), null as TelemetryHealth | null),
       settle(api.analytics.memory(days), null as MemoryAnalytics | null),
+      settle(api.analytics.usage(days), null as Awaited<ReturnType<typeof api.analytics.usage>> | null),
     ]);
     setSummary(s);
     setRunsTs(rt);
@@ -88,6 +90,7 @@ export default function AnalyticsPage() {
     setSre(sr && Object.keys(sr).length ? sr : null);
     setTel(th);
     setMem(mm);
+    setUsage(us);
     setLoading(false);
   }, [days]);
 
@@ -95,8 +98,15 @@ export default function AnalyticsPage() {
     load();
   }, [load]);
 
-  const totalCost = (llm?.by_model ?? []).reduce((a, m) => a + (m.cost_usd || 0), 0);
-  const totalTokens = (llm?.by_model ?? []).reduce((a, m) => a + (m.tokens_input || 0) + (m.tokens_output || 0), 0);
+  // Prefer the usage ledger (real cost, all runs) over the Postgres rollup.
+  const ledgerCost = usage?.enabled ? usage.summary.cost_usd : 0;
+  const ledgerTokens = usage?.enabled ? usage.summary.tokens_in + usage.summary.tokens_out : 0;
+  const totalCost = ledgerCost || (llm?.by_model ?? []).reduce((a, m) => a + (m.cost_usd || 0), 0);
+  const totalTokens =
+    ledgerTokens || (llm?.by_model ?? []).reduce((a, m) => a + (m.tokens_input || 0) + (m.tokens_output || 0), 0);
+  const fmtUsd = (n: number | null | undefined) =>
+    `$${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtMs = (n: number | null | undefined) => ((n || 0) >= 1000 ? `${((n || 0) / 1000).toFixed(1)}s` : `${Math.round(n || 0)}ms`);
 
   return (
     <div className="p-7 space-y-6">
@@ -184,6 +194,102 @@ export default function AnalyticsPage() {
           />
         </div>
       </section>
+
+      {/* LLM usage — real cost / tokens / latency per model and per user */}
+      {usage?.enabled && (usage.by_model.length > 0 || usage.by_user.length > 0) && (
+        <section className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Kpi label="LLM spend" value={fmtUsd(usage.summary.cost_usd)} sub="all runs, est." />
+            <Kpi label="LLM calls" value={fmtNum(usage.summary.calls)} sub={`${fmtNum(usage.summary.errors)} errors`} />
+            <Kpi
+              label="Tokens"
+              value={fmtNum(usage.summary.tokens_in + usage.summary.tokens_out)}
+              sub={`${fmtNum(usage.summary.tokens_in)} in / ${fmtNum(usage.summary.tokens_out)} out`}
+            />
+            <Kpi
+              label="Avg latency"
+              value={fmtMs(usage.summary.calls ? usage.summary.duration_ms / usage.summary.calls : 0)}
+              sub="per call"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">By model — cost · tokens · latency</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left" style={{ color: "var(--ink-soft)" }}>
+                      <th className="pb-2 font-normal">Model</th>
+                      <th className="pb-2 font-normal text-right">Calls</th>
+                      <th className="pb-2 font-normal text-right">Tokens</th>
+                      <th className="pb-2 font-normal text-right">Avg ms</th>
+                      <th className="pb-2 font-normal text-right">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usage.by_model.map((m) => (
+                      <tr key={m.model} className="border-t" style={{ borderColor: "var(--surface-border)" }}>
+                        <td className="py-1.5">
+                          <span style={{ color: "var(--ink-strong)" }}>{m.model}</span>
+                          <span className="ml-1.5 text-xs" style={{ color: "var(--ink-soft)" }}>
+                            {m.provider}
+                          </span>
+                        </td>
+                        <td className="py-1.5 text-right">{fmtNum(m.calls)}</td>
+                        <td className="py-1.5 text-right">{fmtNum(m.tokens_in + m.tokens_out)}</td>
+                        <td className="py-1.5 text-right">{Math.round(m.calls ? m.duration_ms / m.calls : 0)}</td>
+                        <td className="py-1.5 text-right" style={{ color: "var(--accent)" }}>
+                          {fmtUsd(m.cost_usd)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">By user — who is spending what</div>
+              {usage.by_user.length === 0 ? (
+                <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
+                  No per-user usage yet. Runs attribute to the user who triggered them.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left" style={{ color: "var(--ink-soft)" }}>
+                        <th className="pb-2 font-normal">User</th>
+                        <th className="pb-2 font-normal text-right">Calls</th>
+                        <th className="pb-2 font-normal text-right">Tokens</th>
+                        <th className="pb-2 font-normal text-right">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usage.by_user.map((u) => (
+                        <tr key={u.user} className="border-t" style={{ borderColor: "var(--surface-border)" }}>
+                          <td className="py-1.5" style={{ color: "var(--ink-strong)" }}>
+                            {u.user}
+                          </td>
+                          <td className="py-1.5 text-right">{fmtNum(u.calls)}</td>
+                          <td className="py-1.5 text-right">{fmtNum(u.tokens_in + u.tokens_out)}</td>
+                          <td className="py-1.5 text-right" style={{ color: "var(--accent)" }}>
+                            {fmtUsd(u.cost_usd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="text-xs mt-3" style={{ color: "var(--ink-soft)" }}>
+                Cost is estimated from each model&apos;s published rate (USD per 1M tokens). Captured for every run.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Agents + Stages */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">

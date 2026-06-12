@@ -140,6 +140,49 @@ async def llm_cost(request: Request, days: int = Query(30, ge=1, le=365)) -> dic
     return {"by_model": by_model, "timeseries": timeseries}
 
 
+# ────────────────────────────────────────────────────────────────────
+# LLM usage ledger (Redis) — real cost/tokens/latency per model + per user,
+# captured for EVERY run (not just legacy agent_executions writers).
+# ────────────────────────────────────────────────────────────────────
+
+
+def _ledger(request: Request):
+    return getattr(request.app.state, "usage_ledger", None)
+
+
+@router.get("/usage")
+async def usage(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
+    """Everything the analytics page needs in one call: totals, per-model,
+    per-user, daily timeseries — all with real USD cost."""
+    ledger = _ledger(request)
+    if ledger is None:
+        return {"summary": {}, "by_model": [], "by_user": [], "timeseries": [], "enabled": False}
+    return {
+        "summary": await ledger.summary(),
+        "by_model": await ledger.by_model(),
+        "by_user": await ledger.by_user(),
+        "timeseries": await ledger.timeseries(days),
+        "enabled": True,
+    }
+
+
+@router.get("/usage/recent")
+async def usage_recent(request: Request, limit: int = Query(100, ge=1, le=300)) -> list[dict[str, Any]]:
+    """The most recent LLM calls with model, tokens, cost, latency, user."""
+    ledger = _ledger(request)
+    if ledger is None:
+        return []
+    return await ledger.recent(limit)
+
+
+@router.get("/pricing")
+async def pricing(request: Request) -> dict[str, Any]:
+    """The rate card the cost figures are computed from (USD per 1M tokens)."""
+    from devai.analytics.pricing import rate_card
+
+    return {"unit": "USD per 1,000,000 tokens", "rates": rate_card()}
+
+
 @router.get("/sre/summary")
 async def sre_summary(request: Request) -> dict[str, Any]:
     """Best-effort SRE counts from the shared devai_db SRE tables."""

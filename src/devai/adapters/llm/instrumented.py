@@ -63,18 +63,73 @@ class InstrumentedLLMAdapter(LLMAdapter):
             from devai.adapters.telemetry.runtime import get_global_telemetry
 
             usage = response.usage if response is not None else None
+            model = (response.model if response else "") or request.model or self.default_model
+            tok_in = getattr(usage, "prompt_tokens", 0) or 0
+            tok_out = getattr(usage, "completion_tokens", 0) or 0
+            cost = 0.0
+            try:
+                from devai.analytics.pricing import estimate_cost
+
+                cost = estimate_cost(self.provider_name, model, tok_in, tok_out)
+            except Exception:  # noqa: BLE001
+                pass
             get_global_telemetry().record_llm(
                 LLMMetric(
                     agent=str(request.extra.get("agent", "") or ""),
                     provider=self.provider_name,
-                    model=(response.model if response else "") or request.model or self.default_model,
-                    tokens_input=getattr(usage, "prompt_tokens", 0) or 0,
-                    tokens_output=getattr(usage, "completion_tokens", 0) or 0,
+                    model=model,
+                    tokens_input=tok_in,
+                    tokens_output=tok_out,
+                    cost_usd=cost,
                     duration_ms=duration_ms,
                     status=status,
                 )
             )
+            # Queryable usage ledger (Redis) — feeds the analytics cost/tokens/
+            # latency views per model AND per user, for every run (blueprint
+            # runs don't write agent_executions). Fire-and-forget; never blocks.
+            self._ledger_write(request, model, tok_in, tok_out, cost, duration_ms, status)
         except Exception:  # noqa: BLE001 — telemetry must never break the call
+            pass
+
+    def _ledger_write(
+        self,
+        request: LLMRequest,
+        model: str,
+        tok_in: int,
+        tok_out: int,
+        cost: float,
+        duration_ms: float,
+        status: str,
+    ) -> None:
+        try:
+            from devai.analytics.usage_ledger import get_global_ledger
+
+            ledger = get_global_ledger()
+            if ledger is None:
+                return
+            import asyncio
+            import datetime
+
+            extra = request.extra or {}
+            day = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+            coro = ledger.record(
+                day=day,
+                provider=self.provider_name,
+                model=model,
+                tokens_in=tok_in,
+                tokens_out=tok_out,
+                cost_usd=cost,
+                duration_ms=duration_ms,
+                triggered_by=str(extra.get("triggered_by", "") or ""),
+                agent=str(extra.get("agent", "") or ""),
+                run_id=str(extra.get("run_id", "") or ""),
+                status=status,
+            )
+            asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            pass  # no running loop (sync test context) — skip the ledger write
+        except Exception:  # noqa: BLE001
             pass
 
     # ── Pass-throughs ────────────────────────────────────────────────
