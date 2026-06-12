@@ -287,7 +287,8 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
   };
 
   const handleSubmit = async () => {
-    if (!selectedRepo || !requirements) return;
+    const repoOptional = blueprint === "boardroom-plan";
+    if ((!selectedRepo && !repoOptional) || !requirements) return;
     setLoading(true);
     try {
       // Scaffold if requested
@@ -856,7 +857,7 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
           </button>
           <button
             onClick={handleSubmit}
-            disabled={loading || !selectedRepo || !requirements}
+            disabled={loading || (!selectedRepo && blueprint !== "boardroom-plan") || !requirements}
             className="px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             style={{ background: "var(--primary)", color: "var(--primary-ink)" }}
           >

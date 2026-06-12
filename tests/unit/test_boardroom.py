@@ -74,6 +74,7 @@ async def test_consensus_round_ends_debate_early_and_outputs_plan():
     llm = _ScriptedLLM(
         [agree] * 4
         + ["AGREED: stack\nDISPUTED: nothing"]
+        + ['{"recruit": []}']  # supervisor declines to recruit
         + [agree] * 4
         + ["AGREED: stack\nDISPUTED: nothing", "## Decision\nNext.js + Postgres\n## Dissent\nnone"]
     )
@@ -87,15 +88,15 @@ async def test_consensus_round_ends_debate_early_and_outputs_plan():
     # Minutes: convened + (4 positions + synthesis) × 2 rounds + decision.
     assert len(result.data["a2a_messages"]) == 12
     # Early exit after round 2: 11 calls, not 3 full rounds' worth.
-    assert llm.calls == 11
+    assert llm.calls == 12
 
 
 @pytest.mark.asyncio
 async def test_deadlock_runs_all_rounds_and_records_dissent():
     fight = "POSITION: my way\nCHALLENGE: the architect is wrong about coupling\nCONCEDE: nothing"
-    script = []
-    for _ in range(2):  # rounds
-        script += [fight] * 4 + ["AGREED: little\nDISPUTED: architecture (everyone)"]
+    script = [fight] * 4 + ["AGREED: little\nDISPUTED: architecture (everyone)"]
+    script += ['{"recruit": []}']  # supervisor declines to recruit
+    script += [fight] * 4 + ["AGREED: little\nDISPUTED: architecture (everyone)"]
     script += ["## Decision\nmajority picks X\n## Dissent\nStaff Architect disagrees on coupling"]
     llm = _ScriptedLLM(script)
     s = _stage(llm, {"rounds": "2"})

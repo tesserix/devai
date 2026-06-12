@@ -133,6 +133,31 @@ export const GUIDANCE: Record<string, GuidanceEntry> = {
 // ─────────────────────────────────────────────────────────────────────────
 
 export const HELP_TERMS: Record<string, HelpTerm> = {
+  coordination: {
+    term: "coordination",
+    label: "Coordination Layer",
+    summary:
+      "The two coordinator agents that run the show: the Supervisor plans the work and delegates to specialists; the Orchestrator sequences execution (code → test → fix → deploy) and tracks phase progress.",
+    points: [
+      "They don't write code — they route, track, and decide.",
+      "'N msgs' counts the agent-to-agent messages each sent/received this run.",
+      "In a boardroom debate the Supervisor moderates and takes the notes.",
+    ],
+  },
+
+  specialists: {
+    term: "specialists",
+    label: "Specialist Agents",
+    summary:
+      "The role agents that do the actual work, each with its own skills, tools, and LLM. A card lights up while its stage runs; 'N msgs' is its agent-to-agent traffic; Done/Idle/Failed reflects its latest stage outcome.",
+    points: [
+      "Analysis: document analyzer, tech detector, requirements analyst.",
+      "Planning: product director (epic + stories), engineering manager.",
+      "Build/Quality/Deploy: senior developer, DB engineer, reviewers, QA, CI monitor, infra, release.",
+    ],
+  },
+
+
   workflow: {
     term: "workflow",
     label: "Workflow / Blueprint",

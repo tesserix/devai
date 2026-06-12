@@ -129,6 +129,36 @@ _SPECIALISTS: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
     ),
 ]
 
+# Generic panel for NON-ENGINEERING topics (no repo on the run): the
+# boardroom doubles as a general-purpose multi-agent debate — research a
+# market, weigh a strategy, analyze anything — same mesh, different seats.
+_GENERIC_PANEL: list[tuple[str, str, str]] = [
+    (
+        "research_analyst",
+        "Research Analyst",
+        "You own evidence. Ground every claim in concrete facts, data points, "
+        "and named sources of uncertainty; challenge anything asserted without support.",
+    ),
+    (
+        "domain_strategist",
+        "Domain Strategist",
+        "You own the big picture. Frame the drivers, trends, and second-order "
+        "effects; challenge analysis that misses context or interactions.",
+    ),
+    (
+        "risk_analyst",
+        "Risk Analyst",
+        "You own downside scenarios. Quantify what can go wrong, how likely, "
+        "and what would falsify the thesis; challenge optimism without hedges.",
+    ),
+    (
+        "devils_advocate",
+        "Devil's Advocate",
+        "You own the opposite case. Construct the strongest counter-argument "
+        "to whatever the table currently believes; concede only to evidence.",
+    ),
+]
+
 _MODERATOR_BRIEF = (
     "You are the Supervisor moderating a boardroom of specialist agents. "
     "You do not take sides — you synthesize: where the panel AGREES, where "
@@ -165,14 +195,57 @@ class _BoardroomDebateStage(PipelineStage):
         )
         return (response.text or "").strip()
 
-    def _select_panel(self, topic: str) -> list[tuple[str, str, str]]:
-        panel = list(_CORE_PANEL)
+    def _select_panel(self, topic: str, *, has_repo: bool = True) -> list[tuple[str, str, str]]:
+        # No repo → this is a general-purpose debate (market analysis,
+        # strategy, research), not a software delivery — seat the generic
+        # analyst panel instead of the engineering quartet.
+        panel = list(_CORE_PANEL) if has_repo else list(_GENERIC_PANEL)
         lowered = topic.lower()
-        for keywords, seat in _SPECIALISTS:
-            if any(k in lowered for k in keywords):
-                panel.append(seat)
+        if has_repo:
+            for keywords, seat in _SPECIALISTS:
+                if any(k in lowered for k in keywords):
+                    panel.append(seat)
         max_seats = int(self.config.get("panel_max", 7) or 7)
         return panel[:max_seats]
+
+    async def _maybe_recruit(
+        self, topic: str, positions: dict[str, str], panel: list[tuple[str, str, str]]
+    ) -> list[tuple[str, str, str]]:
+        """Moderator judgement call: does the table LACK expertise for this
+        topic? Up to 2 new specialist seats are created with full context
+        and join the debate — 'fetch and borrow any other agents' without
+        being limited to a fixed catalog."""
+        if not self._llm_usable():
+            return []
+        try:
+            import json as _json
+
+            seated = ", ".join(name for _, name, _ in panel)
+            digest = "\n".join(f"{w}: {t[:200]}" for w, t in positions.items())
+            text = await self._say(
+                _MODERATOR_BRIEF,
+                f"Topic under debate:\n{topic[:800]}\n\nSeated panel: {seated}\n\n"
+                f"Round 1 positions:\n{digest}\n\n"
+                "Does this panel LACK expertise the topic genuinely needs? Reply STRICT JSON only:\n"
+                '{"recruit": [{"name": "<Role Title>", "brief": "<1-2 sentence persona: what they own and challenge>"}]}\n'
+                "Maximum 2 recruits; reply {'recruit': []} when the table is sufficient.",
+                max_tokens=300,
+            )
+            t = text.strip()
+            if t.startswith("```"):
+                t = t.split("\n", 1)[1].rsplit("```", 1)[0]
+            data = _json.loads(t)
+            seats: list[tuple[str, str, str]] = []
+            for r in (data.get("recruit") or [])[:2]:
+                name = str(r.get("name") or "").strip()
+                brief = str(r.get("brief") or "").strip()
+                if name and brief:
+                    key = name.lower().replace(" ", "_")[:40]
+                    seats.append((key, name[:40], brief[:300]))
+            return seats
+        except Exception:  # noqa: BLE001 — recruitment is an enhancer, never fatal
+            logger.debug("boardroom recruitment skipped", exc_info=True)
+            return []
 
     def _a2a(
         self, task: DevAITask, bag: list[dict[str, Any]], frm: str, to: str, subject: str, body: str
@@ -201,6 +274,7 @@ class _BoardroomDebateStage(PipelineStage):
             or str(task.agent_context.get("technical_plan") or "")[:500]
             or task.intent
         )
+        has_repo = bool(task.repo)
         if not self._llm_usable():
             return StageResult(
                 message="boardroom skipped — no usable LLM (plan quality degraded, run continues)",
@@ -208,6 +282,7 @@ class _BoardroomDebateStage(PipelineStage):
             )
 
         rounds = max(1, min(4, int(self.config.get("rounds", 2) or 2)))
+        recruited = False
         # Hard wall-clock budget: a real debate takes minutes, but NEVER more
         # than this — when the budget runs out we synthesize from whatever is
         # on the table and project it to the user, who chooses to debate
@@ -215,7 +290,7 @@ class _BoardroomDebateStage(PipelineStage):
         budget_seconds = max(60.0, float(self.config.get("time_budget_seconds", 900) or 900))
         started_at = time.monotonic()
         budget_hit = False
-        panel = self._select_panel(topic)
+        panel = self._select_panel(topic, has_repo=has_repo)
         ctx = task.agent_context
         background = "\n".join(
             f"- {k}: {str(v)[:300]}"
@@ -305,6 +380,24 @@ class _BoardroomDebateStage(PipelineStage):
             # Early consensus only counts from round 2 — in round 1 nobody
             # has seen anyone else's position yet, so "no challenges" is
             # vacuous, not agreement.
+            # Supervisor recruitment: after round 1 the moderator may PULL
+            # IN missing expertise — new seats get the full table context
+            # and join from the next round.
+            if round_no == 1 and not recruited and round_no < rounds:
+                recruited = True
+                extra = await self._maybe_recruit(topic, new_positions, panel)
+                for seat in extra:
+                    panel.append(seat)
+                    transcript.append(f"[round {round_no}] Supervisor recruited {seat[1]}: {seat[2][:120]}")
+                    self._a2a(
+                        task,
+                        a2a_bag,
+                        "supervisor",
+                        "boardroom",
+                        f"Recruited {seat[1]}",
+                        f"The table lacks this expertise — {seat[1]} joins from the next round. Brief: {seat[2][:300]}",
+                    )
+
             if not challenges_made and round_no >= 2 and new_positions:
                 consensus_reached = True
                 break  # genuine consensus — don't burn remaining rounds

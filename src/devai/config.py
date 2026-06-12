@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # die fast when stuck."
     pipeline_stage_inactivity_grace: int = 240  # seconds of silence = stalled
     pipeline_stage_hard_cap_multiplier: int = 4  # absolute ceiling = timeout × N
+    # How long a HARD approval gate (gate: true) waits for the human before
+    # timing out RESUMABLY — the run lands in stage_failed with a clear
+    # message and the Continue button re-requests approval at the same gate.
+    pipeline_gate_timeout_seconds: int = 1800  # 30 minutes
 
     # --- NATS ---
     nats_url: str = "nats://localhost:4222"

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 _TASK_BOOL_KEYS: frozenset[str] = frozenset(
     {
         "task.has_pr",
+        "task.has_repo",
         "task.has_issue",
         "task.has_sandbox",
         "task.has_epic",

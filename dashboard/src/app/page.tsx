@@ -14,6 +14,7 @@ import { TriggerDialog } from "@/components/trigger-dialog";
 import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
 import { useToast } from "@/components/toast";
+import { HelpPopover } from "@/components/guidance";
 
 type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "events" | "chat" | "config";
 
@@ -444,8 +445,9 @@ function OverviewTab({
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3 flex items-center gap-1.5">
           Coordination Layer
+          <HelpPopover term="coordination" />
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {coordinators.map(([key]) => {
@@ -467,8 +469,9 @@ function OverviewTab({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-[var(--ink-muted)] uppercase tracking-wider mb-3 flex items-center gap-1.5">
           Specialist Agents
+          <HelpPopover term="specialists" />
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           {specialists.map(([key]) => {

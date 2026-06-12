@@ -298,6 +298,12 @@ class DevAITask:
     # Keep them as @property so they always reflect current state.
 
     @property
+    def has_repo(self) -> bool:
+        """True when the run targets a repository — boardroom-plan runs
+        without one (topic-only debates) skip every repo-bound stage."""
+        return bool(self.repo)
+
+    @property
     def has_pr(self) -> bool:
         return self.pr_number is not None
 

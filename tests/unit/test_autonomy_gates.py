@@ -75,10 +75,11 @@ def _bp(stages):
 
 
 @pytest.mark.asyncio
-async def test_static_gate_self_approves_under_auto_autonomy():
+async def test_static_gate_self_approves_only_under_full_autonomy():
     sm = _SM()
     ex, _ = _executor(sm)
     task = DevAITask(intent="ship", blueprint="t", repo="o/r")
+    task.agent_context["autonomy"] = "full"
     await ex.execute(_bp([StageSpec(name="deploy", stage="noop_ok", gate=True)]), task)
 
     assert task.state == TaskState.COMPLETED
@@ -86,6 +87,24 @@ async def test_static_gate_self_approves_under_auto_autonomy():
     assert sm.redis.data[f"devai:pipeline:gate:{task.id}:deploy"] == "approved"
     assert sm.redis.data[f"devai:pipeline:gate:{task.id}:deploy:approver"] == "autonomy:full"
     assert any("auto-approved" in (e.message or "") for e in task.stage_events)
+
+
+@pytest.mark.asyncio
+async def test_static_gate_under_auto_waits_and_times_out_resumably():
+    """Smart autonomy NO LONGER self-approves hard gates: it pauses for the
+    human and a timeout lands in stage_failed (Continue re-requests) —
+    never a silent approval, never an unresumable cancel."""
+    sm = _SM()
+    ex, _ = _executor(sm)
+    ex._GATE_POLL_SECONDS = 0.01
+    ex._deps.config.pipeline_gate_timeout_seconds = 0.05
+    task = DevAITask(intent="ship", blueprint="t", repo="o/r")  # autonomy default = auto
+    await ex.execute(_bp([StageSpec(name="deploy", stage="noop_ok", gate=True)]), task)
+
+    assert task.state == TaskState.STAGE_FAILED
+    assert "deploy" in task.stages_failed
+    assert "press Continue" in (task.error or "")
+    assert "deploy" not in task.stages_completed  # resume re-reaches the gate
 
 
 @pytest.mark.asyncio
@@ -107,7 +126,7 @@ async def test_static_gate_blocks_until_decision_when_gated():
 
     assert task.state == TaskState.COMPLETED
     assert "deploy" in task.stages_completed
-    assert any("waiting for human approval" in (e.message or "") for e in task.stage_events)
+    assert any("waiting for your approval" in (e.message or "") for e in task.stage_events)
 
 
 @pytest.mark.asyncio

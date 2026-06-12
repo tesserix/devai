@@ -43,7 +43,7 @@ interface RepoEvent {
   timestamp: number;
 }
 
-export function RepoPanel({ runId }: { runId: string }) {
+export function RepoPanel({ runId, terminal = false }: { runId: string; terminal?: boolean }) {
   const [repo, setRepo] = useState("");
   const [branch, setBranch] = useState("");
   const [rootEntries, setRootEntries] = useState<TreeEntry[]>([]);
@@ -114,12 +114,23 @@ export function RepoPanel({ runId }: { runId: string }) {
   }, [runId, refreshTree]);
 
   // ── SSE: live repo events ──────────────────────────────────────────
+  // Skipped entirely for TERMINAL runs — the repo is a final snapshot, and
+  // holding a stream open just produces "offline" flapping as proxies cut
+  // the idle connection.
   useEffect(() => {
-    if (!runId) return;
+    if (!runId || terminal) return;
     const url = `/api/runs/${encodeURIComponent(runId)}/repo/events?replay=20`;
     const es = new EventSource(url, { withCredentials: true });
     setStreamStatus("connecting");
-    es.addEventListener("hello", () => setStreamStatus("open"));
+    // Only show OFFLINE when reconnects genuinely aren't landing: the
+    // ingress cuts long streams every ~2 minutes BY DESIGN and EventSource
+    // reconnects within seconds — flashing "offline" on every cut read as
+    // a platform failure when nothing was wrong.
+    let offlineTimer: number | undefined;
+    es.addEventListener("hello", () => {
+      if (offlineTimer) window.clearTimeout(offlineTimer);
+      setStreamStatus("open");
+    });
     let refreshTimer: number | undefined;
     es.addEventListener("repo", (e) => {
       try {
@@ -138,12 +149,18 @@ export function RepoPanel({ runId }: { runId: string }) {
         // ignore malformed
       }
     });
-    es.onerror = () => setStreamStatus("closed");
+    es.onerror = () => {
+      // Routine reconnect first; OFFLINE only if no hello lands in 30s.
+      setStreamStatus("connecting");
+      if (offlineTimer) window.clearTimeout(offlineTimer);
+      offlineTimer = window.setTimeout(() => setStreamStatus("closed"), 30000);
+    };
     return () => {
       if (refreshTimer) window.clearTimeout(refreshTimer);
+      if (offlineTimer) window.clearTimeout(offlineTimer);
       es.close();
     };
-  }, [runId, openPath, refreshTree]);
+  }, [runId, openPath, refreshTree, terminal]);
 
   // ── Flash decay — 4s, then drop from the highlight set ─────────────
   useEffect(() => {
@@ -209,7 +226,14 @@ export function RepoPanel({ runId }: { runId: string }) {
           <span className="truncate" title={repo}>
             {repo || "—"}
           </span>
-          <StreamBadge status={streamStatus} />
+          {terminal ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--ink-muted)" }} />
+              <span style={{ color: "var(--ink-muted)" }}>final snapshot</span>
+            </span>
+          ) : (
+            <StreamBadge status={streamStatus} />
+          )}
         </div>
         {branch && (
           <div

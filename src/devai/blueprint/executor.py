@@ -896,16 +896,19 @@ class BlueprintExecutor:
     async def _resolve_gate(self, spec: StageSpec, task: DevAITask, _ev: Any) -> bool:
         """Resolve a human-approval gate before the stage runs.
 
-        Returns True to proceed, False when the run stops here (rejected or
-        stopped by run-control). Decision key:
+        Returns True to proceed, False when the run stops here (rejected,
+        timed out, or stopped by run-control). Decision key:
         ``devai:pipeline:gate:{task_id}:{stage}`` — the same key the
         dashboard's Approve/Reject endpoints write.
 
         Autonomy (per-run ``agent_context['autonomy']``, falling back to
         ``DEVAI_PIPELINE_DEFAULT_AUTONOMY``):
-          full   — self-approve with an audit decision; never prompt.
-          gated  — transition to AWAITING_APPROVAL and poll for the human
-                   decision (the dashboard banner is driven by this state).
+          full        — self-approve with an audit decision; never prompt.
+          auto/gated  — a HARD gate is a hard rule: pause in
+                        AWAITING_APPROVAL (banner + notification surface),
+                        wait up to the gate timeout (default 30m), then
+                        time out RESUMABLY — the run lands in stage_failed
+                        and Continue re-requests approval at this gate.
         No Redis (tests/minimal deps) → proceed.
         """
         sm = self._deps.state_manager
@@ -921,7 +924,11 @@ class BlueprintExecutor:
             return True
         autonomy = str(task.agent_context.get("autonomy") or self._default_autonomy).lower()
 
-        if decision is None and autonomy != "gated":
+        if decision is None and autonomy == "full":
+            # ONLY the explicitly chosen "fully autonomous" mode self-approves.
+            # Smart (auto) used to as well — but a hard gate the user can see
+            # on the DAG that silently approves itself reads as a broken
+            # promise; auto now waits like gated does.
             try:
                 await redis.set(key, "approved", ex=86400)
                 await redis.set(f"{key}:approver", "autonomy:full", ex=86400)
@@ -936,9 +943,18 @@ class BlueprintExecutor:
             prior_state = task.state
             task.current_stage = spec.name
             task.transition(TaskState.AWAITING_APPROVAL)
-            self._emit(task, _ev(StageEventPhase.STARTED, message="waiting for human approval"))
+            gate_timeout = float(
+                getattr(self._deps.config, "pipeline_gate_timeout_seconds", 1800) or 1800
+            )
+            self._emit(
+                task,
+                _ev(
+                    StageEventPhase.STARTED,
+                    message=f"waiting for your approval (times out in {int(gate_timeout / 60)}m — resumable)",
+                ),
+            )
             waited = 0.0
-            while decision is None and waited < self._GATE_MAX_WAIT_SECONDS:
+            while decision is None and waited < gate_timeout:
                 if not await self._check_run_control(task):
                     return False  # stopped by user while waiting
                 await asyncio.sleep(self._GATE_POLL_SECONDS)
@@ -948,9 +964,17 @@ class BlueprintExecutor:
                 except Exception:  # noqa: BLE001
                     logger.exception("gate %s: decision poll failed", spec.name)
             if decision is None:
-                task.error = f"approval gate {spec.name!r} timed out"
+                # RESUMABLE timeout — stage_failed (not cancelled) so the
+                # Continue button re-enqueues the run; the gate stage never
+                # completed, so resume re-reaches it and asks again fresh.
+                task.error = (
+                    f"approval gate {spec.name!r} timed out after {int(gate_timeout / 60)}m — "
+                    "press Continue to resume and re-request approval"
+                )
                 task.failed_stage = spec.name
-                task.transition(TaskState.CANCELLED)
+                task.stages_failed.append(spec.name)
+                task.current_stage = ""
+                task.transition(TaskState.STAGE_FAILED)
                 self._emit(task, _ev(StageEventPhase.FAILED, error=task.error))
                 return False
             task.transition(prior_state if prior_state not in (TaskState.PENDING, TaskState.QUEUED) else TaskState.RUNNING)

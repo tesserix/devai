@@ -191,6 +191,7 @@ export default function RunDetailPage() {
   }, [gates]);
 
   const norm = normalizeRunState(run?.state || run?.stage);
+  const isTerminal = norm === "done" || norm === "failed" || norm === "cancelled";
   const runActive = norm === "running" || norm === "paused" || norm === "queued" || norm === "gate-pending";
 
   // DASH-10 honesty: injections are only consumed by a re-planning stage
@@ -415,6 +416,10 @@ export default function RunDetailPage() {
                 )}
 
                 <BoardroomCard
+                  live={!isTerminal && (run?.stage === "boardroom-debate" || run?.current_stage === "boardroom-debate")}
+                  messages={((ctx.a2a_messages as Array<{ to_agent?: string; from_agent?: string; body?: string; subject?: string; timestamp?: number }> | undefined) ?? []).filter(
+                    (m) => m.to_agent === "boardroom",
+                  )}
                   outcome={{
                     decision: ctx.boardroom_decision as string | undefined,
                     panel: ctx.boardroom_panel as string[] | undefined,
@@ -498,7 +503,7 @@ export default function RunDetailPage() {
           />
         )}
 
-        {tab === "repo" && <RepoPanel runId={runId} />}
+        {tab === "repo" && <RepoPanel runId={runId} terminal={isTerminal} />}
 
         {tab === "chat" && (
           <div className="h-full">

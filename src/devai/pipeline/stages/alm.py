@@ -553,6 +553,21 @@ class _DeployReleaseStage(AgentAdapter):
 
         return _make(ReleaseManagerAgent, self.deps)
 
+    async def _post_validate(self, task, patch) -> None:
+        """Output contract: a deploy that FAILED must fail the stage.
+
+        A live run 'completed' deploy-release in 5.1s with
+        deploy_status='failed' — the milestone comment said ✅ and the run
+        finished green. The same truth rule as review/security/tests: the
+        agent's own verdict decides the stage outcome, so failures surface
+        visibly and the recovery agent gets its shot."""
+        status = str(patch.get("deploy_status") or "").lower()
+        if status in ("failed", "failure", "error"):
+            detail = str(
+                patch.get("deploy_error") or patch.get("summary") or "release manager reported failure"
+            )[:300]
+            raise RuntimeError(f"deploy_release reported deploy_status={status!r}: {detail}")
+
 
 def deploy_release_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
     return _DeployReleaseStage(deps, config)
