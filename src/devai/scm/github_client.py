@@ -494,7 +494,18 @@ class GitHubSCMClient(SCMClient):
             from_branch = await self.get_default_branch(repo)
         sha_resp = await self._request("GET", f"/repos/{repo}/git/ref/heads/{from_branch}")
         sha = sha_resp.json()["object"]["sha"]
-        await self._request("POST", f"/repos/{repo}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": sha})
+        try:
+            await self._request(
+                "POST", f"/repos/{repo}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": sha}
+            )
+        except Exception as e:  # noqa: BLE001
+            # 422 "Reference already exists" — the branch is THERE; agents
+            # re-running a stage (resume/retry) hit this constantly. Return
+            # the existing branch head instead of failing the tool call.
+            if "422" not in str(e):
+                raise
+            existing = await self._request("GET", f"/repos/{repo}/git/ref/heads/{branch_name}")
+            return existing.json()["object"]["sha"]
         return sha
 
     # --- Files ---
@@ -504,7 +515,16 @@ class GitHubSCMClient(SCMClient):
         if ref:
             params["ref"] = ref
         resp = await self._request("GET", f"/repos/{repo}/contents/{path}", params=params)
-        return base64.b64decode(resp.json()["content"]).decode("utf-8")
+        data = resp.json()
+        if isinstance(data, list):
+            # The path is a DIRECTORY — indexing the list with "content"
+            # raised `list indices must be integers` deep in the tool layer.
+            names = ", ".join(str(item.get("name", "")) for item in data[:15])
+            raise FileNotFoundError(
+                f"{path!r} is a directory, not a file — it contains: {names}. "
+                "Use scm_list_files to browse it."
+            )
+        return base64.b64decode(data["content"]).decode("utf-8")
 
     async def list_files(self, repo: str, path: str = "", ref: str | None = None) -> list[dict[str, Any]]:
         params: dict[str, str] = {}

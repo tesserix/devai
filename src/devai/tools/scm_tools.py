@@ -348,6 +348,9 @@ class SCMToolExecutor:
         # confusion interpreting it).
         try:
             return await self.scm.get_file_content(inp["repo"], inp["path"], inp.get("ref"))
+        except FileNotFoundError as e:
+            # Directory-not-file (and similar) — already a clear sentence.
+            return str(e)
         except Exception as e:  # noqa: BLE001
             if "404" in str(e):
                 return (
