@@ -342,10 +342,30 @@ class SCMToolExecutor:
         return await self.scm.add_comment(inp["repo"], inp["issue_id"], inp["body"])
 
     async def _handle_scm_get_file_content(self, inp: dict[str, Any]) -> str:
-        return await self.scm.get_file_content(inp["repo"], inp["path"], inp.get("ref"))
+        # Exploration misses are NORMAL agent behavior — answer them with a
+        # clear, actionable sentence instead of a raw HTTP 404 (which reads
+        # as a scary error in the turn log and costs the model a turn of
+        # confusion interpreting it).
+        try:
+            return await self.scm.get_file_content(inp["repo"], inp["path"], inp.get("ref"))
+        except Exception as e:  # noqa: BLE001
+            if "404" in str(e):
+                return (
+                    f"File {inp['path']!r} does not exist on this ref — check the path "
+                    "with scm_list_files or create it with scm_commit_file."
+                )
+            raise
 
-    async def _handle_scm_list_files(self, inp: dict[str, Any]) -> list[dict[str, Any]]:
-        return await self.scm.list_files(inp["repo"], inp.get("path", ""), inp.get("ref"))
+    async def _handle_scm_list_files(self, inp: dict[str, Any]) -> list[dict[str, Any]] | str:
+        try:
+            return await self.scm.list_files(inp["repo"], inp.get("path", ""), inp.get("ref"))
+        except Exception as e:  # noqa: BLE001
+            if "404" in str(e):
+                return (
+                    f"Directory {inp.get('path', '')!r} does not exist on this ref — "
+                    "list the repo root or create files under it with scm_commit_file."
+                )
+            raise
 
     async def _handle_scm_get_repo_tree(self, inp: dict[str, Any]) -> list[dict[str, Any]]:
         tree = await self.scm.get_repo_tree(inp["repo"], inp.get("ref"))
