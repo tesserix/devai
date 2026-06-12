@@ -100,6 +100,38 @@ class SettingsService:
     async def list_connectors(self, scope: Scope, scope_id: str) -> list[Connector]:
         return await self._load_rows(scope, scope_id)
 
+    async def list_user_connectors_by_email(self, email: str) -> list[Connector]:
+        """User-scope connectors for an email, matched by scope_id OR
+        updated_by. Connectors are saved under the GIP uid (principal.uid)
+        but runs only carry the email (triggered_by) — this bridges the two
+        so per-user LLM resolves at run time regardless of uid/email keying.
+        """
+        if not email:
+            return []
+        if self._pool is None:
+            return [
+                c
+                for c in self._mem.values()
+                if c.scope == Scope.USER and (c.scope_id == email or c.updated_by == email)
+            ]
+        try:
+            rows = await self._pool.fetch(
+                f"""SELECT scope, scope_id, connector_key, instance_id, provider,
+                           prefs, secret_refs, enabled, updated_by,
+                           to_char(updated_at,'YYYY-MM-DD\"T\"HH24:MI:SSZ') AS updated_at
+                    FROM {_TABLE}
+                    WHERE scope='user' AND (scope_id=$1 OR updated_by=$1)""",
+                email,
+            )
+            return [_row_to_connector(r) for r in rows]
+        except Exception:
+            logger.exception("settings: by-email connector load failed (%s)", email)
+            return [
+                c
+                for c in self._mem.values()
+                if c.scope == Scope.USER and (c.scope_id == email or c.updated_by == email)
+            ]
+
     async def upsert_connector(
         self,
         *,

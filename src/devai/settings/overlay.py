@@ -114,6 +114,14 @@ async def build_overlay(
             for c in await service.list_connectors(scope, scope_id):
                 if c.enabled:
                     merged[(c.connector_key, c.instance_id)] = c
+        # Bridge uid/email: connectors are saved under the GIP uid, but runs
+        # only carry the email. Match user connectors by email (scope_id OR
+        # updated_by) so per-user LLM resolves at run time. Applied LAST so it
+        # wins (it's the user's own, most-specific scope).
+        if email and hasattr(service, "list_user_connectors_by_email"):
+            for c in await service.list_user_connectors_by_email(email):
+                if c.enabled:
+                    merged[(c.connector_key, c.instance_id)] = c
     except Exception:  # noqa: BLE001
         logger.warning("overlay: connector resolution failed — using base settings", exc_info=True)
         return base_settings

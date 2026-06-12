@@ -199,3 +199,29 @@ async def test_require_user_connector_blocks_humans_not_systems():
     # Flag off → platform fallback for everyone.
     deps2 = StageDeps(config=type("C", (), {"llm_require_user_connector": False})(), llm=sentinel, llm_resolver=_NoneResolver())
     assert await deps2.llm_for_principal("human@example.com") is sentinel
+
+
+@pytest.mark.asyncio
+async def test_overlay_bridges_uid_keyed_connector_to_email_at_runtime():
+    """The REAL bug: connectors save under the GIP uid, but runs carry only
+    the email (triggered_by). The overlay must still resolve the connector."""
+    from devai.settings.models import Scope
+    from devai.settings.overlay import PrincipalSettingsOverlay, build_overlay
+
+    svc = SettingsService(secrets=_MemSecrets())
+    # Saved under the UID (as the real Settings route does), updated_by=email.
+    await svc.upsert_connector(
+        scope=Scope.USER,
+        scope_id="uid-XYZ",
+        connector_key="llm",
+        provider="anthropic",
+        prefs={"claude_model": "claude-opus-4-8"},
+        secret_values={"anthropic_api_key": "sk-ant-mine"},
+        updated_by="me@example.com",
+    )
+    # A run only knows the email — Principal(uid="", email=...).
+    overlay = await build_overlay(_Settings(), Principal(uid="", email="me@example.com"), svc)
+    assert isinstance(overlay, PrincipalSettingsOverlay), "uid-keyed connector must resolve by email"
+    assert overlay.llm_provider == "anthropic"
+    assert overlay.claude_model == "claude-opus-4-8"
+    assert overlay.anthropic_api_key == "sk-ant-mine"
