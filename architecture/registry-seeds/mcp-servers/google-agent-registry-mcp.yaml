@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: google-agent-registry-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: google-cloud
+    devai.io/category: registry
+spec:
+  name: google-agent-registry-mcp
+  displayName: Google Agent Registry MCP
+  description: Google's Agent Registry MCP server — discover agents, MCP servers,
+    endpoints and tools registered in the GCP project (Gemini Enterprise Agent
+    Platform). Lets DevAI agents enumerate the cloud-side agent estate alongside
+    the in-cluster aregistry. Auth via Workload Identity ADC.
+  endpoint: https://agentregistry.googleapis.com/mcp
+  authMode: gcp_adc
+  tools:
+  - list_agents
+  - search_agents
+  - get_agent
+  - list_endpoints
+  - list_mcp_servers
+  - search_mcp_servers
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: google-agent-registry-mcp

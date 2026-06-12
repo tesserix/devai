@@ -606,6 +606,17 @@ class Settings(BaseSettings):
     llm_gateway_api_key: str = ""  # optional; gateway-enforced auth token
     llm_gateway_model: str = ""  # default model alias the gateway resolves
 
+    # --- vertex adapter ---
+    # Vertex AI (Gemini) over REST with Application Default Credentials —
+    # on GKE that's the pod's Workload Identity GSA (roles/aiplatform.user).
+    # In-cluster traffic rides the PSC endpoint via the vertex-aiplatform
+    # private DNS zone (tesserix-k8s terraform-new/stacks/12-vertex), so
+    # inference never leaves the VPC. No API keys anywhere on this path.
+    vertex_project: str = ""  # DEVAI_VERTEX_PROJECT — empty disables the backend
+    vertex_location: str = "global"  # or a region, e.g. asia-south1
+    vertex_gemini_model: str = "gemini-2.5-flash"
+    vertex_embedding_model: str = "text-embedding-005"
+
     # --- Secrets adapter (per-user/per-tenant secret provisioning) ---
     # Backs the Settings capability. The Settings store keeps only secret
     # references; the adapter writes/reads the actual values. gcp_sm

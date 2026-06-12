@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: google-vertex-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: google-cloud
+    devai.io/category: llm
+spec:
+  name: google-vertex-mcp
+  displayName: Google Vertex AI MCP (generate)
+  description: Google's system MCP server for Vertex AI generation — generate_content,
+    count_tokens and embed_content against any publisher model. Auth is the pod's
+    Workload Identity GSA via ADC (no API keys); in-cluster calls ride the PSC-pinned
+    aiplatform private DNS zone, so traffic stays inside the VPC.
+  endpoint: https://aiplatform.googleapis.com/mcp/generate
+  authMode: gcp_adc
+  tools:
+  - generate_content
+  - count_tokens
+  - embed_content
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: google-vertex-mcp

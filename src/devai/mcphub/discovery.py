@@ -273,4 +273,53 @@ def downstream_headers(
     elif mode == "mtls":
         # Certificate is presented by the HTTP client/transport, not a header.
         pass
+    elif mode in ("gcp_adc", "adc"):
+        # Google Cloud MCP servers (aiplatform, agentregistry, bigquery, …)
+        # authenticate with an OAuth bearer minted from Application Default
+        # Credentials — on GKE that's the pod's Workload Identity GSA. The
+        # x-goog-user-project header names the quota/billing project, which
+        # impersonated/user-domain ADC tokens don't carry implicitly.
+        token, project = _gcp_adc_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            if project:
+                headers.setdefault("x-goog-user-project", project)
+        else:
+            logger.warning(
+                "mcphub: downstream %r is authMode=gcp_adc but ADC is unavailable; calls may be rejected",
+                spec.name,
+            )
     return headers
+
+
+_ADC_STATE: dict[str, Any] = {}
+
+
+def _gcp_adc_token() -> tuple[str, str]:
+    """(access_token, quota_project) from cached ADC, or ("", "") when unavailable.
+
+    Lazy-imports google.auth (adapter-family rule: a backend you don't use
+    never loads its SDK) and refreshes the cached credentials only when
+    expired. Never raises — Google MCP downstreams degrade like any other.
+    """
+    try:
+        creds = _ADC_STATE.get("creds")
+        if creds is None:
+            import google.auth  # noqa: PLC0415
+
+            creds, adc_project = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            _ADC_STATE["creds"] = creds
+            _ADC_STATE["project"] = adc_project or ""
+        if not creds.valid:
+            from google.auth.transport.requests import Request  # noqa: PLC0415
+
+            creds.refresh(Request())
+        from devai.config import settings
+
+        project = getattr(settings, "vertex_project", "") or _ADC_STATE.get("project", "")
+        return str(creds.token or ""), str(project)
+    except Exception:  # noqa: BLE001
+        logger.debug("mcphub: ADC token mint failed", exc_info=True)
+        return "", ""

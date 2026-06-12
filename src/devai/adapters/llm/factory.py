@@ -8,6 +8,8 @@ one of:
     openai     → OpenAILLMAdapter
     gateway    → OpenAILLMAdapter pointed at the agentgateway (model
                  routing + provider credentials live gateway-side)
+    vertex_gemini → VertexGeminiLLMAdapter (REST + ADC/Workload Identity,
+                 VPC-private via the PSC-pinned aiplatform DNS zone)
 
 Graceful degradation rules (identical to the memory adapter family):
   - Unknown provider → log + Noop
@@ -36,7 +38,7 @@ from devai.adapters.llm.noop import NoopLLMAdapter
 
 logger = logging.getLogger(__name__)
 
-KNOWN_PROVIDERS = ("noop", "anthropic", "openai", "gateway")
+KNOWN_PROVIDERS = ("noop", "anthropic", "openai", "gateway", "vertex_gemini")
 
 
 def _build_noop(settings: Any) -> LLMAdapter:
@@ -95,11 +97,28 @@ def _build_gateway(settings: Any) -> LLMAdapter:
     )
 
 
+def _build_vertex_gemini(settings: Any) -> LLMAdapter:
+    """Vertex AI Gemini over REST + ADC (Workload Identity in-cluster).
+
+    Keyless and VPC-private: auth comes from the pod's GSA and traffic
+    rides the PSC endpoint via the pinned aiplatform DNS zone.
+    """
+    from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
+
+    return VertexGeminiLLMAdapter(
+        project=getattr(settings, "vertex_project", "") or "",
+        location=getattr(settings, "vertex_location", "") or "global",
+        default_model=getattr(settings, "vertex_gemini_model", "") or "",
+        embedding_model=getattr(settings, "vertex_embedding_model", "") or "",
+    )
+
+
 llm_registry: AdapterRegistry[LLMAdapter] = AdapterRegistry("llm")
 llm_registry.register("noop", _build_noop)
 llm_registry.register("anthropic", _build_anthropic)
 llm_registry.register("openai", _build_openai)
 llm_registry.register("gateway", _build_gateway)
+llm_registry.register("vertex_gemini", _build_vertex_gemini)
 
 
 def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdapter:

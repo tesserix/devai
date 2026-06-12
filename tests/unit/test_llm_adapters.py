@@ -192,6 +192,41 @@ def test_factory_gateway_without_base_url_falls_back_to_noop():
     assert a.provider_name == "noop"
 
 
+def test_factory_vertex_gemini_without_project_falls_back_to_noop():
+    s = _Settings()
+    s.llm_provider = "vertex_gemini"
+    a = create_llm_adapter(s)
+    assert a.provider_name == "noop"
+
+
+def test_vertex_gemini_parse_maps_text_tools_and_usage():
+    from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
+
+    payload = {
+        "candidates": [
+            {
+                "content": {
+                    "role": "model",
+                    "parts": [
+                        {"text": "hello"},
+                        {"functionCall": {"name": "scm_read_file", "args": {"path": "a.py"}}},
+                    ],
+                },
+                "finishReason": "STOP",
+            }
+        ],
+        "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 3, "totalTokenCount": 10},
+        "modelVersion": "gemini-2.5-flash",
+    }
+    r = VertexGeminiLLMAdapter._parse(payload, model="gemini-2.5-flash", latency_ms=12.0)
+    assert r.text == "hello"
+    assert r.tool_calls[0].name == "scm_read_file"
+    assert r.tool_calls[0].arguments == {"path": "a.py"}
+    assert r.finish_reason == "tool_use"  # tool calls win over STOP
+    assert r.usage.total_tokens == 10
+    assert r.provider == "vertex_gemini"
+
+
 def test_factory_explicit_provider_override_wins_over_settings():
     s = _Settings()
     s.llm_provider = "anthropic"  # would fail without key
