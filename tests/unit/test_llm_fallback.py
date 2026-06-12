@@ -115,3 +115,24 @@ def test_chain_builder_orders_and_skips_unconfigured_links():
 
     chain = create_llm_chain(_S())
     assert chain.provider_name == "vertex_gemini→groq→anthropic"
+
+
+@pytest.mark.asyncio
+async def test_model_fallback_retries_other_model_on_error():
+    from devai.adapters.llm.base import LLMUsage
+    from devai.adapters.llm.fallback import ModelFallbackLLMAdapter
+
+    class _ModelPicky(LLMAdapter):
+        provider_name = "picky"
+        default_model = "primary"
+
+        async def generate(self, request: LLMRequest) -> LLMResponse:
+            if (request.model or "primary") == "primary":
+                return LLMResponse(text="", finish_reason="error", provider="picky")
+            return LLMResponse(text="ok-on-fallback", finish_reason="stop",
+                               provider="picky", usage=LLMUsage())
+
+    a = ModelFallbackLLMAdapter(_ModelPicky(), "backup-model")
+    resp = await a.generate(LLMRequest(model="primary"))
+    assert resp.text == "ok-on-fallback"
+    assert resp.extra.get("model_fallback") is True

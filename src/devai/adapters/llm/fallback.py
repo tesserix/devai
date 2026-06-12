@@ -174,4 +174,55 @@ class ModelAllowlistLLMAdapter(LLMAdapter):
         await self._inner.close()
 
 
-__all__ = ["FallbackLLMAdapter", "ModelAllowlistLLMAdapter"]
+class ModelFallbackLLMAdapter(LLMAdapter):
+    """Retry on a second MODEL of the SAME provider before giving up.
+
+    A user picks a primary + fallback model in Settings; when the primary
+    model errors (e.g. that model is overloaded), the call retries on the
+    fallback model through the same adapter/credentials before the outer
+    provider chain takes over.
+    """
+
+    def __init__(self, inner: LLMAdapter, fallback_model: str) -> None:
+        self._inner = inner
+        self._fallback_model = fallback_model
+
+    @property
+    def provider_name(self) -> str:  # type: ignore[override]
+        return self._inner.provider_name
+
+    @property
+    def default_model(self) -> str:  # type: ignore[override]
+        return self._inner.default_model
+
+    async def generate(self, request: LLMRequest) -> LLMResponse:
+        try:
+            resp = await self._inner.generate(request)
+        except Exception:  # noqa: BLE001
+            logger.warning("model fallback: primary errored — retrying on %s", self._fallback_model, exc_info=True)
+            return await self._inner.generate(replace(request, model=self._fallback_model))
+        if resp.finish_reason == "error" and (request.model or "") != self._fallback_model:
+            logger.warning("model fallback: primary returned error — retrying on %s", self._fallback_model)
+            alt = await self._inner.generate(replace(request, model=self._fallback_model))
+            alt.extra["model_fallback"] = True
+            return alt
+        return resp
+
+    async def stream(self, request: LLMRequest) -> AsyncIterator[LLMResponse]:
+        async for chunk in self._inner.stream(request):
+            yield chunk
+
+    async def embed(self, texts: list[str], *, model: str = "") -> list[list[float]]:
+        return await self._inner.embed(texts, model=model)
+
+    async def list_models(self) -> list[dict[str, str]]:
+        return await self._inner.list_models()
+
+    async def health_check(self) -> dict[str, Any]:
+        return await self._inner.health_check()
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+
+__all__ = ["FallbackLLMAdapter", "ModelAllowlistLLMAdapter", "ModelFallbackLLMAdapter"]

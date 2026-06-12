@@ -275,6 +275,8 @@ function ConnectorForm({
   // Per-model enable/disable: null = no policy (everything enabled);
   // a Set = only those models allowed. Saved as prefs.enabled_models.
   const [disabledModels, setDisabledModels] = useState<Set<string>>(new Set());
+  // Optional same-provider fallback model. Saved as prefs.fallback_model.
+  const [fallbackModel, setFallbackModel] = useState("");
   useEffect(() => {
     if (spec.key !== "llm" || !provider) return;
     let cancelled = false;
@@ -316,6 +318,9 @@ function ConnectorForm({
       // disabled — no policy means every model stays available.
       if (spec.key === "llm" && disabledModels.size > 0 && modelOptions.length > 0) {
         prefs["enabled_models"] = modelOptions.filter((m) => !disabledModels.has(m)).join(",");
+      }
+      if (spec.key === "llm" && fallbackModel) {
+        prefs["fallback_model"] = fallbackModel;
       }
       await api.saveConnector({
         scope,
@@ -386,41 +391,78 @@ function ConnectorForm({
       </div>
 
       <div className="space-y-3">
-        {visibleFields.map((f) => (
-          <label key={f.key} className="block">
-            <span className="text-xs text-[var(--ink-300)] flex items-center gap-1.5">
-              {f.label}
-              {f.secret && <KeyRound className="w-3 h-3 text-amber-400" />}
-              {f.required && <span className="text-red-400">*</span>}
-            </span>
-            <input
-              className="field mt-1 w-full"
-              type={f.secret ? "password" : "text"}
-              autoComplete={f.secret ? "new-password" : "off"}
-              disabled={f.secret && !secretsWritable}
-              list={
-                !f.secret && f.key.endsWith("_model") && modelOptions.length > 0
-                  ? `models-${spec.key}-${provider}`
-                  : undefined
-              }
-              placeholder={
-                f.secret && !secretsWritable ? "secret storage read-only" : f.placeholder
-              }
-              value={values[f.key] || ""}
-              onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-            />
-            {f.help && <span className="text-xs text-[var(--ink-400)] mt-0.5 block">{f.help}</span>}
-          </label>
-        ))}
-      </div>
+        {visibleFields.map((f) => {
+          const isModelField =
+            spec.key === "llm" && f.key.endsWith("_model") && modelOptions.length > 0;
+          return (
+            <label key={f.key} className="block">
+              <span className="text-xs text-[var(--ink-300)] flex items-center gap-1.5">
+                {isModelField ? "Primary Model" : f.label}
+                {f.secret && <KeyRound className="w-3 h-3 text-amber-400" />}
+                {(f.required || isModelField) && <span className="text-red-400">*</span>}
+              </span>
+              {isModelField ? (
+                // Pick from the discovered list — no typing. First enabled
+                // model is the default primary.
+                <select
+                  className="field mt-1 w-full"
+                  value={values[f.key] || ""}
+                  onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                >
+                  <option value="">Select a model…</option>
+                  {modelOptions
+                    .filter((m) => !disabledModels.has(m))
+                    .map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                </select>
+              ) : (
+                <input
+                  className="field mt-1 w-full"
+                  type={f.secret ? "password" : "text"}
+                  autoComplete={f.secret ? "new-password" : "off"}
+                  disabled={f.secret && !secretsWritable}
+                  placeholder={
+                    f.secret && !secretsWritable ? "secret storage read-only" : f.placeholder
+                  }
+                  value={values[f.key] || ""}
+                  onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                />
+              )}
+              {f.help && !isModelField && (
+                <span className="text-xs text-[var(--ink-400)] mt-0.5 block">{f.help}</span>
+              )}
+            </label>
+          );
+        })}
 
-      {modelOptions.length > 0 && (
-        <datalist id={`models-${spec.key}-${provider}`}>
-          {modelOptions.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-      )}
+        {/* Fallback model — picked from the same list; used when the primary
+            errors before the chain moves to the next provider. */}
+        {spec.key === "llm" && modelOptions.length > 0 && (
+          <label className="block">
+            <span className="text-xs text-[var(--ink-300)]">Fallback Model</span>
+            <select
+              className="field mt-1 w-full"
+              value={fallbackModel}
+              onChange={(e) => setFallbackModel(e.target.value)}
+            >
+              <option value="">None — fall through to the next provider</option>
+              {modelOptions
+                .filter((m) => !disabledModels.has(m))
+                .map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+            </select>
+            <span className="text-xs text-[var(--ink-400)] mt-0.5 block">
+              Tried on the same provider if the primary model fails.
+            </span>
+          </label>
+        )}
+      </div>
 
       {spec.key === "llm" && modelOptions.length > 0 && (
         <div>

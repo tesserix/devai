@@ -118,14 +118,18 @@ function handleUnauthorized(): void {
   window.location.assign(`/login?return_to=${encodeURIComponent(returnTo)}`);
 }
 
-async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
+async function apiFetch<T>(path: string, opts?: RequestInit & { soft?: boolean }): Promise<T> {
+  const { soft, ...init } = opts ?? {};
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
-    ...opts,
-    headers: { "Content-Type": "application/json", ...opts?.headers },
+    ...init,
+    headers: { "Content-Type": "application/json", ...init.headers },
   });
   if (res.status === 401) {
-    handleUnauthorized();
+    // `soft` calls (advisory widgets like the trial banner) must never
+    // trigger a navigation/redirect — a non-critical fetch failing should
+    // not bounce a signed-in user off the page they're on.
+    if (!soft) handleUnauthorized();
     throw new Error("Session expired — redirecting to sign in.");
   }
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -250,7 +254,7 @@ export const api = {
       warning: boolean;
       has_own_connector: boolean;
       applicable: boolean;
-    }>("/settings/trial"),
+    }>("/settings/trial", { soft: true }),
 
   listProviderModels: (provider: string) =>
     apiFetch<{

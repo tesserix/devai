@@ -175,6 +175,9 @@ async def build_overlay(
                 enabled = []
             if enabled:
                 overrides["llm_enabled_models"] = enabled
+            fb_model = c.prefs.get("fallback_model")
+            if isinstance(fb_model, str) and fb_model.strip():
+                overrides["llm_user_fallback_model"] = fb_model.strip()
 
     return PrincipalSettingsOverlay(
         base_settings,

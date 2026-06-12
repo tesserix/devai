@@ -106,6 +106,14 @@ class PrincipalLLMResolver:
 
                 adapter = ModelAllowlistLLMAdapter(adapter, list(enabled))
 
+            # The user's chosen fallback MODEL (same provider): retried before
+            # the cross-provider chain when the primary model errors.
+            fb_model = getattr(overlay, "llm_user_fallback_model", "") or ""
+            if fb_model:
+                from devai.adapters.llm.fallback import ModelFallbackLLMAdapter
+
+                adapter = ModelFallbackLLMAdapter(adapter, fb_model)
+
             # Runtime resilience: unless strict per-user isolation is on,
             # chain the platform default behind the user's provider so an
             # outage/misconfiguration degrades instead of failing their run.
