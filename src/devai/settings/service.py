@@ -153,21 +153,42 @@ class SettingsService:
             updated_by=updated_by,
         )
         await self._save_row(connector)
+        # Audit trail — WHO changed WHICH connector and which secret fields
+        # were (re)provisioned. Never records secret values, only field names.
+        await self._audit(
+            action="settings.connector.upsert",
+            actor=updated_by or scope_id,
+            connector=connector,
+            details={
+                "provider": provider,
+                "secrets_set": sorted(secret_refs.keys()),
+                "secret_refs": sorted(secret_refs.values()),  # SM names, not values
+                "prefs_keys": sorted(clean_prefs.keys()),
+            },
+        )
         return connector
 
     async def delete_connector(
-        self, scope: Scope, scope_id: str, connector_key: str, instance_id: str = "default"
+        self, scope: Scope, scope_id: str, connector_key: str, instance_id: str = "default", *, actor: str = ""
     ) -> bool:
         existing = await self._get(scope, scope_id, connector_key, instance_id)
+        deleted_refs: list[str] = []
         if existing and self._secrets is not None:
             for ref_name in existing.secret_refs.values():
                 try:
                     await self._secrets.delete_secret(ref_name)
+                    deleted_refs.append(ref_name)
                 except Exception:  # noqa: BLE001
                     logger.warning("settings: secret delete failed for %s", ref_name)
         key = Connector(
             scope=scope, scope_id=scope_id, connector_key=connector_key, instance_id=instance_id
         ).storage_key()
+        await self._audit(
+            action="settings.connector.delete",
+            actor=actor or scope_id,
+            connector=Connector(scope=scope, scope_id=scope_id, connector_key=connector_key, instance_id=instance_id),
+            details={"deleted_secret_refs": sorted(deleted_refs)},
+        )
         if self._pool is None:
             return self._mem.pop(key, None) is not None
         try:
@@ -182,6 +203,29 @@ class SettingsService:
         except Exception:
             logger.exception("settings: DB delete failed")
             return self._mem.pop(key, None) is not None
+
+    async def _audit(self, *, action: str, actor: str, connector: Connector, details: dict[str, Any]) -> None:
+        """Write a queryable audit_log entry for a settings change.
+
+        Records WHO (actor) did WHAT (action) to WHICH connector (entity_ref =
+        the scope:scope_id:connector:instance key) plus non-secret detail.
+        Never raises — auditing must not break the save — and is a no-op when
+        no DB pool is wired (in-memory/test mode).
+        """
+        if self._pool is None:
+            return
+        try:
+            await self._pool.execute(
+                """INSERT INTO audit_log
+                   (run_id, agent_name, action, entity_type, entity_ref, details, actor, actor_type)
+                   VALUES (NULL, NULL, $1, 'settings_connector', $2, $3, $4, 'user')""",
+                action,
+                connector.storage_key(),
+                json.dumps(details),
+                actor,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("settings: audit write failed (%s)", action, exc_info=True)
 
     async def resolve_secret(self, ref_name: str) -> str | None:
         """Resolve a stored secret ref name back to its value (for the overlay)."""

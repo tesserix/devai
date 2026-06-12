@@ -182,3 +182,41 @@ def test_unknown_connector_rejected():
     svc = _svc()
     with pytest.raises(ValueError):
         asyncio.run(svc.upsert_connector(scope=Scope.USER, scope_id="x", connector_key="nope", provider="p"))
+
+
+@pytest.mark.asyncio
+async def test_upsert_writes_audit_with_no_secret_values():
+    """Audit records actor + field names, never secret values."""
+    rows = []
+
+    class _Pool:
+        async def execute(self, sql, *args):
+            rows.append((sql, args))
+
+        async def fetch(self, sql, *args):
+            return []
+
+    from devai.settings.models import Scope
+    from devai.settings.service import SettingsService
+
+    class _Secrets:
+        async def can_write(self):
+            return True
+
+        async def set_secret(self, key, value, labels=None):
+            class _R:
+                name = key
+            return _R()
+
+    svc = SettingsService(pool=_Pool(), secrets=_Secrets())
+    await svc.upsert_connector(
+        scope=Scope.USER, scope_id="uid-9", connector_key="llm", provider="anthropic",
+        secret_values={"anthropic_api_key": "sk-ant-SECRET"}, updated_by="me@example.com",
+    )
+    audit = [r for r in rows if "audit_log" in r[0]]
+    assert audit, "an audit_log row must be written on upsert"
+    flat = str(audit[-1])
+    assert "settings.connector.upsert" in flat
+    assert "me@example.com" in flat
+    assert "sk-ant-SECRET" not in flat  # value never audited
+    assert "anthropic_api_key" in flat  # field NAME is fine

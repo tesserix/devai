@@ -275,7 +275,7 @@ async def delete_connector(scope: str, scope_id: str, connector_key: str, reques
     sid = "" if scope_id == "-" else scope_id
     _authorize(principal, scope_enum, sid)
     instance_id = request.query_params.get("instance_id", "default")
-    ok = await svc.delete_connector(scope_enum, sid, connector_key, instance_id)
+    ok = await svc.delete_connector(scope_enum, sid, connector_key, instance_id, actor=principal.email)
     return {"status": "deleted" if ok else "not_found"}
 
 
