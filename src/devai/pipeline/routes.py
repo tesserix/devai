@@ -230,6 +230,25 @@ class DispatchResponse(BaseModel):
     team_id: str = ""
 
 
+# Handover-bag keys (and prefixes) the EXECUTOR owns — a dispatch caller
+# setting these could bypass approval gates, inject instructions into agent
+# briefs, or forge recovery state. Stripped (with a log) from inbound bags.
+_RESERVED_CONTEXT_KEYS = frozenset(
+    {"autonomy", "dynamic_gates", "heal_history", "plan_approved", "plan_approval_request", "resumed_from_failure_at"}
+)
+_RESERVED_CONTEXT_PREFIXES = ("heal:", "runbook:", "boardroom_")
+
+
+def _sanitize_agent_context(raw: dict[str, Any]) -> dict[str, Any]:
+    clean: dict[str, Any] = {}
+    for key, value in (raw or {}).items():
+        if key in _RESERVED_CONTEXT_KEYS or key.startswith(_RESERVED_CONTEXT_PREFIXES):
+            logger.warning("dispatch: dropping reserved agent_context key %r", key)
+            continue
+        clean[key] = value
+    return clean
+
+
 @router.post("/runs", response_model=DispatchResponse, status_code=202)
 async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse:
     from devai.identity import trace_id_from_request
@@ -245,8 +264,11 @@ async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse
         raise HTTPException(status_code=403, detail=f"not a member of team {team_id}")
 
     # Fold composer context into the handover bag so the AgentRunner can
-    # hydrate @-mentions + image attachments.
-    agent_context = dict(body.agent_context)
+    # hydrate @-mentions + image attachments. The caller-supplied bag is
+    # SANITIZED first: reserved control keys would otherwise let any caller
+    # self-approve gates (autonomy), inject text into code-writing agents'
+    # briefs (heal:*), or forge approvals/runbooks.
+    agent_context = _sanitize_agent_context(body.agent_context)
     if body.context_refs:
         agent_context["context_refs"] = body.context_refs
     if body.attachments:
@@ -353,15 +375,22 @@ async def retrigger(request: Request, task_id: str) -> dict[str, Any]:
     # Retriggering re-runs the original work — enforce team membership on the
     # source run's owning team (CODE-2) and require a principal when auth is on.
     principal = await _authorize_run(request, original)
+    # Carry the original run's user-chosen options: dropping them silently
+    # changed behavior on retry (a 'Brainstorm first' run retried WITHOUT
+    # its boardroom; a gated run retried at the default autonomy).
+    retry_context: dict[str, Any] = {"requirements": intent, "retry_of": task_id}
+    if ctx.get("brainstorm"):
+        retry_context["brainstorm"] = True
     new_id = await svc.dispatch(
         intent=intent,
         blueprint=original.get("blueprint"),
         repo=repo,
         trigger_type="dashboard-retry",
         label=f"retry:{task_id}"[:80],
-        agent_context={"requirements": intent, "retry_of": task_id},
+        agent_context=retry_context,
         principal=principal.to_dict() if principal else None,
         trace_id=trace_id_from_request(request),
+        autonomy=str(ctx.get("autonomy") or ""),
     )
     return {"run_id": new_id, "stage": "triggered", "repo": repo, "retry_of": task_id}
 

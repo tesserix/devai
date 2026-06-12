@@ -701,6 +701,15 @@ class PipelineService:
         sm = self.state_manager
         # Deliberate terminal→queued transition — force past the zombie guard.
         await sm.persist_task(snapshot, ttl=self.config.pipeline_task_ttl, force=True)
+        # Evict the stale TERMINAL task from the in-process cache — without
+        # this the worker's `self._tasks.get(task_id)` returns the old
+        # failed object, sees is_terminal, and acks the run away without
+        # executing anything (Continue would silently do nothing).
+        if self._pipeline is not None:
+            try:
+                self._pipeline.remove_task(task_id)
+            except Exception:  # noqa: BLE001
+                logger.debug("cache evict failed for %s", task_id, exc_info=True)
         # A lingering "stopped" control flag would cancel the run at claim.
         ctrl = getattr(sm, "set_pipeline_control", None)
         if ctrl is not None:
@@ -708,8 +717,18 @@ class PipelineService:
                 await ctrl(task_id, "")
             except Exception:  # noqa: BLE001
                 logger.debug("control clear failed for %s", task_id, exc_info=True)
-        await sm.enqueue_task(task_id)
-        logger.info("run %s resumed from failure (was %s)", task_id, state)
+        enqueued = await sm.enqueue_task(task_id)
+        if not enqueued:
+            # Terminal runs were ack'd off the queue, so membership in the
+            # ACTIVE set is leftover state (e.g. a crashed worker never
+            # ack'd). Clear it and enqueue for real — silently reporting
+            # "resumed" without a queue entry is the one unacceptable outcome.
+            try:
+                await sm.redis.srem(sm.PIPELINE_ACTIVE_KEY, task_id)
+            except Exception:  # noqa: BLE001
+                logger.debug("active-set clear failed for %s", task_id, exc_info=True)
+            enqueued = await sm.enqueue_task(task_id)
+        logger.info("run %s resumed from failure (was %s, enqueued=%s)", task_id, state, enqueued)
         return {"run_id": task_id, "state": "queued", "resumed": True, "was": state}
 
     async def approve_gate(

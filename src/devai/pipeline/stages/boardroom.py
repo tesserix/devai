@@ -290,9 +290,12 @@ class _BoardroomDebateStage(PipelineStage):
             except Exception:  # noqa: BLE001
                 logger.exception("boardroom: moderator synthesis failed in round %d", round_no)
 
-            if not challenges_made and round_no >= 1 and new_positions:
+            # Early consensus only counts from round 2 — in round 1 nobody
+            # has seen anyone else's position yet, so "no challenges" is
+            # vacuous, not agreement.
+            if not challenges_made and round_no >= 2 and new_positions:
                 consensus_reached = True
-                break  # early consensus — don't burn rounds
+                break  # genuine consensus — don't burn remaining rounds
 
         # Final decision document.
         decision = await self._final_decision(topic, positions, consensus_reached)

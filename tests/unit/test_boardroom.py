@@ -69,8 +69,14 @@ def test_panel_routing_pulls_specialists():
 @pytest.mark.asyncio
 async def test_consensus_round_ends_debate_early_and_outputs_plan():
     agree = "POSITION: Next.js + Postgres.\nCHALLENGE: none — I agree with the table\nCONCEDE: nothing"
-    # 4 panelists agree in round 1 + moderator synthesis + final decision.
-    llm = _ScriptedLLM([agree] * 4 + ["AGREED: stack\nDISPUTED: nothing", "## Decision\nNext.js + Postgres\n## Dissent\nnone"])
+    # Round 1 can NEVER be consensus (nothing on the table to challenge yet);
+    # round 2 with no challenges ends the 3-round debate early.
+    llm = _ScriptedLLM(
+        [agree] * 4
+        + ["AGREED: stack\nDISPUTED: nothing"]
+        + [agree] * 4
+        + ["AGREED: stack\nDISPUTED: nothing", "## Decision\nNext.js + Postgres\n## Dissent\nnone"]
+    )
     s = _stage(llm, {"rounds": "3"})
     task = DevAITask(intent="pick the stack", blueprint="b", repo="o/r")
     result = await s.execute(task)
@@ -78,10 +84,10 @@ async def test_consensus_round_ends_debate_early_and_outputs_plan():
     assert result.data["boardroom_consensus"] is True
     assert "Next.js" in result.data["technical_plan"]
     assert result.data["boardroom_decision"].startswith("## Decision")
-    # Minutes: convened + 4 positions + synthesis + decision.
-    assert len(result.data["a2a_messages"]) == 7
-    # Early exit: 6 calls total, not 3 rounds' worth.
-    assert llm.calls == 6
+    # Minutes: convened + (4 positions + synthesis) × 2 rounds + decision.
+    assert len(result.data["a2a_messages"]) == 12
+    # Early exit after round 2: 11 calls, not 3 full rounds' worth.
+    assert llm.calls == 11
 
 
 @pytest.mark.asyncio

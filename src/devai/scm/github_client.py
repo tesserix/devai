@@ -543,10 +543,18 @@ class GitHubSCMClient(SCMClient):
             # — the "or update" half of this method's contract.
             if "422" not in str(e) or sha:
                 raise
-            lookup = await self._request(
-                "GET", f"/repos/{repo}/contents/{path}", params={"ref": branch}
-            )
-            current_sha = (lookup.json() or {}).get("sha")
+            # The lookup is best-effort: if the 422 had another cause (bad
+            # path, path is a DIRECTORY — the GET then returns a list, or
+            # the file truly doesn't exist → 404) we must re-raise the
+            # ORIGINAL 422, never a masking secondary error.
+            try:
+                lookup = await self._request(
+                    "GET", f"/repos/{repo}/contents/{path}", params={"ref": branch}
+                )
+                body = lookup.json()
+                current_sha = body.get("sha") if isinstance(body, dict) else None
+            except Exception:  # noqa: BLE001
+                current_sha = None
             if not current_sha:
                 raise
             payload["sha"] = current_sha

@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re as _re
 import time
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -56,6 +57,30 @@ class _RunStopped(Exception):
 # in-progress task and the freshly-emitted event.
 EventCallback = Callable[[DevAITask, StageEvent], None]
 
+
+
+# Exception strings can embed live credentials — DB DSNs with passwords,
+# provider API keys, bearer tokens. The recovery agent posts error text to
+# GitHub issues (potentially PUBLIC repos) and feeds it to LLM prompts, so
+# everything leaving the process goes through this scrub first.
+_SECRET_PATTERNS = [
+    _re.compile(r"(://[^/\s:@]+:)[^@\s]+(@)"),  # scheme://user:PASS@host
+    _re.compile(r"\b(sk-[A-Za-z0-9_-]{8,})"),
+    _re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{20,})"),
+    _re.compile(r"\b(github_pat_[A-Za-z0-9_]{20,})"),
+    _re.compile(r"\b(AKIA[A-Z0-9]{12,})"),
+    _re.compile(r"\b(xox[baprs]-[A-Za-z0-9-]{10,})"),
+    _re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}"),
+    _re.compile(r"(?i)\b((?:api[_-]?key|token|password|secret)\s*[=:]\s*)[^\s&\"']{6,}"),
+]
+
+
+def _redact(text: str) -> str:
+    """Mask credential-shaped substrings before text leaves the process."""
+    out = text or ""
+    for pat in _SECRET_PATTERNS:
+        out = pat.sub(lambda m: (m.group(1) if m.lastindex else "") + "***REDACTED***" + (m.group(2) if (m.lastindex or 0) >= 2 else ""), out)
+    return out
 
 
 def _parse_json_lenient(text: str) -> Any:
@@ -494,6 +519,9 @@ class BlueprintExecutor:
         Returns True when the caller should re-run the stage.
         """
         heal_stage = f"heal:{spec.name}"
+        # Everything below (bug issue, comments, LLM prompts, events) may
+        # leave the process — scrub credential-shaped substrings ONCE here.
+        error = _redact(error)
 
         def _hev(phase: StageEventPhase, **kw: Any) -> StageEvent:
             return StageEvent(
@@ -511,11 +539,17 @@ class BlueprintExecutor:
         decision = await self._diagnose_failure(spec, task, error)
         duration_ms = (time.monotonic() - start) * 1000.0
 
+        llm = self._deps.llm
+        llm_usable = llm is not None and getattr(llm, "provider_name", "noop") != "noop"
         if decision is None:
             # A flaky diagnosis call must never doom the recovery loop — the
             # user contract is "retry with injected context, minimum 3
-            # rounds". Timeouts get the incremental-continuation brief; any
-            # other failure gets the error itself as corrective context.
+            # rounds". Timeouts get the incremental-continuation brief (a
+            # mechanical retry helps even with no LLM); any other failure
+            # gets the error itself as corrective context — but ONLY when an
+            # LLM actually exists. With a noop provider a deterministic
+            # failure would just burn 3 mechanical re-runs and spam GitHub
+            # bugs nobody is diagnosing.
             if "timed out" in error.lower():
                 decision = {
                     "action": "retry",
@@ -526,7 +560,7 @@ class BlueprintExecutor:
                         "first, then finish ONLY the remaining work and open the PR."
                     ),
                 }
-            else:
+            elif llm_usable:
                 decision = {
                     "action": "retry",
                     "diagnosis": "automated diagnosis unavailable — retrying with the raw error as context",
@@ -537,8 +571,8 @@ class BlueprintExecutor:
                     ),
                 }
 
-        if decision.get("action") == "abort":
-            why = str(decision.get("diagnosis") or "no recovery path found")
+        if decision is None or decision.get("action") == "abort":
+            why = str((decision or {}).get("diagnosis") or "no usable diagnosis (LLM unavailable)")
             self._emit(
                 task,
                 _hev(StageEventPhase.FAILED, duration_ms=duration_ms, error=f"recovery abandoned: {why[:300]}"),
@@ -661,6 +695,7 @@ class BlueprintExecutor:
         ]
         if not history:
             return
+        error = _redact(error)
         chrono = "\n".join(
             f"{i + 1}. **Error:** `{str(h.get('error') or '')[:140]}` → "
             f"**diagnosis:** {str(h.get('diagnosis') or '')[:200]} → "
