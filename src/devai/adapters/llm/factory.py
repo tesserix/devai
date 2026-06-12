@@ -271,7 +271,21 @@ def create_role_llm(settings: Any, role: str) -> LLMAdapter:
     if cached is not None:
         return cached
 
-    primary = create_llm_adapter(settings)
+    # Provider follows the MODEL: role models are claude-* → anthropic
+    # primary (gemini-* → vertex, llama/mixtral → groq). Without this, a
+    # vertex_gemini-primary deployment would feed claude model ids to the
+    # Gemini API and silently degrade every role pin to fallback defaults.
+    model = str(getattr(settings, f"llm_model_{role}", "") or "")
+    if model.startswith("claude"):
+        primary = create_llm_adapter(settings, provider="anthropic")
+    elif model.startswith("gemini"):
+        primary = create_llm_adapter(settings, provider="vertex_gemini")
+    elif model.startswith(("llama", "mixtral")):
+        primary = create_llm_adapter(settings, provider="groq")
+    else:
+        primary = create_llm_adapter(settings)
+    if primary.provider_name == "noop":
+        primary = create_llm_adapter(settings)  # keyless role provider → configured default
     chain: list[LLMAdapter] = [primary]
     fb_name = str(getattr(settings, "llm_role_chain_provider", "") or "").lower()
     if fb_name and llm_registry.has(fb_name) and fb_name != primary.provider_name:
@@ -285,11 +299,23 @@ def create_role_llm(settings: Any, role: str) -> LLMAdapter:
 
         base = FallbackLLMAdapter(*chain, preserve_model=True)
 
-    model = str(getattr(settings, f"llm_model_{role}", "") or "")
     adapter = PinnedModelLLMAdapter(base, model) if model else base
     _ROLE_CHAIN_CACHE[cache_key] = adapter
     logger.info("role LLM route %r: %s (model=%s)", role, adapter.provider_name, model or "default")
     return adapter
+
+
+def role_llm_or(settings: Any, role: str, fallback: Any) -> Any:
+    """The role-routed chain, or ``fallback`` (typically deps.llm) when the
+    role chain can't build a real provider — keeps tests and keyless
+    environments on their injected adapter."""
+    try:
+        chain = create_role_llm(settings, role)
+        if "noop" in str(getattr(chain, "provider_name", "noop")):
+            return fallback
+        return chain
+    except Exception:  # noqa: BLE001
+        return fallback
 
 
 class PinnedModelLLMAdapter(LLMAdapter):
@@ -368,6 +394,7 @@ __all__ = [
     "create_llm_adapter",
     "create_llm_chain",
     "create_role_llm",
+    "role_llm_or",
     "llm_registry",
     "resolve_llm_tier",
     "resolve_spec_provider",

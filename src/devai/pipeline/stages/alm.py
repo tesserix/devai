@@ -444,7 +444,9 @@ class _DiagnoseTestFailuresStage(PipelineStage):
         )
 
     async def _analyze(self, task, failed: int, qa_summary: str) -> tuple[str, str]:
-        llm = self.deps.llm
+        from devai.adapters.llm import role_llm_or
+
+        llm = role_llm_or(self.deps.config, "utility", self.deps.llm)
         if llm is None or getattr(llm, "provider_name", "noop") == "noop":
             return (
                 f"{failed} test(s) failed — see the QA stage output on the run.",

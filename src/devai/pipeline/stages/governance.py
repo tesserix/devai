@@ -137,7 +137,9 @@ class _UpdateGovernanceStage(PipelineStage):
             "pr": task.pr_number,
         }
         skill_guidance = self._skill_guidance(ctx)
-        llm = self.deps.llm
+        from devai.adapters.llm import role_llm_or
+
+        llm = role_llm_or(self.deps.config, "utility", self.deps.llm)
         if llm is not None and getattr(llm, "provider_name", "noop") != "noop":
             try:
                 from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole

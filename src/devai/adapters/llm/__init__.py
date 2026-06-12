@@ -43,6 +43,7 @@ from devai.adapters.llm.factory import (
     create_llm_chain,
     create_role_llm,
     llm_registry,
+    role_llm_or,
 )
 
 __all__ = [
@@ -57,5 +58,6 @@ __all__ = [
     "create_llm_adapter",
     "create_llm_chain",
     "create_role_llm",
+    "role_llm_or",
     "llm_registry",
 ]

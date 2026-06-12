@@ -741,7 +741,9 @@ class BlueprintExecutor:
     ) -> str:
         """LLM-drafted 'what a human should check' section; mechanical
         fallback when no LLM is usable."""
-        llm = self._deps.llm
+        from devai.adapters.llm import role_llm_or
+
+        llm = role_llm_or(self._deps.config, "utility", self._deps.llm)
         if llm is not None and getattr(llm, "provider_name", "noop") != "noop":
             try:
                 from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
@@ -779,7 +781,9 @@ class BlueprintExecutor:
     async def _diagnose_failure(self, spec: StageSpec, task: DevAITask, error: str) -> dict[str, Any] | None:
         """LLM root-cause + recovery plan. None when no usable LLM or the
         response is unusable — recovery degrades to plain on_failure."""
-        llm = self._deps.llm
+        from devai.adapters.llm import role_llm_or
+
+        llm = role_llm_or(self._deps.config, "utility", self._deps.llm)
         if llm is None or getattr(llm, "provider_name", "noop") == "noop":
             return None
         try:

@@ -516,7 +516,9 @@ class _PlanApprovalStage(PipelineStage):
     async def _assess_clarity(self, task: DevAITask) -> tuple[str, list[str]]:
         """LLM judges intent completeness. No usable LLM → CLEAR (never block
         a run on missing infrastructure)."""
-        llm = self.deps.llm
+        from devai.adapters.llm import role_llm_or
+
+        llm = role_llm_or(self.deps.config, "utility", self.deps.llm)
         if llm is None or getattr(llm, "provider_name", "noop") == "noop":
             return "clear", []
         try:
