@@ -109,6 +109,22 @@ class _UpdateGovernanceStage(PipelineStage):
             pass
         return "\n".join(lines)
 
+    def _skill_guidance(self, ctx: dict) -> str:
+        """The active skill profile's rendered conventions — directory layout,
+        test framework, file idioms — so the guide matches how this stack is
+        actually worked, not generic advice."""
+        try:
+            from devai.agents.skills import get_skill_profile
+
+            profile = get_skill_profile(ctx.get("skill_profile_name"))
+            parts = [profile.render_for_developer()]
+            qa = getattr(profile, "render_for_qa", None)
+            if callable(qa):
+                parts.append(qa())
+            return "\n\n".join(p for p in parts if p)[:3000]
+        except Exception:  # noqa: BLE001
+            return ""
+
     async def _compose(self, task: DevAITask, existing: str, structure: str) -> str:
         ctx = task.agent_context
         facts = {
@@ -120,26 +136,34 @@ class _UpdateGovernanceStage(PipelineStage):
             "epic": task.epic_issue_number,
             "pr": task.pr_number,
         }
+        skill_guidance = self._skill_guidance(ctx)
         llm = self.deps.llm
         if llm is not None and getattr(llm, "provider_name", "noop") != "noop":
             try:
                 from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
 
                 prompt = (
-                    "Update this repository's CLAUDE.md governance file.\n\n"
+                    "Update this repository's CLAUDE.md guide. It is read by Claude "
+                    "(and every engineering agent) at the start of ANY future work on this "
+                    "repo, so it must read like the repo's own engineering handbook — match "
+                    "the project's logic, stack, and conventions exactly.\n\n"
                     f"CURRENT CLAUDE.md:\n---\n{existing[:4000] or '(none yet)'}\n---\n\n"
                     f"WHAT THIS DELIVERY RUN LEARNED:\n"
                     f"- Repo: {facts['repo']}\n- Requirement: {facts['intent']}\n"
                     f"- Detected tech stack: {facts['tech_stack'] or 'unknown'}\n"
                     f"- Skill profile: {facts['skill_profile'] or 'unknown'}\n"
                     f"- Approved plan/decision:\n{facts['plan'] or '(none recorded)'}\n\n"
+                    f"STACK SKILLS & CONVENTIONS (from the active skill profile — fold these in):\n"
+                    f"{skill_guidance or '(none rendered)'}\n\n"
                     f"PROJECT STRUCTURE (ground truth):\n{structure or '(unavailable)'}\n\n"
                     "RULES:\n"
                     "1. PRESERVE every existing 'Critical Rules' section VERBATIM — never weaken guardrails.\n"
                     "2. Add or refresh these sections with the facts above: '## Project Overview', "
                     "'## Tech Stack', '## Project Structure', '## Commands', "
-                    "'## Conventions & Patterns' (derive from the stack), "
-                    "'## Architecture Decisions' (from the approved plan).\n"
+                    "'## Skills & Conventions' (directory layout, naming, component/test idioms "
+                    "from the skill profile — concrete, repo-specific), "
+                    "'## Testing' (framework, where tests live, how to run them), "
+                    "'## Architecture Decisions' (from the approved plan, with the why).\n"
                     "3. Be concrete and concise — this file is injected into every agent's prompt.\n"
                     "4. Do NOT mention AI tools, assistants, or how this file is generated.\n"
                     "Reply with the COMPLETE new CLAUDE.md content only — no fences, no commentary."
@@ -169,6 +193,7 @@ class _UpdateGovernanceStage(PipelineStage):
             f"{marker}\n## Project Overview\n{facts['intent']}\n\n"
             f"## Tech Stack\n{facts['tech_stack'] or 'See repository configuration.'}\n\n"
             f"## Project Structure\n{structure or '(see repository root)'}\n\n"
+            + (f"## Skills & Conventions\n{skill_guidance}\n\n" if skill_guidance else "")
             + (f"## Architecture Decisions\n{facts['plan']}\n" if facts["plan"] else "")
         )
         base = existing.split(marker)[0].rstrip() if existing else f"# Claude Reference Guide — {task.repo}"
