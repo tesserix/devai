@@ -1,0 +1,99 @@
+# Boardroom planning session — multi-agent debate → agreed plan → user approval.
+#
+# For BIG decisions (tech stack, architecture, product direction) that deserve
+# a proper boardroom discussion before anyone writes code. The supervisor
+# convenes the core panel (product / engineering / architecture / security),
+# pulls in specialists the topic demands (data, infra, QA, release, UX), runs
+# bounded debate rounds, and synthesizes the decision — consensus or majority
+# with recorded dissent. The user then approves the agreed plan at a gate that
+# NEVER self-approves; on approval the decision is written into the epic and
+# the run completes. Kick off implementation afterwards with the alm-pipeline
+# (the epic carries the approved plan) — or graft the `boardroom_debate` stage
+# directly into any other blueprint.
+name: boardroom-plan
+description: "Boardroom debate on a big decision — specialist panel argues, agrees, and presents the plan for your approval"
+
+stages:
+  - name: create-issue
+    type: deterministic
+    stage: create_issue
+    lane: plan
+    timeout: 2m
+
+  - name: hydrate-context
+    type: context
+    stage: context_hydration
+    lane: plan
+    depends_on: [create-issue]
+    timeout: 5m
+    on_failure: continue
+
+  - name: inject-memory
+    type: context
+    stage: memory_injection
+    lane: plan
+    depends_on: [hydrate-context]
+    timeout: 2m
+    on_failure: continue
+
+  - name: detect-tech-stack
+    type: analyst
+    stage: detect_tech_stack
+    agent: tech_detector
+    lane: plan
+    depends_on: [inject-memory]
+    timeout: 5m
+
+  - name: analyze-requirements
+    type: analyst
+    stage: analyze_requirements
+    agent: requirements_analyst
+    lane: plan
+    depends_on: [detect-tech-stack]
+    timeout: 10m
+
+  - name: create-epic
+    type: agentic
+    stage: create_epic
+    agent: product_director_epic
+    lane: plan
+    depends_on: [analyze-requirements]
+    timeout: 10m
+
+  - name: boardroom-debate
+    type: review
+    stage: boardroom_debate
+    agent: supervisor
+    lane: plan
+    title: Boardroom Debate
+    depends_on: [create-epic]
+    timeout: 30m
+    config:
+      rounds: "3"
+
+  # The user signs off on what the boardroom agreed — ALWAYS pauses.
+  - name: plan-approval
+    type: review
+    stage: plan_approval
+    lane: review
+    depends_on: [boardroom-debate]
+    timeout: 24h
+    config:
+      require_approval: "true"
+
+  - name: post-report
+    type: deterministic
+    stage: post_report
+    lane: deploy
+    depends_on: [plan-approval]
+    on_failure: continue
+    config:
+      title: "Boardroom Planning Report"
+      target: issue
+
+  - name: learn
+    type: deterministic
+    stage: alm_learn
+    lane: deploy
+    depends_on: [post-report]
+    on_failure: continue

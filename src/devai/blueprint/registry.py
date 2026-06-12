@@ -102,6 +102,11 @@ def register_defaults(registry: StageRegistry) -> None:
     registry.register("deploy_release", _alm.deploy_release_stage)
     registry.register("staff_review", _alm.staff_review_stage)
 
+    # ─── Boardroom (multi-agent decision debate) ─────────────────────
+    from devai.pipeline.stages import boardroom as _boardroom
+
+    registry.register("boardroom_debate", _boardroom.boardroom_debate_stage)
+
     # ─── Specialization runner (YAML role catalog) ───────────────────
     registry.register("run_specialization", _specialization.run_specialization_stage)
 

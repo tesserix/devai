@@ -414,12 +414,16 @@ class _PlanApprovalStage(PipelineStage):
             or getattr(self.deps.config, "pipeline_default_autonomy", "auto")
             or "auto"
         ).lower()
+        # `require_approval: true` in the blueprint stage config ALWAYS pauses
+        # for the human, regardless of autonomy — boardroom decisions and
+        # other deliberate sign-offs must never self-approve.
+        force_gate = str(self.config.get("require_approval", "")).lower() in ("1", "true", "yes")
 
-        if autonomy == "full":
+        if autonomy == "full" and not force_gate:
             return StageResult(message="plan approval skipped (autonomy=full)", data={"plan_approved": "auto"})
 
         questions: list[str] = []
-        if autonomy != "gated":
+        if autonomy != "gated" and not force_gate:
             verdict, questions = await self._assess_clarity(task)
             if verdict == "clear":
                 return StageResult(
@@ -500,6 +504,10 @@ class _PlanApprovalStage(PipelineStage):
         plan_summary = ""
         if isinstance(plan, dict):
             plan_summary = str(plan.get("technical_plan") or plan.get("summary") or "")[:1200]
+        if not plan_summary:
+            # Boardroom runs (and any stage that writes a top-level summary)
+            # surface their agreed decision on the approval banner.
+            plan_summary = str(ctx.get("plan_summary") or ctx.get("boardroom_decision") or "")[:1200]
         return {
             "gate": self.name(),
             "title": "Plan Approval",

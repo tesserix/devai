@@ -1,0 +1,366 @@
+"""Boardroom debate stage — structured multi-agent decision making.
+
+Big tech/product/architecture decisions deserve a proper boardroom
+discussion, not one agent's first idea. The supervisor (moderator)
+convenes a panel, PULLS IN extra specialists when the topic demands
+them, runs bounded debate rounds where every panelist must take a
+position and challenge the others, then synthesizes the agreed plan —
+with dissent recorded honestly — for the user's one-click approval.
+
+Scenario coverage, by design:
+
+  - topic routing      — a core quartet (product, engineering, architecture,
+                         security) always sits; data/infra/QA/release/UX
+                         specialists join when the topic mentions their
+                         domain ("pull agents from other blueprints").
+  - early consensus    — if a round produces no new challenges, the debate
+                         ends early instead of burning rounds.
+  - deadlock           — persistent disagreement is NOT papered over: the
+                         moderator records the majority recommendation AND
+                         the dissent, and the approval gate shows both.
+  - flaky panelist     — an LLM error skips that seat for the round (noted
+                         as absent) instead of killing the meeting.
+  - flaky moderator    — synthesis degrades to a mechanical digest of the
+                         final positions.
+  - no LLM at all      — the stage no-ops visibly (boardroom_skipped) and
+                         the pipeline continues; planning quality degrades,
+                         the run does not crash.
+  - visibility         — every statement is an A2A message (the Timeline
+                         reads like meeting minutes) and the decision is
+                         posted to the epic when one exists.
+  - downstream reuse   — the decision lands in `technical_plan` (what
+                         create-plan/implement read) and
+                         `boardroom_decision`; pair with plan_approval
+                         (require_approval: true) so the user signs off.
+
+Registered as `boardroom_debate`; usable from ANY blueprint.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from typing import Any
+
+from devai.pipeline.interfaces import PipelineStage, StageDeps
+from devai.pipeline.types import DevAITask, StageResult
+
+logger = logging.getLogger(__name__)
+
+# Core seats — always present. (role key, display name, persona brief)
+_CORE_PANEL: list[tuple[str, str, str]] = [
+    (
+        "product_director",
+        "Product Director",
+        "You own user value and scope. Fight scope creep, demand measurable "
+        "success criteria, and challenge any tech choice that doesn't serve "
+        "the user outcome.",
+    ),
+    (
+        "engineering_manager",
+        "Engineering Manager",
+        "You own delivery. Challenge anything that can't be built and "
+        "operated by a small team on a realistic timeline; push for the "
+        "simplest architecture that meets the requirements.",
+    ),
+    (
+        "staff_architect",
+        "Staff Architect",
+        "You own long-term technical health. Challenge short-cuts that "
+        "create lock-in, hidden coupling, or migration pain; insist on "
+        "clear data models and interface boundaries.",
+    ),
+    (
+        "security_expert",
+        "Security Expert",
+        "You own risk. Challenge auth, data-handling, supply-chain and "
+        "compliance gaps; no plan passes with an unaddressed critical risk.",
+    ),
+]
+
+# Specialist seats pulled in when the topic demands them.
+_SPECIALISTS: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
+    (
+        ("database", "schema", "sql", "data model", "storage", "migration"),
+        (
+            "db_engineer",
+            "DB Engineer",
+            "You own the data layer. Challenge schema designs, consistency "
+            "assumptions, and any ORM/storage choice that won't survive scale "
+            "or migration.",
+        ),
+    ),
+    (
+        ("deploy", "kubernetes", "k8s", "cloud", "infra", "cost", "scale", "hosting"),
+        (
+            "infra_provisioner",
+            "Infra Engineer",
+            "You own runtime and cost. Challenge anything that's painful to "
+            "deploy, observe, or pay for; demand a concrete deploy story.",
+        ),
+    ),
+    (
+        ("test", "quality", "qa", "coverage", "e2e"),
+        (
+            "qa_tester",
+            "QA Lead",
+            "You own verifiability. Challenge anything that can't be tested "
+            "automatically; demand acceptance criteria that map to tests.",
+        ),
+    ),
+    (
+        ("release", "rollout", "versioning", "feature flag", "launch"),
+        (
+            "release_manager",
+            "Release Manager",
+            "You own safe delivery. Challenge launches without rollback "
+            "plans, staged rollouts, or telemetry.",
+        ),
+    ),
+    (
+        ("ui", "ux", "frontend", "design", "mobile", "responsive"),
+        (
+            "ux_specialist",
+            "UX Specialist",
+            "You own the experience. Challenge flows that confuse users and "
+            "any UI plan without states for loading/error/empty.",
+        ),
+    ),
+]
+
+_MODERATOR_BRIEF = (
+    "You are the Supervisor moderating a boardroom of specialist agents. "
+    "You do not take sides — you synthesize: where the panel AGREES, where "
+    "it still DISAGREES (name who holds which position), and what the "
+    "strongest open challenges are."
+)
+
+
+class _BoardroomDebateStage(PipelineStage):
+    def __init__(self, deps: StageDeps, config: dict[str, str]) -> None:
+        self.deps = deps
+        self.config = config
+
+    def name(self) -> str:
+        return str(self.config.get("__stage_name") or "boardroom-debate")
+
+    # ── helpers ─────────────────────────────────────────────────────
+
+    def _llm_usable(self) -> bool:
+        llm = self.deps.llm
+        return llm is not None and getattr(llm, "provider_name", "noop") != "noop"
+
+    async def _say(self, system: str, prompt: str, *, max_tokens: int = 700) -> str:
+        from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+        response = await self.deps.llm.generate(
+            LLMRequest(
+                messages=[
+                    LLMMessage(role=LLMRole.SYSTEM, content=system),
+                    LLMMessage(role=LLMRole.USER, content=prompt),
+                ],
+                max_tokens=max_tokens,
+                temperature=0.4,
+                extra={"agent": "boardroom"},
+            )
+        )
+        return (response.text or "").strip()
+
+    def _select_panel(self, topic: str) -> list[tuple[str, str, str]]:
+        panel = list(_CORE_PANEL)
+        lowered = topic.lower()
+        for keywords, seat in _SPECIALISTS:
+            if any(k in lowered for k in keywords):
+                panel.append(seat)
+        max_seats = int(self.config.get("panel_max", 7) or 7)
+        return panel[:max_seats]
+
+    def _a2a(
+        self, task: DevAITask, bag: list[dict[str, Any]], frm: str, to: str, subject: str, body: str
+    ) -> None:
+        bag.append(
+            {
+                "id": uuid.uuid4().hex,
+                "from_agent": frm,
+                "to_agent": to,
+                "message_type": "broadcast" if to == "boardroom" else "response",
+                "subject": subject[:140],
+                "body": body[:1000],
+                "payload": {"stage": self.name()},
+                "in_reply_to": None,
+                "timestamp": time.time(),
+                "triggered_by": task.triggered_by or "",
+                "trace_id": task.trace_id or task.id,
+            }
+        )
+
+    # ── the meeting ─────────────────────────────────────────────────
+
+    async def execute(self, task: DevAITask) -> StageResult:
+        topic = (
+            str(self.config.get("topic") or "")
+            or str(task.agent_context.get("technical_plan") or "")[:500]
+            or task.intent
+        )
+        if not self._llm_usable():
+            return StageResult(
+                message="boardroom skipped — no usable LLM (plan quality degraded, run continues)",
+                data={"boardroom_skipped": True},
+            )
+
+        rounds = max(1, min(4, int(self.config.get("rounds", 2) or 2)))
+        panel = self._select_panel(topic)
+        ctx = task.agent_context
+        background = "\n".join(
+            f"- {k}: {str(v)[:300]}"
+            for k, v in (
+                ("detected tech stack", ctx.get("detected_tech_stack")),
+                ("analyzed requirements", ctx.get("analyzed_requirements")),
+                ("existing plan draft", ctx.get("technical_plan")),
+            )
+            if v
+        )
+
+        a2a_bag: list[dict[str, Any]] = list(ctx.get("a2a_messages") or [])
+        self._a2a(
+            task,
+            a2a_bag,
+            "supervisor",
+            "boardroom",
+            "Boardroom convened",
+            f"Panel: {', '.join(name for _, name, _ in panel)}. Topic: {topic[:300]}",
+        )
+
+        positions: dict[str, str] = {}
+        transcript: list[str] = []
+        consensus_reached = False
+
+        for round_no in range(1, rounds + 1):
+            prior = (
+                "\n\n".join(f"**{who}**: {text[:600]}" for who, text in positions.items())
+                or "(opening round — no positions yet)"
+            )
+            new_positions: dict[str, str] = {}
+            challenges_made = False
+
+            for _role, display, brief in panel:
+                prompt = (
+                    f"BOARDROOM ROUND {round_no}/{rounds}.\n\nDecision topic:\n{topic[:1200]}\n\n"
+                    + (f"Background:\n{background}\n\n" if background else "")
+                    + f"Current positions on the table:\n{prior}\n\n"
+                    "Speak as your role. Reply in EXACTLY this format:\n"
+                    "POSITION: <your concrete recommendation, 2-4 sentences>\n"
+                    "CHALLENGE: <the weakest point of another panelist's position and why "
+                    "(or 'none — I agree with the table')>\n"
+                    "CONCEDE: <anything you now accept that you previously opposed, or 'nothing'>"
+                )
+                try:
+                    text = await self._say(
+                        f"You are the {display} in a boardroom of specialist agents. {brief} "
+                        "Be direct and aggressive on substance, professional in tone.",
+                        prompt,
+                    )
+                except Exception:  # noqa: BLE001 — one absent seat ≠ cancelled meeting
+                    logger.exception("boardroom: %s failed to respond in round %d", display, round_no)
+                    transcript.append(f"[round {round_no}] {display}: (absent — LLM error)")
+                    continue
+                new_positions[display] = text
+                transcript.append(f"[round {round_no}] {display}: {text}")
+                self._a2a(task, a2a_bag, _role, "boardroom", f"Round {round_no} position", text)
+                challenge = next(
+                    (ln for ln in text.splitlines() if ln.upper().startswith("CHALLENGE:")), ""
+                )
+                if challenge and "none" not in challenge.lower()[:30]:
+                    challenges_made = True
+
+            positions.update(new_positions)
+
+            # Moderator round synthesis.
+            try:
+                summary = await self._say(
+                    _MODERATOR_BRIEF,
+                    f"Round {round_no} positions:\n\n"
+                    + "\n\n".join(f"**{w}**: {t[:500]}" for w, t in new_positions.items())
+                    + "\n\nReply with:\nAGREED: <bullet list>\nDISPUTED: <bullet list with names, or 'nothing'>",
+                    max_tokens=400,
+                )
+                transcript.append(f"[round {round_no}] Supervisor synthesis: {summary}")
+                self._a2a(task, a2a_bag, "supervisor", "boardroom", f"Round {round_no} synthesis", summary)
+            except Exception:  # noqa: BLE001
+                logger.exception("boardroom: moderator synthesis failed in round %d", round_no)
+
+            if not challenges_made and round_no >= 1 and new_positions:
+                consensus_reached = True
+                break  # early consensus — don't burn rounds
+
+        # Final decision document.
+        decision = await self._final_decision(topic, positions, consensus_reached)
+        transcript.append(f"[final] Supervisor decision: {decision[:800]}")
+        self._a2a(task, a2a_bag, "supervisor", "boardroom", "Boardroom decision", decision)
+
+        await self._post_to_epic(task, panel, decision)
+
+        return StageResult(
+            message=(
+                f"boardroom: {len(panel)} seats, "
+                + ("consensus" if consensus_reached else "majority + recorded dissent")
+            ),
+            data={
+                "boardroom_decision": decision[:6000],
+                "boardroom_consensus": consensus_reached,
+                "boardroom_panel": [name for _, name, _ in panel],
+                "boardroom_transcript": "\n\n".join(transcript)[-12000:],
+                # Downstream stages (plan approval, implement) read this.
+                "technical_plan": decision[:6000],
+                # The plan-approval banner surfaces this summary.
+                "plan_summary": decision[:1200],
+                "a2a_messages": a2a_bag,
+            },
+        )
+
+    async def _final_decision(
+        self, topic: str, positions: dict[str, str], consensus: bool
+    ) -> str:
+        digest = "\n\n".join(f"**{w}**: {t[:600]}" for w, t in positions.items())
+        try:
+            return await self._say(
+                _MODERATOR_BRIEF,
+                f"The boardroom has finished debating:\n{topic[:1000]}\n\nFinal positions:\n{digest}\n\n"
+                "Write the DECISION DOCUMENT in markdown with EXACTLY these sections:\n"
+                "## Decision\n## Why (alternatives considered and why rejected)\n"
+                "## Risks & mitigations\n## Plan outline (numbered, buildable steps)\n"
+                "## Dissent\n(name who disagreed and with what — 'none' only if the table truly agreed)",
+                max_tokens=1200,
+            )
+        except Exception:  # noqa: BLE001 — degrade to a mechanical digest
+            logger.exception("boardroom: final decision synthesis failed")
+            return (
+                "## Decision\n(moderator synthesis unavailable — final positions below)\n\n"
+                + digest
+                + "\n\n## Dissent\nUnresolved — review the positions above."
+            )
+
+    async def _post_to_epic(
+        self, task: DevAITask, panel: list[tuple[str, str, str]], decision: str
+    ) -> None:
+        scm = self.deps.scm
+        if scm is None or not task.epic_issue_number or getattr(task, "dry_run", False):
+            return
+        try:
+            await scm.add_comment(
+                task.repo,
+                task.epic_issue_number,
+                "## Boardroom decision\n\n"
+                f"_Panel: {', '.join(name for _, name, _ in panel)} — run `{task.id}`_\n\n"
+                + decision[:5000],
+            )
+        except Exception:  # noqa: BLE001 — minutes are best-effort
+            logger.exception("boardroom: epic comment failed")
+
+
+def boardroom_debate_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return _BoardroomDebateStage(deps, config)
+
+
+__all__ = ["boardroom_debate_stage"]
