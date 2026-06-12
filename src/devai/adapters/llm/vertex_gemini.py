@@ -43,30 +43,50 @@ class VertexGeminiLLMAdapter(LLMAdapter):
         location: str = "global",
         default_model: str = "gemini-2.5-flash",
         embedding_model: str = "text-embedding-005",
+        base_url: str = "",
+        api_key: str = "",
     ) -> None:
         if not project:
             raise AdapterNotConfigured("vertex_gemini adapter requires DEVAI_VERTEX_PROJECT")
-        try:
-            import google.auth  # noqa: F401, PLC0415
-        except ImportError as e:  # pragma: no cover
-            raise AdapterNotInstalled("vertex_gemini adapter requires google-auth") from e
         self._project = project
         self._location = location or "global"
         self.default_model = default_model or "gemini-2.5-flash"
         self._embedding_model = embedding_model or "text-embedding-005"
+        self._api_key = api_key
+        self._gateway = bool(base_url)
         self._creds: Any = None
-        host = (
-            "aiplatform.googleapis.com"
-            if self._location == "global"
-            else f"{self._location}-aiplatform.googleapis.com"
-        )
+        if not api_key and not base_url:
+            # Keyless direct mode is the only one that needs google-auth.
+            try:
+                import google.auth  # noqa: F401, PLC0415
+            except ImportError as e:  # pragma: no cover
+                raise AdapterNotInstalled("vertex_gemini adapter requires google-auth for ADC mode") from e
+        if base_url:
+            # devai-ai-gateway route — the gateway injects x-goog-api-key
+            # and strips caller auth, so this client sends no credentials.
+            origin = base_url.rstrip("/")
+        else:
+            host = (
+                "aiplatform.googleapis.com"
+                if self._location == "global"
+                else f"{self._location}-aiplatform.googleapis.com"
+            )
+            origin = f"https://{host}"
         self._base = (
-            f"https://{host}/v1/projects/{project}/locations/{self._location}/publishers/google/models"
+            f"{origin}/v1/projects/{project}/locations/{self._location}/publishers/google/models"
         )
 
     # ── auth ──────────────────────────────────────────────────────────
 
     def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["x-goog-api-key"] = self._api_key
+            return headers
+        if self._gateway:
+            # Gateway injects credentials; sending none avoids a stale
+            # bearer overriding the gateway's key.
+            return headers
         if self._creds is None:
             import google.auth  # noqa: PLC0415
 
@@ -77,11 +97,9 @@ class VertexGeminiLLMAdapter(LLMAdapter):
             from google.auth.transport.requests import Request  # noqa: PLC0415
 
             self._creds.refresh(Request())
-        return {
-            "Authorization": f"Bearer {self._creds.token}",
-            "x-goog-user-project": self._project,
-            "Content-Type": "application/json",
-        }
+        headers["Authorization"] = f"Bearer {self._creds.token}"
+        headers["x-goog-user-project"] = self._project
+        return headers
 
     # ── request mapping ───────────────────────────────────────────────
 
@@ -250,10 +268,11 @@ class VertexGeminiLLMAdapter(LLMAdapter):
     async def health_check(self) -> dict[str, Any]:
         try:
             self._headers()
+            mode = "api-key" if self._api_key else ("gateway" if self._gateway else "ADC")
             return {
                 "ok": True,
                 "provider": self.provider_name,
-                "detail": f"ADC valid; endpoint {self._base.split('/v1/')[0]}",
+                "detail": f"auth={mode}; endpoint {self._base.split('/v1/')[0]}",
             }
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "provider": self.provider_name, "detail": str(e)}

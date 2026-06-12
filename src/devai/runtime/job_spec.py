@@ -218,8 +218,13 @@ def build_job_spec(
         "DEVAI_VERTEX_LOCATION",
         "DEVAI_VERTEX_GEMINI_MODEL",
         "DEVAI_VERTEX_EMBEDDING_MODEL",
+        "DEVAI_VERTEX_BASE_URL",
         "DEVAI_ANTHROPIC_BASE_URL",
         "DEVAI_OPENAI_BASE_URL",
+        "DEVAI_LLM_TIER_LIGHT",
+        "DEVAI_LLM_TIER_STANDARD",
+        "DEVAI_LLM_TIER_HEAVY",
+        "DEVAI_LLM_TIER_FRONTIER",
     ):
         value = os.environ.get(plain_key, "")
         if value:

@@ -199,6 +199,45 @@ def test_factory_vertex_gemini_without_project_falls_back_to_noop():
     assert a.provider_name == "noop"
 
 
+def test_vertex_gemini_gateway_mode_needs_no_credentials():
+    from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
+
+    a = VertexGeminiLLMAdapter(
+        project="proj-1",
+        location="global",
+        base_url="http://ai-gateway.agentgateway-system.svc.cluster.local:8080/vertex",
+    )
+    # Gateway injects x-goog-api-key; the client must send NO auth headers.
+    h = a._headers()
+    assert "Authorization" not in h and "x-goog-api-key" not in h
+    assert a._base.startswith("http://ai-gateway.agentgateway-system.svc.cluster.local:8080/vertex/v1/")
+
+
+def test_vertex_gemini_api_key_mode_sets_goog_header():
+    from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
+
+    a = VertexGeminiLLMAdapter(project="proj-1", api_key="AQ.test")
+    h = a._headers()
+    assert h["x-goog-api-key"] == "AQ.test"
+    assert "Authorization" not in h
+
+
+def test_resolve_llm_tier_maps_provider_and_model():
+    from devai.adapters.llm.factory import resolve_llm_tier
+
+    s = _Settings()
+    s.llm_provider = "noop"
+    s.llm_tier_light = "vertex_gemini:gemini-2.5-flash"
+    s.llm_tier_heavy = "anthropic:claude-sonnet-4-20250514"
+    assert resolve_llm_tier(s, "light") == ("vertex_gemini", "gemini-2.5-flash")
+    assert resolve_llm_tier(s, "heavy") == ("anthropic", "claude-sonnet-4-20250514")
+    # Unset tier → global default provider, default model
+    assert resolve_llm_tier(s, "frontier") == ("noop", "")
+    # Unknown provider in a tier → global default
+    s.llm_tier_standard = "nope:whatever"
+    assert resolve_llm_tier(s, "standard") == ("noop", "")
+
+
 def test_vertex_gemini_parse_maps_text_tools_and_usage():
     from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
 

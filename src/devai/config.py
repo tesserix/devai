@@ -616,6 +616,21 @@ class Settings(BaseSettings):
     vertex_location: str = "global"  # or a region, e.g. asia-south1
     vertex_gemini_model: str = "gemini-2.5-flash"
     vertex_embedding_model: str = "text-embedding-005"
+    # Route Vertex calls through the devai-ai-gateway instead of dialing
+    # aiplatform.googleapis.com directly. The gateway injects the API key
+    # (GCP SM: prod-devai-vertex-api-key) and strips caller auth, so pods
+    # need no Vertex credentials at all on this path.
+    vertex_base_url: str = ""  # e.g. http://ai-gateway.agentgateway-system.svc.cluster.local:8080/vertex
+    vertex_api_key: str = ""  # direct API-key auth (local dev); ADC is the keyless default
+    gcp_secret_vertex_api_key: str = "prod-devai-vertex-api-key"
+
+    # --- LLM cost tiers ---
+    # "provider:model" pairs resolved by resolve_llm_tier(); lets stages and
+    # specializations ask for a cost class instead of naming a provider.
+    llm_tier_light: str = ""  # e.g. vertex_gemini:gemini-3.1-flash-lite
+    llm_tier_standard: str = ""  # e.g. vertex_gemini:gemini-2.5-flash
+    llm_tier_heavy: str = ""  # e.g. anthropic:claude-sonnet-4-20250514
+    llm_tier_frontier: str = ""  # e.g. openai:o3
 
     # --- Secrets adapter (per-user/per-tenant secret provisioning) ---
     # Backs the Settings capability. The Settings store keeps only secret

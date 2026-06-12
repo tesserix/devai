@@ -110,6 +110,8 @@ def _build_vertex_gemini(settings: Any) -> LLMAdapter:
         location=getattr(settings, "vertex_location", "") or "global",
         default_model=getattr(settings, "vertex_gemini_model", "") or "",
         embedding_model=getattr(settings, "vertex_embedding_model", "") or "",
+        base_url=getattr(settings, "vertex_base_url", "") or "",
+        api_key=getattr(settings, "vertex_api_key", "") or "",
     )
 
 
@@ -119,6 +121,32 @@ llm_registry.register("anthropic", _build_anthropic)
 llm_registry.register("openai", _build_openai)
 llm_registry.register("gateway", _build_gateway)
 llm_registry.register("vertex_gemini", _build_vertex_gemini)
+
+
+LLM_TIERS = ("light", "standard", "heavy", "frontier")
+
+
+def resolve_llm_tier(settings: Any, tier: str) -> tuple[str, str]:
+    """Map a cost tier to a ``(provider, model)`` pair.
+
+    Tiers are configured as ``provider:model`` strings
+    (``DEVAI_LLM_TIER_LIGHT`` …), so re-pointing a whole cost class —
+    e.g. light → a cheaper Gemini once it's model-enabled — is an env
+    change, never a code or spec change. Unknown/unset tiers fall back
+    to the global default provider with its default model: callers can
+    always ask for a tier and get something that works.
+    """
+    name = (tier or "").strip().lower()
+    raw = getattr(settings, f"llm_tier_{name}", "") if name in LLM_TIERS else ""
+    if raw and ":" in raw:
+        provider, _, model = raw.partition(":")
+        provider, model = provider.strip(), model.strip()
+        if llm_registry.has(provider.lower()):
+            return provider.lower(), model
+        logger.warning("llm tier %r names unknown provider %r — using global default", name, provider)
+    elif raw:
+        logger.warning("llm tier %r is %r (expected provider:model) — using global default", name, raw)
+    return (getattr(settings, "llm_provider", "noop") or "noop").lower(), ""
 
 
 def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdapter:
@@ -161,4 +189,4 @@ def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdap
         return NoopLLMAdapter()
 
 
-__all__ = ["KNOWN_PROVIDERS", "create_llm_adapter", "llm_registry"]
+__all__ = ["KNOWN_PROVIDERS", "LLM_TIERS", "create_llm_adapter", "llm_registry", "resolve_llm_tier"]
