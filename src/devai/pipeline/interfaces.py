@@ -72,12 +72,27 @@ class StageDeps:
     # when the Settings capability is disabled, and stages must tolerate that.
     secrets: SecretsAdapter | None = None
     settings_service: Any = None
+    # Per-principal LLM resolution (settings.llm_resolver.PrincipalLLMResolver).
+    # Stages call `await deps.llm_for_principal(email)` — falls back to
+    # `deps.llm` when the user configured nothing. Untyped to avoid an
+    # import cycle; None when the Settings capability is disabled.
+    llm_resolver: Any = None
 
     # Pluggable LLM providers — None means "stages use their hardcoded
     # default provider" (the way existing agents do today). Once we move
     # to specializations-as-YAML, the spec declares its provider and we
     # plumb it through here.
     extra: dict[str, Any] | None = None
+
+    async def llm_for_principal(self, email: str) -> LLMAdapter | None:
+        """The triggering user's own LLM adapter (their Settings connectors),
+        falling back to the platform default. Stages that talk to an LLM
+        should prefer this over reading ``deps.llm`` directly."""
+        if self.llm_resolver is not None and email:
+            adapter = await self.llm_resolver.resolve_for_email(email)
+            if adapter is not None:
+                return adapter
+        return self.llm
 
 
 class PipelineStage(ABC):

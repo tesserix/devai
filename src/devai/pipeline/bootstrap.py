@@ -161,6 +161,15 @@ async def build_runtime(
     except Exception:  # noqa: BLE001
         logger.exception("bootstrap: seed crew load failed")
 
+    # Per-principal LLM resolution: runs triggered by a user whose Settings
+    # configure an LLM connector execute on THEIR provider/keys, isolated
+    # per tenant. None service → resolver returns None → deps.llm default.
+    llm_resolver = None
+    if settings_service is not None:
+        from devai.settings.llm_resolver import PrincipalLLMResolver
+
+        llm_resolver = PrincipalLLMResolver(config, settings_service)
+
     deps = StageDeps(
         config=config,
         scm=scm,
@@ -171,6 +180,7 @@ async def build_runtime(
         event_bus_adapter=event_bus_adapter,
         secrets=secrets_adapter,
         settings_service=settings_service,
+        llm_resolver=llm_resolver,
         extra=extra or None,
     )
 

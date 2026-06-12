@@ -187,7 +187,10 @@ class _RunSpecializationStage(PipelineStage):
         Degrades to a clear stub when no LLM adapter is wired (e.g. unit
         tests or a noop deployment) so the pipeline never hard-fails.
         """
-        llm = self.deps.llm
+        # Per-tenant isolation: the triggering user's own LLM connector
+        # (Settings → overlay → their provider/keys) wins over the platform
+        # default; users with nothing configured get deps.llm unchanged.
+        llm = await self.deps.llm_for_principal(task.triggered_by or "")
         if llm is None:
             logger.info("specialization %s: no LLM adapter wired — returning stub", spec.name)
             return StageResult(

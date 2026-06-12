@@ -97,8 +97,15 @@ async def build_overlay(
         lookups.append((Scope.TENANT, principal.tenant_id))
     for team_id in getattr(principal, "team_ids", []) or []:
         lookups.append((Scope.TEAM, team_id))
-    if getattr(principal, "uid", "") or principal.email:
-        lookups.append((Scope.USER, principal.uid or principal.email))
+    # User rows may be keyed by uid (GIP) or email (local auth / run records
+    # that only carry triggered_by). Look up BOTH when they differ — email
+    # first so a uid-keyed row (saved by the richer principal) wins.
+    uid = getattr(principal, "uid", "") or ""
+    email = getattr(principal, "email", "") or ""
+    if email and email != uid:
+        lookups.append((Scope.USER, email))
+    if uid:
+        lookups.append((Scope.USER, uid))
 
     # Collect connectors per (key, instance) with most-specific-wins.
     merged: dict[tuple[str, str], Connector] = {}
