@@ -321,6 +321,18 @@ async def _serve(host: str, port: int) -> None:
         )
     )
 
+    # Application loggers (devai.*) need an explicit handler — uvicorn's
+    # config only wires its OWN loggers, so agent/stage warnings and
+    # exceptions were invisible in `kubectl logs` (incidents kept being
+    # investigated blind because the pod with the evidence had rolled).
+    import logging as _logging
+    import sys as _sys
+
+    _logging.basicConfig(
+        level=getattr(_logging, str(settings.log_level).upper(), _logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=_sys.stdout,
+    )
     config = uvicorn.Config(webhook_app, host=host, port=port, log_level=settings.log_level)
     server = uvicorn.Server(config)
     await server.serve()

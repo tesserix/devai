@@ -735,11 +735,13 @@ class _AlmLearnStage(PipelineStage):
                     tags=["alm", "flaky-stages", task.blueprint],
                     metadata={"task_id": task.id, "failed_stages": failed},
                 )
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             logger.exception("alm_learn: memory write failed — run completes regardless")
+            # Self-describing failure: the run events are durable, pod logs
+            # are not — the error must live where the investigation happens.
             return StageResult(
-                message="memory write failed (see logs)",
-                data={"learn_done": False},
+                message=f"memory write failed: {type(e).__name__}: {str(e)[:200]}",
+                data={"learn_done": False, "learn_error": f"{type(e).__name__}: {str(e)[:300]}"},
             )
 
         reinforced = await self._reinforce_recalled(task, outcome)
@@ -867,10 +869,14 @@ class _PostReportStage(PipelineStage):
             return StageResult(message="rendered report (not posted)", data=result_data)
 
         try:
+            # SCMClient's comment surface is add_comment(repo, issue_id, body)
+            # — PRs are issues on GitHub. post_pr_comment/post_issue_comment
+            # only existed on the legacy core client; every report 'render ok,
+            # post failed' since the multi-SCM migration.
             if self.target == "pr" and task.pr_number is not None:
-                await self.deps.scm.post_pr_comment(task.repo, task.pr_number, report)  # type: ignore[union-attr]
+                await self.deps.scm.add_comment(task.repo, task.pr_number, report)  # type: ignore[union-attr]
             elif self.target == "issue" and task.issue_number is not None and task.issue_number > 0:
-                await self.deps.scm.post_issue_comment(task.repo, task.issue_number, report)  # type: ignore[union-attr]
+                await self.deps.scm.add_comment(task.repo, task.issue_number, report)  # type: ignore[union-attr]
         except Exception as e:  # noqa: BLE001
             logger.exception("post_report: failed to post comment")
             return StageResult(message=f"render ok, post failed: {e}", data=result_data)
