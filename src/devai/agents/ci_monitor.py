@@ -165,7 +165,13 @@ class CIMonitorAgent(BaseAgent):
         original_visibility = await self._make_public_for_ci(repo, a2a)
 
         try:
-            # Step 2: Poll for the latest workflow run on this branch
+            # Step 2: Poll for the latest workflow run on this branch.
+            # FIX-UNTIL-GREEN: when the CI agent pushes a workflow fix, the
+            # push triggers a NEW build — wait for it and re-evaluate instead
+            # of returning the stale failure. Bounded by MAX_CI_FIX_ATTEMPTS;
+            # the loop ends on the first green build, an unfixable diagnosis,
+            # or exhausted attempts (then the failure stands, honestly).
+            seen_run_ids: set[int] = set()
             run_data = await self._wait_for_build(repo, branch)
 
             if not run_data:
@@ -180,28 +186,35 @@ class CIMonitorAgent(BaseAgent):
                     "build_logs": "No workflow found — skipped CI check",
                 }
 
-            build_run_id = run_data.get("id", 0)
-            status = run_data.get("conclusion", "unknown")
-            url = run_data.get("html_url", "")
+            fix_attempts = state.get("ci_fix_attempts", 0)
+            result: dict[str, Any] = {}
+            while True:
+                build_run_id = run_data.get("id", 0)
+                seen_run_ids.add(int(build_run_id or 0))
+                status = run_data.get("conclusion", "unknown")
+                url = run_data.get("html_url", "")
+                result = {
+                    "build_run_id": build_run_id,
+                    "build_status": status,
+                    "build_url": url,
+                    "ci_fix_attempts": fix_attempts,
+                }
 
-            result: dict[str, Any] = {
-                "build_run_id": build_run_id,
-                "build_status": status,
-                "build_url": url,
-            }
+                if status == "success":
+                    a2a.notify(
+                        "qa_tester",
+                        "CI Build Passed",
+                        f"Build #{build_run_id} passed for branch '{branch}'.\nURL: {url}",
+                    )
+                    a2a.broadcast(
+                        "Build Passed",
+                        f"CI build #{build_run_id} passed on branch '{branch}'"
+                        + (f" after {fix_attempts} CI fix(es)" if fix_attempts else "")
+                        + ".",
+                        exclude=["qa_tester"],
+                    )
+                    return result
 
-            if status == "success":
-                a2a.notify(
-                    "qa_tester",
-                    "CI Build Passed",
-                    f"Build #{build_run_id} passed for branch '{branch}'.\nURL: {url}",
-                )
-                a2a.broadcast(
-                    "Build Passed",
-                    f"CI build #{build_run_id} passed on branch '{branch}'.",
-                    exclude=["qa_tester"],
-                )
-            else:
                 # Fetch and analyze failed job logs
                 failed_jobs = await self._get_failed_jobs(repo, build_run_id)
                 result["failed_jobs"] = failed_jobs
@@ -210,12 +223,11 @@ class CIMonitorAgent(BaseAgent):
                 log_summary = await self._analyze_failure(failed_jobs)
                 result["build_logs"] = log_summary
 
-                # Hand off to Claude with workflow-edit tools to attempt
-                # an autonomous fix. The CI agent's whole job description
-                # is "make the build green" — passing every failure
-                # straight back to the dev was a waste of senior dev
-                # cycles for things that are obviously CI misconfig.
-                fix_attempts = state.get("ci_fix_attempts", 0)
+                # Hand off to Claude with workflow-edit tools to attempt an
+                # autonomous fix, then WAIT FOR THE RE-TRIGGERED BUILD and
+                # re-evaluate — "fix until green", bounded by attempts. The
+                # old flow returned 'ci_fix_committed' after pushing a fix
+                # without ever checking whether the fix actually worked.
                 fix_outcome: dict[str, Any] | None = None
                 if fix_attempts < MAX_CI_FIX_ATTEMPTS:
                     fix_outcome = await self._attempt_workflow_fix(
@@ -227,44 +239,51 @@ class CIMonitorAgent(BaseAgent):
                         state=state,
                         a2a=a2a,
                     )
-                    result["ci_fix_attempts"] = fix_attempts + 1
+                    fix_attempts += 1
+                    result["ci_fix_attempts"] = fix_attempts
                     if fix_outcome:
                         result["ci_fix_decision"] = fix_outcome.get("decision")
                         result["ci_fix_summary"] = fix_outcome.get("summary")
 
-                # If the agent fixed the workflow, return success-like
-                # state; the orchestrator can re-run this node to pick
-                # up the new build for the same branch.
                 if fix_outcome and fix_outcome.get("decision") == "fixed":
                     a2a.notify(
                         "senior_developer",
                         "CI Workflow Fixed by CI Agent",
                         f"CI Engineer fixed: {fix_outcome.get('summary', 'workflow change')}\n"
                         f"Files: {', '.join(fix_outcome.get('files_modified', []))}\n"
-                        f"Build will re-run automatically.",
+                        "Waiting for the re-triggered build to verify the fix.",
                     )
+                    new_run = await self._wait_for_new_build(repo, branch, seen_run_ids)
+                    if new_run is not None:
+                        run_data = new_run
+                        continue  # re-evaluate the NEW build
+                    # New build never appeared — report honestly, not green.
                     result["build_status"] = "ci_fix_committed"
+                    result["build_logs"] = (
+                        f"{log_summary}\n\nCI fix committed but no new workflow run appeared "
+                        "within the wait budget — verify the workflow triggers on push."
+                    )
                     return result
 
-                # Otherwise escalate to the developer with the focused
-                # prompt the CI agent built (or the raw log summary if
-                # the agent didn't get that far).
-                escalation_body = (fix_outcome.get("developer_prompt") if fix_outcome else log_summary) or log_summary
+                # Unfixable by the CI agent (or attempts exhausted) — escalate
+                # to the developer with the focused prompt the CI agent built.
+                escalation_body = (
+                    fix_outcome.get("developer_prompt") if fix_outcome else log_summary
+                ) or log_summary
                 a2a.escalate(
                     "senior_developer",
                     "CI Build Failed",
-                    f"Build #{build_run_id} failed on branch '{branch}'.\n\n"
-                    f"## Diagnosis from CI Engineer\n{escalation_body}\n\nURL: {url}",
+                    f"Build #{build_run_id} failed on branch '{branch}'"
+                    + (f" (after {fix_attempts} CI fix attempt(s))" if fix_attempts else "")
+                    + f".\n\n## Diagnosis from CI Engineer\n{escalation_body}\n\nURL: {url}",
                     payload={"failed_jobs": failed_jobs, "ci_fix_outcome": fix_outcome},
                 )
-
                 a2a.notify(
                     "staff_reviewer",
                     "CI Build Failed",
                     f"Build failed for the reviewed PR. See: {url}",
                 )
-
-            return result
+                return result
 
         finally:
             # Step 3: Wait for ALL builds to drain, then make repo private again
@@ -376,6 +395,33 @@ class CIMonitorAgent(BaseAgent):
             elapsed += POLL_INTERVAL_SECONDS
 
         logger.warning("Build timeout after %ds for branch %s", BUILD_TIMEOUT_SECONDS, branch)
+        return None
+
+    async def _wait_for_new_build(
+        self, repo: str, branch: str, seen_run_ids: set[int]
+    ) -> dict[str, Any] | None:
+        """Wait for a workflow run we have NOT evaluated yet (the build the
+        CI agent's fix push re-triggered) to complete. Returns None when no
+        new run appears/completes inside the budget — the fix-until-green
+        loop then reports honestly instead of assuming the fix worked."""
+        elapsed = 0
+        while elapsed < BUILD_TIMEOUT_SECONDS:
+            try:
+                resp = await self.scm._request(
+                    "GET",
+                    f"/repos/{repo}/actions/runs",
+                    params={"branch": branch, "per_page": "5"},
+                )
+                runs = resp.json().get("workflow_runs", [])
+                fresh = [r for r in runs if int(r.get("id", 0) or 0) not in seen_run_ids]
+                completed = [r for r in fresh if r.get("status") == "completed"]
+                if completed:
+                    return completed[0]
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to check for re-triggered build: %s", e)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            elapsed += POLL_INTERVAL_SECONDS
+        logger.warning("No new build appeared within %ds for branch %s", BUILD_TIMEOUT_SECONDS, branch)
         return None
 
     async def _get_failed_jobs(self, repo: str, run_id: int) -> list[dict[str, str]]:

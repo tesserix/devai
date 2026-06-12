@@ -117,7 +117,18 @@ class SecurityToolExecutor:
         handler = getattr(self, f"_handle_{tool_name}", None)
         if handler is None:
             return f"Unknown tool: {tool_name}"
+        # A scanner that isn't installed must read as NOT SCANNED, never as
+        # "scanned clean" — the old silent-empty behavior turned every
+        # missing binary into a false-negative security verdict.
+        self._tools_unavailable: list[str] = []
         result = await handler(tool_input)
+        if isinstance(result, dict) and self._tools_unavailable:
+            result["scanners_not_run"] = sorted(set(self._tools_unavailable))
+            result["warning"] = (
+                "These scanners are NOT INSTALLED in this runtime and did NOT run — "
+                "treat their coverage as missing, not clean. Base your verdict on the "
+                "scanners that did run plus your own code review of the diff."
+            )
         if isinstance(result, str):
             return result
         return json.dumps(result, indent=2, default=str)
@@ -765,7 +776,11 @@ class SecurityToolExecutor:
         cwd: str,
         timeout: int = 60,
     ) -> str:
-        """Run a command and return stdout, or empty string on failure."""
+        """Run a command and return stdout, or empty string on failure.
+
+        Missing binaries are recorded in ``_tools_unavailable`` so execute()
+        can surface them — "tool absent" must be distinguishable from
+        "tool ran and found nothing"."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -776,6 +791,13 @@ class SecurityToolExecutor:
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return stdout.decode(errors="replace")
-        except (TimeoutError, FileNotFoundError, Exception) as e:
+        except FileNotFoundError:
+            tool = cmd[1] if cmd[0] in ("python", "npx") and len(cmd) > 1 else cmd[0]
+            tool = tool.lstrip("-m ").strip() or cmd[0]
+            logger.warning("security scanner not installed in this runtime: %s", tool)
+            if hasattr(self, "_tools_unavailable"):
+                self._tools_unavailable.append(tool)
+            return ""
+        except (TimeoutError, Exception) as e:  # noqa: BLE001
             logger.debug("Command %s failed: %s", cmd[0], e)
             return ""

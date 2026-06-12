@@ -8,6 +8,10 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .
+# Security scanners the security_expert agent shells out to. Python-native
+# ones install cheaply here; without them every SAST/dependency scan
+# silently returned zero findings (a false "clean" verdict).
+RUN pip install --no-cache-dir bandit pip-audit
 
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
 FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203

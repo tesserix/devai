@@ -84,6 +84,23 @@ VALIDATION_TOOLS: list[dict[str, Any]] = [
 ]
 
 
+def _not_run(tool: str, detail: str) -> dict:
+    """A validation that could not execute must say so EXPLICITLY — never
+    'passed'. The agent should treat the repo's CI (monitor-build /
+    run-tests in CI mode) as the authoritative verdict instead."""
+    return {
+        "tool": tool,
+        "passed": None,
+        "status": "not_run",
+        "error": detail,
+        "guidance": (
+            "This validation could not run here (toolchain missing). Do NOT treat it as "
+            "passed — rely on the repo's CI results (run_playwright_test / the build stage) "
+            "for the authoritative verdict."
+        ),
+    }
+
+
 class ValidationToolExecutor:
     """Executes code validation tools."""
 
@@ -108,20 +125,23 @@ class ValidationToolExecutor:
                 return {"error": "Failed to clone repository"}
 
             if lang == "python":
-                # Try mypy first, then pyright
-                out = await self._run(["python", "-m", "mypy", "--ignore-missing-imports", "."], tmpdir)
+                rc, out = await self._run(["python", "-m", "mypy", "--ignore-missing-imports", "."], tmpdir)
                 tool = "mypy"
             elif lang == "go":
-                out = await self._run(["go", "build", "./..."], tmpdir)
+                rc, out = await self._run(["go", "build", "./..."], tmpdir)
                 tool = "go build"
             elif lang in ("typescript", "javascript"):
-                await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
-                out = await self._run(["npx", "tsc", "--noEmit"], tmpdir)
+                irc, _ = await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
+                if irc is None:
+                    return _not_run("tsc", "npm not installed in this runtime")
+                rc, out = await self._run(["npx", "tsc", "--noEmit"], tmpdir)
                 tool = "tsc"
             else:
                 return {"tool": "unknown", "passed": True, "output": f"No compiler for {lang}"}
 
-            passed = "error" not in out.lower() and "Error" not in out
+            if rc is None:
+                return _not_run(tool, out)
+            passed = rc == 0
             return {
                 "tool": tool,
                 "passed": passed,
@@ -138,26 +158,26 @@ class ValidationToolExecutor:
                 return {"error": "Failed to clone repository"}
 
             if lang == "python":
-                out = await self._run(["python", "-m", "ruff", "check", "."], tmpdir)
+                rc, out = await self._run(["python", "-m", "ruff", "check", "."], tmpdir)
                 tool = "ruff"
             elif lang == "go":
-                out = await self._run(["golangci-lint", "run", "./..."], tmpdir)
+                rc, out = await self._run(["golangci-lint", "run", "./..."], tmpdir)
                 tool = "golangci-lint"
             elif lang in ("typescript", "javascript"):
-                await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
-                out = await self._run(["npx", "eslint", ".", "--ext", ".ts,.tsx,.js,.jsx"], tmpdir)
+                irc, _ = await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
+                if irc is None:
+                    return _not_run("eslint", "npm not installed in this runtime")
+                rc, out = await self._run(["npx", "eslint", ".", "--ext", ".ts,.tsx,.js,.jsx"], tmpdir)
                 tool = "eslint"
             else:
                 return {"tool": "unknown", "passed": True, "output": f"No linter for {lang}"}
 
-            # Count issues
-            error_count = out.count("error") + out.count("Error")
+            if rc is None:
+                return _not_run(tool, out)
             warning_count = out.count("warning") + out.count("Warning")
-
             return {
                 "tool": tool,
-                "passed": error_count == 0,
-                "errors": error_count,
+                "passed": rc == 0,
                 "warnings": warning_count,
                 "output": out[:3000],
             }
@@ -171,33 +191,35 @@ class ValidationToolExecutor:
                 return {"error": "Failed to clone repository"}
 
             if lang == "python":
-                out = await self._run(
+                rc, out = await self._run(
                     ["python", "-m", "pytest", "-v", "--tb=short", "-q"],
                     tmpdir,
                     timeout=300,
                 )
                 tool = "pytest"
             elif lang == "go":
-                out = await self._run(
+                rc, out = await self._run(
                     ["go", "test", "-v", "-count=1", "./..."],
                     tmpdir,
                     timeout=300,
                 )
                 tool = "go test"
             elif lang in ("typescript", "javascript"):
-                await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
-                out = await self._run(["npm", "test", "--", "--passWithNoTests"], tmpdir, timeout=300)
+                irc, _ = await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
+                if irc is None:
+                    return _not_run("jest/vitest", "npm not installed in this runtime")
+                rc, out = await self._run(["npm", "test", "--", "--passWithNoTests"], tmpdir, timeout=300)
                 tool = "jest/vitest"
             else:
                 return {"tool": "unknown", "passed": True, "output": f"No test runner for {lang}"}
 
-            # Parse pass/fail
-            passed_count = out.count("PASS") + out.count("passed") + out.count("ok")
+            if rc is None:
+                return _not_run(tool, out)
+            passed_count = out.count("PASS") + out.count("passed")
             failed_count = out.count("FAIL") + out.count("failed") + out.count("FAILED")
-
             return {
                 "tool": tool,
-                "passed": failed_count == 0,
+                "passed": rc == 0,
                 "total_passed": passed_count,
                 "total_failed": failed_count,
                 "output": out[:3000],
@@ -212,22 +234,25 @@ class ValidationToolExecutor:
                 return {"error": "Failed to clone repository"}
 
             if lang == "python":
-                out = await self._run(["python", "-m", "ruff", "format", "--check", "."], tmpdir)
+                rc, out = await self._run(["python", "-m", "ruff", "format", "--check", "."], tmpdir)
                 tool = "ruff format"
             elif lang == "go":
-                out = await self._run(["gofmt", "-l", "."], tmpdir)
+                rc, out = await self._run(["gofmt", "-l", "."], tmpdir)
                 tool = "gofmt"
             elif lang in ("typescript", "javascript"):
-                await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
-                out = await self._run(["npx", "prettier", "--check", "."], tmpdir)
+                irc, _ = await self._run(["npm", "install", "--ignore-scripts"], tmpdir)
+                if irc is None:
+                    return _not_run("prettier", "npm not installed in this runtime")
+                rc, out = await self._run(["npx", "prettier", "--check", "."], tmpdir)
                 tool = "prettier"
             else:
                 return {"tool": "unknown", "passed": True, "output": f"No formatter for {lang}"}
 
-            passed = len(out.strip()) == 0 or "All matched" in out or "already formatted" in out
+            if rc is None:
+                return _not_run(tool, out)
             return {
                 "tool": tool,
-                "passed": passed,
+                "passed": rc == 0,
                 "output": out[:2000],
             }
 
@@ -269,7 +294,15 @@ class ValidationToolExecutor:
 
         return f"https://{host}/{repo}.git"
 
-    async def _run(self, cmd: list[str], cwd: str, timeout: int = 120) -> str:
+    async def _run(self, cmd: list[str], cwd: str, timeout: int = 120) -> tuple[int | None, str]:
+        """Run a command → (returncode, output). returncode None = the tool
+        is NOT INSTALLED in this runtime.
+
+        The old version returned only text and handlers grepped it for the
+        word "error" — a missing toolchain produced "[Errno 2] No such file
+        or directory: 'npm'", which contains no "error", so EVERY TypeScript
+        validation in production falsely PASSED. Exit codes are the truth:
+        mypy/tsc/ruff/eslint/pytest all exit non-zero on findings."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -279,6 +312,8 @@ class ValidationToolExecutor:
                 env={**os.environ},
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return stdout.decode(errors="replace")
-        except (TimeoutError, FileNotFoundError, Exception) as e:
-            return f"Command failed: {e}"
+            return (proc.returncode, stdout.decode(errors="replace"))
+        except FileNotFoundError as e:
+            return (None, f"toolchain not installed in this runtime: {e}")
+        except (TimeoutError, Exception) as e:  # noqa: BLE001
+            return (1, f"Command failed: {e}")
