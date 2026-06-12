@@ -105,6 +105,15 @@ class StageDeps:
             if adapter is not None:
                 return adapter
             if bool(getattr(self.config, "llm_require_user_connector", False)):
+                # Strict mode — but a trial budget lets new users test on the
+                # platform chain, metered per token. At exhaustion the trial
+                # adapter answers with a clear "add your own key" message and
+                # the shared keys stay revoked for that user permanently.
+                budget = int(getattr(self.config, "llm_trial_token_budget", 0) or 0)
+                if budget > 0 and self.llm is not None:
+                    from devai.settings.trial import TrialLLMAdapter, get_trial_meter
+
+                    return TrialLLMAdapter(self.llm, get_trial_meter(self.config), email)
                 return None
             return self.llm
 

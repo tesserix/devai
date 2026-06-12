@@ -223,6 +223,43 @@ async def list_provider_models(provider: str, request: Request) -> dict[str, Any
     }
 
 
+# ── trial status ─────────────────────────────────────────────────────────────
+
+
+@router.get("/trial")
+async def trial_status(request: Request) -> dict[str, Any]:
+    """The caller's trial-allowance state — drives the depletion banner.
+
+    ``applicable`` is false when the user already has their own LLM
+    connector (trial irrelevant) or strict mode is off.
+    """
+    principal = await _require_principal(request)
+    svc = _svc(request)
+
+    from devai.config import settings as base_settings
+    from devai.settings.trial import get_trial_meter
+
+    email = principal.email or principal.uid
+    meter = get_trial_meter(base_settings)
+    status = await meter.status(email)
+
+    has_own = False
+    try:
+        from devai.settings.llm_resolver import PrincipalLLMResolver
+
+        resolver = PrincipalLLMResolver(base_settings, svc)
+        has_own = await resolver.resolve(principal) is not None
+    except Exception:  # noqa: BLE001
+        logger.warning("trial status: connector check failed", exc_info=True)
+
+    strict = bool(getattr(base_settings, "llm_require_user_connector", False))
+    return {
+        **status,
+        "has_own_connector": has_own,
+        "applicable": strict and not has_own,
+    }
+
+
 # ── delete ──────────────────────────────────────────────────────────────────
 
 

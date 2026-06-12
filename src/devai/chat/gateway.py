@@ -105,6 +105,10 @@ class ConversationGateway:
         if not (turn.text or "").strip():
             return ConversationReply(text="Please send a message.")
 
+        trial_block = await self._trial_guard(principal)
+        if trial_block is not None:
+            return trial_block
+
         try:
             agent = await self._agent_for(principal)
             text = await agent.chat(
@@ -127,6 +131,50 @@ class ConversationGateway:
 
         await self._audit(turn, principal, trace_id, error="error" in reply.metadata)
         return reply
+
+    async def _trial_guard(self, principal: Principal) -> ConversationReply | None:
+        """Trial enforcement for chat — same policy as the run path.
+
+        Humans without their own LLM connector chat on the platform agent
+        only while trial budget remains; each turn deducts a flat estimate
+        (the LangChain path doesn't expose exact usage here). Exhausted →
+        a clear add-your-own-key reply; the shared keys stay revoked.
+        Returns None when the turn may proceed. Never raises.
+        """
+        try:
+            email = getattr(principal, "email", "") or ""
+            is_human = "@" in email and not email.startswith(("webhook:", "system:"))
+            if not is_human or not bool(getattr(self._config, "llm_require_user_connector", False)):
+                return None
+            if self._settings_service is not None:
+                from devai.settings.llm_resolver import PrincipalLLMResolver
+
+                resolver = PrincipalLLMResolver(self._config, self._settings_service)
+                if await resolver.resolve(principal) is not None:
+                    return None  # user has their own connector — no trial involved
+
+            from devai.settings.trial import get_trial_meter
+
+            meter = get_trial_meter(self._config)
+            if meter.budget <= 0 or await meter.exhausted(email):
+                return ConversationReply(
+                    text=(
+                        "Your free trial allowance is used up. Add your own LLM "
+                        "API key in Settings → LLM Provider to keep chatting — "
+                        "the shared platform credentials are no longer available "
+                        "for your account."
+                    ),
+                    metadata={"trial_exhausted": True},
+                )
+            # Flat per-turn estimate — the chat path doesn't surface exact
+            # token usage; conservative so trials end predictably.
+            total = await meter.add(email, 1500)
+            if total >= int(meter.budget * 0.8):
+                logger.info("trial: %s at %d/%d tokens (warning threshold)", email, total, meter.budget)
+            return None
+        except Exception:  # noqa: BLE001
+            logger.warning("trial guard failed — allowing turn", exc_info=True)
+            return None
 
     async def _audit(
         self,

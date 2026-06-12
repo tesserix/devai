@@ -643,6 +643,14 @@ class Settings(BaseSettings):
     # connector" stub instead of silently riding the shared platform key.
     llm_require_user_connector: bool = False
 
+    # Trial allowance that softens the strict mode above: users WITHOUT
+    # their own connector may spend this many tokens on the platform chain
+    # to try DevAI. Usage accrues permanently (Redis) — at exhaustion the
+    # shared keys are auto-revoked for that user forever; only their own
+    # Settings connector serves them afterwards. 0 disables trials
+    # (strict mode then blocks immediately).
+    llm_trial_token_budget: int = 0
+
     # Service principal for system/webhook/cron runs (SRE scans, scheduled
     # work, automation). When set to an email that owns a Settings LLM
     # connector, those runs resolve THAT connector through the same overlay

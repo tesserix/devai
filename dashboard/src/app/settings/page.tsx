@@ -31,6 +31,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null); // connector key being added/edited
+  const [trial, setTrial] = useState<Awaited<ReturnType<typeof api.getTrialStatus>> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,6 +40,8 @@ export default function SettingsPage() {
       const [cat, mine] = await Promise.all([api.getSettingsCatalog(), api.listSettings()]);
       setCatalog(cat);
       setConnectors(mine.connectors);
+      // Trial state is advisory — never block the page on it.
+      api.getTrialStatus().then(setTrial).catch(() => setTrial(null));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load settings");
     } finally {
@@ -60,6 +63,45 @@ export default function SettingsPage() {
         Connect your own LLM, source control, memory, Slack and MCP servers. Your credentials drive
         both your conversations and your pipeline runs.
       </p>
+
+      {trial?.applicable && trial.exhausted && (
+        <div className="panel mt-5 p-4 text-sm flex items-start gap-3 border border-red-500/40">
+          <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-[var(--ink-100)] font-medium">Free trial used up — add your own API key to continue.</p>
+            <p className="text-[var(--ink-300)] mt-1">
+              You&apos;ve spent your {trial.budget.toLocaleString()}-token trial allowance. The shared
+              platform credentials are permanently revoked for your account — configure an LLM
+              connector below (Anthropic, Vertex, OpenAI, Groq or OpenRouter) to keep working.
+            </p>
+          </div>
+        </div>
+      )}
+      {trial?.applicable && !trial.exhausted && trial.trial_enabled && (
+        <div
+          className={`panel mt-5 p-4 text-sm flex items-start gap-3 border ${
+            trial.warning ? "border-amber-500/40" : "border-sky-500/30"
+          }`}
+        >
+          <AlertTriangle className={`w-5 h-5 mt-0.5 shrink-0 ${trial.warning ? "text-amber-400" : "text-sky-400"}`} />
+          <div className="flex-1">
+            <p className="text-[var(--ink-100)]">
+              {trial.warning ? "Trial almost used up" : "You're on the free trial"} —{" "}
+              {trial.remaining.toLocaleString()} of {trial.budget.toLocaleString()} tokens left.
+            </p>
+            <p className="text-[var(--ink-300)] mt-1">
+              Add your own LLM API key below before it runs out; once spent, the shared credentials
+              are revoked permanently for your account.
+            </p>
+            <div className="mt-2 h-1.5 rounded bg-[var(--surface-border)] overflow-hidden">
+              <div
+                className={trial.warning ? "h-full bg-amber-400" : "h-full bg-sky-400"}
+                style={{ width: `${Math.min(100, Math.round((trial.used / Math.max(1, trial.budget)) * 100))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {!secretsWritable && !loading && (
         <div className="panel mt-5 p-4 text-sm flex items-start gap-3 border border-amber-500/30">

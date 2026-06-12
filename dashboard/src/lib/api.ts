@@ -240,6 +240,18 @@ export const api = {
       { method: "DELETE" }
     ),
 
+  getTrialStatus: () =>
+    apiFetch<{
+      trial_enabled: boolean;
+      budget: number;
+      used: number;
+      remaining: number;
+      exhausted: boolean;
+      warning: boolean;
+      has_own_connector: boolean;
+      applicable: boolean;
+    }>("/settings/trial"),
+
   listProviderModels: (provider: string) =>
     apiFetch<{
       provider: string;
