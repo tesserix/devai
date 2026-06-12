@@ -133,13 +133,25 @@ stages:
     depends_on: [implement-code]
     timeout: 10m
 
+  # CLAUDE.md maintenance — commit the stack/structure/approved-plan facts
+  # the run learned into the repo's governance file (on the PR branch), so
+  # every agent and every FUTURE run reads current, repo-specific rules.
+  - name: update-governance
+    type: deterministic
+    stage: update_governance
+    lane: build
+    title: Update Governance
+    depends_on: [db-engineering]
+    timeout: 5m
+    on_failure: continue   # docs enrichment must never block delivery (heal runs first)
+
   # ─── Quality gates ──────────────────────────────────────────────────
   - name: review-code
     type: review
     stage: review_code
     agent: staff_reviewer
     lane: review
-    depends_on: [implement-code, db-engineering]
+    depends_on: [implement-code, db-engineering, update-governance]
     timeout: 15m
 
   - name: security-scan

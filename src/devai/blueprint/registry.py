@@ -107,6 +107,11 @@ def register_defaults(registry: StageRegistry) -> None:
 
     registry.register("boardroom_debate", _boardroom.boardroom_debate_stage)
 
+    # ─── Governance maintenance (target repo CLAUDE.md) ──────────────
+    from devai.pipeline.stages import governance as _governance
+
+    registry.register("update_governance", _governance.update_governance_stage)
+
     # ─── Specialization runner (YAML role catalog) ───────────────────
     registry.register("run_specialization", _specialization.run_specialization_stage)
 
