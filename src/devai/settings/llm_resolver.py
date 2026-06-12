@@ -52,9 +52,12 @@ class PrincipalLLMResolver:
         behind per-user providers. Never raises."""
         if self._platform is None:
             try:
-                from devai.adapters.llm.factory import create_llm_adapter
+                from devai.adapters.llm.factory import create_llm_chain
 
-                self._platform = create_llm_adapter(self._base)
+                # The full platform chain (vertex → groq → openrouter →
+                # anthropic in prod), so a user's broken provider degrades
+                # through every configured backend before giving up.
+                self._platform = create_llm_chain(self._base)
             except Exception:  # noqa: BLE001
                 logger.warning("settings: platform fallback adapter build failed", exc_info=True)
                 return None

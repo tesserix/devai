@@ -215,25 +215,42 @@ def resolve_llm_tier(settings: Any, tier: str) -> tuple[str, str]:
 
 
 def create_llm_chain(settings: Any) -> LLMAdapter:
-    """The default adapter wrapped with the configured runtime fallback.
+    """The default adapter wrapped with the configured runtime fallbacks.
 
-    ``DEVAI_LLM_FALLBACK_PROVIDER`` names a second backend that picks up a
-    call when the primary raises or answers with an error — outages degrade
-    instead of failing the workflow. Same provider / unset / unconfigured
-    fallback → just the primary.
+    ``DEVAI_LLM_FALLBACK_PROVIDER`` is an ordered, comma-separated list of
+    backends that pick up a call when everything before them raised or
+    answered with an error — outages degrade down the chain instead of
+    failing the workflow. The canonical prod order:
+
+        vertex_gemini → groq → openrouter → anthropic
+
+    Links that are unconfigured (no key), unknown, or duplicates of an
+    earlier link are skipped with a log — a half-configured chain still
+    yields the best chain available rather than nothing.
     """
     primary = create_llm_adapter(settings)
-    fb_name = (getattr(settings, "llm_fallback_provider", "") or "").lower()
-    if not fb_name or fb_name == primary.provider_name or not llm_registry.has(fb_name):
-        return primary
-    fallback = create_llm_adapter(settings, provider=fb_name)
-    if fallback.provider_name == "noop":
-        logger.warning("llm fallback provider %r is not configured — chain disabled", fb_name)
+    raw = getattr(settings, "llm_fallback_provider", "") or ""
+    chain: list[LLMAdapter] = [primary]
+    seen = {primary.provider_name}
+    for name in (n.strip().lower() for n in raw.split(",")):
+        if not name or name in seen:
+            continue
+        if not llm_registry.has(name):
+            logger.warning("llm fallback link %r is unknown — skipped", name)
+            continue
+        adapter = create_llm_adapter(settings, provider=name)
+        if adapter.provider_name == "noop":
+            logger.warning("llm fallback link %r is not configured — skipped", name)
+            continue
+        chain.append(adapter)
+        seen.add(adapter.provider_name)
+    if len(chain) == 1:
         return primary
     from devai.adapters.llm.fallback import FallbackLLMAdapter
 
-    logger.info("LLM fallback chain active: %s → %s", primary.provider_name, fallback.provider_name)
-    return FallbackLLMAdapter(primary, fallback)
+    wrapped = FallbackLLMAdapter(*chain)
+    logger.info("LLM fallback chain active: %s", wrapped.provider_name)
+    return wrapped
 
 
 def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdapter:

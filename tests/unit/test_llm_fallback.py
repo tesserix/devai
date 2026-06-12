@@ -97,3 +97,21 @@ async def test_allowlist_clamps_disabled_models_and_filters_listing():
     await guarded.generate(LLMRequest(model="forbidden-model"))
     assert echo.seen[-1].model == ""
     assert guarded.provider_name == "echo"
+
+
+def test_chain_builder_orders_and_skips_unconfigured_links():
+    from devai.adapters.llm.factory import create_llm_chain
+
+    class _S:
+        # Primary: vertex (api-key mode → buildable without google-auth)
+        llm_provider = "vertex_gemini"
+        vertex_project = "proj-1"
+        vertex_api_key = "AQ.test"
+        llm_noop_canned_text = "[noop]"
+        # groq configured; openrouter NOT (skipped); anthropic configured.
+        llm_fallback_provider = "groq,openrouter,anthropic"
+        groq_api_key = "gsk_test"
+        anthropic_api_key = "sk-ant-test"
+
+    chain = create_llm_chain(_S())
+    assert chain.provider_name == "vertex_gemini→groq→anthropic"
