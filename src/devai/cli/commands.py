@@ -328,11 +328,19 @@ async def _serve(host: str, port: int) -> None:
     import logging as _logging
     import sys as _sys
 
-    _logging.basicConfig(
-        level=getattr(_logging, str(settings.log_level).upper(), _logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=_sys.stdout,
-    )
+    # NOTE: basicConfig() no-ops here — services.log_buffer installs a
+    # buffering handler on the root logger (GCS archive), which makes the
+    # root look 'configured'. Add the stdout handler EXPLICITLY so both
+    # coexist: archive keeps buffering, kubectl logs finally shows devai.*.
+    _root = _logging.getLogger()
+    _root.setLevel(getattr(_logging, str(settings.log_level).upper(), _logging.INFO))
+    if not any(
+        isinstance(h, _logging.StreamHandler) and getattr(h, "stream", None) in (_sys.stdout, _sys.stderr)
+        for h in _root.handlers
+    ):
+        _handler = _logging.StreamHandler(_sys.stdout)
+        _handler.setFormatter(_logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        _root.addHandler(_handler)
     config = uvicorn.Config(webhook_app, host=host, port=port, log_level=settings.log_level)
     server = uvicorn.Server(config)
     await server.serve()
