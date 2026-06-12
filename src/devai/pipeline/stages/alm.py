@@ -28,6 +28,91 @@ def _make(klass: Any, deps: StageDeps) -> Any | None:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# CI ground truth — stages verify REAL workflow conclusions, independent
+# of agent narration. An agent claiming green while github.com/.../actions
+# is red is exactly the failure mode this guards against (live incident).
+# ──────────────────────────────────────────────────────────────────────
+
+
+async def _latest_ci_conclusions(deps: StageDeps, repo: str, branch: str) -> tuple[str, str]:
+    """(verdict, url) for the newest workflow runs on ``branch``.
+
+    verdict: 'success' (newest run of EVERY workflow on the branch is green),
+    'failure'/'cancelled'/… (some workflow's newest run is red, url points at
+    it), 'in_progress', 'none' (no runs), or 'unknown' (non-GitHub SCM / API
+    error — caller keeps the agent's verdict).
+    """
+    req = getattr(deps.scm, "_request", None)
+    if req is None or not repo or not branch:
+        return ("unknown", "")
+    try:
+        resp = await req("GET", f"/repos/{repo}/actions/runs", params={"branch": branch, "per_page": "10"})
+        runs = resp.json().get("workflow_runs", [])
+        if not runs:
+            return ("none", "")
+        if runs[0].get("status") != "completed":
+            return ("in_progress", runs[0].get("html_url", ""))
+        # Newest run PER workflow must be green — a repo typically runs
+        # several workflows (CI, PR checks) per push.
+        seen: set[Any] = set()
+        for r in runs:
+            wf = r.get("workflow_id") or r.get("name")
+            if wf in seen:
+                continue
+            seen.add(wf)
+            if r.get("status") == "completed" and r.get("conclusion") != "success":
+                return (str(r.get("conclusion") or "failure"), r.get("html_url", ""))
+        return ("success", runs[0].get("html_url", ""))
+    except Exception:  # noqa: BLE001
+        logger.debug("CI truth check failed for %s@%s", repo, branch, exc_info=True)
+        return ("unknown", "")
+
+
+async def _repo_has_workflows(deps: StageDeps, repo: str, branch: str) -> bool:
+    req = getattr(deps.scm, "_request", None)
+    if req is None:
+        return False
+    try:
+        resp = await req(
+            "GET", f"/repos/{repo}/contents/.github/workflows", params={"ref": branch} if branch else None
+        )
+        return resp.status_code == 200 and bool(resp.json())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _assert_ci_truth(deps: StageDeps, task: Any, patch: dict[str, Any], *, stage: str) -> None:
+    """Raise unless the branch's REAL workflows are green.
+
+    Raising here fails the stage visibly, which engages the executor's
+    retry → diagnose → fix loop — instead of a red repo sailing to deploy.
+    'unknown' (non-GitHub / API blip) keeps the agent's verdict: this guard
+    must never block on its own outage, only on observed red builds.
+    """
+    branch = str(patch.get("branch_name") or task.branch_name or "")
+    if not branch or not task.repo:
+        return
+    verdict, url = await _latest_ci_conclusions(deps, task.repo, branch)
+    if verdict == "success" or verdict == "unknown":
+        return
+    if verdict == "in_progress":
+        raise RuntimeError(
+            f"{stage}: CI for '{branch}' is still running ({url}) — cannot declare success until it completes"
+        )
+    if verdict == "none":
+        if await _repo_has_workflows(deps, task.repo, branch):
+            raise RuntimeError(
+                f"{stage}: repo has workflows under .github/workflows but NONE ran for '{branch}' — "
+                "CI never triggered (workflow misconfiguration); fix the workflow trigger before proceeding"
+            )
+        return  # genuinely no CI in this repo — nothing to verify
+    raise RuntimeError(
+        f"{stage}: GitHub workflows for '{branch}' concluded '{verdict}' ({url}) — "
+        "the stage cannot pass while the repo's actual builds are red"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Planning chain — ingest → tech → analyze → epic → stories → plan
 # ──────────────────────────────────────────────────────────────────────
 
@@ -322,6 +407,13 @@ class _MonitorBuildStage(AgentAdapter):
     def _next_state(self) -> TaskState:
         return TaskState.BUILDING
 
+    async def _post_validate(self, task, patch) -> None:
+        # Ground truth over narration: whatever the agent reported, the
+        # branch's actual workflows must be green for this stage to pass.
+        if patch.get(f"{self.role_key()}_stub"):
+            return
+        await _assert_ci_truth(self.deps, task, patch, stage="monitor_build")
+
     def _make_agent(self):
         from devai.agents.ci_monitor import CIMonitorAgent
 
@@ -346,6 +438,10 @@ class _RunTestsStage(AgentAdapter):
                 "run_tests produced no test results — the QA agent must write/run "
                 f"tests and report counts (keys present: {sorted(patch.keys())[:8]})"
             )
+        # Tests execute through the repo's own CI — so the branch's actual
+        # workflows being red means the tests did NOT pass, whatever the
+        # narrated counts say.
+        await _assert_ci_truth(self.deps, task, patch, stage="run_tests")
 
     def role_key(self) -> str:
         return "qa_tester"
