@@ -6,6 +6,8 @@ one of:
     noop       → NoopLLMAdapter
     anthropic  → AnthropicLLMAdapter
     openai     → OpenAILLMAdapter
+    gateway    → OpenAILLMAdapter pointed at the agentgateway (model
+                 routing + provider credentials live gateway-side)
 
 Graceful degradation rules (identical to the memory adapter family):
   - Unknown provider → log + Noop
@@ -34,7 +36,7 @@ from devai.adapters.llm.noop import NoopLLMAdapter
 
 logger = logging.getLogger(__name__)
 
-KNOWN_PROVIDERS = ("noop", "anthropic", "openai")
+KNOWN_PROVIDERS = ("noop", "anthropic", "openai", "gateway")
 
 
 def _build_noop(settings: Any) -> LLMAdapter:
@@ -69,10 +71,35 @@ def _build_openai(settings: Any) -> LLMAdapter:
     )
 
 
+def _build_gateway(settings: Any) -> LLMAdapter:
+    """The solo.io agentgateway as the single LLM egress.
+
+    The gateway exposes an OpenAI-compatible endpoint and routes each
+    model alias to whatever backend its config names (Vertex Gemini /
+    Vertex Claude / Anthropic direct / OpenAI / self-hosted). DevAI
+    stays provider-agnostic: this builder is just the OpenAI adapter
+    pointed at the gateway service, so swapping or adding backends is
+    a gateway config change — never a DevAI change.
+    """
+    from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
+
+    base_url = getattr(settings, "llm_gateway_base_url", "") or ""
+    if not base_url:
+        raise AdapterNotConfigured("gateway adapter requires DEVAI_LLM_GATEWAY_BASE_URL")
+    return OpenAILLMAdapter(
+        # The OpenAI SDK insists on a non-empty key; the gateway decides
+        # whether to enforce it.
+        api_key=getattr(settings, "llm_gateway_api_key", "") or "not-needed",
+        base_url=base_url,
+        default_model=getattr(settings, "llm_gateway_model", "") or "",
+    )
+
+
 llm_registry: AdapterRegistry[LLMAdapter] = AdapterRegistry("llm")
 llm_registry.register("noop", _build_noop)
 llm_registry.register("anthropic", _build_anthropic)
 llm_registry.register("openai", _build_openai)
+llm_registry.register("gateway", _build_gateway)
 
 
 def create_llm_adapter(settings: Any, *, provider: str | None = None) -> LLMAdapter:

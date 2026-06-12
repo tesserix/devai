@@ -1,0 +1,187 @@
+<mxfile host="65bd71144e">
+    <diagram id="current-state" name="1 — Current (direct APIs)">
+        <mxGraphModel dx="847" dy="544" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="pod" value="&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;DevAI pod (GKE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;verticalAlign=top;fontSize=14;fontStyle=1;align=left;spacingLeft=10;spacingTop=6;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="80" width="640" height="500" as="geometry"/>
+                </mxCell>
+                <mxCell id="stages" value="Pipeline stages / Chat / SRE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="130" width="180" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="stagedeps" value="StageDeps.llm" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="130" width="130" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="instr" value="InstrumentedLLMAdapter&#xa;(tokens / latency per agent)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" parent="1" vertex="1">
+                    <mxGeometry x="470" y="130" width="190" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="factory" value="factory&#xa;DEVAI_LLM_PROVIDER" style="rhombus;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="230" width="180" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="bridge" value="Legacy bridge agents&#xa;(db_engineer, product_director, …)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="230" width="180" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="adAnthropic" value="AnthropicLLMAdapter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="360" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="adOpenai" value="OpenAILLMAdapter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" parent="1" vertex="1">
+                    <mxGeometry x="270" y="360" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="adNoop" value="NoopLLMAdapter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#999999;dashed=1;" parent="1" vertex="1">
+                    <mxGeometry x="470" y="360" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="legacyProv" value="providers/* legacy wrappers&#xa;(anthropic_claude, openai, gemini, groq, nemoclaw)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="460" width="300" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="specYaml" value="Specialization YAML&#xa;llm_provider / llm_model" style="shape=note;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;size=14;" parent="1" vertex="1">
+                    <mxGeometry x="760" y="100" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="extAnthropic" value="api.anthropic.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="760" y="370" width="180" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="extOpenai" value="api.openai.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="760" y="430" width="180" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="extMix" value="Anthropic / OpenAI / Gemini / Groq / NemoClaw endpoints" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="760" y="490" width="240" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" parent="1" source="stages" target="stagedeps" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" parent="1" source="stagedeps" target="instr" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" parent="1" source="instr" target="factory" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e4" value="anthropic" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" parent="1" source="factory" target="adAnthropic" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="150" y="300"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e5" value="openai" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" parent="1" source="factory" target="adOpenai" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e6" value="unknown / error" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" parent="1" source="factory" target="adNoop" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e7" value="hardcoded imports" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#B85450;" parent="1" source="bridge" target="legacyProv" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e8" value="API key · public internet" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" parent="1" source="adAnthropic" target="extAnthropic" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e9" value="API key · public internet" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" parent="1" source="adOpenai" target="extOpenai" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e10" value="API keys · public internet" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#B85450;" parent="1" source="legacyProv" target="extMix" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e11" value="parsed but NOT wired" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#D6B656;fontColor=#B85450;fontStyle=1;" parent="1" source="specYaml" target="factory" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="target-state" name="2 — Target (Vertex primary, Anthropic fallback)">
+        <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="specs" value="Specialization YAMLs — per-agent routing&#xa;llm_provider / llm_model / llm_tier&#xa;(security_expert → vertex_anthropic · claude-sonnet-4,&#xa;staff_reviewer → vertex_gemini · gemini-2.5-flash, …)" style="shape=note;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;size=14;align=left;spacingLeft=8;" vertex="1" parent="1">
+                    <mxGeometry x="40" y="40" width="360" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="pod2" value="DevAI pod (GKE — Workload Identity SA)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;verticalAlign=top;fontSize=14;fontStyle=1;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1">
+                    <mxGeometry x="40" y="180" width="650" height="480" as="geometry"/>
+                </mxCell>
+                <mxCell id="router" value="LLM Router&#xa;resolve(spec) → tier / provider / model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="1">
+                    <mxGeometry x="70" y="220" width="230" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="cache" value="per-provider&#xa;adapter cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="1">
+                    <mxGeometry x="350" y="220" width="150" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="instr2" value="InstrumentedLLMAdapter&#xa;agent · provider · model · tokens · fallback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" vertex="1" parent="1">
+                    <mxGeometry x="70" y="320" width="230" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="fb" value="FallbackLLMAdapter&#xa;primary → fallback → Noop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;" vertex="1" parent="1">
+                    <mxGeometry x="350" y="320" width="230" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="vg" value="vertex_gemini" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="1">
+                    <mxGeometry x="70" y="440" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="va" value="vertex_anthropic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="1">
+                    <mxGeometry x="250" y="440" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="vm" value="vertex_maas&#xa;(Llama / Mistral)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;" vertex="1" parent="1">
+                    <mxGeometry x="440" y="440" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="adirect" value="anthropic — direct API&#xa;(FALLBACK)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="70" y="560" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="odirect" value="openai — direct API&#xa;(o3, niche roles only)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" vertex="1" parent="1">
+                    <mxGeometry x="320" y="560" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="vpc" value="GCP VPC — tesseracthub-480811 (VPC Service Controls perimeter)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0E8;strokeColor=#82B366;dashed=1;verticalAlign=top;fontSize=14;fontStyle=1;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1">
+                    <mxGeometry x="760" y="180" width="540" height="330" as="geometry"/>
+                </mxCell>
+                <mxCell id="psc" value="Private Service Connect&#xa;aiplatform.googleapis.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="1">
+                    <mxGeometry x="800" y="240" width="240" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="vertex" value="Vertex AI&#xa;Gemini (native) · Claude (Model Garden) · Llama / Mistral (MaaS)&#xa;quotas · audit logs · model allowlist · one bill" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="800" y="360" width="460" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="extA2" value="api.anthropic.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="760" y="570" width="180" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="extO2" value="api.openai.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;" vertex="1" parent="1">
+                    <mxGeometry x="980" y="570" width="180" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="t1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="specs" target="router">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="router" target="cache">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="cache" target="instr2">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="instr2" target="fb">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t5" value="primary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="fb" target="vg">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t6" value="primary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="fb" target="va">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t7" value="primary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="fb" target="vm">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t8" value="fallback (429 / 5xx / quota)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#D79B00;fontColor=#D79B00;" edge="1" parent="1" source="fb" target="adirect">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t9" value="ADC · no API keys · in-VPC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#82B366;fontStyle=1;" edge="1" parent="1" source="vg" target="psc">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#82B366;" edge="1" parent="1" source="va" target="psc">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#82B366;" edge="1" parent="1" source="vm" target="psc">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#82B366;" edge="1" parent="1" source="psc" target="vertex">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t13" value="API key · egress (fallback only)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#D79B00;" edge="1" parent="1" source="adirect" target="extA2">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="t14" value="API key · egress" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="odirect" target="extO2">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

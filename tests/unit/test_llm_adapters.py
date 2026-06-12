@@ -185,6 +185,13 @@ def test_factory_openai_without_key_falls_back_to_noop():
     assert a.provider_name == "noop"
 
 
+def test_factory_gateway_without_base_url_falls_back_to_noop():
+    s = _Settings()
+    s.llm_provider = "gateway"
+    a = create_llm_adapter(s)
+    assert a.provider_name == "noop"
+
+
 def test_factory_explicit_provider_override_wins_over_settings():
     s = _Settings()
     s.llm_provider = "anthropic"  # would fail without key

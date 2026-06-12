@@ -586,7 +586,7 @@ class Settings(BaseSettings):
     # override per-role via their `llm_provider:` field. Missing SDKs /
     # config degrade gracefully to "noop" — adapter pattern, identical
     # to the memory family. See src/devai/adapters/llm/.
-    llm_provider: str = "anthropic"  # noop | anthropic | openai
+    llm_provider: str = "anthropic"  # noop | anthropic | openai | gateway
     llm_noop_canned_text: str = "[noop response]"
 
     # Optional per-provider overrides (the existing anthropic_api_key /
@@ -595,6 +595,16 @@ class Settings(BaseSettings):
     anthropic_base_url: str = ""
     openai_base_url: str = ""
     openai_organization: str = ""
+
+    # gateway — the solo.io agentgateway as the single LLM egress. DevAI
+    # speaks OpenAI wire format to the gateway; the gateway routes to any
+    # backend (Vertex Gemini/Claude, Anthropic direct, OpenAI, …) per its
+    # own config, authenticating to Vertex via Workload Identity (GSA
+    # agentgateway-llm, terraform-new/stacks/12-vertex). Model names are
+    # gateway-side aliases, so swapping backends never touches DevAI.
+    llm_gateway_base_url: str = ""  # e.g. http://ai-gateway.agentgateway-system.svc.cluster.local:8080/v1
+    llm_gateway_api_key: str = ""  # optional; gateway-enforced auth token
+    llm_gateway_model: str = ""  # default model alias the gateway resolves
 
     # --- Secrets adapter (per-user/per-tenant secret provisioning) ---
     # Backs the Settings capability. The Settings store keeps only secret
