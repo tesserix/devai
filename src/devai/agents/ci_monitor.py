@@ -71,6 +71,9 @@ CI_FIX_TOOLS = [
         "github_list_files",
         "github_get_repo_tree",
         "github_commit_file",
+        "github_ci_status",
+        "github_ci_failure_logs",
+        "github_rerun_failed_jobs",
         "github_add_comment",
     }
 ]

@@ -35,91 +35,22 @@ def _make(klass: Any, deps: StageDeps) -> Any | None:
 
 
 async def _latest_ci_conclusions(deps: StageDeps, repo: str, branch: str) -> tuple[str, str]:
-    """(verdict, url) for the newest workflow runs on ``branch``.
+    from devai.services.ci_insight import latest_ci_conclusions
 
-    verdict: 'success' (newest run of EVERY workflow on the branch is green),
-    'failure'/'cancelled'/… (some workflow's newest run is red, url points at
-    it), 'in_progress', 'none' (no runs), or 'unknown' (non-GitHub SCM / API
-    error — caller keeps the agent's verdict).
-    """
-    req = getattr(deps.scm, "_request", None)
-    if req is None or not repo or not branch:
-        return ("unknown", "")
-    try:
-        resp = await req("GET", f"/repos/{repo}/actions/runs", params={"branch": branch, "per_page": "10"})
-        runs = resp.json().get("workflow_runs", [])
-        if not runs:
-            return ("none", "")
-        if runs[0].get("status") != "completed":
-            return ("in_progress", runs[0].get("html_url", ""))
-        # Newest run PER workflow must be green — a repo typically runs
-        # several workflows (CI, PR checks) per push.
-        seen: set[Any] = set()
-        for r in runs:
-            wf = r.get("workflow_id") or r.get("name")
-            if wf in seen:
-                continue
-            seen.add(wf)
-            if r.get("status") == "completed" and r.get("conclusion") != "success":
-                return (str(r.get("conclusion") or "failure"), r.get("html_url", ""))
-        return ("success", runs[0].get("html_url", ""))
-    except Exception:  # noqa: BLE001
-        logger.debug("CI truth check failed for %s@%s", repo, branch, exc_info=True)
-        return ("unknown", "")
+    out = await latest_ci_conclusions(deps.scm, repo, branch)
+    return (out["verdict"], out["url"])
 
 
 async def _failed_job_logs(deps: StageDeps, repo: str, run_url: str) -> str:
-    """Failed-step log excerpt for a red workflow run (best-effort, redacted).
+    from devai.services.ci_insight import failed_job_logs
 
-    The diagnose→fix loop works from ERRORS, not just a red verdict — this
-    pulls the failed jobs' names/steps and a log tail so the recovery agent
-    and the re-run ci_monitor start from the actual failure, not a guess.
-    """
-    req = getattr(deps.scm, "_request", None)
-    run_id = run_url.rstrip("/").rsplit("/", 1)[-1] if run_url else ""
-    if req is None or not run_id.isdigit():
-        return ""
-    try:
-        resp = await req("GET", f"/repos/{repo}/actions/runs/{run_id}/jobs", params={"per_page": "20"})
-        jobs = resp.json().get("jobs", [])
-        failed = [j for j in jobs if j.get("conclusion") not in (None, "success", "skipped")]
-        if not failed:
-            return ""
-        lines: list[str] = []
-        for job in failed[:3]:
-            steps = [
-                f"step '{s.get('name')}' → {s.get('conclusion')}"
-                for s in job.get("steps", [])
-                if s.get("conclusion") not in (None, "success", "skipped")
-            ]
-            lines.append(f"job '{job.get('name')}' → {job.get('conclusion')}; " + "; ".join(steps[:5]))
-            try:
-                log_resp = await req("GET", f"/repos/{repo}/actions/jobs/{job.get('id')}/logs")
-                text = log_resp.text if hasattr(log_resp, "text") else ""
-                if text:
-                    tail = text[-2500:]
-                    from devai.services.redact import redact_secrets
-
-                    lines.append(redact_secrets(tail))
-            except Exception:  # noqa: BLE001
-                pass
-        return "\n".join(lines)[:6000]
-    except Exception:  # noqa: BLE001
-        logger.debug("failed-job log fetch failed for %s run %s", repo, run_id, exc_info=True)
-        return ""
+    return await failed_job_logs(deps.scm, repo, run_url)
 
 
 async def _repo_has_workflows(deps: StageDeps, repo: str, branch: str) -> bool:
-    req = getattr(deps.scm, "_request", None)
-    if req is None:
-        return False
-    try:
-        resp = await req(
-            "GET", f"/repos/{repo}/contents/.github/workflows", params={"ref": branch} if branch else None
-        )
-        return resp.status_code == 200 and bool(resp.json())
-    except Exception:  # noqa: BLE001
-        return False
+    from devai.services.ci_insight import repo_has_workflows
+
+    return await repo_has_workflows(deps.scm, repo, branch)
 
 
 async def _assert_ci_truth(deps: StageDeps, task: Any, patch: dict[str, Any], *, stage: str) -> None:

@@ -29,6 +29,9 @@ spec:
   - scm_post_comment
   - scm_post_pr_review
   - scm_get_workflow_runs
+  - scm_ci_status
+  - scm_ci_failure_logs
+  - scm_rerun_failed_jobs
   - scm_get_workflow_logs
   toolSelector:
     matchLabels:

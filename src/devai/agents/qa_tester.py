@@ -30,6 +30,9 @@ QA_TOOLS = [
         "github_get_pr_diff",
         "github_commit_file",
         "github_add_comment",
+        "github_ci_status",
+        "github_ci_failure_logs",
+        "github_rerun_failed_jobs",
     }
 ] + TEST_TOOLS
 

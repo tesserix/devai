@@ -208,6 +208,56 @@ SCM_TOOLS: list[dict[str, Any]] = [
             "required": ["repo"],
         },
     },
+    {
+        "name": "scm_ci_status",
+        "description": (
+            "Ground-truth CI verdict for a branch: the newest run of EVERY workflow with its "
+            "conclusion (success/failure/in_progress). Use this to verify your fix actually turned "
+            "the builds green before declaring success — narration doesn't count, this does."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository identifier"},
+                "branch": {"type": "string", "description": "Branch to check (the story/work branch)"},
+            },
+            "required": ["repo", "branch"],
+        },
+    },
+    {
+        "name": "scm_ci_failure_logs",
+        "description": (
+            "Failure forensics for a red workflow run: failed job names, failed steps, and a log "
+            "tail (secrets redacted). Start every debug round here — read the ACTUAL errors, then "
+            "fix the workflow file or the code, push to the branch, and re-check scm_ci_status."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository identifier"},
+                "run_id": {
+                    "type": "string",
+                    "description": "Workflow run id or its html URL (from scm_ci_status)",
+                },
+            },
+            "required": ["repo", "run_id"],
+        },
+    },
+    {
+        "name": "scm_rerun_failed_jobs",
+        "description": (
+            "Re-run only the FAILED jobs of a workflow run — re-test after a fix or to rule out a "
+            "flake without pushing an empty commit. Poll scm_ci_status afterwards for the verdict."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository identifier"},
+                "run_id": {"type": "string", "description": "Workflow run id to re-run failed jobs for"},
+            },
+            "required": ["repo", "run_id"],
+        },
+    },
 ]
 
 
@@ -451,6 +501,22 @@ class SCMToolExecutor:
             inp.get("branch"),
             inp.get("limit", 5),
         )
+
+    async def _handle_scm_ci_status(self, inp: dict[str, Any]) -> dict[str, Any]:
+        from devai.services.ci_insight import latest_ci_conclusions
+
+        return await latest_ci_conclusions(self.scm, inp["repo"], inp.get("branch", ""))
+
+    async def _handle_scm_ci_failure_logs(self, inp: dict[str, Any]) -> str:
+        from devai.services.ci_insight import failed_job_logs
+
+        logs = await failed_job_logs(self.scm, inp["repo"], inp.get("run_id", ""))
+        return logs or "No failed jobs found for that run (or logs unavailable)."
+
+    async def _handle_scm_rerun_failed_jobs(self, inp: dict[str, Any]) -> dict[str, Any]:
+        from devai.services.ci_insight import rerun_failed_jobs
+
+        return await rerun_failed_jobs(self.scm, inp["repo"], inp.get("run_id", ""))
 
 
 # Backward-compatible alias
