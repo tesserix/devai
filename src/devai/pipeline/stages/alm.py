@@ -68,6 +68,47 @@ async def _latest_ci_conclusions(deps: StageDeps, repo: str, branch: str) -> tup
         return ("unknown", "")
 
 
+async def _failed_job_logs(deps: StageDeps, repo: str, run_url: str) -> str:
+    """Failed-step log excerpt for a red workflow run (best-effort, redacted).
+
+    The diagnose→fix loop works from ERRORS, not just a red verdict — this
+    pulls the failed jobs' names/steps and a log tail so the recovery agent
+    and the re-run ci_monitor start from the actual failure, not a guess.
+    """
+    req = getattr(deps.scm, "_request", None)
+    run_id = run_url.rstrip("/").rsplit("/", 1)[-1] if run_url else ""
+    if req is None or not run_id.isdigit():
+        return ""
+    try:
+        resp = await req("GET", f"/repos/{repo}/actions/runs/{run_id}/jobs", params={"per_page": "20"})
+        jobs = resp.json().get("jobs", [])
+        failed = [j for j in jobs if j.get("conclusion") not in (None, "success", "skipped")]
+        if not failed:
+            return ""
+        lines: list[str] = []
+        for job in failed[:3]:
+            steps = [
+                f"step '{s.get('name')}' → {s.get('conclusion')}"
+                for s in job.get("steps", [])
+                if s.get("conclusion") not in (None, "success", "skipped")
+            ]
+            lines.append(f"job '{job.get('name')}' → {job.get('conclusion')}; " + "; ".join(steps[:5]))
+            try:
+                log_resp = await req("GET", f"/repos/{repo}/actions/jobs/{job.get('id')}/logs")
+                text = log_resp.text if hasattr(log_resp, "text") else ""
+                if text:
+                    tail = text[-2500:]
+                    from devai.services.redact import redact_secrets
+
+                    lines.append(redact_secrets(tail))
+            except Exception:  # noqa: BLE001
+                pass
+        return "\n".join(lines)[:6000]
+    except Exception:  # noqa: BLE001
+        logger.debug("failed-job log fetch failed for %s run %s", repo, run_id, exc_info=True)
+        return ""
+
+
 async def _repo_has_workflows(deps: StageDeps, repo: str, branch: str) -> bool:
     req = getattr(deps.scm, "_request", None)
     if req is None:
@@ -106,9 +147,20 @@ async def _assert_ci_truth(deps: StageDeps, task: Any, patch: dict[str, Any], *,
                 "CI never triggered (workflow misconfiguration); fix the workflow trigger before proceeding"
             )
         return  # genuinely no CI in this repo — nothing to verify
+
+    # Red build: pull the failed jobs' logs so the diagnose→fix round works
+    # from the ACTUAL errors. Lands in agent_context (the re-run agent and
+    # the recovery diagnosis read it) and in the error (visible on the run).
+    log_excerpt = await _failed_job_logs(deps, task.repo, url)
+    ctx = getattr(task, "agent_context", None)
+    if log_excerpt and isinstance(ctx, dict):
+        ctx["ci_failure_logs"] = log_excerpt
+        ctx["ci_failed_branch"] = branch
+        ctx["ci_failed_run_url"] = url
     raise RuntimeError(
         f"{stage}: GitHub workflows for '{branch}' concluded '{verdict}' ({url}) — "
-        "the stage cannot pass while the repo's actual builds are red"
+        "the stage cannot pass while the repo's actual builds are red. "
+        + (f"Failure excerpt:\n{log_excerpt[:800]}" if log_excerpt else "Could not fetch failure logs.")
     )
 
 
