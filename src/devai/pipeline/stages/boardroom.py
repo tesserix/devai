@@ -208,6 +208,13 @@ class _BoardroomDebateStage(PipelineStage):
             )
 
         rounds = max(1, min(4, int(self.config.get("rounds", 2) or 2)))
+        # Hard wall-clock budget: a real debate takes minutes, but NEVER more
+        # than this — when the budget runs out we synthesize from whatever is
+        # on the table and project it to the user, who chooses to debate
+        # further (reject at the gate) or proceed to build (approve).
+        budget_seconds = max(60.0, float(self.config.get("time_budget_seconds", 900) or 900))
+        started_at = time.monotonic()
+        budget_hit = False
         panel = self._select_panel(topic)
         ctx = task.agent_context
         background = "\n".join(
@@ -235,6 +242,13 @@ class _BoardroomDebateStage(PipelineStage):
         consensus_reached = False
 
         for round_no in range(1, rounds + 1):
+            if time.monotonic() - started_at > budget_seconds:
+                budget_hit = True
+                transcript.append(
+                    f"[round {round_no}] Supervisor: time budget "
+                    f"({int(budget_seconds)}s) reached — closing the debate with the positions on the table."
+                )
+                break
             prior = (
                 "\n\n".join(f"**{who}**: {text[:600]}" for who, text in positions.items())
                 or "(opening round — no positions yet)"
@@ -295,6 +309,17 @@ class _BoardroomDebateStage(PipelineStage):
                 consensus_reached = True
                 break  # genuine consensus — don't burn remaining rounds
 
+        # An empty table is a FAILURE, not a meeting: if every panelist call
+        # errored, raise so the executor retries / the recovery agent
+        # engages — returning a hollow "decision" silently downgraded the
+        # whole feature (live incident: an SDK kwarg bug made all seats
+        # 'absent' in 0.7s and the run sailed on without any debate).
+        if not positions:
+            raise RuntimeError(
+                "boardroom collected zero positions — every panelist call failed; "
+                "see transcript: " + " | ".join(transcript[-3:])[:400]
+            )
+
         # Final decision document.
         decision = await self._final_decision(topic, positions, consensus_reached)
         transcript.append(f"[final] Supervisor decision: {decision[:800]}")
@@ -306,10 +331,12 @@ class _BoardroomDebateStage(PipelineStage):
             message=(
                 f"boardroom: {len(panel)} seats, "
                 + ("consensus" if consensus_reached else "majority + recorded dissent")
+                + (" (time budget reached)" if budget_hit else "")
             ),
             data={
                 "boardroom_decision": decision[:6000],
                 "boardroom_consensus": consensus_reached,
+                "boardroom_budget_hit": budget_hit,
                 "boardroom_panel": [name for _, name, _ in panel],
                 "boardroom_transcript": "\n\n".join(transcript)[-12000:],
                 # Downstream stages (plan approval, implement) read this.

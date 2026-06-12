@@ -415,9 +415,14 @@ class _PlanApprovalStage(PipelineStage):
             or "auto"
         ).lower()
         # `require_approval: true` in the blueprint stage config ALWAYS pauses
-        # for the human, regardless of autonomy — boardroom decisions and
-        # other deliberate sign-offs must never self-approve.
+        # for the human, regardless of autonomy — and so does a BOARDROOM
+        # outcome: when the user asked to brainstorm first, the debate's
+        # agreed plan is the contract for everything downstream, and the run
+        # must stop for their sign-off (with their modifications folded in)
+        # before any blueprint continues. Never self-approve either case.
         force_gate = str(self.config.get("require_approval", "")).lower() in ("1", "true", "yes")
+        if task.agent_context.get("boardroom_decision") or task.agent_context.get("brainstorm"):
+            force_gate = True
 
         if autonomy == "full" and not force_gate:
             return StageResult(message="plan approval skipped (autonomy=full)", data={"plan_approved": "auto"})
@@ -432,25 +437,81 @@ class _PlanApprovalStage(PipelineStage):
                 )
 
         # Pause: build the approval request a human can actually decide on.
-        request = self._build_request(task, questions)
-        gates = task.agent_context.setdefault("dynamic_gates", [])
-        if isinstance(gates, list):
-            gates.append(request)
+        # Boardroom mode adds a DEBATE-MORE loop: rejecting the agreed plan
+        # sends the panel back for another round (bounded), then re-presents
+        # the updated decision — approve continues to development, repeated
+        # rejection after the extra rounds cancels.
+        extra_debates = 0
+        max_extra_debates = 2
+        while True:
+            request = self._build_request(task, questions)
+            gates = task.agent_context.setdefault("dynamic_gates", [])
+            if isinstance(gates, list):
+                gates = [g for g in gates if not (isinstance(g, dict) and g.get("gate") == self.name())]
+                gates.append(request)
+                task.agent_context["dynamic_gates"] = gates
 
-        decision = await self._await_decision(task)
-        if decision == "approved":
-            await self._record_approval_on_epic(task, request)
-            return StageResult(
-                message="plan approved by human — proceeding",
-                data={"plan_approved": "human", "plan_approval_request": request},
+            decision = await self._await_decision(task)
+            if decision == "approved":
+                await self._record_approval_on_epic(task, request)
+                return StageResult(
+                    message="plan approved by human — proceeding",
+                    data={"plan_approved": "human", "plan_approval_request": request},
+                )
+            boardroom_mode = bool(task.agent_context.get("boardroom_decision"))
+            if decision == "rejected" and boardroom_mode and extra_debates < max_extra_debates:
+                extra_debates += 1
+                logger.info(
+                    "plan_approval: boardroom plan rejected — convening extra debate round %d/%d",
+                    extra_debates,
+                    max_extra_debates,
+                )
+                await self._clear_decision(task)
+                await self._extra_debate_round(task)
+                continue  # re-present the updated decision
+            task.error = (
+                "plan rejected at approval" if decision == "rejected" else "plan approval timed out"
             )
-        task.error = "plan rejected at approval" if decision == "rejected" else "plan approval timed out"
-        task.failed_stage = self.name()
-        return StageResult(
-            next_state=TaskState.CANCELLED,
-            message=task.error,
-            data={"plan_approved": decision or "timeout"},
-        )
+            task.failed_stage = self.name()
+            return StageResult(
+                next_state=TaskState.CANCELLED,
+                message=task.error,
+                data={"plan_approved": decision or "timeout"},
+            )
+
+    async def _clear_decision(self, task: DevAITask) -> None:
+        """Remove the recorded gate decision so the next await pauses again."""
+        redis = getattr(self.deps.state_manager, "redis", None)
+        if redis is None:
+            return
+        try:
+            await redis.delete(f"devai:pipeline:gate:{task.id}:{self.name()}")
+        except Exception:  # noqa: BLE001
+            logger.debug("gate decision clear failed", exc_info=True)
+
+    async def _extra_debate_round(self, task: DevAITask) -> None:
+        """The user asked for more debate — run ONE more boardroom round on
+        the current decision and fold the updated outcome into the task."""
+        try:
+            from devai.pipeline.stages.boardroom import boardroom_debate_stage
+
+            stage = boardroom_debate_stage(
+                self.deps,
+                {
+                    "rounds": "1",
+                    "time_budget_seconds": "300",
+                    "topic": (
+                        "The user REJECTED this plan and asked the panel to debate further. "
+                        "Challenge its weakest assumptions and improve it.\n\n"
+                        + str(task.agent_context.get("boardroom_decision") or task.intent)[:1500]
+                    ),
+                    "__stage_name": "boardroom-extra-round",
+                },
+            )
+            result = await stage.execute(task)
+            task.merge_handover(result.data)
+        except Exception:  # noqa: BLE001 — a failed extra round re-presents the old plan
+            logger.exception("extra boardroom round failed — re-presenting the existing plan")
 
     async def _assess_clarity(self, task: DevAITask) -> tuple[str, list[str]]:
         """LLM judges intent completeness. No usable LLM → CLEAR (never block
@@ -508,7 +569,7 @@ class _PlanApprovalStage(PipelineStage):
             # Boardroom runs (and any stage that writes a top-level summary)
             # surface their agreed decision on the approval banner.
             plan_summary = str(ctx.get("plan_summary") or ctx.get("boardroom_decision") or "")[:1200]
-        return {
+        request: dict[str, Any] = {
             "gate": self.name(),
             "title": "Plan Approval",
             "kind": "plan_approval",
@@ -520,6 +581,15 @@ class _PlanApprovalStage(PipelineStage):
             "questions": questions,
             "requested_at": time.time(),
         }
+        # Boardroom context: when the debate ran, the user is approving ITS
+        # agreed plan — show who sat, whether the table agreed, and the
+        # decision document itself.
+        if ctx.get("boardroom_decision"):
+            request["boardroom_decision"] = str(ctx["boardroom_decision"])[:2500]
+            request["boardroom_panel"] = ctx.get("boardroom_panel") or []
+            request["boardroom_consensus"] = bool(ctx.get("boardroom_consensus"))
+            request["title"] = "Boardroom Plan Approval"
+        return request
 
     async def _record_approval_on_epic(self, task: DevAITask, request: dict[str, Any]) -> None:
         """The human just confirmed the proposal — fold it into the epic

@@ -638,7 +638,18 @@ class GitHubSCMClient(SCMClient):
         payload: dict[str, Any] = {"body": body, "event": event}
         if comments:
             payload["comments"] = comments
-        resp = await self._request("POST", f"/repos/{repo}/pulls/{pr_id}/reviews", json=payload)
+        try:
+            resp = await self._request("POST", f"/repos/{repo}/pulls/{pr_id}/reviews", json=payload)
+        except Exception as e:  # noqa: BLE001
+            # GitHub 422s APPROVE / REQUEST_CHANGES on your OWN pull request —
+            # and our bot authors the PRs its reviewer agents then review.
+            # Degrade to a COMMENT review carrying the verdict in the body so
+            # the review lands instead of burning agent turns on workarounds.
+            if "422" not in str(e) or event.upper() == "COMMENT":
+                raise
+            payload["event"] = "COMMENT"
+            payload["body"] = f"**[Review verdict: {event.upper()}]**\n\n{body}"
+            resp = await self._request("POST", f"/repos/{repo}/pulls/{pr_id}/reviews", json=payload)
         return resp.json()
 
     async def merge_pull_request(self, repo: str, pr_id: int, method: str = "squash") -> dict[str, Any]:

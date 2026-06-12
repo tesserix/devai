@@ -26,6 +26,10 @@ export interface Approval {
   stage?: string;
   error?: string;
   diagnosis?: string;
+  /** Boardroom plan approval: the panel's agreed decision. */
+  boardroom_decision?: string;
+  boardroom_panel?: string[];
+  boardroom_consensus?: boolean;
 }
 
 interface ApprovalBannerProps {
@@ -71,15 +75,20 @@ export function ApprovalBanner({ approvals, onApprove, onReject }: ApprovalBanne
     <div className="space-y-2">
       {pending.map((a) => {
         const agentInfo = a.agent ? AGENT_INFO[a.agent] : undefined;
-        const explain =
-          GATE_EXPLAINERS[a.gate] ??
-          (a.kind === "heal_approval"
-            ? {
-                what: `Stage "${a.stage || a.gate}" failed — the recovery agent diagnosed it and proposes a fix below.`,
-                approve: "Approve to apply the fix and re-run the failed stage.",
-                reject: "Reject to let the failure stand — the run stops at this stage.",
-              }
-            : undefined);
+        const explain = a.boardroom_decision
+          ? {
+              what: "The boardroom finished debating — this is the panel's agreed plan. Everything downstream builds on it.",
+              approve: "Approve to continue development with exactly this plan.",
+              reject: "Reject to send the panel back for another debate round (the updated plan re-appears here).",
+            }
+          : (GATE_EXPLAINERS[a.gate] ??
+            (a.kind === "heal_approval"
+              ? {
+                  what: `Stage "${a.stage || a.gate}" failed — the recovery agent diagnosed it and proposes a fix below.`,
+                  approve: "Approve to apply the fix and re-run the failed stage.",
+                  reject: "Reject to let the failure stand — the run stops at this stage.",
+                }
+              : undefined));
         return (
           <div
             key={a.gate}
@@ -146,6 +155,39 @@ export function ApprovalBanner({ approvals, onApprove, onReject }: ApprovalBanne
                     >
                       Request: {a.intent}
                     </p>
+                  )}
+                  {a.boardroom_decision && (
+                    <div
+                      className="mt-2 rounded p-2.5 space-y-1.5"
+                      style={{ background: "var(--surface-raised)", fontSize: 12 }}
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(a.boardroom_panel ?? []).map((p) => (
+                          <span
+                            key={p}
+                            className="px-1.5 py-0.5 rounded-full text-[10px]"
+                            style={{ background: "var(--accent-soft-bg-2)", color: "var(--accent-soft-ink)" }}
+                          >
+                            {p}
+                          </span>
+                        ))}
+                        <span
+                          className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+                          style={{
+                            background: a.boardroom_consensus ? "var(--ok-soft-bg)" : "var(--warn-soft-bg)",
+                            color: a.boardroom_consensus ? "var(--ok-ink)" : "var(--warn-ink)",
+                          }}
+                        >
+                          {a.boardroom_consensus ? "consensus" : "majority + dissent"}
+                        </span>
+                      </div>
+                      <p
+                        className="whitespace-pre-wrap"
+                        style={{ color: "var(--ink-soft)", maxHeight: 200, overflowY: "auto" }}
+                      >
+                        {a.boardroom_decision}
+                      </p>
+                    </div>
                   )}
                   {a.kind === "heal_approval" && (
                     <div

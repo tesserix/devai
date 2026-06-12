@@ -42,6 +42,7 @@ import { GuidancePanel, HelpPopover } from "@/components/guidance";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { BuildingState, type BuildPhase } from "@/components/building-state";
 import { EmptyState } from "@/components/empty-state";
+import { BoardroomCard } from "@/components/boardroom-card";
 import { useToast } from "@/components/toast";
 import {
   AlertTriangle,
@@ -412,6 +413,16 @@ export default function RunDetailPage() {
                     </div>
                   </section>
                 )}
+
+                <BoardroomCard
+                  outcome={{
+                    decision: ctx.boardroom_decision as string | undefined,
+                    panel: ctx.boardroom_panel as string[] | undefined,
+                    consensus: ctx.boardroom_consensus as boolean | undefined,
+                    budget_hit: ctx.boardroom_budget_hit as boolean | undefined,
+                    transcript: ctx.boardroom_transcript as string | undefined,
+                  }}
+                />
 
                 <DelegationCard plan={effectiveDelegation} />
               </div>
