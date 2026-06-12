@@ -92,6 +92,19 @@ async def build_runtime(
     except Exception:  # noqa: BLE001
         logger.exception("bootstrap: global memory registration failed")
 
+    # Register the usage ledger here too (not just in webhook/app.py): the
+    # Temporal/queue worker and in-process pipeline both build their runtime
+    # through this path, so this is what makes the instrumented LLM adapter
+    # capture cost/tokens for PIPELINE runs — without it, only chat (api
+    # process) was recorded and the analytics cost views stayed at $0.
+    try:
+        from devai.analytics.usage_ledger import UsageLedger, get_global_ledger, set_global_ledger
+
+        if get_global_ledger() is None:
+            set_global_ledger(UsageLedger(getattr(config, "redis_url", "") or ""))
+    except Exception:  # noqa: BLE001
+        logger.exception("bootstrap: usage ledger registration failed")
+
     # Secrets backend — used (with settings_service) by stages to resolve a
     # per-user settings overlay at execution time. Degrades to Noop.
     secrets_adapter = None

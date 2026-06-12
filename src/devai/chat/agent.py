@@ -54,6 +54,56 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class _ChatUsageCallback:
+    """LangChain callback that records chat LLM usage to the analytics ledger.
+
+    Chat doesn't go through the instrumented adapter, so its cost/tokens
+    would never reach analytics. on_llm_end carries token usage; we attribute
+    it to the agent's current principal and write to the global ledger.
+    Best-effort — never raises into the LLM call.
+    """
+
+    raise_error = False
+    run_inline = True
+
+    def __init__(self, agent: DevAIChatAgent) -> None:
+        self._agent = agent
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        try:
+            from devai.analytics.pricing import estimate_cost
+            from devai.analytics.usage_ledger import get_global_ledger
+
+            ledger = get_global_ledger()
+            if ledger is None:
+                return
+            usage = {}
+            try:
+                usage = (response.llm_output or {}).get("usage", {}) or {}
+            except Exception:  # noqa: BLE001
+                pass
+            tok_in = int(usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0)
+            tok_out = int(usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0)
+            if not (tok_in or tok_out):
+                return
+            model = getattr(self._agent.config, "claude_model", "") or "claude"
+            principal = getattr(self._agent, "_principal", None)
+            email = getattr(principal, "email", "") if principal else ""
+            cost = estimate_cost("anthropic", model, tok_in, tok_out)
+            import asyncio
+            import datetime
+
+            day = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+            coro = ledger.record(
+                day=day, provider="anthropic", model=model, tokens_in=tok_in, tokens_out=tok_out,
+                cost_usd=cost, duration_ms=0.0, triggered_by=email, agent="chat", status="ok",
+            )
+            asyncio.get_running_loop().create_task(coro)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 SYSTEM_PROMPT = """You are the DevAI Assistant — an intelligent interface to the DevAI ALM and SRE platform.
 
 You have access to the complete history of:
@@ -110,11 +160,16 @@ class DevAIChatAgent:
         self.config = config
         self.state = state_manager
         self.db = database
+        # Usage-ledger callback so chat LLM spend shows in analytics too —
+        # chat uses LangChain directly, not the instrumented adapter, so
+        # without this its cost/tokens never reach the ledger.
+        self._usage_cb = _ChatUsageCallback(self)
         self.llm = ChatAnthropic(
             model=config.claude_model,
             anthropic_api_key=config.anthropic_api_key,
             max_tokens=4096,
             temperature=0.3,
+            callbacks=[self._usage_cb],
         )
         self._tools = self._build_tools()
         self._conversations: dict[str, list] = {}  # session_id -> message history
