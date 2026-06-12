@@ -275,15 +275,35 @@ class SeniorDeveloperAgent(BaseAgent):
             ci_issues = "\n".join(f"- {e['subject']}: {e['body'][:200]}" for e in escalations)
             ci_fix_context = f"\n\n## Issues to Fix\n{ci_issues}"
 
-        user_message = f"""Repository: {repo}
-Run ID: {state.get("run_id", "")}
-
-## YOUR ASSIGNED STORY
+        # Brief the assignment + PR conventions. With NO resolved story
+        # (scaffold runs, or older runs where story content didn't survive
+        # the handover) the templates previously interpolated None — PRs
+        # landed titled "Story #None:" with "Closes #None".
+        if story_number:
+            assignment = f"""## YOUR ASSIGNED STORY
 Story #{story_number}: {story_title}
 Description: {story_desc}
 
 ### Acceptance Criteria
-{ac_text}
+{ac_text}"""
+            pr_instructions = f"""Create feature branch `{branch_name}`, implement ONLY the changes for Story #{story_number}, and create a PR.
+The PR title should be: "Story #{story_number}: {story_title}"
+The PR body must include: "Closes #{story_number}\""""
+        else:
+            epic_number = state.get("epic_issue_number")
+            assignment = f"""## YOUR ASSIGNMENT
+{story_title or "Implement the requirements below end to end."}"""
+            pr_instructions = (
+                f"Create feature branch `{branch_name}`, implement the changes, and create a PR "
+                "with a concise, descriptive title summarizing the change (NEVER reference a "
+                "story number you don't have)."
+                + (f'\nThe PR body must include: "Part of #{epic_number}"' if epic_number else "")
+            )
+
+        user_message = f"""Repository: {repo}
+Run ID: {state.get("run_id", "")}
+
+{assignment}
 
 ## Technical Plan for This Story
 {plan}
@@ -300,9 +320,7 @@ Description: {story_desc}
 {inbox_context}
 
 ## Instructions
-Create feature branch `{branch_name}`, implement ONLY the changes for Story #{story_number}, and create a PR.
-The PR title should be: "Story #{story_number}: {story_title}"
-The PR body must include: "Closes #{story_number}"
+{pr_instructions}
 """
 
         # Continuation brief: never redo finished work. This is what makes

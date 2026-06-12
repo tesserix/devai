@@ -176,7 +176,11 @@ class AgentAdapter(PipelineStage):
             data["a2a_messages"] = patch["a2a_messages"]
 
         # Surface known scalars at the top level — these are read by
-        # condition expressions and the dashboard.
+        # condition expressions, downstream stage briefs, and the dashboard.
+        # `stories` and `technical_plan` matter most: without them the
+        # implement stage briefed "Story #None" with an empty plan (the PR
+        # title/body interpolated None) because only the issue NUMBERS
+        # survived the handover, not the story content.
         for key in (
             "epic_issue_number",
             "pr_number",
@@ -190,6 +194,9 @@ class AgentAdapter(PipelineStage):
             "test_failed",
             "test_passed",
             "test_total",
+            "stories",
+            "technical_plan",
+            "analyzed_requirements",
         ):
             if key in patch and patch[key] is not None:
                 data[key] = patch[key]
