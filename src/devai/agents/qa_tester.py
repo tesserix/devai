@@ -181,13 +181,17 @@ Start by reading the PR diff to understand what was changed, explore existing te
             max_iterations=self.config.claude_max_iterations_ops,
         )
 
-        # Post results as a PR comment
+        # Post results as a PR comment — best-effort: the tests already ran;
+        # a failed comment must never fail the stage (one bad kwarg here
+        # killed an otherwise-perfect 15-stage run). SCMClient.add_comment
+        # takes (repo, issue_id, body) — the old issue_number kwarg only
+        # existed on the legacy core client.
         if pr_number:
-            await self.github.add_comment(
-                repo=repo,
-                issue_number=pr_number,
-                body=f"## QA Test Results — Story #{story_number}\n\n{result_text}",
-            )
+            heading = f"## QA Test Results — Story #{story_number}" if story_number else "## QA Test Results"
+            try:
+                await self.github.add_comment(repo, pr_number, f"{heading}\n\n{result_text}")
+            except Exception:  # noqa: BLE001
+                logger.exception("QA results comment failed for PR #%s", pr_number)
 
         # Notify about test completion for this story
         a2a.notify(
