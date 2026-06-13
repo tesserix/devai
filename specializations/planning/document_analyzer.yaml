@@ -12,8 +12,9 @@ llm_model: gemini-3.1-pro-preview
 allowed_tools:
   - doc_read_pdf
   - doc_read_url
-  - doc_read_text
-  - doc_extract_openapi
+  - doc_read_markdown
+  - doc_parse_requirements_text
+  - doc_parse_openapi
 
 max_turns: 30
 timeout: 15m

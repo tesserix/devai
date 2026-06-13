@@ -5,12 +5,19 @@ description: >-
   and root cause is hypothesised, the orchestrator inspects severity,
   blast radius, and confidence and decides what happens next: auto-
   remediate (safe actions only), plan-and-escalate to a human, or close
-  the run as healthy. Pure routing — it issues no cluster changes itself.
+  the run as healthy. Routing only — read-only live-state checks (alerts,
+  cluster health) ground the decision; it issues no cluster changes itself.
 category: orchestration
 
 llm_provider: openai
 llm_model: o3
 temperature: 0.2
+
+allowed_tools:
+  - k8s_get_cluster_health
+  - k8s_get_deployments
+  - prom_get_alerts
+  - obs_list_alerts
 
 max_turns: 12
 timeout: 5m

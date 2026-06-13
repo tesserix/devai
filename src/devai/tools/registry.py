@@ -144,6 +144,11 @@ def has(name: str) -> bool:
     return name in _REGISTRY
 
 
+def get(name: str) -> RegisteredTool | None:
+    """Look up one registered tool (spec + factory) by name."""
+    return _REGISTRY.get(name)
+
+
 def bind(allowed_tools: list[str], ctx: ToolContext) -> list[BoundTool]:
     """Resolve a spec's allowed_tools against the registry + a context.
 
@@ -286,6 +291,7 @@ __all__ = [
     "RegisteredTool",
     "ToolContext",
     "bind",
+    "get",
     "has",
     "known",
     "register",

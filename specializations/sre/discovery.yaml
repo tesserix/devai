@@ -11,9 +11,10 @@ llm_model: gpt-4.1
 temperature: 0.1
 
 allowed_tools:
-  - kubectl_get
-  - kubectl_describe
-  - prometheus_query
+  - k8s_get_deployments
+  - k8s_get_pod_status
+  - k8s_get_events
+  - prom_query
 
 max_turns: 30
 timeout: 5m

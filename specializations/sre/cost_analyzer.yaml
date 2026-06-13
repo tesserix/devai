@@ -10,9 +10,10 @@ llm_provider: openai
 llm_model: gpt-4.1
 
 allowed_tools:
-  - gcp_billing_query
-  - kubectl_get
-  - prometheus_query
+  - gcp_get_billing_summary
+  - k8s_get_resource_usage
+  - k8s_get_deployments
+  - prom_query
 
 max_turns: 25
 timeout: 10m

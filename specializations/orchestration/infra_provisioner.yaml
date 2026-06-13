@@ -13,9 +13,8 @@ max_tokens: 8192
 allowed_tools:
   - scm_get_file_content
   - scm_commit_file
-  - validate_dockerfile
-  - validate_helm_lint
-  - validate_yaml
+  - validate_lint
+  - validate_format
 
 max_turns: 100
 timeout: 15m

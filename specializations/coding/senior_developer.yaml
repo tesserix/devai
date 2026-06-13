@@ -16,11 +16,11 @@ allowed_tools:
   - scm_create_branch
   - scm_commit_file
   - scm_create_pull_request
+  - scm_get_pr_diff
   - validate_compile
   - validate_lint
   - validate_unit_tests
   - validate_format
-  - validate_dockerfile
 
 max_turns: 120
 timeout: 30m

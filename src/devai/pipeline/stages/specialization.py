@@ -289,12 +289,15 @@ class _RunSpecializationStage(PipelineStage):
         # roles previously ran on spec.system_prompt alone — none of the
         # stack guidance (directory layout, test framework, conventions)
         # ever reached them, silently degrading their output quality.
+        # The renderer is picked per role (a coding spec gets developer
+        # guidance, a release spec gets release guidance, …) instead of
+        # the one-size-fits-all planner view.
         system_prompt = spec.system_prompt
         try:
             from devai.agents.skills import get_skill_profile
 
             profile = get_skill_profile(task.agent_context.get("skill_profile_name"))
-            guidance = profile.render_for_planner()
+            guidance = self._render_skill_guidance(spec, profile)
             if guidance:
                 system_prompt = f"{system_prompt}\n\n{guidance}"
         except Exception:  # noqa: BLE001 — guidance is an enhancer, never a blocker
@@ -346,6 +349,38 @@ class _RunSpecializationStage(PipelineStage):
             message=f"{spec.name} ran via LLM ({spec.llm_provider.value if hasattr(spec.llm_provider, 'value') else spec.llm_provider})",
             data=data,
         )
+
+    @staticmethod
+    def _render_skill_guidance(spec: Specialization, profile: Any) -> str:
+        """Pick the render_for_* view that matches this role.
+
+        Mirrors how the bridged Python agents choose their renderer
+        (senior_developer → developer, qa_tester → qa, …). Name hints win
+        over the category so e.g. an orchestration-category release role
+        still gets release guidance. Falls back to the planner view.
+        """
+        name = (spec.name or "").lower()
+        category = (spec.category or "").lower()
+        by_hint = (
+            (("qa", "test"), "render_for_qa"),
+            (("security",), "render_for_security"),
+            (("release", "deploy", "promot"), "render_for_release"),
+            (("db_", "database"), "render_for_db_engineer"),
+            (("infra", "provision"), "render_for_infra"),
+            (("review",), "render_for_reviewer"),
+        )
+        method = ""
+        for hints, renderer in by_hint:
+            if any(h in name for h in hints):
+                method = renderer
+                break
+        if not method:
+            method = {
+                "coding": "render_for_developer",
+                "review": "render_for_reviewer",
+            }.get(category, "render_for_planner")
+        render = getattr(profile, method, None) or profile.render_for_planner
+        return render() or ""
 
     def _build_user_prompt(self, spec: Specialization, task: DevAITask) -> str:
         """Compose the user turn from the task intent plus any context keys

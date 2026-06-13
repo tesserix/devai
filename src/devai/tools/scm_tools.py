@@ -55,6 +55,18 @@ SCM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "scm_close_issue",
+        "description": "Close an issue or work item (e.g. after the release that ships it).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository identifier"},
+                "issue_id": {"type": "integer", "description": "Issue number or work item ID"},
+            },
+            "required": ["repo", "issue_id"],
+        },
+    },
+    {
         "name": "scm_add_comment",
         "description": "Add a comment to an issue, work item, or pull request.",
         "input_schema": {
@@ -176,6 +188,18 @@ SCM_TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["repo", "pr_id", "body", "event"],
+        },
+    },
+    {
+        "name": "scm_get_pull_request",
+        "description": "Get a pull request's metadata: title, state, mergeability, head/base branches, author.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository identifier"},
+                "pr_id": {"type": "integer", "description": "Pull request number/ID"},
+            },
+            "required": ["repo", "pr_id"],
         },
     },
     {
@@ -315,9 +339,7 @@ class SCMToolExecutor:
             import time as _time
 
             try:
-                await self._redis.set(
-                    f"devai:run:{self._run_id}:activity", str(_time.time()), ex=3600
-                )
+                await self._redis.set(f"devai:run:{self._run_id}:activity", str(_time.time()), ex=3600)
             except Exception:  # noqa: BLE001 — heartbeat is best-effort
                 pass
 
@@ -479,6 +501,12 @@ class SCMToolExecutor:
 
     async def _handle_scm_get_pr_diff(self, inp: dict[str, Any]) -> str:
         return await self.scm.get_pr_diff(inp["repo"], inp["pr_id"])
+
+    async def _handle_scm_get_pull_request(self, inp: dict[str, Any]) -> dict[str, Any]:
+        return await self.scm.get_pull_request(inp["repo"], inp["pr_id"])
+
+    async def _handle_scm_close_issue(self, inp: dict[str, Any]) -> dict[str, Any]:
+        return await self.scm.update_issue(inp["repo"], inp["issue_id"], state="closed")
 
     async def _handle_scm_create_pr_review(self, inp: dict[str, Any]) -> dict[str, Any]:
         return await self.scm.create_pr_review(

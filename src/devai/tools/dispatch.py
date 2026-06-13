@@ -69,7 +69,12 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
         # Cluster / remediation writes used by SRE specs
         "kubectl_rollout_restart",
         "kubectl_scale",
+        # GitOps writes (registry-backed — see the registry fallback below)
         "argocd_sync",
+        "argocd_rollback",
+        "kargo_promote",
+        "flux_reconcile",
+        "flux_suspend",
         # Paging / messaging
         "pagerduty_create_incident",
         "slack_post_message",
@@ -93,6 +98,8 @@ class ToolDispatcher:
         self._index: dict[str, tuple[dict[str, Any], str]] = {}
         # module path → executor instance (lazily constructed, cached)
         self._executors: dict[str, Any] = {}
+        # registry-backed tools: name → bound handler (lazily bound, cached)
+        self._registry_handlers: dict[str, Any] = {}
         self._build_index()
 
     def _build_index(self) -> None:
@@ -112,13 +119,20 @@ class ToolDispatcher:
     def build_tool_specs(self, names: list[str]) -> list[ToolSpec]:
         """ToolSpec list for the names a specialization allows.
 
-        Unknown names are skipped with a warning rather than failing the
-        run — a typo'd tool just won't be offered to the model.
+        Names not in the built-in catalog fall back to the central tool
+        registry (``devai.tools.registry``) — that's where the gitops /
+        shell / web families live. Truly unknown names are skipped with a
+        warning rather than failing the run — a typo'd tool just won't be
+        offered to the model.
         """
         specs: list[ToolSpec] = []
         for name in names:
             entry = self._index.get(name)
             if entry is None:
+                spec = self._registry_spec(name)
+                if spec is not None:
+                    specs.append(spec)
+                    continue
                 logger.warning("specialization allows unknown tool %r — skipping", name)
                 continue
             schema, module_path = entry
@@ -131,6 +145,40 @@ class ToolDispatcher:
             specs.append(ToolSpec(name=name, description=desc, parameters=schema))
         return specs
 
+    def _registry_spec(self, name: str) -> ToolSpec | None:
+        """Resolve a tool from the central registry (gitops/shell/web families)."""
+        try:
+            from devai.tools import registry
+
+            entry = registry.get(name)
+        except Exception:  # noqa: BLE001 — registry import failure shouldn't kill the run
+            logger.debug("tool registry unavailable while resolving %r", name, exc_info=True)
+            return None
+        return entry.spec if entry is not None else None
+
+    async def _execute_via_registry(self, name: str, arguments: dict[str, Any]) -> str | None:
+        """Run a registry-backed tool. None means the registry doesn't have it."""
+        try:
+            from devai.tools import registry
+        except Exception:  # noqa: BLE001
+            return None
+        handler = self._registry_handlers.get(name)
+        if handler is None:
+            entry = registry.get(name)
+            if entry is None:
+                return None
+            try:
+                handler = entry.factory(registry.ToolContext(scm=self._scm))
+            except Exception:  # noqa: BLE001 — a broken factory degrades to "unknown"
+                logger.exception("tool %r registry factory raised", name)
+                return None
+            self._registry_handlers[name] = handler
+        try:
+            return await handler(arguments or {})
+        except Exception as e:  # noqa: BLE001 — tool failure is reported to the model, not fatal
+            logger.warning("registry tool %s raised: %s", name, e)
+            return f"error: tool {name} failed: {e}"
+
     async def execute(self, name: str, arguments: dict[str, Any]) -> str:
         """Run a tool call, returning a string the model can read."""
         if self._dry_run and name in MUTATING_TOOLS:
@@ -141,6 +189,9 @@ class ToolDispatcher:
             )
         entry = self._index.get(name)
         if entry is None:
+            via_registry = await self._execute_via_registry(name, arguments)
+            if via_registry is not None:
+                return via_registry
             return f"error: unknown tool {name!r}"
         _schema, module_path = entry
         executor = self._executor_for(module_path)

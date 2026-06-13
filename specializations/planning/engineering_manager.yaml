@@ -15,7 +15,6 @@ allowed_tools:
   - scm_get_repo_tree
   - scm_get_file_content
   - scm_list_files
-  - repo_profile
 
 max_turns: 60
 timeout: 15m

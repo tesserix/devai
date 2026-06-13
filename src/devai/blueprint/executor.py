@@ -58,7 +58,6 @@ class _RunStopped(Exception):
 EventCallback = Callable[[DevAITask, StageEvent], None]
 
 
-
 # Exception strings can embed live credentials — DB DSNs with passwords,
 # provider API keys, bearer tokens. The recovery agent posts error text to
 # GitHub issues (potentially PUBLIC repos) and feeds it to LLM prompts, so
@@ -79,7 +78,12 @@ def _redact(text: str) -> str:
     """Mask credential-shaped substrings before text leaves the process."""
     out = text or ""
     for pat in _SECRET_PATTERNS:
-        out = pat.sub(lambda m: (m.group(1) if m.lastindex else "") + "***REDACTED***" + (m.group(2) if (m.lastindex or 0) >= 2 else ""), out)
+        out = pat.sub(
+            lambda m: (
+                (m.group(1) if m.lastindex else "") + "***REDACTED***" + (m.group(2) if (m.lastindex or 0) >= 2 else "")
+            ),
+            out,
+        )
     return out
 
 
@@ -131,9 +135,7 @@ class BlueprintExecutor:
         # stage AFTER transient retries exhaust, before on_failure applies.
         heal_enabled = bool(getattr(deps.config, "pipeline_heal_on_failure", True))
         self._heal_rounds = (
-            min(5, max(0, int(getattr(deps.config, "pipeline_heal_attempts", 3) or 0)))
-            if heal_enabled
-            else 0
+            min(5, max(0, int(getattr(deps.config, "pipeline_heal_attempts", 3) or 0))) if heal_enabled else 0
         )
 
     async def execute(self, blueprint: Blueprint, task: DevAITask) -> DevAITask:
@@ -410,8 +412,7 @@ class BlueprintExecutor:
                         if not extended:
                             extended = True
                             logger.info(
-                                "stage %s past its %.0fs timeout but actively working — "
-                                "extending (hard cap %.0fs)",
+                                "stage %s past its %.0fs timeout but actively working — extending (hard cap %.0fs)",
                                 spec.name,
                                 timeout,
                                 timeout * hard_mult,
@@ -524,9 +525,7 @@ class BlueprintExecutor:
         error = _redact(error)
 
         def _hev(phase: StageEventPhase, **kw: Any) -> StageEvent:
-            return StageEvent(
-                heal_stage, phase, stage_type="recovery", agent=self._HEAL_AGENT, lane=spec.lane, **kw
-            )
+            return StageEvent(heal_stage, phase, stage_type="recovery", agent=self._HEAL_AGENT, lane=spec.lane, **kw)
 
         self._emit(
             task,
@@ -637,10 +636,13 @@ class BlueprintExecutor:
         from devai.pipeline.stages._base import run_correlation_label
 
         rec = task.agent_context.get(f"heal:{spec.name}") or {}
-        attempt_no = len(
-            [h for h in (task.agent_context.get("heal_history") or []) if h.get("stage") == spec.name]
-        )
-        body_core = (
+        attempt_no = len([h for h in (task.agent_context.get("heal_history") or []) if h.get("stage") == spec.name])
+        # Everything below lands on a PUBLIC issue and the error/diagnosis are
+        # laundered from untrusted logs — strip @mentions and hidden HTML
+        # comments so injected text can't page people or seed the next bot.
+        from devai.services.prompt_guard import neutralize_for_issue
+
+        body_core = neutralize_for_issue(
             f"### Recovery attempt {attempt_no}\n\n"
             f"**Error:**\n```\n{error[:800]}\n```\n\n"
             f"**Diagnosis:** {str(decision.get('diagnosis') or '')[:800]}\n\n"
@@ -690,9 +692,7 @@ class BlueprintExecutor:
         tried, the surviving error, and what a human should check next.
         Lands on the stage's bug issue (labeled devai:needs-human) and in
         agent_context['runbook:<stage>'] for the dashboard."""
-        history = [
-            h for h in (task.agent_context.get("heal_history") or []) if h.get("stage") == spec.name
-        ]
+        history = [h for h in (task.agent_context.get("heal_history") or []) if h.get("stage") == spec.name]
         if not history:
             return
         error = _redact(error)
@@ -717,7 +717,9 @@ class BlueprintExecutor:
         scm = self._deps.scm
         if scm is not None and bug and not getattr(task, "dry_run", False):
             try:
-                await scm.add_comment(task.repo, bug, runbook)
+                from devai.services.prompt_guard import neutralize_for_issue
+
+                await scm.add_comment(task.repo, bug, neutralize_for_issue(runbook))
                 await scm.add_labels(task.repo, bug, ["devai:needs-human", "devai:runbook"])
             except Exception:  # noqa: BLE001
                 logger.exception("runbook post failed for stage %s", spec.name)
@@ -741,17 +743,17 @@ class BlueprintExecutor:
     ) -> str:
         """LLM-drafted 'what a human should check' section; mechanical
         fallback when no LLM is usable."""
-        llm = await self._deps.role_llm_for_principal(
-            getattr(task, "triggered_by", "") or "", "utility"
-        )
+        llm = await self._deps.role_llm_for_principal(getattr(task, "triggered_by", "") or "", "utility")
         if llm is not None and getattr(llm, "provider_name", "noop") != "noop":
             try:
                 from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+                from devai.services.prompt_guard import wrap_untrusted
 
                 tried = "; ".join(str(h.get("diagnosis") or "")[:150] for h in history[-4:])
                 prompt = (
                     f"An autonomous pipeline stage {spec.name!r} failed repeatedly and automated "
-                    f"recovery gave up.\nFinal error:\n{error[:1000]}\n\nDiagnoses already tried "
+                    f"recovery gave up.\n{wrap_untrusted(error, 'final error', limit=1000)}\n\n"
+                    f"Diagnoses already tried "
                     f"(none worked): {tried}\n\nWrite EXACTLY two markdown sections:\n"
                     "### Likely root cause\n<2-3 sentences>\n"
                     "### What a human should check\n<numbered list of up to 5 concrete steps>"
@@ -803,11 +805,16 @@ class BlueprintExecutor:
                 else ""
             )
             completed = ", ".join(task.stages_completed[-12:]) or "none"
+            # The error text is attacker-influenceable (CI logs, tool output,
+            # repo content) — fence it so the diagnosis model reads it as
+            # data, not as instructions to launder into guidance.
+            from devai.services.prompt_guard import wrap_untrusted
+
             prompt = (
                 "You are the recovery specialist of an autonomous software-delivery pipeline. "
                 f"Stage {spec.name!r} (agent: {spec.resolved_agent() or 'n/a'}, handler: {spec.stage}) "
                 "failed after all retries.\n\n"
-                f"Error:\n{error[:1500]}\n\n"
+                f"{wrap_untrusted(error, 'stage error / failure logs', limit=1500)}\n\n"
                 f"Run intent: {(task.intent or '')[:400]}\n"
                 f"Repo: {task.repo}\nStages completed so far: {completed}{prior_txt}\n\n"
                 "Decide how to recover. Reply with STRICT JSON only (no markdown fences):\n"
@@ -842,9 +849,7 @@ class BlueprintExecutor:
             logger.exception("recovery diagnosis failed for stage %s", spec.name)
             return None
 
-    async def _await_heal_approval(
-        self, spec: StageSpec, task: DevAITask, decision: dict[str, Any], _hev: Any
-    ) -> bool:
+    async def _await_heal_approval(self, spec: StageSpec, task: DevAITask, decision: dict[str, Any], _hev: Any) -> bool:
         """Raise a dynamic gate with the recovery proposal and wait for the
         human decision (same key the dashboard Approve/Reject writes)."""
         sm = self._deps.state_manager
@@ -853,9 +858,7 @@ class BlueprintExecutor:
             return True  # no decision surface (tests) — degrade open
         gate_name = f"heal-{spec.name}"
         gates = task.agent_context.setdefault("dynamic_gates", [])
-        if isinstance(gates, list) and not any(
-            isinstance(g, dict) and g.get("gate") == gate_name for g in gates
-        ):
+        if isinstance(gates, list) and not any(isinstance(g, dict) and g.get("gate") == gate_name for g in gates):
             gates.append(
                 {
                     "gate": gate_name,
@@ -864,7 +867,9 @@ class BlueprintExecutor:
                     "stage": spec.name,
                     "agent": self._HEAL_AGENT,
                     "intent": (task.intent or "")[:300],
-                    "error": str(decision.get("error") or task.agent_context.get(f"heal:{spec.name}", {}).get("error") or "")[:600],
+                    "error": str(
+                        decision.get("error") or task.agent_context.get(f"heal:{spec.name}", {}).get("error") or ""
+                    )[:600],
                     "diagnosis": str(decision.get("diagnosis") or "")[:800],
                     "plan_summary": str(decision.get("guidance") or "")[:800],
                     "questions": [q for q in [str(decision.get("user_message") or "").strip()] if q],
@@ -893,9 +898,7 @@ class BlueprintExecutor:
                 approved = str(verdict).lower() == "approved"
                 if approved:
                     task.transition(
-                        prior_state
-                        if prior_state not in (TaskState.PENDING, TaskState.QUEUED)
-                        else TaskState.RUNNING
+                        prior_state if prior_state not in (TaskState.PENDING, TaskState.QUEUED) else TaskState.RUNNING
                     )
                 return approved
             await asyncio.sleep(self._GATE_POLL_SECONDS)
@@ -955,9 +958,7 @@ class BlueprintExecutor:
             prior_state = task.state
             task.current_stage = spec.name
             task.transition(TaskState.AWAITING_APPROVAL)
-            gate_timeout = float(
-                getattr(self._deps.config, "pipeline_gate_timeout_seconds", 1800) or 1800
-            )
+            gate_timeout = float(getattr(self._deps.config, "pipeline_gate_timeout_seconds", 1800) or 1800)
             self._emit(
                 task,
                 _ev(
@@ -989,7 +990,9 @@ class BlueprintExecutor:
                 task.transition(TaskState.STAGE_FAILED)
                 self._emit(task, _ev(StageEventPhase.FAILED, error=task.error))
                 return False
-            task.transition(prior_state if prior_state not in (TaskState.PENDING, TaskState.QUEUED) else TaskState.RUNNING)
+            task.transition(
+                prior_state if prior_state not in (TaskState.PENDING, TaskState.QUEUED) else TaskState.RUNNING
+            )
 
         if str(decision).lower() == "rejected":
             task.error = f"rejected at gate {spec.name!r}"

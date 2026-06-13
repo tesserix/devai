@@ -216,10 +216,15 @@ class AgentAdapter(PipelineStage):
         # behavior instead of repeating the same failure.
         heal = task.agent_context.get(f"heal:{task.current_stage or self.name()}")
         if isinstance(heal, dict) and heal.get("guidance"):
+            # The raw failure text is attacker-influenceable (CI logs, tool
+            # output) — fence it as data. The diagnosis/guidance are the
+            # recovery agent's own output and are meant to be followed.
+            from devai.services.prompt_guard import wrap_untrusted
+
             state["requirements"] = (
                 f"{state.get('requirements') or task.intent}\n\n"
                 "## RECOVERY GUIDANCE — the previous attempt of this stage FAILED\n"
-                f"Failure: {heal.get('error', '')}\n"
+                f"{wrap_untrusted(str(heal.get('error', '')), 'failure output', limit=800)}\n"
                 f"Diagnosis: {heal.get('diagnosis', '')}\n"
                 f"Corrective instructions (follow these): {heal['guidance']}"
             )

@@ -3,13 +3,23 @@ display_name: Root Cause Analyst
 description: >-
   Synthesis role. Reads every specialist's findings plus the correlated
   finding set and produces a single ranked root-cause hypothesis with a
-  causal chain and confidence. Pure reasoning over prior outputs — calls
-  no tools, changes nothing.
+  causal chain and confidence. Primarily reasoning over prior outputs,
+  with read-only evidence tools (logs, events, metrics) to verify a
+  causal chain before committing to it — changes nothing.
 category: sre
 
 llm_provider: claude
 llm_model: claude-sonnet-4-20250514
 temperature: 0.2
+
+allowed_tools:
+  - k8s_get_events
+  - k8s_get_pod_status
+  - k8s_get_pod_logs
+  - prom_query
+  - prom_query_range
+  - obs_query_logs
+  - obs_query_metrics
 
 max_turns: 8
 timeout: 6m

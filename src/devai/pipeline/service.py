@@ -309,6 +309,7 @@ class PipelineService:
         # any stranded BEFORE the durable queue existed). enqueue_task is
         # idempotent, so all replicas booting at once converge to one enqueue.
         await self._reconcile_orphans()
+
         # Orphan reconciliation must be CONTINUOUS, not boot-only: a dispatch
         # can persist the snapshot and then fail the enqueue (Redis blip), or
         # an ack path can drop a run — leaving it 'pending' forever with an
@@ -791,6 +792,18 @@ class PipelineService:
         resumable = {"failed", "stage_failed", "agent_timeout", "cancelled"}
         if state not in resumable:
             raise ValueError(f"run is {state!r} — only failed/cancelled runs can be resumed")
+        # Rate limit: one resume per run per cooldown window. Beyond the SADD
+        # queue guard (which only dedupes concurrent enqueues), this stops a
+        # retry-happy client or script from re-burning the run's LLM budget
+        # in a tight loop — each resume re-executes real stages.
+        redis = getattr(self.state_manager, "redis", None)
+        if redis is not None:
+            try:
+                fresh = await redis.set(f"devai:pipeline:resume:{task_id}", "1", nx=True, ex=30)
+            except Exception:  # noqa: BLE001 — rate limiting must not block recovery when Redis hiccups
+                fresh = True
+            if not fresh:
+                raise ValueError(f"run {task_id!r} was resumed moments ago — wait before retrying")
 
         snapshot["state"] = "queued"
         snapshot["error"] = ""
@@ -944,8 +957,7 @@ class PipelineService:
                 {
                     **dyn,
                     "decision": decision,
-                    "pending": decision is None
-                    and TaskState(snapshot.get("state", "pending")) not in TERMINAL_STATES,
+                    "pending": decision is None and TaskState(snapshot.get("state", "pending")) not in TERMINAL_STATES,
                     "blueprint": snapshot.get("blueprint", ""),
                     "repo": snapshot.get("repo", ""),
                     "stages_done": len(completed),
@@ -1453,7 +1465,9 @@ class PipelineService:
                 a2a_envs = [e for e in envelopes if e.get("event_type") == "a2a"]
                 if a2a_envs:
                     for env in a2a_envs:
-                        pipe.rpush(a2a_key, json.dumps({k: v for k, v in env.items() if k != "event_type"}, default=str))
+                        pipe.rpush(
+                            a2a_key, json.dumps({k: v for k, v in env.items() if k != "event_type"}, default=str)
+                        )
                     pipe.ltrim(a2a_key, -self._A2A_CAP, -1)
                     pipe.expire(a2a_key, ttl)
                 await pipe.execute()

@@ -15,7 +15,6 @@ allowed_tools:
   - scm_get_repo_tree
   - scm_get_file_content
   - scm_create_issue
-  - scm_create_project_v2
 
 max_turns: 30
 timeout: 10m

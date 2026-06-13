@@ -114,8 +114,7 @@ _SPECIALISTS: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
         (
             "release_manager",
             "Release Manager",
-            "You own safe delivery. Challenge launches without rollback "
-            "plans, staged rollouts, or telemetry.",
+            "You own safe delivery. Challenge launches without rollback plans, staged rollouts, or telemetry.",
         ),
     ),
     (
@@ -200,9 +199,7 @@ class _BoardroomDebateStage(PipelineStage):
             self._role_chain = self.deps.llm
         return self._role_chain
 
-    async def _say(
-        self, system: str, prompt: str, *, max_tokens: int = 700, moderator: bool = False
-    ) -> str:
+    async def _say(self, system: str, prompt: str, *, max_tokens: int = 700, moderator: bool = False) -> str:
         """Panel seats run on the CHEAP boardroom model (many parallel
         debater calls); the moderator's syntheses and the decision document
         get the stronger one."""
@@ -287,9 +284,7 @@ class _BoardroomDebateStage(PipelineStage):
             logger.debug("boardroom recruitment skipped", exc_info=True)
             return []
 
-    def _a2a(
-        self, task: DevAITask, bag: list[dict[str, Any]], frm: str, to: str, subject: str, body: str
-    ) -> None:
+    def _a2a(self, task: DevAITask, bag: list[dict[str, Any]], frm: str, to: str, subject: str, body: str) -> None:
         bag.append(
             {
                 "id": uuid.uuid4().hex,
@@ -371,6 +366,12 @@ class _BoardroomDebateStage(PipelineStage):
             )
             if v
         )
+        if background:
+            # Repo-derived context (tech-stack detection reads repo files) —
+            # fence it so a poisoned README can't steer the whole boardroom.
+            from devai.services.prompt_guard import wrap_untrusted
+
+            background = wrap_untrusted(background, "prior-stage context", limit=1200)
 
         a2a_bag: list[dict[str, Any]] = list(ctx.get("a2a_messages") or [])
         self._a2a(
@@ -425,9 +426,7 @@ class _BoardroomDebateStage(PipelineStage):
                 new_positions[display] = text
                 transcript.append(f"[round {round_no}] {display}: {text}")
                 self._a2a(task, a2a_bag, _role, "boardroom", f"Round {round_no} position", text)
-                challenge = next(
-                    (ln for ln in text.splitlines() if ln.upper().startswith("CHALLENGE:")), ""
-                )
+                challenge = next((ln for ln in text.splitlines() if ln.upper().startswith("CHALLENGE:")), "")
                 if challenge and "none" not in challenge.lower()[:30]:
                     challenges_made = True
 
@@ -511,9 +510,7 @@ class _BoardroomDebateStage(PipelineStage):
             },
         )
 
-    async def _final_decision(
-        self, topic: str, positions: dict[str, str], consensus: bool
-    ) -> str:
+    async def _final_decision(self, topic: str, positions: dict[str, str], consensus: bool) -> str:
         digest = "\n\n".join(f"**{w}**: {t[:600]}" for w, t in positions.items())
         try:
             return await self._say(
@@ -534,9 +531,7 @@ class _BoardroomDebateStage(PipelineStage):
                 + "\n\n## Dissent\nUnresolved — review the positions above."
             )
 
-    async def _post_to_epic(
-        self, task: DevAITask, panel: list[tuple[str, str, str]], decision: str
-    ) -> None:
+    async def _post_to_epic(self, task: DevAITask, panel: list[tuple[str, str, str]], decision: str) -> None:
         scm = self.deps.scm
         if scm is None or not task.epic_issue_number or getattr(task, "dry_run", False):
             return
@@ -545,8 +540,7 @@ class _BoardroomDebateStage(PipelineStage):
                 task.repo,
                 task.epic_issue_number,
                 "## Boardroom decision\n\n"
-                f"_Panel: {', '.join(name for _, name, _ in panel)} — run `{task.id}`_\n\n"
-                + decision[:5000],
+                f"_Panel: {', '.join(name for _, name, _ in panel)} — run `{task.id}`_\n\n" + decision[:5000],
             )
         except Exception:  # noqa: BLE001 — minutes are best-effort
             logger.exception("boardroom: epic comment failed")

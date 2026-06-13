@@ -354,10 +354,32 @@ class DevAITask:
         Shallow merge — by convention, each stage writes a single
         role-namespaced key, so collisions only happen when a stage runs
         twice (retry loop), which is the right behavior (latest wins).
+
+        ``a2a_messages`` is the exception: stages snapshot the bag at
+        start, append their own traffic, and hand the list back — with
+        parallel-level siblings a plain replace would drop whatever a
+        sibling merged in the meantime (lost update). Union by message id
+        instead, preserving arrival order.
         """
-        if data:
-            self.agent_context.update(data)
-            self.updated_at = time.time()
+        if not data:
+            return
+        incoming = data.get("a2a_messages")
+        existing = self.agent_context.get("a2a_messages")
+        if isinstance(incoming, list) and isinstance(existing, list) and existing:
+            merged = list(existing)
+            seen = {m.get("id") for m in merged if isinstance(m, dict) and m.get("id")}
+            for msg in incoming:
+                mid = msg.get("id") if isinstance(msg, dict) else None
+                if mid and mid in seen:
+                    continue
+                if mid:
+                    seen.add(mid)
+                    merged.append(msg)
+                elif msg not in merged:  # id-less legacy messages: dedupe by value
+                    merged.append(msg)
+            data = {**data, "a2a_messages": merged}
+        self.agent_context.update(data)
+        self.updated_at = time.time()
 
     def record_event(self, event: StageEvent) -> None:
         self.stage_events.append(event)

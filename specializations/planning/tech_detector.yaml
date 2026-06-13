@@ -11,10 +11,9 @@ llm_provider: gemini
 llm_model: gemini-3.1-pro-preview
 
 allowed_tools:
-  - file_tree
+  - scm_get_repo_tree
+  - list_directory
   - read_file
-  - repo_profile
-  - detect_repo_state
 
 max_turns: 20
 timeout: 5m

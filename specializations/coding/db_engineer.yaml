@@ -15,7 +15,7 @@ allowed_tools:
   - scm_get_repo_tree
   - scm_get_file_content
   - scm_commit_file
-  - validate_sql
+  - validate_lint
 
 max_turns: 80
 timeout: 10m

@@ -10,11 +10,11 @@ llm_provider: claude
 llm_model: claude-sonnet-4-20250514
 
 allowed_tools:
-  - kubectl_rollout_restart
-  - kubectl_scale
+  - k8s_get_pod_status
+  - k8s_get_events
+  - k8s_get_deployments
   - argocd_sync
-  - pagerduty_create_incident
-  - slack_post_message
+  - scm_create_issue
 
 max_turns: 30
 timeout: 10m
