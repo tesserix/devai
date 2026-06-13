@@ -44,7 +44,7 @@ jobs:
           # The image-build workflows. Any that were triggered for this SHA
           # (path-filtered) must reach a terminal state before we read :latest,
           # so we never tag a stale pre-build image.
-          BUILD_WFS="ci.yaml runner-build.yaml dashboard-build.yaml sre-build.yaml sre-dashboard-build.yaml auth-bff-build.yaml"
+          BUILD_WFS="ci.yaml runner-build.yaml dashboard-build.yaml sre-build.yaml sre-dashboard-build.yaml auth-bff-build.yaml mcpbridge-build.yaml"
           SHA="${{ github.sha }}"
           for i in $(seq 1 60); do   # up to ~30 min
             pending=0
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
-          IMAGES="devai devai-sre devai-dashboard devai-sre-dashboard devai-auth-bff devai-runner"
+          IMAGES="devai devai-sre devai-dashboard devai-sre-dashboard devai-auth-bff devai-runner devai-mcp-bridge"
           for img in $IMAGES; do
             REPO="${REGISTRY}/${OWNER_REPO}/${img}"
             if crane manifest "${REPO}:latest" >/dev/null 2>&1; then

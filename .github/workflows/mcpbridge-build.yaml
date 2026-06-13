@@ -107,17 +107,10 @@ jobs:
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
           cache-to: type=registry,ref=${{ steps.cache.outputs.ref }},mode=max
 
-      - name: Get GKE credentials
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
-        uses: google-github-actions/get-gke-credentials@v3
-        with:
-          cluster_name: ${{ env.GKE_CLUSTER }}
-          location: ${{ env.GKE_REGION }}
-          project_id: ${{ env.GCP_PROJECT_ID }}
-
-      - name: Restart bridge deployment
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
-        run: kubectl rollout restart deployment/devai-mcp-bridge -n devai || true
+      # No rollout-restart here: ensure-image-tags re-tags :latest as
+      # main-<sha> for the bridge too, and Kargo's prod stage sets the
+      # devai-mcp-bridge ArgoCD app's image.tag to that sha (same as the other
+      # devai images). The WIF auth above stays for the Trivy/security steps.
 
       - name: Trivy vulnerability scan (SARIF)
         if: github.event_name != 'pull_request'
