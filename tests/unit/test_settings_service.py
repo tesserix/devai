@@ -220,3 +220,48 @@ async def test_upsert_writes_audit_with_no_secret_values():
     assert "me@example.com" in flat
     assert "sk-ant-SECRET" not in flat  # value never audited
     assert "anthropic_api_key" in flat  # field NAME is fine
+
+
+def test_resave_merges_prefs_and_keeps_other_provider_keys():
+    """Adding OpenAI after Anthropic must keep the Anthropic key AND the
+    earlier non-secret prefs (the exact bug the user hit)."""
+    svc = _svc()
+
+    async def go():
+        # Day 1: Anthropic.
+        await svc.upsert_connector(
+            scope=Scope.USER, scope_id="u", connector_key="llm", provider="anthropic",
+            prefs={"claude_model": "claude-opus-4-8"},
+            secret_values={"anthropic_api_key": "ANT"}, updated_by="u",
+        )
+        # Day 2: OpenAI (same default instance).
+        c = await svc.upsert_connector(
+            scope=Scope.USER, scope_id="u", connector_key="llm", provider="openai",
+            prefs={"openai_model": "gpt-4.1"},
+            secret_values={"openai_api_key": "OAI"}, updated_by="u",
+        )
+        # Both keys survive.
+        assert set(c.secret_refs) == {"anthropic_api_key", "openai_api_key"}
+        # The earlier non-secret pref is NOT dropped by the second save.
+        assert c.prefs["claude_model"] == "claude-opus-4-8"
+        assert c.prefs["openai_model"] == "gpt-4.1"
+
+    asyncio.run(go())
+
+
+def test_clear_one_secret_field_keeps_the_rest():
+    svc = _svc()
+
+    async def go():
+        await svc.upsert_connector(
+            scope=Scope.USER, scope_id="u", connector_key="llm", provider="openai",
+            secret_values={"anthropic_api_key": "ANT", "openai_api_key": "OAI"}, updated_by="u",
+        )
+        ok = await svc.clear_secret_field(Scope.USER, "u", "llm", "anthropic_api_key", actor="u")
+        assert ok is True
+        rows = await svc.list_connectors(Scope.USER, "u")
+        assert set(rows[0].secret_refs) == {"openai_api_key"}  # only anthropic removed
+        # clearing a field that isn't set is a no-op
+        assert await svc.clear_secret_field(Scope.USER, "u", "llm", "groq_api_key", actor="u") is False
+
+    asyncio.run(go())

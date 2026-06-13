@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-airtable-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: database
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: token
+    mcp.devai.io/native: http
+spec:
+  name: catalog-airtable-mcp
+  displayName: Airtable
+  description: "Structured data \u2014 bases, tables and records in Airtable."
+  endpoint: https://mcp.airtable.com/mcp
+  transport: streamable-http
+  authMode: header
+  catalog: true
+  connect:
+    authKind: token
+    native: http
+    credential: Airtable personal access token
+    docs: https://airtable.com

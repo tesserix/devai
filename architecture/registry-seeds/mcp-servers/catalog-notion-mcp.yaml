@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-notion-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: docs
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: oauth
+    mcp.devai.io/native: http
+spec:
+  name: catalog-notion-mcp
+  displayName: Notion
+  description: Search, read and update Notion pages and databases.
+  endpoint: https://mcp.notion.com/mcp
+  transport: streamable-http
+  authMode: oauth
+  catalog: true
+  connect:
+    authKind: oauth
+    native: http
+    credential: Notion OAuth
+    docs: https://developers.notion.com/docs/mcp

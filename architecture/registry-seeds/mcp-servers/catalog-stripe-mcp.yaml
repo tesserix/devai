@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-stripe-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: payments
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: token
+    mcp.devai.io/native: http
+spec:
+  name: catalog-stripe-mcp
+  displayName: Stripe
+  description: Stripe customers, payments, invoices and balance.
+  endpoint: https://mcp.stripe.com
+  transport: streamable-http
+  authMode: header
+  catalog: true
+  connect:
+    authKind: token
+    native: http
+    credential: Stripe restricted API key
+    docs: https://docs.stripe.com/mcp

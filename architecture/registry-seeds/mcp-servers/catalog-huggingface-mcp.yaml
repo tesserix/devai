@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-huggingface-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: ai
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: token
+    mcp.devai.io/native: http
+spec:
+  name: catalog-huggingface-mcp
+  displayName: Hugging Face
+  description: Models, datasets, Spaces and inference on the Hugging Face Hub.
+  endpoint: https://hf.co/mcp
+  transport: streamable-http
+  authMode: header
+  catalog: true
+  connect:
+    authKind: token
+    native: http
+    credential: Hugging Face access token
+    docs: https://huggingface.co/settings/mcp

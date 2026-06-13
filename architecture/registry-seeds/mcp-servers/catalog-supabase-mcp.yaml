@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-supabase-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: database
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: token
+    mcp.devai.io/native: http
+spec:
+  name: catalog-supabase-mcp
+  displayName: Supabase
+  description: Supabase Postgres, auth, storage and edge functions.
+  endpoint: https://mcp.supabase.com/mcp
+  transport: streamable-http
+  authMode: header
+  catalog: true
+  connect:
+    authKind: token
+    native: http
+    credential: Supabase personal access token
+    docs: https://supabase.com/docs/guides/getting-started/mcp

@@ -200,6 +200,12 @@ def discover(
         return out
     for rec in records:
         spec = spec_from_record(rec)
+        # Catalog templates (marketplace browse-and-connect entries) are NOT
+        # shared downstream legs — they're per-user connect targets. The hub
+        # must not auto-dial them (no shared credential, per-user endpoint).
+        # They reach a user only after they connect (mcphub/personal.py).
+        if spec.labels.get("mcp.devai.io/catalog") == "true":
+            continue
         if not spec.is_servable():
             logger.info(
                 "mcphub: skipping non-servable downstream %r (transport=%s endpoint=%s)",

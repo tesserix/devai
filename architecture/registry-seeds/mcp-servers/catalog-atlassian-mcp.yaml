@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-atlassian-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: ticketing
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: oauth
+    mcp.devai.io/native: http
+spec:
+  name: catalog-atlassian-mcp
+  displayName: Jira & Confluence (Atlassian)
+  description: Jira issues/sprints and Confluence pages (Atlassian Rovo).
+  endpoint: https://mcp.atlassian.com/v1/sse
+  transport: streamable-http
+  authMode: oauth
+  catalog: true
+  connect:
+    authKind: oauth
+    native: http
+    credential: Atlassian OAuth
+    docs: https://www.atlassian.com/platform/remote-mcp-server

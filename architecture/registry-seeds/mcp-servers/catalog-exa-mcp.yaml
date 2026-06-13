@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-exa-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: search
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: token
+    mcp.devai.io/native: http
+spec:
+  name: catalog-exa-mcp
+  displayName: Exa Search
+  description: Neural web search and content retrieval.
+  endpoint: https://mcp.exa.ai/mcp
+  transport: streamable-http
+  authMode: header
+  catalog: true
+  connect:
+    authKind: token
+    native: http
+    credential: Exa API key
+    docs: https://docs.exa.ai

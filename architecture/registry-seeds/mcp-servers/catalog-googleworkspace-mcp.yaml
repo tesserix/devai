@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-googleworkspace-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: productivity
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: oauth
+    mcp.devai.io/native: http
+spec:
+  name: catalog-googleworkspace-mcp
+  displayName: Gmail & Google Calendar
+  description: Gmail search/compose and Google Calendar events (Google Workspace).
+  endpoint: https://mcp.google.com/workspace
+  transport: streamable-http
+  authMode: oauth
+  catalog: true
+  connect:
+    authKind: oauth
+    native: http
+    credential: Google OAuth
+    docs: https://developers.google.com

@@ -1,0 +1,31 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-playwright-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: testing
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: none
+    mcp.devai.io/native: stdio
+spec:
+  name: catalog-playwright-mcp
+  displayName: Playwright (browser)
+  description: "Drive a real browser \u2014 navigate, fill, assert, screenshot for E2E flows."
+  endpoint: http://devai-mcp-bridge.devai.svc.cluster.local:8099/bridge/playwright
+  transport: streamable-http
+  authMode: none
+  catalog: true
+  connect:
+    authKind: none
+    native: stdio
+    credential: none
+    docs: https://github.com/microsoft/playwright-mcp
+  stdio:
+    command: npx
+    args:
+    - -y
+    - '@playwright/mcp@latest'
+    - --headless

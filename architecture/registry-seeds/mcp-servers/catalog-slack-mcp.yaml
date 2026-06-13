@@ -1,0 +1,33 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-slack-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: messaging
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: env
+    mcp.devai.io/native: stdio
+spec:
+  name: catalog-slack-mcp
+  displayName: Slack
+  description: "Post/read Slack messages, list channels, react \u2014 agent notifications."
+  endpoint: http://devai-mcp-bridge.devai.svc.cluster.local:8099/bridge/slack
+  transport: streamable-http
+  authMode: env
+  catalog: true
+  connect:
+    authKind: env
+    native: stdio
+    credential: "Slack bot token (xoxb-\u2026)"
+    docs: https://github.com/modelcontextprotocol/servers/tree/main/src/slack
+  stdio:
+    command: npx
+    args:
+    - -y
+    - '@modelcontextprotocol/server-slack'
+    env:
+      SLACK_BOT_TOKEN: '{secret}'
+      SLACK_TEAM_ID: '{prefs:team_id}'

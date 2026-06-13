@@ -1,0 +1,30 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-fetch-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: search
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: none
+    mcp.devai.io/native: stdio
+spec:
+  name: catalog-fetch-mcp
+  displayName: Fetch (web pages)
+  description: Fetch a URL and return clean, readable content for the model.
+  endpoint: http://devai-mcp-bridge.devai.svc.cluster.local:8099/bridge/fetch
+  transport: streamable-http
+  authMode: none
+  catalog: true
+  connect:
+    authKind: none
+    native: stdio
+    credential: none
+    docs: https://github.com/modelcontextprotocol/servers/tree/main/src/fetch
+  stdio:
+    command: npx
+    args:
+    - -y
+    - '@modelcontextprotocol/server-fetch'

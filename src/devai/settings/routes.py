@@ -273,20 +273,31 @@ def _mcp_catalog_entry(rec: Any) -> dict[str, Any]:
     labels = meta.get("labels", {}) if isinstance(meta, dict) else {}
     tools = raw.get("tools") if isinstance(raw, dict) else None
     endpoint = (raw.get("endpoint") if isinstance(raw, dict) else "") or getattr(rec, "url", "") or ""
-    # First-party DevAI servers are always-on platform infra; flag them so the
-    # UI shows "built-in" instead of a Connect button.
-    is_builtin = "devai.svc.cluster.local" in str(endpoint) or labels.get("devai.io/source") == "devai"
+    connect = raw.get("connect", {}) if isinstance(raw, dict) else {}
+    is_catalog = labels.get("mcp.devai.io/catalog") == "true" or bool(raw.get("catalog"))
+    # First-party DevAI servers are always-on platform infra (built-in). Catalog
+    # templates are user-connectable. Everything else (a real shared external
+    # leg) is connectable too.
+    is_builtin = not is_catalog and (
+        "devai.svc.cluster.local" in str(endpoint) or labels.get("devai.io/source") == "devai"
+    )
     return {
         "name": getattr(rec, "name", ""),
         "display_name": (raw.get("displayName") if isinstance(raw, dict) else "") or getattr(rec, "name", ""),
         "description": getattr(rec, "description", "") or (raw.get("description", "") if isinstance(raw, dict) else ""),
         "endpoint": str(endpoint),
         "auth_mode": (raw.get("authMode") if isinstance(raw, dict) else "") or "none",
-        "transport": getattr(rec, "type", "") or "streamable-http",
+        "transport": getattr(rec, "type", "") or (raw.get("transport") if isinstance(raw, dict) else "") or "streamable-http",
         "category": labels.get("devai.io/category", ""),
         "tools": list(tools) if isinstance(tools, list) else [],
         "tool_count": len(tools) if isinstance(tools, list) else 0,
         "builtin": bool(is_builtin),
+        "catalog": bool(is_catalog),
+        # Connect hints for the UI: how to authenticate + native transport.
+        "auth_kind": connect.get("authKind", "") or labels.get("mcp.devai.io/auth-kind", ""),
+        "native": connect.get("native", "") or labels.get("mcp.devai.io/native", ""),
+        "credential": connect.get("credential", ""),
+        "docs": connect.get("docs", ""),
     }
 
 
@@ -312,6 +323,26 @@ async def mcp_marketplace(request: Request) -> dict[str, Any]:
         "connectable": [e for e in entries if not e["builtin"]],
         "builtin": [e for e in entries if e["builtin"]],
     }
+
+
+@router.delete("/connectors/{scope}/{scope_id}/{connector_key}/secrets/{field_key}")
+async def clear_secret(
+    scope: str, scope_id: str, connector_key: str, field_key: str, request: Request
+) -> dict[str, str]:
+    """Remove ONE secret field (e.g. just the Anthropic key) from a connector."""
+    principal = await _require_principal(request)
+    svc = _svc(request)
+    try:
+        scope_enum = Scope(scope)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid scope") from None
+    sid = "" if scope_id == "-" else scope_id
+    _authorize(principal, scope_enum, sid)
+    instance_id = request.query_params.get("instance_id", "default")
+    ok = await svc.clear_secret_field(
+        scope_enum, sid, connector_key, field_key, instance_id, actor=principal.email
+    )
+    return {"status": "cleared" if ok else "not_found"}
 
 
 @router.delete("/connectors/{scope}/{scope_id}/{connector_key}")

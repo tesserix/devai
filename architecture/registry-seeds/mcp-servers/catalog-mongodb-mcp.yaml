@@ -1,0 +1,32 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-mongodb-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: database
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: env
+    mcp.devai.io/native: stdio
+spec:
+  name: catalog-mongodb-mcp
+  displayName: MongoDB
+  description: Query MongoDB collections and indexes.
+  endpoint: http://devai-mcp-bridge.devai.svc.cluster.local:8099/bridge/mongodb
+  transport: streamable-http
+  authMode: env
+  catalog: true
+  connect:
+    authKind: env
+    native: stdio
+    credential: MongoDB connection string
+    docs: https://github.com/mongodb-js/mongodb-mcp-server
+  stdio:
+    command: npx
+    args:
+    - -y
+    - mongodb-mcp-server
+    env:
+      MDB_MCP_CONNECTION_STRING: '{secret}'

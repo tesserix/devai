@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-make-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: automation
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: oauth
+    mcp.devai.io/native: http
+spec:
+  name: catalog-make-mcp
+  displayName: Make (Integromat)
+  description: Trigger Make scenarios across 2,000+ apps.
+  endpoint: https://mcp.make.com/mcp
+  transport: streamable-http
+  authMode: oauth
+  catalog: true
+  connect:
+    authKind: oauth
+    native: http
+    credential: Make OAuth
+    docs: https://www.make.com

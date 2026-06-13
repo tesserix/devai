@@ -182,8 +182,18 @@ class SettingsService:
             )
             secret_refs[fkey] = ref.name
 
-        # Non-secret prefs (drop any secret-keyed values that slipped in).
-        clean_prefs = {k: v for k, v in (prefs or {}).items() if k not in secret_field_keys}
+        # Non-secret prefs: MERGE over the existing instance, don't replace.
+        # A connector like LLM holds per-provider config (claude_model,
+        # openai_model, …); saving one provider must not drop the others'
+        # settings. New non-empty values win; unset fields keep their prior
+        # value. (Secret-keyed values are never persisted to prefs.)
+        clean_prefs = dict(existing.prefs) if existing else {}
+        for k, v in (prefs or {}).items():
+            if k in secret_field_keys:
+                continue
+            if v in ("", None):
+                continue
+            clean_prefs[k] = v
 
         connector = Connector(
             scope=scope,
@@ -246,6 +256,40 @@ class SettingsService:
         except Exception:
             logger.exception("settings: DB delete failed")
             return self._mem.pop(key, None) is not None
+
+    async def clear_secret_field(
+        self,
+        scope: Scope,
+        scope_id: str,
+        connector_key: str,
+        field_key: str,
+        instance_id: str = "default",
+        *,
+        actor: str = "",
+    ) -> bool:
+        """Remove ONE secret field from a connector (e.g. drop just the
+        Anthropic key) without touching the rest of the connector.
+
+        Deletes the backend secret and drops its ref; the connector and its
+        other secrets/prefs stay. Returns False when the field isn't set.
+        """
+        existing = await self._get(scope, scope_id, connector_key, instance_id)
+        if not existing or field_key not in existing.secret_refs:
+            return False
+        ref_name = existing.secret_refs.pop(field_key)
+        if self._secrets is not None:
+            try:
+                await self._secrets.delete_secret(ref_name)
+            except Exception:  # noqa: BLE001 — drop the ref regardless; orphan SM version is harmless
+                logger.warning("settings: secret delete failed for %s", ref_name)
+        await self._save_row(existing)
+        await self._audit(
+            action="settings.connector.secret.clear",
+            actor=actor or scope_id,
+            connector=existing,
+            details={"cleared_field": field_key, "deleted_secret_ref": ref_name},
+        )
+        return True
 
     async def _audit(self, *, action: str, actor: str, connector: Connector, details: dict[str, Any]) -> None:
         """Write a queryable audit_log entry for a settings change.

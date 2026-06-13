@@ -244,6 +244,13 @@ export const api = {
       { method: "DELETE" }
     ),
 
+  // Remove ONE secret field (e.g. just the Anthropic key) from a connector.
+  clearSecret: (scope: string, scopeId: string, connectorKey: string, fieldKey: string, instanceId = "default") =>
+    apiFetch<{ status: string }>(
+      `/settings/connectors/${scope}/${encodeURIComponent(scopeId || "-")}/${connectorKey}/secrets/${fieldKey}?instance_id=${encodeURIComponent(instanceId)}`,
+      { method: "DELETE" }
+    ),
+
   getTrialStatus: () =>
     apiFetch<{
       trial_enabled: boolean;
@@ -1143,6 +1150,11 @@ export interface McpMarketplaceEntry {
   tools: string[];
   tool_count: number;
   builtin: boolean;
+  catalog: boolean;
+  auth_kind: string; // oauth | token | env | none
+  native: string; // http | stdio
+  credential: string;
+  docs: string;
 }
 
 // ── Analytics (GET /api/analytics/*) ──────────────────────────────────

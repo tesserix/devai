@@ -1,0 +1,32 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-sqlite-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: database
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: env
+    mcp.devai.io/native: stdio
+spec:
+  name: catalog-sqlite-mcp
+  displayName: SQLite
+  description: Query and explore a SQLite database.
+  endpoint: http://devai-mcp-bridge.devai.svc.cluster.local:8099/bridge/sqlite
+  transport: streamable-http
+  authMode: env
+  catalog: true
+  connect:
+    authKind: env
+    native: stdio
+    credential: Path to a SQLite file (in the bridge workspace)
+    docs: https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite
+  stdio:
+    command: npx
+    args:
+    - -y
+    - '@modelcontextprotocol/server-sqlite'
+    env:
+      SQLITE_DB_PATH: '{prefs:db_path}'

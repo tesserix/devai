@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: catalog-zapier-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: catalog
+    devai.io/category: automation
+    mcp.devai.io/catalog: 'true'
+    mcp.devai.io/auth-kind: oauth
+    mcp.devai.io/native: http
+spec:
+  name: catalog-zapier-mcp
+  displayName: Zapier (8,000+ apps)
+  description: "The universal bridge \u2014 one connection reaches 8,000+ apps (Lucidchart, Bolt, Lovable,\
+    \ Calendly, Airtable, Trello, and the long tail) via Zapier actions."
+  endpoint: https://mcp.zapier.com/api/mcp/mcp
+  transport: streamable-http
+  authMode: oauth
+  catalog: true
+  connect:
+    authKind: oauth
+    native: http
+    credential: "Zapier OAuth \u2014 then enable the actions/apps you want exposed"
+    docs: https://zapier.com/mcp

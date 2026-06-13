@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, KeyRound, Loader2, Plus, Save, Store, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, KeyRound, Loader2, Pencil, Plus, Save, Store, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/confirm-dialog";
 import {
   api,
@@ -195,6 +195,24 @@ function McpMarketplace({ onConnect }: { onConnect: (e: McpMarketplaceEntry) => 
 
   const connectable = data?.connectable ?? [];
   const builtin = data?.builtin ?? [];
+  const total = connectable.length + builtin.length;
+
+  const [query, setQuery] = useState("");
+  const [cat, setCat] = useState("all");
+  const categories = useMemo(() => {
+    const s = new Set<string>();
+    connectable.forEach((e) => e.category && s.add(e.category));
+    return ["all", ...Array.from(s).sort()];
+  }, [connectable]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return connectable.filter(
+      (e) =>
+        (cat === "all" || e.category === cat) &&
+        (!q || `${e.display_name} ${e.name} ${e.description} ${e.category}`.toLowerCase().includes(q))
+    );
+  }, [connectable, query, cat]);
 
   return (
     <div className="panel p-5">
@@ -203,11 +221,11 @@ function McpMarketplace({ onConnect }: { onConnect: (e: McpMarketplaceEntry) => 
           <div className="flex items-center gap-2">
             <Store className="w-4 h-4 text-indigo-400" />
             <h2 className="text-[var(--ink-50)] font-medium">MCP Marketplace</h2>
-            {data && <span className="pill text-xs">{connectable.length + builtin.length} servers</span>}
+            {data && <span className="pill text-xs">{total} apps</span>}
           </div>
           <p className="text-sm text-[var(--ink-300)] mt-1">
-            Browse every MCP server in the registry and connect your own — tools they expose become
-            available to your agents and chat.
+            Connect popular tools — GitHub, Jira, Notion, Slack, Figma, draw.io, Postgres and more.
+            Their tools become available to your agents and chat. Credentials stay in your own scope.
           </p>
         </div>
         <ChevronDown className={`w-4 h-4 text-[var(--ink-400)] transition-transform ${open ? "rotate-180" : ""}`} />
@@ -221,29 +239,45 @@ function McpMarketplace({ onConnect }: { onConnect: (e: McpMarketplaceEntry) => 
             </div>
           )}
 
-          {!loading && connectable.length > 0 && (
+          {!loading && total > 0 && (
             <>
-              <div className="label-eyebrow mb-2">Connect your own</div>
-              <div className="grid sm:grid-cols-2 gap-3">
-                {connectable.map((e) => (
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <input
+                  className="field text-sm flex-1 min-w-[180px]"
+                  placeholder="Search apps…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+                <select className="field text-sm" value={cat} onChange={(e) => setCat(e.target.value)}>
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c === "all" ? "All categories" : c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="label-eyebrow mb-2">Connect your own ({filtered.length})</div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filtered.map((e) => (
                   <McpCard key={e.name} entry={e} onConnect={() => onConnect(e)} />
                 ))}
               </div>
+
+              {builtin.length > 0 && (
+                <>
+                  <div className="label-eyebrow mb-2 mt-5">Built-in (always on)</div>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {builtin.map((e) => (
+                      <McpCard key={e.name} entry={e} builtin />
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
 
-          {!loading && builtin.length > 0 && (
-            <>
-              <div className="label-eyebrow mb-2 mt-5">Built-in (always on)</div>
-              <div className="grid sm:grid-cols-2 gap-3">
-                {builtin.map((e) => (
-                  <McpCard key={e.name} entry={e} builtin />
-                ))}
-              </div>
-            </>
-          )}
-
-          {!loading && connectable.length === 0 && builtin.length === 0 && (
+          {!loading && total === 0 && (
             <p className="text-sm text-[var(--ink-400)]">No MCP servers in the registry yet.</p>
           )}
         </div>
@@ -251,6 +285,13 @@ function McpMarketplace({ onConnect }: { onConnect: (e: McpMarketplaceEntry) => 
     </div>
   );
 }
+
+const AUTH_BADGE: Record<string, { label: string; cls: string }> = {
+  oauth: { label: "OAuth", cls: "text-sky-400" },
+  token: { label: "API key", cls: "text-amber-400" },
+  env: { label: "Secret", cls: "text-amber-400" },
+  none: { label: "No auth", cls: "text-emerald-400" },
+};
 
 function McpCard({
   entry,
@@ -261,6 +302,7 @@ function McpCard({
   onConnect?: () => void;
   builtin?: boolean;
 }) {
+  const auth = AUTH_BADGE[entry.auth_kind] ?? null;
   return (
     <div className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-raised)] p-3 flex flex-col">
       <div className="flex items-start justify-between gap-2">
@@ -269,8 +311,10 @@ function McpCard({
       </div>
       <p className="text-xs text-[var(--ink-300)] mt-1 line-clamp-3 flex-1">{entry.description}</p>
       <div className="flex items-center justify-between mt-2">
-        <span className="text-[10px] text-[var(--ink-400)]">
-          {entry.tool_count} tool{entry.tool_count === 1 ? "" : "s"} · {entry.auth_mode}
+        <span className="text-[10px] text-[var(--ink-400)] flex items-center gap-1.5">
+          {auth && <span className={auth.cls}>{auth.label}</span>}
+          {entry.native === "stdio" && <span title="runs via the MCP bridge">· bridge</span>}
+          {builtin && entry.tool_count > 0 && <span>· {entry.tool_count} tools</span>}
         </span>
         {builtin ? (
           <span className="text-[10px] text-emerald-400 flex items-center gap-1">
@@ -285,6 +329,19 @@ function McpCard({
     </div>
   );
 }
+
+// LLM secret field → the provider it belongs to, so the single LLM connector
+// renders one editable row per provider key you've added.
+const LLM_KEY_TO_PROVIDER: Record<string, string> = {
+  anthropic_api_key: "anthropic",
+  openai_api_key: "openai",
+  vertex_api_key: "vertex_gemini",
+  llm_gateway_api_key: "gateway",
+  groq_api_key: "groq",
+  openrouter_api_key: "openrouter",
+};
+
+type EditTarget = { provider?: string; instanceId: string; values: Record<string, string> } | null;
 
 function ConnectorCard({
   spec,
@@ -306,6 +363,77 @@ function ConnectorCard({
   prefill?: { provider?: string; instanceId?: string; values?: Record<string, string> };
 }) {
   const confirm = useConfirm();
+  const [editTarget, setEditTarget] = useState<EditTarget>(null);
+
+  // Build the list of rows to show. For LLM, expand the single connector into
+  // one row per provider that has a key set (so "2 secrets" reads as the two
+  // providers you actually added). For everything else, one row per instance.
+  const rows: {
+    key: string;
+    scope: string;
+    scopeId: string;
+    instanceId: string;
+    label: string;
+    badge: string;
+    isPrimary: boolean;
+    provider?: string;
+    prefs: Record<string, string>;
+    onRemove: () => Promise<void>;
+  }[] = [];
+
+  for (const c of configured) {
+    if (spec.key === "llm") {
+      const providersWithKeys = c.secrets_set
+        .map((k) => ({ field: k, provider: LLM_KEY_TO_PROVIDER[k] }))
+        .filter((p) => p.provider);
+      const list = providersWithKeys.length
+        ? providersWithKeys
+        : [{ field: "", provider: c.provider }];
+      for (const p of list) {
+        rows.push({
+          key: `${c.instance_id}:${p.provider}`,
+          scope: c.scope,
+          scopeId: c.scope_id,
+          instanceId: c.instance_id,
+          label: p.provider || c.provider || "llm",
+          badge: p.field ? "key set" : "configured",
+          isPrimary: (c.provider || "") === p.provider,
+          provider: p.provider,
+          prefs: c.prefs as Record<string, string>,
+          onRemove: async () => {
+            if (p.field) {
+              await api.clearSecret(c.scope, c.scope_id, "llm", p.field, c.instance_id);
+            } else {
+              await api.deleteConnector(c.scope, c.scope_id, c.connector_key, c.instance_id);
+            }
+            onDeleted();
+          },
+        });
+      }
+    } else {
+      rows.push({
+        key: `${c.scope}:${c.scope_id}:${c.instance_id}`,
+        scope: c.scope,
+        scopeId: c.scope_id,
+        instanceId: c.instance_id,
+        label: c.provider || c.instance_id,
+        badge: c.secrets_set.length ? `${c.secrets_set.length} secret(s) set` : "configured",
+        isPrimary: false,
+        provider: c.provider,
+        prefs: c.prefs as Record<string, string>,
+        onRemove: async () => {
+          await api.deleteConnector(c.scope, c.scope_id, c.connector_key, c.instance_id);
+          onDeleted();
+        },
+      });
+    }
+  }
+
+  const openAdd = () => {
+    setEditTarget(null);
+    onEdit();
+  };
+
   return (
     <div className="panel p-5">
       <div className="flex items-start justify-between gap-4">
@@ -313,62 +441,77 @@ function ConnectorCard({
           <div className="flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-indigo-400" />
             <h2 className="text-[var(--ink-50)] font-medium">{spec.label}</h2>
-            {configured.length > 0 && (
-              <span className="pill text-xs">{configured.length} configured</span>
-            )}
+            {rows.length > 0 && <span className="pill text-xs">{rows.length} configured</span>}
           </div>
           <p className="text-sm text-[var(--ink-300)] mt-1">{spec.description}</p>
         </div>
-        <button className="btn-secondary text-sm flex items-center gap-1.5 shrink-0" onClick={onEdit}>
-          <Plus className="w-3.5 h-3.5" /> {spec.multi ? "Add" : "Configure"}
+        <button className="btn-secondary text-sm flex items-center gap-1.5 shrink-0" onClick={openAdd}>
+          <Plus className="w-3.5 h-3.5" /> {spec.multi || spec.key === "llm" ? "Add" : "Configure"}
         </button>
       </div>
 
-      {configured.length > 0 && (
+      {rows.length > 0 && (
         <div className="mt-4 space-y-2">
-          {configured.map((c) => (
+          {rows.map((r) => (
             <div
-              key={`${c.scope}:${c.scope_id}:${c.instance_id}`}
+              key={r.key}
               className="flex items-center justify-between text-sm rounded-md px-3 py-2 bg-[var(--surface-raised)]"
             >
-              <div className="flex items-center gap-3">
-                <span className="pill text-xs capitalize">{c.scope}</span>
-                <span className="text-[var(--ink-100)]">{c.provider || c.instance_id}</span>
-                {c.secrets_set.length > 0 && (
-                  <span className="text-xs text-emerald-400 flex items-center gap-1">
-                    <Check className="w-3 h-3" /> {c.secrets_set.length} secret(s) set
-                  </span>
-                )}
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="pill text-xs capitalize">{r.scope}</span>
+                <span className="text-[var(--ink-100)] truncate">{r.label}</span>
+                {r.isPrimary && <span className="pill text-[10px] text-sky-400">primary</span>}
+                <span className="text-xs text-emerald-400 flex items-center gap-1 shrink-0">
+                  <Check className="w-3 h-3" /> {r.badge}
+                </span>
               </div>
-              <button
-                className="text-[var(--ink-400)] hover:text-red-400"
-                title="Delete"
-                aria-label={`Delete ${spec.label} (${c.scope})`}
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: `Delete ${spec.label} connector?`,
-                    message: "This removes the connector and its stored credentials. This can't be undone.",
-                    confirmLabel: "Delete",
-                    tone: "danger",
-                  });
-                  if (!ok) return;
-                  await api.deleteConnector(c.scope, c.scope_id, c.connector_key, c.instance_id);
-                  onDeleted();
-                }}
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  className="text-[var(--ink-400)] hover:text-indigo-300 p-1"
+                  title="Edit / update"
+                  aria-label={`Edit ${spec.label} ${r.label}`}
+                  onClick={() => {
+                    onEdit(); // ensure this card's form area is the open one
+                    setEditTarget({ provider: r.provider, instanceId: r.instanceId, values: { ...r.prefs } });
+                  }}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  className="text-[var(--ink-400)] hover:text-red-400 p-1"
+                  title="Remove"
+                  aria-label={`Remove ${spec.label} ${r.label}`}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `Remove ${r.label}?`,
+                      message:
+                        spec.key === "llm"
+                          ? "This deletes this provider's stored key. Your other providers stay."
+                          : "This removes the connector and its stored credentials. This can't be undone.",
+                      confirmLabel: "Remove",
+                      tone: "danger",
+                    });
+                    if (!ok) return;
+                    await r.onRemove();
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {isEditing && (
+      {(isEditing || editTarget) && (
         <ConnectorForm
           spec={spec}
           secretsWritable={secretsWritable}
-          onSaved={onSaved}
-          prefill={prefill}
+          onSaved={() => {
+            setEditTarget(null);
+            onSaved();
+          }}
+          prefill={editTarget ?? prefill}
         />
       )}
     </div>
