@@ -426,6 +426,12 @@ class Settings(BaseSettings):
     # --- Monitoring ---
     prometheus_url: str = "http://prometheus-server.monitoring.svc.cluster.local:80"
     grafana_url: str = "http://grafana.monitoring.svc.cluster.local:80"
+    # Browser-facing Grafana base (for analytics "open in Grafana" trace deep
+    # links). Empty → the dashboard hides the link. The Tempo datasource uid
+    # is the one registered in grafana.yaml (uid: tempo).
+    grafana_public_url: str = ""
+    traces_backend: str = "tempo"
+    traces_datasource_uid: str = "tempo"
 
     # --- Observability connectors (configured in DevAI Settings; the SRE
     # runtime reads these from env via its ExternalSecret). The fan-out tool

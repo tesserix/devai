@@ -736,6 +736,7 @@ export const api = {
         { method: "DELETE" },
       ),
     telemetry: () => apiFetch<TelemetryHealth>("/analytics/telemetry"),
+    fleet: (days = 30) => apiFetch<FleetTelemetry>(`/analytics/fleet?days=${days}`),
     logs: (opts: { limit?: number; level?: string; q?: string } = {}) => {
       const p = new URLSearchParams();
       if (opts.limit) p.set("limit", String(opts.limit));
@@ -1240,8 +1241,29 @@ export interface TelemetryHealth {
     detail?: string;
   };
   prometheus: { url: string; reachable: boolean; status?: number };
+  traces?: {
+    backend: string;
+    exporting: boolean;
+    grafana_url: string;
+    explore_link: string;
+    langsmith_project: string;
+  };
   metrics_enabled: boolean;
   provider: string;
+}
+
+export interface FleetTelemetry {
+  enabled: boolean;
+  window_days: number;
+  source?: string;
+  agents: {
+    agent: string;
+    runs: number;
+    failures: number;
+    p95_latency_ms: number | null;
+    tokens: number;
+    cost_usd: number;
+  }[];
 }
 
 export interface LogEntry {

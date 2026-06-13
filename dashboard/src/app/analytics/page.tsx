@@ -22,6 +22,7 @@ import {
   type AnalyticsSummary,
   type LLMCost,
   type MemoryAnalytics,
+  type FleetTelemetry,
   type RunsTimeseriesPoint,
   type SLOReport,
   type StageStat,
@@ -78,6 +79,7 @@ export default function AnalyticsPage() {
   const [llm, setLlm] = useState<LLMCost | null>(null);
   const [sre, setSre] = useState<AnalyticsSRESummary | null>(null);
   const [tel, setTel] = useState<TelemetryHealth | null>(null);
+  const [fleet, setFleet] = useState<FleetTelemetry | null>(null);
   const [mem, setMem] = useState<MemoryAnalytics | null>(null);
   const [slo, setSlo] = useState<SLOReport | null>(null);
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.analytics.usage>> | null>(null);
@@ -86,7 +88,7 @@ export default function AnalyticsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     const settle = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback);
-    const [s, rt, st, ag, lc, sr, th, mm, us, ev, sl] = await Promise.all([
+    const [s, rt, st, ag, lc, sr, th, mm, us, ev, sl, fl] = await Promise.all([
       settle(api.analytics.summary(days), null as AnalyticsSummary | null),
       settle(api.analytics.runsTimeseries(days), [] as RunsTimeseriesPoint[]),
       settle(api.analytics.stages(), [] as StageStat[]),
@@ -98,6 +100,7 @@ export default function AnalyticsPage() {
       settle(api.analytics.usage(days), null as Awaited<ReturnType<typeof api.analytics.usage>> | null),
       settle(api.analytics.evals(days), null as Awaited<ReturnType<typeof api.analytics.evals>> | null),
       settle(api.analytics.slo(Math.min(days, 90)), null as SLOReport | null),
+      settle(api.analytics.fleet(days), null as FleetTelemetry | null),
     ]);
     setSummary(s);
     setRunsTs(rt);
@@ -110,6 +113,7 @@ export default function AnalyticsPage() {
     setUsage(us);
     setEvals(ev);
     setSlo(sl);
+    setFleet(fl);
     setLoading(false);
   }, [days]);
 
@@ -508,10 +512,11 @@ export default function AnalyticsPage() {
         </>
       )}
 
-      {/* ════ PLATFORM — telemetry pipeline + agentic memory ════ */}
+      {/* ════ PLATFORM — telemetry pipeline + traces + fleet + memory ════ */}
       {tab === "platform" && (
         <>
           <TelemetryPanel tel={tel} />
+          <FleetTelemetryPanel fleet={fleet} />
           <MemoryPanel mem={mem} days={days} onChanged={load} />
         </>
       )}
@@ -827,6 +832,95 @@ function TelemetryPanel({ tel }: { tel: TelemetryHealth | null }) {
           Set <code>DEVAI_TELEMETRY_PROVIDER=otel</code> and <code>DEVAI_OTEL_ENDPOINT</code> to the collector
           (OTLP/HTTP :4318) to start exporting traces + metrics.
         </p>
+      )}
+      {/* Traces — agent → stage → llm-call spans go to Tempo (via the
+          collector) and LangSmith. Deep-link into Grafana Explore when set. */}
+      <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+        <div className="text-xs" style={{ color: "var(--ink-muted)" }}>
+          Traces:{" "}
+          <span style={{ color: "var(--ink-soft)" }}>
+            {tel?.traces?.backend ? `${tel.traces.backend} (OTel)` : "OTel"}
+            {tel?.traces?.langsmith_project ? ` · LangSmith: ${tel.traces.langsmith_project}` : ""}
+          </span>
+        </div>
+        {tel?.traces?.explore_link ? (
+          <a
+            href={tel.traces.explore_link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="pill pill-ok"
+            style={{ textDecoration: "none" }}
+          >
+            Open agent traces in Grafana →
+          </a>
+        ) : (
+          <span className="text-xs" style={{ color: "var(--ink-muted)" }}>
+            set <code>DEVAI_GRAFANA_PUBLIC_URL</code> for a trace deep-link
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FleetTelemetryPanel({ fleet }: { fleet: FleetTelemetry | null }) {
+  const agents = fleet?.agents ?? [];
+  return (
+    <div className="panel" style={{ padding: 16 }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="label-eyebrow flex items-center gap-2">
+          <Activity className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} /> Fleet telemetry — per agent
+        </div>
+        <span className="pill" style={{ color: "var(--ink-soft)" }}>
+          {fleet?.source === "prometheus" ? "Prometheus / OTel" : "metrics"}
+        </span>
+      </div>
+      {!fleet?.enabled || agents.length === 0 ? (
+        <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
+          {fleet && !fleet.enabled
+            ? "Prometheus not configured — per-agent metrics come from the OTel collector's scrape endpoint."
+            : "No per-agent metrics yet. They appear once agents run and the collector scrapes into Prometheus."}
+        </p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="w-full" style={{ fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ color: "var(--ink-muted)", textAlign: "left" }}>
+                <th style={{ padding: "6px 8px" }}>Agent</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Runs</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Failures</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>p95 latency</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Tokens</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agents.map((a) => (
+                <tr key={a.agent} style={{ borderTop: "1px solid var(--border-subtle)" }}>
+                  <td style={{ padding: "6px 8px", color: "var(--ink)" }}>{a.agent}</td>
+                  <td className="font-mono tabular-nums" style={{ padding: "6px 8px", textAlign: "right" }}>
+                    {fmtNum(a.runs)}
+                  </td>
+                  <td
+                    className="font-mono tabular-nums"
+                    style={{ padding: "6px 8px", textAlign: "right", color: a.failures ? "var(--error-ink)" : undefined }}
+                  >
+                    {fmtNum(a.failures)}
+                  </td>
+                  <td className="font-mono tabular-nums" style={{ padding: "6px 8px", textAlign: "right" }}>
+                    {a.p95_latency_ms == null ? "—" : fmtMs(a.p95_latency_ms)}
+                  </td>
+                  <td className="font-mono tabular-nums" style={{ padding: "6px 8px", textAlign: "right" }}>
+                    {fmtNum(a.tokens)}
+                  </td>
+                  <td className="font-mono tabular-nums" style={{ padding: "6px 8px", textAlign: "right" }}>
+                    {fmtUsd(a.cost_usd)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

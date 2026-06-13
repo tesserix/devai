@@ -354,12 +354,115 @@ async def telemetry(request: Request) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             prom["reachable"] = False
 
+    # Trace backend (Tempo via the collector) + a browser deep-link into
+    # Grafana Explore filtered to the DevAI service. The dashboard shows the
+    # link only when grafana_public_url is configured.
+    grafana_public = getattr(config, "grafana_public_url", "") if config else ""
+    ds_uid = getattr(config, "traces_datasource_uid", "tempo") if config else "tempo"
+    service = getattr(config, "otel_service_name", "devai") if config else "devai"
+    explore_link = ""
+    if grafana_public:
+        import json as _json
+        from urllib.parse import quote
+
+        # Grafana Explore deep link: Tempo datasource, TraceQL filtered to the
+        # service. Grafana parses the `left` panel state from the query string.
+        left = _json.dumps(
+            {
+                "datasource": ds_uid,
+                "queries": [{"refId": "A", "queryType": "traceql", "query": f'{{ resource.service.name = "{service}" }}'}],
+                "range": {"from": "now-6h", "to": "now"},
+            }
+        )
+        explore_link = f"{grafana_public.rstrip('/')}/explore?left={quote(left)}"
+
     return {
         "telemetry": tel,
         "prometheus": prom,
+        "traces": {
+            "backend": getattr(config, "traces_backend", "tempo") if config else "tempo",
+            "exporting": bool(tel.get("exporting")),
+            "grafana_url": grafana_public,
+            "explore_link": explore_link,
+            "langsmith_project": getattr(config, "langchain_project", "") if config else "",
+        },
         "metrics_enabled": bool(getattr(config, "metrics_enabled", True)) if config else True,
         "provider": getattr(config, "telemetry_provider", "noop") if config else "noop",
     }
+
+
+# ────────────────────────────────────────────────────────────────────
+# Fleet telemetry (per-agent metrics from Prometheus / the OTel collector)
+# ────────────────────────────────────────────────────────────────────
+
+
+async def _prom_query_vector(config: Any, promql: str) -> list[dict[str, Any]]:
+    """Instant PromQL query → list of {labels, value}; [] when unreachable."""
+    base = (getattr(config, "prometheus_url", "") or "").rstrip("/")
+    if not base:
+        return []
+    headers = {}
+    token = getattr(config, "prometheus_token", "") or ""
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base}/api/v1/query", params={"query": promql}, headers=headers)
+            results = resp.json().get("data", {}).get("result", [])
+            return [{"labels": r.get("metric", {}), "value": float(r["value"][1])} for r in results]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+@router.get("/fleet")
+async def fleet(request: Request, days: int = Query(30, ge=1, le=90)) -> dict[str, Any]:
+    """Per-agent (fleet) telemetry from Prometheus — the OTel metrics the
+    collector renders. Runs, failures, p95 stage latency, LLM tokens and cost
+    keyed by agent persona. Degrades to an empty, disabled payload when
+    Prometheus is unreachable (the page then shows the Postgres rollups)."""
+    config = getattr(request.app.state, "config", None)
+    base = (getattr(config, "prometheus_url", "") or "") if config else ""
+    if not base:
+        return {"enabled": False, "agents": [], "window_days": days}
+    window = f"{days}d"
+
+    def _by_agent(rows: list[dict[str, Any]]) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for r in rows:
+            agent = r["labels"].get("agent") or ""
+            if agent:
+                out[agent] = out.get(agent, 0.0) + r["value"]
+        return out
+
+    runs = _by_agent(await _prom_query_vector(config, f"sum by (agent) (increase(devai_agent_runs_total[{window}]))"))
+    fails = _by_agent(
+        await _prom_query_vector(
+            config, f'sum by (agent) (increase(devai_agent_runs_total{{status="failed"}}[{window}]))'
+        )
+    )
+    tokens = _by_agent(await _prom_query_vector(config, f"sum by (agent) (increase(devai_llm_tokens_total[{window}]))"))
+    cost = _by_agent(await _prom_query_vector(config, f"sum by (agent) (increase(devai_llm_cost_usd_total[{window}]))"))
+    p95 = _by_agent(
+        await _prom_query_vector(
+            config,
+            "histogram_quantile(0.95, sum by (agent, le) "
+            f"(rate(devai_pipeline_stage_duration_milliseconds_bucket[{window}])))",
+        )
+    )
+
+    names = sorted(set(runs) | set(tokens) | set(cost), key=lambda a: -(runs.get(a, 0) + cost.get(a, 0)))
+    agents = [
+        {
+            "agent": name,
+            "runs": round(runs.get(name, 0.0)),
+            "failures": round(fails.get(name, 0.0)),
+            "p95_latency_ms": round(p95.get(name, 0.0)) if name in p95 else None,
+            "tokens": round(tokens.get(name, 0.0)),
+            "cost_usd": round(cost.get(name, 0.0), 4),
+        }
+        for name in names
+    ]
+    return {"enabled": True, "window_days": days, "agents": agents, "source": "prometheus"}
 
 
 # ────────────────────────────────────────────────────────────────────
