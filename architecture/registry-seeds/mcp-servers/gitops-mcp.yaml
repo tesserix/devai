@@ -11,7 +11,7 @@ spec:
   name: gitops-mcp
   displayName: DevAI GitOps MCP
   description: "GitOps delivery operations across all three controllers behind one interface — Argo CD (app status, sync, history, rollback), Kargo (stages, freight, promotions), and Flux CD (kustomizations, helm releases, sources, reconcile, suspend). Backed by the adapters.gitops family; mutating tools are gated by DEVAI_GITOPS_MUTATIONS_ENABLED and audited."
-  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/gitops
+  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/gitops/
   authMode: jwt
   tools:
   - argocd_list_apps

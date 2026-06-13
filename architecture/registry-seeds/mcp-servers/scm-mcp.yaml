@@ -12,7 +12,7 @@ spec:
   displayName: DevAI SCM MCP
   description: Multi-SCM operations (GitHub / GitLab / Azure DevOps) behind a single interface. Tools
     normalize the vendor differences so agent prompts stay portable.
-  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/scm
+  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/scm/
   authMode: jwt
   tools:
   - scm_get_repo_tree
