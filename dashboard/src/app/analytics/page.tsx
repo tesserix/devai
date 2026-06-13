@@ -23,6 +23,7 @@ import {
   type LLMCost,
   type MemoryAnalytics,
   type RunsTimeseriesPoint,
+  type SLOReport,
   type StageStat,
   type TelemetryHealth,
 } from "@/lib/api";
@@ -30,6 +31,17 @@ import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Donut, HBarChart, LineChart } from "@/components/charts";
 
 const DAY_OPTIONS = [7, 30, 90];
+
+// The page is split into focused tabs — reliability (SLO/SLA + failures),
+// cost, usage & quality, platform health — so each concern reads on its
+// own instead of one undifferentiated scroll.
+const TABS = [
+  { key: "reliability", label: "Reliability · SLO" },
+  { key: "cost", label: "Cost" },
+  { key: "quality", label: "Usage & Quality" },
+  { key: "platform", label: "Platform" },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
 
 function fmtMs(ms: number | null | undefined): string {
   if (ms == null) return "—";
@@ -57,6 +69,7 @@ function fmtNum(n: number | null | undefined): string {
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
+  const [tab, setTab] = useState<TabKey>("reliability");
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [runsTs, setRunsTs] = useState<RunsTimeseriesPoint[]>([]);
@@ -66,13 +79,14 @@ export default function AnalyticsPage() {
   const [sre, setSre] = useState<AnalyticsSRESummary | null>(null);
   const [tel, setTel] = useState<TelemetryHealth | null>(null);
   const [mem, setMem] = useState<MemoryAnalytics | null>(null);
+  const [slo, setSlo] = useState<SLOReport | null>(null);
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.analytics.usage>> | null>(null);
   const [evals, setEvals] = useState<Awaited<ReturnType<typeof api.analytics.evals>> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const settle = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback);
-    const [s, rt, st, ag, lc, sr, th, mm, us, ev] = await Promise.all([
+    const [s, rt, st, ag, lc, sr, th, mm, us, ev, sl] = await Promise.all([
       settle(api.analytics.summary(days), null as AnalyticsSummary | null),
       settle(api.analytics.runsTimeseries(days), [] as RunsTimeseriesPoint[]),
       settle(api.analytics.stages(), [] as StageStat[]),
@@ -83,6 +97,7 @@ export default function AnalyticsPage() {
       settle(api.analytics.memory(days), null as MemoryAnalytics | null),
       settle(api.analytics.usage(days), null as Awaited<ReturnType<typeof api.analytics.usage>> | null),
       settle(api.analytics.evals(days), null as Awaited<ReturnType<typeof api.analytics.evals>> | null),
+      settle(api.analytics.slo(Math.min(days, 90)), null as SLOReport | null),
     ]);
     setSummary(s);
     setRunsTs(rt);
@@ -94,6 +109,7 @@ export default function AnalyticsPage() {
     setMem(mm);
     setUsage(us);
     setEvals(ev);
+    setSlo(sl);
     setLoading(false);
   }, [days]);
 
@@ -142,80 +158,189 @@ export default function AnalyticsPage() {
         </div>
       </header>
 
-      {/* KPI cards */}
-      <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        <Kpi label="Total runs" value={fmtNum(summary?.runs.total)} sub={`${summary?.runs.active ?? 0} active`} />
-        <div className="panel flex items-center justify-between" style={{ padding: 14 }}>
-          <div>
-            <div className="label-eyebrow">Success rate</div>
-            <div className="text-xs mt-1" style={{ color: "var(--ink-muted)" }}>
-              {summary?.runs.completed ?? 0} ok · {summary?.runs.failed ?? 0} failed
+      {/* Tab bar — one concern per view */}
+      <div className="seg" role="tablist" aria-label="Analytics sections" style={{ width: "fit-content" }}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            data-active={tab === t.key}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ════ RELIABILITY — SLO / SLA, failures, run health ════ */}
+      {tab === "reliability" && (
+        <>
+          <SLOPanel slo={slo} />
+
+          <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <Kpi label="Total runs" value={fmtNum(summary?.runs.total)} sub={`${summary?.runs.active ?? 0} active`} />
+            <div className="panel flex items-center justify-between" style={{ padding: 14 }}>
+              <div>
+                <div className="label-eyebrow">Success rate</div>
+                <div className="text-xs mt-1" style={{ color: "var(--ink-muted)" }}>
+                  {summary?.runs.completed ?? 0} ok · {summary?.runs.failed ?? 0} failed
+                </div>
+              </div>
+              <Donut value={summary?.runs.success_rate ?? null} label="" size={80} />
             </div>
-          </div>
-          <Donut value={summary?.runs.success_rate ?? null} label="" size={80} />
-        </div>
-        <Kpi label="Avg duration" value={fmtMs(summary?.runs.avg_duration_ms)} sub="per run (terminal)" />
-        <Kpi label="LLM spend" value={fmtUsd(totalCost)} sub={`${fmtNum(totalTokens)} tokens`} />
-        <Kpi label="Failed runs" value={fmtNum(summary?.runs.failed)} sub={`window ${days}d`} accent="error" />
-      </section>
+            <Kpi label="Failed runs" value={fmtNum(summary?.runs.failed)} sub={`window ${days}d`} accent="error" />
+            <Kpi label="Avg duration" value={fmtMs(summary?.runs.avg_duration_ms)} sub="per run (terminal)" />
+            <Kpi
+              label="Open incidents"
+              value={fmtNum(sre?.open_incidents)}
+              sub={`${sre?.critical_incidents ?? 0} critical`}
+              accent={sre?.critical_incidents ? "error" : undefined}
+            />
+          </section>
 
-      {/* Telemetry / OTel health */}
-      <TelemetryPanel tel={tel} />
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-2">Runs over time — completed vs failed</div>
+              <LineChart
+                height={180}
+                series={[
+                  {
+                    name: "Completed",
+                    color: "var(--ok)",
+                    points: runsTs.map((p) => ({ label: p.date, value: p.completed })),
+                  },
+                  {
+                    name: "Failed",
+                    color: "var(--error)",
+                    points: runsTs.map((p) => ({ label: p.date, value: p.failed })),
+                  },
+                ]}
+              />
+            </div>
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">Slowest stages (avg)</div>
+              <HBarChart
+                color="var(--info)"
+                rows={stages
+                  .filter((s) => s.avg_duration_ms != null)
+                  .sort((a, b) => (b.avg_duration_ms ?? 0) - (a.avg_duration_ms ?? 0))
+                  .slice(0, 8)
+                  .map((s) => ({ label: s.stage, value: s.avg_duration_ms ?? 0 }))}
+                formatValue={(n) => fmtMs(n)}
+              />
+            </div>
+          </section>
 
-      {/* Runs over time + LLM cost over time */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="panel" style={{ padding: 16 }}>
-          <div className="label-eyebrow mb-2">Runs over time</div>
-          <LineChart
-            height={180}
-            series={[
-              {
-                name: "Completed",
-                color: "var(--ok)",
-                points: runsTs.map((p) => ({ label: p.date, value: p.completed })),
-              },
-              {
-                name: "Failed",
-                color: "var(--error)",
-                points: runsTs.map((p) => ({ label: p.date, value: p.failed })),
-              },
-            ]}
-          />
-        </div>
-        <div className="panel" style={{ padding: 16 }}>
-          <div className="label-eyebrow mb-2">LLM cost over time</div>
-          <LineChart
-            height={180}
-            formatY={(n) => fmtUsd(n)}
-            series={[
-              {
-                name: "Cost (USD)",
-                color: "var(--accent)",
-                points: (llm?.timeseries ?? []).map((p) => ({ label: p.date, value: p.cost_usd })),
-              },
-            ]}
-          />
-        </div>
-      </section>
+          {/* By blueprint + SRE strip */}
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">By blueprint — success vs failure</div>
+              <div className="flex flex-col gap-2">
+                {(summary?.by_blueprint ?? []).length === 0 && (
+                  <div style={{ color: "var(--ink-muted)", fontSize: 12 }}>No runs yet.</div>
+                )}
+                {(summary?.by_blueprint ?? []).map((b) => (
+                  <div key={b.blueprint} className="flex items-center gap-2" style={{ fontSize: 12 }}>
+                    <span className="truncate" style={{ width: 160, color: "var(--ink-soft)" }} title={b.blueprint}>
+                      {b.blueprint}
+                    </span>
+                    <span className="font-mono tabular-nums" style={{ width: 40, color: "var(--ink)" }}>
+                      {b.total}
+                    </span>
+                    <div
+                      className="flex-1 rounded flex overflow-hidden"
+                      style={{ background: "var(--surface-muted)", height: 12 }}
+                    >
+                      <div style={{ width: `${b.total ? (b.completed / b.total) * 100 : 0}%`, background: "var(--ok)" }} />
+                      <div style={{ width: `${b.total ? (b.failed / b.total) * 100 : 0}%`, background: "var(--error)" }} />
+                    </div>
+                    <span
+                      className="font-mono tabular-nums"
+                      style={{ width: 48, textAlign: "right", color: "var(--ink-soft)" }}
+                    >
+                      {b.success_rate == null ? "—" : `${Math.round(b.success_rate * 100)}%`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-      {/* LLM usage — real cost / tokens / latency per model and per user */}
-      {usage?.enabled && (usage.by_model.length > 0 || usage.by_user.length > 0) && (
-        <section className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Kpi label="LLM spend" value={fmtUsd(usage.summary.cost_usd)} sub="all runs, est." />
-            <Kpi label="LLM calls" value={fmtNum(usage.summary.calls)} sub={`${fmtNum(usage.summary.errors)} errors`} />
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">SRE summary</div>
+              {sre == null ? (
+                <div style={{ color: "var(--ink-muted)", fontSize: 12 }}>
+                  SRE tables not reachable from this service (or empty). The SRE dashboard has the full view.
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <Stat label="Open incidents" value={fmtNum(sre.open_incidents)} />
+                  <Stat
+                    label="Critical"
+                    value={fmtNum(sre.critical_incidents)}
+                    accent={sre.critical_incidents ? "error" : undefined}
+                  />
+                  <Stat label="Apps tracked" value={fmtNum(sre.total_apps)} />
+                  <Stat label="Cost (24h)" value={fmtUsd(sre.latest_daily_cost)} />
+                </div>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* ════ COST — spend, per model, per user ════ */}
+      {tab === "cost" && (
+        <>
+          <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Kpi label="LLM spend" value={fmtUsd(totalCost)} sub={`${fmtNum(totalTokens)} tokens`} />
+            <Kpi label="LLM calls" value={fmtNum(usage?.summary.calls)} sub={`${fmtNum(usage?.summary.errors)} errors`} />
             <Kpi
               label="Tokens"
-              value={fmtNum(usage.summary.tokens_in + usage.summary.tokens_out)}
-              sub={`${fmtNum(usage.summary.tokens_in)} in / ${fmtNum(usage.summary.tokens_out)} out`}
+              value={fmtNum((usage?.summary.tokens_in ?? 0) + (usage?.summary.tokens_out ?? 0))}
+              sub={`${fmtNum(usage?.summary.tokens_in)} in / ${fmtNum(usage?.summary.tokens_out)} out`}
             />
             <Kpi
               label="Avg latency"
-              value={fmtMs(usage.summary.calls ? usage.summary.duration_ms / usage.summary.calls : 0)}
+              value={fmtMs(usage?.summary.calls ? usage.summary.duration_ms / usage.summary.calls : 0)}
               sub="per call"
             />
-          </div>
+          </section>
 
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-2">LLM cost over time</div>
+              <LineChart
+                height={180}
+                formatY={(n) => fmtUsd(n)}
+                series={[
+                  {
+                    name: "Cost (USD)",
+                    color: "var(--accent)",
+                    points: (llm?.timeseries ?? []).map((p) => ({ label: p.date, value: p.cost_usd })),
+                  },
+                ]}
+              />
+            </div>
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">Top agents by LLM cost</div>
+              <HBarChart
+                color="var(--accent)"
+                rows={agents
+                  .slice()
+                  .sort((a, b) => b.total_cost_usd - a.total_cost_usd)
+                  .slice(0, 8)
+                  .map((a) => ({ label: a.agent_name, value: a.total_cost_usd }))}
+                formatValue={(n) => fmtUsd(n)}
+              />
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* LLM usage — per model and per user (the headline KPIs live above) */}
+      {tab === "cost" && usage?.enabled && (usage.by_model.length > 0 || usage.by_user.length > 0) && (
+        <section className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="panel" style={{ padding: 16 }}>
               <div className="label-eyebrow mb-3">By model — cost · tokens · latency</div>
@@ -294,6 +419,9 @@ export default function AnalyticsPage() {
         </section>
       )}
 
+      {/* ════ USAGE & QUALITY — evals, per-agent execution stats ════ */}
+      {tab === "quality" && (
+        <>
       {/* Evals — quality scores (pass rate, by evaluator) */}
       <section className="panel" style={{ padding: 16 }}>
         <div className="label-eyebrow mb-3">Quality evals {evals?.scope === "me" ? "· your runs" : ""}</div>
@@ -333,34 +461,6 @@ export default function AnalyticsPage() {
             </div>
           </div>
         )}
-      </section>
-
-      {/* Agents + Stages */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="panel" style={{ padding: 16 }}>
-          <div className="label-eyebrow mb-3">Top agents by LLM cost</div>
-          <HBarChart
-            color="var(--accent)"
-            rows={agents
-              .slice()
-              .sort((a, b) => b.total_cost_usd - a.total_cost_usd)
-              .slice(0, 8)
-              .map((a) => ({ label: a.agent_name, value: a.total_cost_usd }))}
-            formatValue={(n) => fmtUsd(n)}
-          />
-        </div>
-        <div className="panel" style={{ padding: 16 }}>
-          <div className="label-eyebrow mb-3">Slowest stages (avg)</div>
-          <HBarChart
-            color="var(--info)"
-            rows={stages
-              .filter((s) => s.avg_duration_ms != null)
-              .sort((a, b) => (b.avg_duration_ms ?? 0) - (a.avg_duration_ms ?? 0))
-              .slice(0, 8)
-              .map((s) => ({ label: s.stage, value: s.avg_duration_ms ?? 0 }))}
-            formatValue={(n) => fmtMs(n)}
-          />
-        </div>
       </section>
 
       {/* Agent table */}
@@ -405,57 +505,107 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {/* Agentic memory */}
-      <MemoryPanel mem={mem} days={days} onChanged={load} />
+        </>
+      )}
 
-      {/* By blueprint + SRE strip */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="panel" style={{ padding: 16 }}>
-          <div className="label-eyebrow mb-3">By blueprint</div>
-          <div className="flex flex-col gap-2">
-            {(summary?.by_blueprint ?? []).length === 0 && (
-              <div style={{ color: "var(--ink-muted)", fontSize: 12 }}>No runs yet.</div>
-            )}
-            {(summary?.by_blueprint ?? []).map((b) => (
-              <div key={b.blueprint} className="flex items-center gap-2" style={{ fontSize: 12 }}>
-                <span className="truncate" style={{ width: 160, color: "var(--ink-soft)" }} title={b.blueprint}>
-                  {b.blueprint}
-                </span>
-                <span className="font-mono tabular-nums" style={{ width: 40, color: "var(--ink)" }}>
-                  {b.total}
-                </span>
-                <div className="flex-1 rounded flex overflow-hidden" style={{ background: "var(--surface-muted)", height: 12 }}>
-                  <div style={{ width: `${b.total ? (b.completed / b.total) * 100 : 0}%`, background: "var(--ok)" }} />
-                  <div style={{ width: `${b.total ? (b.failed / b.total) * 100 : 0}%`, background: "var(--error)" }} />
-                </div>
-                <span className="font-mono tabular-nums" style={{ width: 48, textAlign: "right", color: "var(--ink-soft)" }}>
-                  {b.success_rate == null ? "—" : `${Math.round(b.success_rate * 100)}%`}
-                </span>
-              </div>
-            ))}
-          </div>
+      {/* ════ PLATFORM — telemetry pipeline + agentic memory ════ */}
+      {tab === "platform" && (
+        <>
+          <TelemetryPanel tel={tel} />
+          <MemoryPanel mem={mem} days={days} onChanged={load} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── SLO scorecard ─────────────────────────────────────────────────────
+
+function SLOPanel({ slo }: { slo: SLOReport | null }) {
+  const fmtPct = (n: number | null | undefined, digits = 2) => (n == null ? "—" : `${n.toFixed(digits)}%`);
+  const fmtSecs = (s: number | null | undefined) => {
+    if (s == null) return "—";
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) return `${(s / 60).toFixed(1)}m`;
+    return `${(s / 3600).toFixed(1)}h`;
+  };
+  const http = slo?.http;
+  const inc = slo?.incidents ?? {};
+  const noData = !slo || (http?.requests == null && (inc.total_incidents ?? 0) === 0);
+  return (
+    <section className="panel" style={{ padding: 16 }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="label-eyebrow flex items-center gap-2">
+          <Activity className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} /> SLO scorecard
+          {slo ? ` · ${slo.window_days}d window` : ""}
         </div>
+        {http?.error_budget_burn_pct != null && (
+          <span className={`pill ${http.error_budget_burn_pct >= 100 ? "pill-error" : http.error_budget_burn_pct >= 80 ? "pill-warn" : "pill-ok"}`}>
+            error budget {http.error_budget_burn_pct}% burned
+          </span>
+        )}
+      </div>
+      {noData ? (
+        <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
+          No SLO measurements yet — availability/latency come from Prometheus, incident MTTR from the SRE
+          tables. Sections appear as data lands.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <SloStat
+            label="Availability"
+            value={fmtPct(http?.availability_pct, 3)}
+            target={`target ${slo!.targets.availability_pct}%`}
+            met={http?.availability_met}
+          />
+          <SloStat
+            label="p95 latency"
+            value={http?.latency_p95_ms == null ? "—" : `${Math.round(http.latency_p95_ms)}ms`}
+            target={`target ≤${slo!.targets.latency_p95_ms}ms`}
+            met={http?.latency_met}
+          />
+          <SloStat
+            label="Error rate"
+            value={fmtPct(http?.error_rate_pct)}
+            target={`target ≤${slo!.targets.error_rate_pct}%`}
+            met={http?.error_rate_met}
+          />
+          <SloStat label="Incidents" value={`${inc.total_incidents ?? 0}`} target={`${inc.critical_incidents ?? 0} critical`} />
+          <SloStat label="Resolved" value={`${inc.resolved_incidents ?? 0}`} target="in window" />
+          <SloStat label="Avg MTTR" value={fmtSecs(inc.avg_mttr_seconds)} target={`worst ${fmtSecs(inc.worst_mttr_seconds)}`} />
+        </div>
+      )}
+    </section>
+  );
+}
 
-        <div className="panel" style={{ padding: 16 }}>
-          <div className="label-eyebrow mb-3">SRE summary</div>
-          {sre == null ? (
-            <div style={{ color: "var(--ink-muted)", fontSize: 12 }}>
-              SRE tables not reachable from this service (or empty). The SRE dashboard has the full view.
-            </div>
+function SloStat({
+  label,
+  value,
+  target,
+  met,
+}: {
+  label: string;
+  value: string;
+  target: string;
+  met?: boolean | null;
+}) {
+  const color = met == null ? "var(--ink)" : met ? "var(--ok-ink)" : "var(--error-ink)";
+  return (
+    <div className="rounded" style={{ background: "var(--surface-muted)", padding: 12 }}>
+      <div className="flex items-center gap-1.5" style={{ fontSize: 11, color: "var(--ink-muted)" }}>
+        {label}
+        {met != null &&
+          (met ? (
+            <CheckCircle2 className="w-3 h-3" style={{ color: "var(--ok-ink)" }} />
           ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <Stat label="Open incidents" value={fmtNum(sre.open_incidents)} />
-              <Stat
-                label="Critical"
-                value={fmtNum(sre.critical_incidents)}
-                accent={sre.critical_incidents ? "error" : undefined}
-              />
-              <Stat label="Apps tracked" value={fmtNum(sre.total_apps)} />
-              <Stat label="Cost (24h)" value={fmtUsd(sre.latest_daily_cost)} />
-            </div>
-          )}
-        </div>
-      </section>
+            <AlertTriangle className="w-3 h-3" style={{ color: "var(--error-ink)" }} />
+          ))}
+      </div>
+      <div className="font-mono tabular-nums" style={{ fontSize: 20, fontWeight: 600, color }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 10, color: "var(--ink-muted)", marginTop: 2 }}>{target}</div>
     </div>
   );
 }
