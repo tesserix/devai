@@ -221,6 +221,14 @@ async def mount_domain_servers(app: Any, settings: Settings) -> list[Any]:
             entered.append(cm)
 
             def _asgi(scope, receive, send, _m=manager):  # noqa: ANN001 — bind per loop
+                # Slash-agnostic: a mount strips its prefix, so a client that
+                # dials the seed endpoint verbatim (".../mcp/scm", no trailing
+                # slash — the MCP SDK does NOT follow the 307) arrives with
+                # path "". Normalize to "/" so both forms serve instead of
+                # 404 → "Session terminated" at the Hub.
+                if scope.get("type") == "http" and scope.get("path", "") in ("", scope.get("root_path", "")):
+                    scope = dict(scope)
+                    scope["path"] = "/"
                 return _m.handle_request(scope, receive, send)
 
             app.mount(f"/mcp/{segment}", _asgi)
