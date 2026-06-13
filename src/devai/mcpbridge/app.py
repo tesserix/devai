@@ -124,9 +124,8 @@ def _build_bridge_server(name: str, spec: LaunchSpec, cache: _SessionCache) -> A
 
 def create_bridge_app(settings: Any) -> Any:
     """The bridge ASGI app: /healthz + /bridge/<name> per catalog stdio server."""
-    from starlette.applications import Starlette
+    from fastapi import FastAPI, Request
     from starlette.responses import JSONResponse
-    from starlette.routing import Route
 
     allowed = [c.strip() for c in str(getattr(settings, "mcpbridge_allowed_commands", "npx")).split(",") if c.strip()]
     cache = _SessionCache()
@@ -173,13 +172,14 @@ def create_bridge_app(settings: Any) -> Any:
                     pass
             await cache.close()
 
-    async def healthz(_request: Any) -> Any:
+    app = FastAPI(title="devai-mcp-bridge", lifespan=lifespan)
+
+    @app.get("/healthz")
+    async def healthz() -> Any:  # noqa: ANN202
         return JSONResponse({"status": "ok", "service": "devai-mcp-bridge", "servers": sorted(mounted)})
 
-    app = Starlette(routes=[Route("/healthz", healthz)], lifespan=lifespan)
-
     @app.middleware("http")
-    async def _credentials(request: Any, call_next: Any) -> Any:
+    async def _credentials(request: Request, call_next: Any) -> Any:
         # Lift per-request credential material into the contextvar the handlers
         # read. x-mcp-prefs is a JSON object of non-secret connector prefs.
         _SECRET.set(request.headers.get("x-mcp-secret", "") or "")
