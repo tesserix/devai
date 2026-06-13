@@ -368,3 +368,14 @@ def test_build_domains_includes_sample(monkeypatch):
     domains = tool_server.build_domains(Settings())
     assert "sample" in domains and "scm" in domains
     assert len(domains["scm"]) >= 10
+
+
+async def test_hub_leg_stays_routable_across_refreshes(hub):
+    """Regression: re-discovery hands `_ensure_connected` a FRESH spec whose
+    health is the registry default — adopting it verbatim flipped every
+    connected leg to unhealthy one refresh later, so tools/call answered
+    'downstream unavailable' while the session underneath was fine."""
+    await hub.refresh()
+    await hub.refresh()  # second discovery → fresh specs for live legs
+    result = await hub.call_tool("sre-mcp__list_pods", {"ns": "devai"})
+    assert result.content == [{"echo": "list_pods", "args": {"ns": "devai"}}]

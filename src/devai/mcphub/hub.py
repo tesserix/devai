@@ -116,7 +116,14 @@ class MCPHub:
     async def _ensure_connected(self, spec: Any) -> None:
         existing = self._connections.get(spec.name)
         if existing is not None and existing.healthy:
-            existing.spec = spec  # refresh endpoint/auth in place
+            # Refresh endpoint/auth in place — but PRESERVE the live health.
+            # The freshly-discovered spec carries the registry default
+            # ("unknown"), and `healthy` reads spec.health: adopting it
+            # verbatim silently flipped every connected leg to unhealthy one
+            # refresh after it connected, so tools/call answered "downstream
+            # unavailable" while the session underneath was fine.
+            spec.health = existing.spec.health
+            existing.spec = spec
             return
         if existing is not None:
             await self._drop(spec.name)
