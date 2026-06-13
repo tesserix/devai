@@ -207,7 +207,12 @@ async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[s
     everyone's. Pass-rate, average score, by-evaluator, recent."""
     db = await _db(request)
     if db is None:
-        return {"summary": {"evals": 0, "avg_score": 0, "pass_rate": 0}, "by_evaluator": [], "recent": [], "scope": "none"}
+        return {
+            "summary": {"evals": 0, "avg_score": 0, "pass_rate": 0},
+            "by_evaluator": [],
+            "recent": [],
+            "scope": "none",
+        }
     scope_user, is_admin = await _usage_scope(request)
     out = await db.analytics_evals(days, scope_user)
     out["scope"] = "all" if is_admin else "me"
@@ -370,7 +375,9 @@ async def telemetry(request: Request) -> dict[str, Any]:
         left = _json.dumps(
             {
                 "datasource": ds_uid,
-                "queries": [{"refId": "A", "queryType": "traceql", "query": f'{{ resource.service.name = "{service}" }}'}],
+                "queries": [
+                    {"refId": "A", "queryType": "traceql", "query": f'{{ resource.service.name = "{service}" }}'}
+                ],
                 "range": {"from": "now-6h", "to": "now"},
             }
         )
@@ -441,7 +448,11 @@ async def fleet(request: Request, days: int = Query(30, ge=1, le=90)) -> dict[st
         )
     )
     tokens = _by_agent(await _prom_query_vector(config, f"sum by (agent) (increase(devai_llm_tokens_total[{window}]))"))
-    cost = _by_agent(await _prom_query_vector(config, f"sum by (agent) (increase(devai_llm_cost_usd_total[{window}]))"))
+    # The OTel→Prometheus exporter appends the instrument unit, so the cost
+    # counter (devai.llm.cost_usd, unit USD) lands as devai_llm_cost_usd_USD_total.
+    cost = _by_agent(
+        await _prom_query_vector(config, f"sum by (agent) (increase(devai_llm_cost_usd_USD_total[{window}]))")
+    )
     p95 = _by_agent(
         await _prom_query_vector(
             config,
