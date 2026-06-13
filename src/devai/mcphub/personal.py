@@ -113,13 +113,16 @@ def _spec_for(conn: dict[str, Any]) -> DownstreamSpec | None:
         except ValueError as e:
             logger.warning("mcphub: dropping personal MCP %r — %s", conn.get("instance_id"), e)
             return None
+        is_oauth = str(conn.get("provider") or "").lower() == "oauth"
         header = str(conn.get("mcp_auth_header") or "").strip() or "Authorization"
-        if token:
+        if token and not is_oauth:
             # A bare header name defaults to a Bearer scheme on Authorization;
-            # a custom header (x-api-key, …) gets the raw token.
+            # a custom header (x-api-key, …) gets the raw token. OAuth connectors
+            # store a REFRESH token, not a Bearer — the caller mints the access
+            # token and sets Authorization itself (see _Manager._ensure).
             headers[header] = f"Bearer {token}" if header.lower() == "authorization" else token
 
-    transport = "sse" if str(conn.get("provider") or "").lower() == "sse" else "streamable-http"
+    transport = "sse" if str(conn.get("provider") or "").lower() in ("sse",) else "streamable-http"
     return DownstreamSpec(
         name=_seg(str(conn.get("instance_id") or "default")),
         endpoint=url,
@@ -133,6 +136,20 @@ def _is_bridge_endpoint(url: str) -> bool:
     """True for DevAI's own in-cluster stdio bridge (trusted internal service)."""
     host = urlparse(url).hostname or ""
     return host.startswith("devai-mcp-bridge") or "/bridge/" in url
+
+
+async def _oauth_bearer(conn: dict[str, Any]) -> str:
+    """Mint a fresh access token for an oauth MCP connector from its stored
+    refresh token + token endpoint (provisioned by the OAuth callback)."""
+    from devai.settings.mcp_oauth import access_token
+
+    return await access_token(
+        refresh_token=str(conn.get("mcp_token") or ""),
+        token_endpoint=str(conn.get("oauth_token_endpoint") or ""),
+        client_id=str(conn.get("oauth_client_id") or ""),
+        client_secret=str(conn.get("oauth_client_secret") or ""),
+        now=time.time(),
+    )
 
 
 @dataclass(slots=True)
@@ -173,6 +190,14 @@ class PersonalLegs:
                 spec = _spec_for(c)
                 if spec is None or spec.name in conns:
                     continue
+                # OAuth connectors store a refresh token (mcp_token); mint a
+                # short-lived Bearer access token for this leg.
+                if str(c.get("provider") or "").lower() == "oauth":
+                    bearer = await _oauth_bearer(c)
+                    if not bearer:
+                        logger.warning("mcphub: oauth MCP %r for %s — no access token", spec.name, email)
+                        continue
+                    spec.headers["Authorization"] = f"Bearer {bearer}"
                 conn = DownstreamConnection(spec, headers=spec.headers, timeout=self._timeout)
                 try:
                     await asyncio.wait_for(conn.connect(), timeout=self._timeout)

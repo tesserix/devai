@@ -279,6 +279,13 @@ export const api = {
       builtin: McpMarketplaceEntry[];
     }>("/settings/mcp/marketplace", { soft: true }),
 
+  // Begin the Connect-with-OAuth flow for a catalog server → consent URL.
+  mcpOAuthStart: (server: string) =>
+    apiFetch<{ authorize_url: string }>("/settings/mcp/oauth/start", {
+      method: "POST",
+      body: JSON.stringify({ server }),
+    }),
+
   // Pipeline. The Fiber pipeline serializes a task as {id, state, current_stage,
   // …} but the dashboard's PipelineRun shape is {run_id, stage, agents}. Normalize
   // at the boundary so a missing run_id never reaches run.run_id.slice() and

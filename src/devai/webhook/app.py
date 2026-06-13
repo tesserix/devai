@@ -720,6 +720,12 @@ def create_app(
 
     app.include_router(settings_router)
 
+    # MCP OAuth (Connect-with-OAuth for hosted SaaS MCP servers). The callback
+    # is a GET redirect from the provider carrying the user's session cookie.
+    from devai.settings.oauth_routes import router as mcp_oauth_router
+
+    app.include_router(mcp_oauth_router)
+
     # Serve dashboard static files (CSS, JS)
     static_dir = Path(__file__).parent.parent / "dashboard" / "static"
     if static_dir.exists():

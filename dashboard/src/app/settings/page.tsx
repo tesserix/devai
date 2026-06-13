@@ -59,6 +59,21 @@ export default function SettingsPage() {
     void load();
   }, [load]);
 
+  // Feedback after the OAuth redirect lands back on /settings?mcp_oauth=…
+  const [oauthMsg, setOauthMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const p = new URLSearchParams(window.location.search);
+    const status = p.get("mcp_oauth");
+    if (!status) return;
+    if (status === "connected") {
+      setOauthMsg({ ok: true, text: `Connected ${p.get("server") || "MCP server"} via OAuth.` });
+    } else if (status === "error") {
+      setOauthMsg({ ok: false, text: `OAuth failed: ${p.get("detail") || "unknown error"}.` });
+    }
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
   const secretsWritable = catalog?.secrets_writable ?? false;
 
   return (
@@ -127,6 +142,17 @@ export default function SettingsPage() {
         <div className="panel mt-5 p-4 text-sm text-red-300 border border-red-500/30">{error}</div>
       )}
 
+      {oauthMsg && (
+        <div
+          className={`panel mt-5 p-4 text-sm flex items-center gap-2 border ${
+            oauthMsg.ok ? "border-emerald-500/30 text-emerald-300" : "border-red-500/30 text-red-300"
+          }`}
+        >
+          {oauthMsg.ok ? <Check className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+          {oauthMsg.text}
+        </div>
+      )}
+
       {loading ? (
         <div className="mt-8 flex items-center gap-2 text-[var(--ink-300)]">
           <Loader2 className="w-4 h-4 animate-spin" /> Loading…
@@ -158,7 +184,18 @@ export default function SettingsPage() {
           })}
 
           <McpMarketplace
-            onConnect={(entry) => {
+            onConnect={async (entry) => {
+              // OAuth servers run the consent flow (redirect to the provider);
+              // everything else pre-fills the MCP connector form.
+              if (entry.auth_kind === "oauth") {
+                try {
+                  const { authorize_url } = await api.mcpOAuthStart(entry.name);
+                  if (authorize_url) window.location.href = authorize_url;
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Could not start OAuth");
+                }
+                return;
+              }
               setMcpPrefill({
                 provider: entry.transport === "sse" ? "sse" : "streamable_http",
                 instanceId: entry.name,

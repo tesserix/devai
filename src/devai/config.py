@@ -166,6 +166,10 @@ class Settings(BaseSettings):
 
     # --- Dashboard ---
     dashboard_base_url: str = "http://localhost:8080"
+    # Public origin used to build the MCP OAuth redirect URI
+    # (<public_base_url>/api/settings/mcp/oauth/callback). Must match what the
+    # OAuth app / dynamic registration is allowed to redirect to.
+    public_base_url: str = "https://devai.tesserix.app"
 
     # --- Keycloak OIDC (primary auth for dashboard) ---
     keycloak_url: str = "https://internal-identity.tesserix.app"
