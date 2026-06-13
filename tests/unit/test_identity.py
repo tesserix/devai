@@ -252,3 +252,38 @@ def test_principal_from_webhook_gitlab_user_block() -> None:
 def test_principal_from_webhook_unknown_sender_falls_back() -> None:
     p = _principal_from_webhook("ado", {})
     assert p.email == "unknown@ado"
+
+
+# ── MCP Hub service bearer ─────────────────────────────────────────────
+
+
+def _make_bearer_request(token_header: str, configured: str) -> Any:
+    req = _make_request(headers={"authorization": token_header} if token_header else {})
+    req.app.state.config.mcp_hub_service_token = configured
+    return req
+
+
+@pytest.mark.asyncio
+async def test_service_bearer_resolves_hub_principal() -> None:
+    token = "a-strong-shared-service-token-123"
+    req = _make_bearer_request(f"Bearer {token}", token)
+    principal = await extract_principal(req)
+    assert principal is not None
+    assert principal.uid == "svc-mcp-hub"
+    assert principal.auth_provider == "service-token"
+    assert "service" in principal.roles
+
+
+@pytest.mark.asyncio
+async def test_service_bearer_wrong_token_rejected() -> None:
+    req = _make_bearer_request("Bearer not-the-right-token-at-all", "a-strong-shared-service-token-123")
+    principal = await extract_principal(req)
+    assert principal is None
+
+
+@pytest.mark.asyncio
+async def test_service_bearer_short_configured_token_never_matches() -> None:
+    # A trivially short configured token must not enable the path at all.
+    req = _make_bearer_request("Bearer short", "short")
+    principal = await extract_principal(req)
+    assert principal is None

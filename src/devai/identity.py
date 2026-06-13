@@ -203,21 +203,65 @@ def _strip_forwarded_identity(request: Request) -> None:
         logger.debug("failed to strip untrusted forwarded headers", exc_info=True)
 
 
+def _principal_from_service_bearer(request: Request) -> Principal | None:
+    """The MCP Hub's service identity from its shared bearer token, or None.
+
+    Compares ``Authorization: Bearer <x>`` against the configured
+    ``mcp_hub_service_token`` with :func:`hmac.compare_digest` (no timing
+    leak). Both sides read the SAME key from the devai-api-secrets
+    ExternalSecret, so rotation is one GCP SM update. Never raises.
+    """
+    try:
+        auth = request.headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            return None
+        presented = auth[7:].strip()
+        cfg = getattr(getattr(request, "app", None), "state", None)
+        expected = str(getattr(getattr(cfg, "config", None), "mcp_hub_service_token", "") or "") if cfg else ""
+        if len(expected) < 16 or not presented:
+            return None
+        if not hmac.compare_digest(presented.encode(), expected.encode()):
+            return None
+        return Principal(
+            email="mcp-hub@service.devai.internal",
+            uid="svc-mcp-hub",
+            auth_provider="service-token",
+            roles=["service"],
+            display_name="DevAI MCP Hub",
+        )
+    except Exception:  # noqa: BLE001 — identity resolution must never 500
+        logger.debug("service-bearer check failed", exc_info=True)
+        return None
+
+
 async def extract_principal(request: Request) -> Principal | None:
     """Resolve the current Principal from the request, or None.
 
     Order of preference:
 
-    1. ``X-Forwarded-User`` / ``X-Forwarded-Email`` headers stamped by the
+    1. The MCP Hub's service bearer (``Authorization: Bearer`` matching the
+       shared ``DEVAI_MCP_HUB_SERVICE_TOKEN``) — how the Hub authenticates
+       toward the per-domain MCP servers it federates (/mcp/scm, /mcp/gitops).
+       Identity is terminated at the Hub, so the Hub presents its OWN service
+       identity here, never the original caller's.
+    2. ``X-Forwarded-User`` / ``X-Forwarded-Email`` headers stamped by the
        auth-bff proxy (services/auth-bff/internal/proxy/proxy.go). When
        traffic comes through the bff this is the authoritative path.
-    2. The ``devai_session`` cookie — the dashboard FastAPI app stores
+    3. The ``devai_session`` cookie — the dashboard FastAPI app stores
        session metadata in Redis at ``devai:session:{session_id}`` after
        OAuth (Keycloak or GitHub). Used when the dashboard talks to the
        backend directly (same-origin) without the bff.
-    3. None — caller decides whether to fall back to ``Principal.system()``
+    4. None — caller decides whether to fall back to ``Principal.system()``
        or to refuse the request.
     """
+    # 0. MCP Hub service bearer — constant-time match against the shared
+    #    token. Only honored when the operator configured a non-trivial token
+    #    (≥16 chars), so an empty/placeholder setting can never be "matched"
+    #    by an empty Authorization header.
+    principal = _principal_from_service_bearer(request)
+    if principal is not None:
+        return principal
+
     # 1. auth-bff stamped headers — trusted only when they actually came
     #    from the bff (see _forward_trusted). Otherwise STRIP them and fall
     #    through, so a direct caller can't spoof identity (or an admin role)
