@@ -21,6 +21,7 @@ and degrade. The Noop backend satisfies the whole ABC with no-ops.
 
 from __future__ import annotations
 
+import contextlib
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,6 +38,12 @@ class StageMetric:
     status: str  # completed | failed | skipped | running
     duration_ms: float = 0.0
     repo: str = ""
+    # Per-fleet attribution: which agent persona ran the stage and its visual
+    # lane. Carried onto both the metric labels AND the trace span so Grafana
+    # can break runs/latency/failures down per agent ("fleet").
+    agent: str = ""
+    lane: str = ""
+    run_id: str = ""
     attrs: dict[str, str] = field(default_factory=dict)
 
 
@@ -79,6 +86,25 @@ class TelemetryAdapter(Adapter):
         Idempotent — calling twice must not double-instrument.
         """
         return None
+
+    # ──────────────────────────────────────────────────────────────────
+    # Tracing — domain spans for the AI agents
+    # ──────────────────────────────────────────────────────────────────
+
+    def span(self, name: str, *, attributes: dict[str, Any] | None = None) -> contextlib.AbstractContextManager[Any]:
+        """A trace span as a context manager — the OTel-native agent trace.
+
+        ``with telemetry.span("agent.senior_developer", attributes={...}):``
+        opens a span; nested spans (a stage's LLM calls) attach automatically
+        through OpenTelemetry's contextvar propagation, so a run reads as
+        run → stage → llm-call trees in Tempo/Jaeger. The yielded value is the
+        Span (or None on the Noop) — callers usually ignore it.
+
+        Default: a no-op context. The OTel backend overrides with a real span.
+        Never raises; an exception inside the block is recorded on the span and
+        re-raised by the backend implementation.
+        """
+        return contextlib.nullcontext(None)
 
     # ──────────────────────────────────────────────────────────────────
     # Domain records — total, best-effort, never raise

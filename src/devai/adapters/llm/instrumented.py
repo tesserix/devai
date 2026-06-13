@@ -37,10 +37,10 @@ class InstrumentedLLMAdapter(LLMAdapter):
     async def generate(self, request: LLMRequest) -> LLMResponse:
         started = time.perf_counter()
         try:
-            # LangSmith child run (no-op when tracing is off) — nests under
-            # the executor's stage span via contextvars, so adapter-path
-            # calls show up in traces just like the LangChain-based agents.
-            with self._trace_ctx(request) as rt:
+            # Two child trace planes, both nesting under the executor's stage
+            # span via contextvars (no-ops when off): an OTel span → Tempo,
+            # and a LangSmith run → the LangSmith project.
+            with self._otel_span(request), self._trace_ctx(request) as rt:
                 response = await self._inner.generate(request)
                 if rt is not None:
                     self._trace_end(rt, response)
@@ -49,6 +49,27 @@ class InstrumentedLLMAdapter(LLMAdapter):
             raise
         self._record(request, response, (time.perf_counter() - started) * 1000.0)
         return response
+
+    def _otel_span(self, request: LLMRequest) -> Any:
+        """OTel span for one LLM call — nests under the stage span in Tempo."""
+        try:
+            from devai.adapters.telemetry.runtime import get_global_telemetry
+
+            extra = request.extra or {}
+            return get_global_telemetry().span(
+                f"llm.{extra.get('agent') or self.provider_name}",
+                attributes={
+                    "devai.provider": self.provider_name,
+                    "devai.model": request.model or self.default_model,
+                    "devai.agent": str(extra.get("agent", "") or ""),
+                    "devai.run_id": str(extra.get("run_id", "") or ""),
+                    "devai.triggered_by": str(extra.get("triggered_by", "") or ""),
+                },
+            )
+        except Exception:  # noqa: BLE001 — tracing must never break the call
+            import contextlib as _c
+
+            return _c.nullcontext(None)
 
     def _trace_ctx(self, request: LLMRequest) -> Any:
         try:

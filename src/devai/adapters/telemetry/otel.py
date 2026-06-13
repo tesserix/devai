@@ -18,6 +18,7 @@ swallow their own exceptions — measuring a request must never break it.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from typing import Any
@@ -26,6 +27,16 @@ from devai.adapters.base import AdapterNotConfigured, AdapterNotInstalled
 from devai.adapters.telemetry.base import LLMMetric, StageMetric, TelemetryAdapter
 
 logger = logging.getLogger(__name__)
+
+
+def _clean_attrs(attributes: dict[str, Any] | None) -> dict[str, Any]:
+    """OTel span/metric attributes must be scalars — coerce and drop empties."""
+    out: dict[str, Any] = {}
+    for key, value in (attributes or {}).items():
+        if value is None or value == "":
+            continue
+        out[key] = value if isinstance(value, (str, bool, int, float)) else str(value)
+    return out
 
 
 def _normalize_signal_endpoint(endpoint: str, signal: str) -> str:
@@ -69,8 +80,7 @@ class OtelTelemetryAdapter(TelemetryAdapter):
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
         except ImportError as e:  # pragma: no cover - exercised via factory degrade
             raise AdapterNotInstalled(
-                "otel telemetry adapter requires opentelemetry-exporter-otlp-proto-http "
-                "(pip install 'devai[otel]')"
+                "otel telemetry adapter requires opentelemetry-exporter-otlp-proto-http (pip install 'devai[otel]')"
             ) from e
 
         self._endpoint = endpoint
@@ -119,14 +129,13 @@ class OtelTelemetryAdapter(TelemetryAdapter):
         self._stage_duration = meter.create_histogram(
             "devai.pipeline.stage.duration", unit="ms", description="Pipeline stage latency"
         )
-        self._llm_tokens = meter.create_counter(
-            "devai.llm.tokens", unit="1", description="LLM tokens consumed"
-        )
-        self._llm_cost = meter.create_counter(
-            "devai.llm.cost_usd", unit="USD", description="LLM spend in USD"
-        )
-        self._llm_duration = meter.create_histogram(
-            "devai.llm.duration", unit="ms", description="LLM call latency"
+        self._llm_tokens = meter.create_counter("devai.llm.tokens", unit="1", description="LLM tokens consumed")
+        self._llm_cost = meter.create_counter("devai.llm.cost_usd", unit="USD", description="LLM spend in USD")
+        self._llm_duration = meter.create_histogram("devai.llm.duration", unit="ms", description="LLM call latency")
+        # Per-fleet (per-agent) execution counter — lets Grafana break runs
+        # and failures down by agent persona independent of the stage name.
+        self._agent_runs = meter.create_counter(
+            "devai.agent.runs", unit="1", description="Agent (fleet) stage executions"
         )
 
         self._meter = meter
@@ -161,9 +170,7 @@ class OtelTelemetryAdapter(TelemetryAdapter):
                     response = await call_next(request)
                 except Exception as exc:  # noqa: BLE001
                     span.set_status(status_code.ERROR, str(exc))
-                    _safe_record(
-                        req_count, req_duration, method, route, 500, (time.perf_counter() - started) * 1000
-                    )
+                    _safe_record(req_count, req_duration, method, route, 500, (time.perf_counter() - started) * 1000)
                     raise
                 code = getattr(response, "status_code", 0)
                 span.set_attribute("http.status_code", code)
@@ -176,17 +183,32 @@ class OtelTelemetryAdapter(TelemetryAdapter):
     # Domain records
     # ──────────────────────────────────────────────────────────────────
 
+    def span(self, name: str, *, attributes: dict[str, Any] | None = None) -> contextlib.AbstractContextManager[Any]:
+        try:
+            return self._tracer.start_as_current_span(name, attributes=_clean_attrs(attributes))
+        except Exception:  # noqa: BLE001 — tracing must never break the caller
+            logger.debug("span(%s) failed to start", name, exc_info=True)
+            return contextlib.nullcontext(None)
+
     def record_stage(self, metric: StageMetric) -> None:
         try:
-            attrs = {
-                "blueprint": metric.blueprint,
-                "stage": metric.stage,
-                "status": metric.status,
-                **metric.attrs,
-            }
+            attrs = _clean_attrs(
+                {
+                    "blueprint": metric.blueprint,
+                    "stage": metric.stage,
+                    "status": metric.status,
+                    "agent": metric.agent,
+                    "lane": metric.lane,
+                    **metric.attrs,
+                }
+            )
             self._stage_count.add(1, attrs)
             if metric.duration_ms:
                 self._stage_duration.record(metric.duration_ms, attrs)
+            # Per-agent (fleet) counter — agent-keyed, no stage dimension so the
+            # cardinality stays bounded by the number of agent personas.
+            if metric.agent:
+                self._agent_runs.add(1, _clean_attrs({"agent": metric.agent, "status": metric.status}))
         except Exception:  # noqa: BLE001
             logger.debug("record_stage failed", exc_info=True)
 

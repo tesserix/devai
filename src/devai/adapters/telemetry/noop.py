@@ -13,6 +13,7 @@ ships fully functional with telemetry off, and turning it on is one env var.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from devai.adapters.telemetry.base import LLMMetric, StageMetric, TelemetryAdapter
@@ -25,6 +26,9 @@ class NoopTelemetryAdapter(TelemetryAdapter):
 
     def instrument_asgi(self, app: Any) -> None:  # noqa: ARG002
         return None
+
+    def span(self, name: str, *, attributes: dict[str, Any] | None = None) -> contextlib.AbstractContextManager[Any]:  # noqa: ARG002
+        return contextlib.nullcontext(None)
 
     def record_stage(self, metric: StageMetric) -> None:  # noqa: ARG002
         return None

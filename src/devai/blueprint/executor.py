@@ -97,6 +97,37 @@ def _parse_json_lenient(text: str) -> Any:
     return json.loads(t.strip())
 
 
+def _otel_stage_span(spec: StageSpec, task: DevAITask) -> Any:
+    """OTel span for one stage attempt — the agent-native trace plane.
+
+    Names the span after the agent persona (``agent.senior_developer``) so a
+    run reads as a tree of agent spans in Tempo/Grafana; the LLM calls inside
+    nest automatically through OTel's contextvar propagation. No-op (a plain
+    null context) whenever telemetry is the Noop.
+    """
+    try:
+        from devai.adapters.telemetry.runtime import get_global_telemetry
+
+        agent = spec.resolved_agent() or spec.name
+        return get_global_telemetry().span(
+            f"agent.{agent}",
+            attributes={
+                "devai.run_id": task.id,
+                "devai.blueprint": task.blueprint or "",
+                "devai.stage": spec.name,
+                "devai.stage_handler": spec.stage,
+                "devai.agent": agent,
+                "devai.lane": spec.lane or "",
+                "devai.repo": task.repo or "",
+                "devai.triggered_by": task.triggered_by or "",
+            },
+        )
+    except Exception:  # noqa: BLE001 — tracing must never break a stage
+        import contextlib as _c
+
+        return _c.nullcontext(None)
+
+
 def _stage_trace(spec: StageSpec, task: DevAITask) -> Any:
     """LangSmith trace context for one stage attempt; no-op when disabled.
 
@@ -558,10 +589,12 @@ class BlueprintExecutor:
         """
         for attempt in range(1, max_attempts + 1):
             try:
-                # LangSmith span per attempt — LLM calls inside inherit this
-                # parent through contextvars, so a run reads as
-                # stage → llm-call trees in the LangSmith project.
-                with _stage_trace(spec, task) as _rt:
+                # Two trace planes per attempt, both no-ops when off:
+                #  - OTel span → the collector → Tempo/Grafana (infra-native);
+                #  - LangSmith run → the LangSmith project (LLM-native).
+                # Either way LLM calls inside inherit this parent through
+                # contextvars, so a run reads as stage → llm-call trees.
+                with _otel_stage_span(spec, task), _stage_trace(spec, task) as _rt:
                     result = await self._execute_supervised(stage, spec, task, timeout)
                     if _rt is not None and isinstance(result, StageResult):
                         with contextlib.suppress(Exception):

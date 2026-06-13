@@ -1124,6 +1124,11 @@ class PipelineService:
                         status=event.phase.value,
                         duration_ms=float(event.duration_ms or 0.0),
                         repo=task.repo or "",
+                        # Per-fleet attribution — the agent persona + lane on
+                        # the event light up per-agent metric breakdowns.
+                        agent=event.agent or "",
+                        lane=event.lane or "",
+                        run_id=task.id,
                     )
                 )
             except Exception:  # noqa: BLE001
