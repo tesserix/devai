@@ -56,9 +56,16 @@ def _summary(obj: dict[str, Any], kind: str) -> dict[str, Any]:
 class FluxGitOpsAdapter(GitOpsAdapter):
     provider = "flux"
 
-    def __init__(self, *, default_namespace: str = "flux-system", mutations_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        default_namespace: str = "flux-system",
+        mutations_enabled: bool = True,
+        cluster: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(mutations_enabled=mutations_enabled)
         self.default_namespace = default_namespace
+        self._cluster = cluster  # user-connected cluster (None = in-cluster)
 
     @staticmethod
     def _resource(kind: str) -> str:
@@ -71,7 +78,7 @@ class FluxGitOpsAdapter(GitOpsAdapter):
         args = ["get", resource]
         args += ["-n", namespace] if namespace else ["-A"]
         try:
-            result = await kubectl_json(*args)
+            result = await kubectl_json(*args, cluster=self._cluster)
         except Exception as e:  # noqa: BLE001
             return [err(f"flux: cannot list {kind}: {e}")]
         return [_summary(o, kind) for o in result.get("items", [])]
@@ -102,7 +109,7 @@ class FluxGitOpsAdapter(GitOpsAdapter):
             if not resource:
                 return err(f"flux: unknown kind {k!r}")
             try:
-                obj = await kubectl_json("get", resource, name, "-n", namespace)
+                obj = await kubectl_json("get", resource, name, "-n", namespace, cluster=self._cluster)
             except Exception:  # noqa: BLE001 — try the next kind
                 continue
             detail = _summary(obj, k)
@@ -125,7 +132,14 @@ class FluxGitOpsAdapter(GitOpsAdapter):
         stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
             await kubectl(
-                "annotate", resource, name, "-n", ns, f"reconcile.fluxcd.io/requestedAt={stamp}", "--overwrite"
+                "annotate",
+                resource,
+                name,
+                "-n",
+                ns,
+                f"reconcile.fluxcd.io/requestedAt={stamp}",
+                "--overwrite",
+                cluster=self._cluster,
             )
             logger.info("gitops/flux: reconcile requested for %s/%s (%s)", ns, name, kind)
             return {"ok": True, "kind": kind, "name": name, "namespace": ns, "requested_at": stamp}
@@ -144,7 +158,7 @@ class FluxGitOpsAdapter(GitOpsAdapter):
         ns = namespace or self.default_namespace
         patch = '{"spec":{"suspend":' + ("true" if suspended else "false") + "}}"
         try:
-            await kubectl("patch", resource, name, "-n", ns, "--type", "merge", "-p", patch)
+            await kubectl("patch", resource, name, "-n", ns, "--type", "merge", "-p", patch, cluster=self._cluster)
             verb = "suspended" if suspended else "resumed"
             logger.warning("gitops/flux: %s %s/%s (%s)", verb.upper(), ns, name, kind)
             return {"ok": True, "kind": kind, "name": name, "namespace": ns, "suspended": suspended}

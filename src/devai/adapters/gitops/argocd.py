@@ -21,12 +21,26 @@ logger = logging.getLogger(__name__)
 class ArgoCDGitOpsAdapter(GitOpsAdapter):
     provider = "argocd"
 
-    def __init__(self, settings: Settings, *, mutations_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        mutations_enabled: bool = True,
+        cluster: dict | None = None,
+        app_namespace: str = "",
+    ) -> None:
         super().__init__(mutations_enabled=mutations_enabled)
+        from devai.adapters.gitops.base import cluster_kubectl_flags
         from devai.services.argocd import ArgocdClient  # internal, not a vendor SDK
 
-        self._client = ArgocdClient(settings)
-        self.namespace = settings.argocd_namespace
+        # `cluster` targets an Argo CD living in a user-connected cluster
+        # (Settings → Kubernetes Clusters); None = the platform's own.
+        self._client = ArgocdClient(
+            settings,
+            kubectl_extra=cluster_kubectl_flags(cluster),
+            namespace=app_namespace,
+        )
+        self.namespace = app_namespace or settings.argocd_namespace
 
     async def list_targets(self, scope: str = "") -> list[dict[str, Any]]:
         return await self._client.list_apps(project=scope or None)

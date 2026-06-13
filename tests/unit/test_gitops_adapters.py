@@ -95,7 +95,7 @@ def _kargo_freight(name: str, alias: str, ts: str) -> dict[str, Any]:
 def kargo(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
-    async def fake_json(*args: str, timeout: int = 30) -> dict[str, Any]:
+    async def fake_json(*args: str, timeout: int = 30, cluster=None) -> dict[str, Any]:
         calls.append(args)
         if args[1].startswith("freights"):
             if not args[2].startswith("-"):  # named get: kubectl get freights <name> -n <ns>
@@ -126,7 +126,7 @@ def kargo(monkeypatch):
 
     created: list[str] = []
 
-    async def fake_kubectl(*args: str, timeout: int = 30, stdin: str = "") -> str:
+    async def fake_kubectl(*args: str, timeout: int = 30, stdin: str = "", cluster=None) -> str:
         if args[0] == "create":
             created.append(stdin)
             return "promotion.kargo.akuity.io/staging-xyz12 created"
@@ -180,7 +180,7 @@ async def test_kargo_mutation_gate(kargo):
 def flux(monkeypatch):
     annotated: list[tuple[str, ...]] = []
 
-    async def fake_json(*args: str, timeout: int = 30) -> dict[str, Any]:
+    async def fake_json(*args: str, timeout: int = 30, cluster=None) -> dict[str, Any]:
         if args[1].startswith("kustomizations"):
             obj = {
                 "metadata": {"name": "devai-api", "namespace": "devai"},
@@ -193,7 +193,7 @@ def flux(monkeypatch):
             return obj if len(args) > 2 and args[2] == "devai-api" else {"items": [obj]}
         raise RuntimeError("no such resource")
 
-    async def fake_kubectl(*args: str, timeout: int = 30, stdin: str = "") -> str:
+    async def fake_kubectl(*args: str, timeout: int = 30, stdin: str = "", cluster=None) -> str:
         annotated.append(args)
         return ""
 

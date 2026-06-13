@@ -60,15 +60,66 @@ def _audit(ctx: ToolContext, tool: str, args: dict[str, Any]) -> None:
     )
 
 
+def _adapter_for_cluster(provider: str, cluster: dict[str, Any]) -> Any:
+    """A FRESH adapter targeting a user-connected cluster (never cached —
+    credentials are per-user and per-call)."""
+    from devai.config import settings
+
+    mutations = bool(getattr(settings, "gitops_mutations_enabled", True))
+    if provider == "argocd":
+        from devai.adapters.gitops.argocd import ArgoCDGitOpsAdapter
+
+        return ArgoCDGitOpsAdapter(settings, mutations_enabled=mutations, cluster=cluster)
+    if provider == "kargo":
+        from devai.adapters.gitops.kargo import KargoGitOpsAdapter
+
+        return KargoGitOpsAdapter(mutations_enabled=mutations, cluster=cluster)
+    if provider == "flux":
+        from devai.adapters.gitops.flux import FluxGitOpsAdapter
+
+        return FluxGitOpsAdapter(mutations_enabled=mutations, cluster=cluster)
+    return _adapter(provider)
+
+
+async def _resolve_cluster(ctx: ToolContext, name: str) -> tuple[dict[str, Any] | None, str]:
+    """The caller's connected cluster by name → (cluster, "") or (None, error)."""
+    email = (ctx.triggered_by or "").strip()
+    if "@" not in email:
+        return None, (
+            "ERROR: this call carries no user identity, so a personal cluster cannot be "
+            "resolved — omit 'cluster' to use the platform cluster"
+        )
+    from devai.settings.connections import user_cluster, user_cluster_names
+
+    cluster = await user_cluster(email, name)
+    if cluster is None or not cluster.get("server"):
+        names = await user_cluster_names(email)
+        return None, (
+            f"ERROR: no connected cluster named {name!r} for {email}. "
+            + (f"Available: {', '.join(names)}" if names else "Connect one in Settings → Kubernetes Cluster.")
+        )
+    return cluster, ""
+
+
 def _make(provider: str, method: str, *, mutating: bool = False, arg_map: dict[str, str] | None = None):
     """Factory-of-factories: one handler shape for every gitops tool.
 
     `arg_map` renames tool-call args to adapter kwargs (e.g. project→scope).
+    Every tool accepts an optional `cluster` — the name of one of the
+    CALLER's connected Kubernetes clusters (Settings → Kubernetes Cluster);
+    omitted = the platform cluster.
     """
 
     def factory(ctx: ToolContext) -> Handler:
         async def handler(args: dict[str, Any]) -> str:
-            adapter = _adapter(provider)
+            cluster_name = str(args.pop("cluster", "") or "").strip()
+            if cluster_name:
+                cluster, problem = await _resolve_cluster(ctx, cluster_name)
+                if problem:
+                    return problem
+                adapter = _adapter_for_cluster(provider, cluster)
+            else:
+                adapter = _adapter(provider)
             fn = getattr(adapter, method, None)
             if fn is None:
                 return f"ERROR: {provider} backend does not support {method}"
@@ -92,8 +143,18 @@ def _make(provider: str, method: str, *, mutating: bool = False, arg_map: dict[s
     return factory
 
 
+_CLUSTER = {
+    "type": "string",
+    "description": (
+        "Optional — the name of one of YOUR connected Kubernetes clusters "
+        "(Settings → Kubernetes Cluster). Omit to use the platform cluster."
+    ),
+}
+
+
 def _obj(props: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
-    schema: dict[str, Any] = {"type": "object", "properties": props}
+    # Every gitops tool can target a user-connected cluster via `cluster`.
+    schema: dict[str, Any] = {"type": "object", "properties": {**props, "cluster": _CLUSTER}}
     if required:
         schema["required"] = required
     return schema

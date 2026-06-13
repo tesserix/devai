@@ -261,6 +261,131 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         ),
     ),
     ConnectorSpec(
+        key="kubernetes",
+        label="Kubernetes Cluster",
+        family="kubernetes",
+        provider_attr="k8s_flavor",
+        providers=("generic", "gke", "eks", "aks"),
+        multi=True,
+        description=(
+            "Connect your own Kubernetes clusters — agents and GitOps tools (Argo CD, Kargo, "
+            "Flux) can then operate against them by name. Tokens and CA certs live in GCP "
+            "Secret Manager under YOUR scope only."
+        ),
+        fields=(
+            _f("k8s_name", "Cluster Name", "k8s_name", required=True, placeholder="prod-gke"),
+            _f(
+                "k8s_api_server",
+                "API Server URL",
+                "k8s_api_server",
+                required=True,
+                placeholder="https://34.x.x.x or https://my-cluster:6443",
+            ),
+            _f(
+                "k8s_token",
+                "Bearer Token",
+                "k8s_token",
+                secret=True,
+                required=True,
+                help="ServiceAccount token with the RBAC your agents should have.",
+            ),
+            _f(
+                "k8s_ca_cert",
+                "CA Certificate (base64)",
+                "k8s_ca_cert",
+                secret=True,
+                help="certificate-authority-data from your kubeconfig. Leave empty to skip TLS verification.",
+            ),
+            _f("k8s_namespace", "Default Namespace", "k8s_namespace", placeholder="default"),
+        ),
+    ),
+    ConnectorSpec(
+        key="cloud",
+        label="Cloud Account",
+        family="cloud",
+        provider_attr="cloud_provider",
+        providers=("gcp", "aws", "azure"),
+        multi=True,
+        description=(
+            "Connect cloud accounts (GCP / AWS / Azure). Credentials are stored in GCP Secret "
+            "Manager under your scope and surfaced to agents and MCP tools that operate on "
+            "your infrastructure."
+        ),
+        fields=(
+            _f("cloud_name", "Account Name", "cloud_name", required=True, placeholder="my-prod-gcp"),
+            _f("gcp_project_id", "GCP Project ID", "gcp_project_id", provider="gcp"),
+            _f(
+                "gcp_sa_key",
+                "Service Account Key (JSON)",
+                "gcp_sa_key",
+                secret=True,
+                provider="gcp",
+                help="Paste the JSON key. Prefer a least-privilege SA.",
+            ),
+            _f("aws_region", "AWS Region", "aws_region", placeholder="us-east-1", provider="aws"),
+            _f("aws_access_key_id", "Access Key ID", "aws_access_key_id", secret=True, provider="aws"),
+            _f("aws_secret_access_key", "Secret Access Key", "aws_secret_access_key", secret=True, provider="aws"),
+            _f("azure_subscription_id", "Subscription ID", "azure_subscription_id", provider="azure"),
+            _f("azure_tenant_id", "Tenant ID", "azure_tenant_id", provider="azure"),
+            _f("azure_client_id", "Client ID", "azure_client_id", provider="azure"),
+            _f("azure_client_secret", "Client Secret", "azure_client_secret", secret=True, provider="azure"),
+        ),
+    ),
+    ConnectorSpec(
+        key="argocd",
+        label="Argo CD",
+        family="gitops",
+        provider_attr="argocd_mode",
+        providers=("api", "kubectl"),
+        multi=True,
+        description=(
+            "Connect external Argo CD instances by API server + token. The in-platform Argo CD "
+            "needs nothing here; add entries for the Argo CDs running in YOUR clusters."
+        ),
+        fields=(
+            _f("argocd_name", "Name", "argocd_name", required=True, placeholder="prod-argocd"),
+            _f(
+                "argocd_server_url",
+                "Server URL",
+                "argocd_server_url",
+                required=True,
+                placeholder="https://argocd.example.com",
+            ),
+            _f("argocd_token", "Auth Token", "argocd_token", secret=True, required=True),
+            _f(
+                "argocd_app_namespace",
+                "Application Namespace",
+                "argocd_app_namespace",
+                placeholder="argocd",
+                help="Namespace holding the Application CRs (kubectl mode).",
+            ),
+        ),
+    ),
+    ConnectorSpec(
+        key="kargo",
+        label="Kargo",
+        family="gitops",
+        provider_attr="kargo_mode",
+        providers=("api", "kubectl"),
+        multi=True,
+        description=(
+            "Connect external Kargo control planes (promotion pipelines in your own clusters) "
+            "by API endpoint + token."
+        ),
+        fields=(
+            _f("kargo_name", "Name", "kargo_name", required=True, placeholder="prod-kargo"),
+            _f(
+                "kargo_api_url",
+                "API URL",
+                "kargo_api_url",
+                required=True,
+                placeholder="https://kargo.example.com",
+            ),
+            _f("kargo_token", "Auth Token", "kargo_token", secret=True, required=True),
+            _f("kargo_project", "Default Project", "kargo_project", placeholder="my-project"),
+        ),
+    ),
+    ConnectorSpec(
         key="web_search",
         label="Web Search",
         family="web_search",

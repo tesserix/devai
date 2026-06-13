@@ -28,6 +28,15 @@ logger = logging.getLogger(__name__)
 
 _TABLE = "user_settings"
 
+# Process-global instance for call sites with no constructor injection
+# (tool handlers, adapters). Last constructed wins — each process builds
+# exactly one real service at startup.
+_GLOBAL: SettingsService | None = None
+
+
+def get_settings_service() -> SettingsService | None:
+    return _GLOBAL
+
 
 class SettingsService:
     """CRUD for connectors + secret provisioning, scoped user/team/tenant/global."""
@@ -36,6 +45,8 @@ class SettingsService:
         self._pool = pool
         self._secrets = secrets
         self._mem: dict[str, Connector] = {}  # fallback store, keyed by storage_key
+        global _GLOBAL  # noqa: PLW0603 — deliberate process-global registration
+        _GLOBAL = self
 
     @property
     def has_db(self) -> bool:
@@ -289,4 +300,4 @@ def _row_to_connector(r: Any) -> Connector:
     )
 
 
-__all__ = ["SettingsService"]
+__all__ = ["SettingsService", "get_settings_service"]

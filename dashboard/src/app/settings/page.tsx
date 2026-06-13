@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, KeyRound, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, KeyRound, Loader2, Plus, Save, Store, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/confirm-dialog";
 import {
   api,
+  type McpMarketplaceEntry,
   type SettingsCatalog,
   type SettingsConnector,
   type SettingsConnectorSpec,
@@ -32,6 +33,11 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null); // connector key being added/edited
   const [trial, setTrial] = useState<Awaited<ReturnType<typeof api.getTrialStatus>> | null>(null);
+  // When the user clicks "Connect" in the MCP marketplace, pre-fill the MCP
+  // connector form (name + endpoint) and open it.
+  const [mcpPrefill, setMcpPrefill] = useState<
+    { provider?: string; instanceId?: string; values?: Record<string, string> } | null
+  >(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -136,17 +142,146 @@ export default function SettingsPage() {
                 configured={configured}
                 secretsWritable={secretsWritable}
                 isEditing={editing === spec.key}
-                onEdit={() => setEditing(editing === spec.key ? null : spec.key)}
+                onEdit={() => {
+                  if (editing !== spec.key) setMcpPrefill(null);
+                  setEditing(editing === spec.key ? null : spec.key);
+                }}
                 onSaved={() => {
                   setEditing(null);
+                  setMcpPrefill(null);
                   void load();
                 }}
                 onDeleted={() => void load()}
+                prefill={spec.key === "mcp" ? mcpPrefill ?? undefined : undefined}
               />
             );
           })}
+
+          <McpMarketplace
+            onConnect={(entry) => {
+              setMcpPrefill({
+                provider: entry.transport === "sse" ? "sse" : "streamable_http",
+                instanceId: entry.name,
+                values: { mcp_name: entry.display_name || entry.name, mcp_url: entry.endpoint },
+              });
+              setEditing("mcp");
+              if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+/** MCP marketplace — browse the registry's MCP servers and connect your own. */
+function McpMarketplace({ onConnect }: { onConnect: (e: McpMarketplaceEntry) => void }) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.mcpMarketplace>> | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api
+      .mcpMarketplace()
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (open && data === null) load();
+  }, [open, data, load]);
+
+  const connectable = data?.connectable ?? [];
+  const builtin = data?.builtin ?? [];
+
+  return (
+    <div className="panel p-5">
+      <button className="flex items-center justify-between w-full gap-4" onClick={() => setOpen((v) => !v)}>
+        <div className="text-left">
+          <div className="flex items-center gap-2">
+            <Store className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-[var(--ink-50)] font-medium">MCP Marketplace</h2>
+            {data && <span className="pill text-xs">{connectable.length + builtin.length} servers</span>}
+          </div>
+          <p className="text-sm text-[var(--ink-300)] mt-1">
+            Browse every MCP server in the registry and connect your own — tools they expose become
+            available to your agents and chat.
+          </p>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-[var(--ink-400)] transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-4">
+          {loading && (
+            <div className="flex items-center gap-2 text-[var(--ink-300)] text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading marketplace…
+            </div>
+          )}
+
+          {!loading && connectable.length > 0 && (
+            <>
+              <div className="label-eyebrow mb-2">Connect your own</div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {connectable.map((e) => (
+                  <McpCard key={e.name} entry={e} onConnect={() => onConnect(e)} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {!loading && builtin.length > 0 && (
+            <>
+              <div className="label-eyebrow mb-2 mt-5">Built-in (always on)</div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {builtin.map((e) => (
+                  <McpCard key={e.name} entry={e} builtin />
+                ))}
+              </div>
+            </>
+          )}
+
+          {!loading && connectable.length === 0 && builtin.length === 0 && (
+            <p className="text-sm text-[var(--ink-400)]">No MCP servers in the registry yet.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function McpCard({
+  entry,
+  onConnect,
+  builtin,
+}: {
+  entry: McpMarketplaceEntry;
+  onConnect?: () => void;
+  builtin?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-raised)] p-3 flex flex-col">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[var(--ink-100)] text-sm font-medium">{entry.display_name || entry.name}</div>
+        {entry.category && <span className="pill text-[10px] capitalize">{entry.category}</span>}
+      </div>
+      <p className="text-xs text-[var(--ink-300)] mt-1 line-clamp-3 flex-1">{entry.description}</p>
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-[10px] text-[var(--ink-400)]">
+          {entry.tool_count} tool{entry.tool_count === 1 ? "" : "s"} · {entry.auth_mode}
+        </span>
+        {builtin ? (
+          <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+            <Check className="w-3 h-3" /> built-in
+          </span>
+        ) : (
+          <button className="btn-secondary text-xs flex items-center gap-1" onClick={onConnect}>
+            <Plus className="w-3 h-3" /> Connect
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -159,6 +294,7 @@ function ConnectorCard({
   onEdit,
   onSaved,
   onDeleted,
+  prefill,
 }: {
   spec: SettingsConnectorSpec;
   configured: SettingsConnector[];
@@ -167,6 +303,7 @@ function ConnectorCard({
   onEdit: () => void;
   onSaved: () => void;
   onDeleted: () => void;
+  prefill?: { provider?: string; instanceId?: string; values?: Record<string, string> };
 }) {
   const confirm = useConfirm();
   return (
@@ -231,6 +368,7 @@ function ConnectorCard({
           spec={spec}
           secretsWritable={secretsWritable}
           onSaved={onSaved}
+          prefill={prefill}
         />
       )}
     </div>
@@ -241,16 +379,19 @@ function ConnectorForm({
   spec,
   secretsWritable,
   onSaved,
+  prefill,
 }: {
   spec: SettingsConnectorSpec;
   secretsWritable: boolean;
   onSaved: () => void;
+  // Pre-populate the form (e.g. "Connect" from the MCP marketplace).
+  prefill?: { provider?: string; instanceId?: string; values?: Record<string, string> };
 }) {
   const [scope, setScope] = useState<string>("user");
   const [scopeId, setScopeId] = useState("");
-  const [provider, setProvider] = useState(spec.providers[0] || "");
-  const [instanceId, setInstanceId] = useState("default");
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [provider, setProvider] = useState(prefill?.provider || spec.providers[0] || "");
+  const [instanceId, setInstanceId] = useState(prefill?.instanceId || "default");
+  const [values, setValues] = useState<Record<string, string>>(prefill?.values || {});
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 

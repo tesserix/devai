@@ -37,10 +37,19 @@ class ArgocdClient:
     All public methods are traced via LangSmith when enabled.
     """
 
-    def __init__(self, config: Settings) -> None:
-        self.namespace = config.argocd_namespace
+    def __init__(
+        self,
+        config: Settings,
+        *,
+        kubectl_extra: list[str] | None = None,
+        namespace: str = "",
+    ) -> None:
+        self.namespace = namespace or config.argocd_namespace
         self.sync_timeout = config.argocd_sync_timeout
         self.health_timeout = config.argocd_health_timeout
+        # Extra kubectl flags (e.g. --server/--token targeting a
+        # user-connected cluster from Settings → Kubernetes Clusters).
+        self._kubectl_extra = list(kubectl_extra or [])
 
         # Apply tracing decorators to public methods
         self._apply_tracing()
@@ -74,7 +83,7 @@ class ArgocdClient:
 
     async def _kubectl(self, *args: str) -> str:
         """Execute a kubectl command and return stdout."""
-        cmd = ["kubectl", *args]
+        cmd = ["kubectl", *self._kubectl_extra, *args]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,

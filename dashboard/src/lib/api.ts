@@ -264,6 +264,14 @@ export const api = {
       enabled_models?: string[];
     }>(`/settings/models/${encodeURIComponent(provider)}`),
 
+  // MCP marketplace — registry MCP servers a user can browse + connect.
+  mcpMarketplace: () =>
+    apiFetch<{
+      servers: McpMarketplaceEntry[];
+      connectable: McpMarketplaceEntry[];
+      builtin: McpMarketplaceEntry[];
+    }>("/settings/mcp/marketplace", { soft: true }),
+
   // Pipeline. The Fiber pipeline serializes a task as {id, state, current_stage,
   // …} but the dashboard's PipelineRun shape is {run_id, stage, agents}. Normalize
   // at the boundary so a missing run_id never reaches run.run_id.slice() and
@@ -1122,6 +1130,19 @@ export interface SaveConnectorInput {
   instance_id?: string;
   prefs?: Record<string, unknown>;
   secrets?: Record<string, string>;
+}
+
+export interface McpMarketplaceEntry {
+  name: string;
+  display_name: string;
+  description: string;
+  endpoint: string;
+  auth_mode: string;
+  transport: string;
+  category: string;
+  tools: string[];
+  tool_count: number;
+  builtin: boolean;
 }
 
 // ── Analytics (GET /api/analytics/*) ──────────────────────────────────

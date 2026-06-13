@@ -47,9 +47,16 @@ def _freight_summary(f: dict[str, Any]) -> dict[str, Any]:
 class KargoGitOpsAdapter(GitOpsAdapter):
     provider = "kargo"
 
-    def __init__(self, *, default_project: str = "", mutations_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        default_project: str = "",
+        mutations_enabled: bool = True,
+        cluster: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(mutations_enabled=mutations_enabled)
         self.default_project = default_project
+        self._cluster = cluster  # user-connected cluster (None = in-cluster)
 
     def _project(self, scope: str) -> str:
         return scope or self.default_project
@@ -58,7 +65,7 @@ class KargoGitOpsAdapter(GitOpsAdapter):
 
     async def list_projects(self) -> list[dict[str, Any]]:
         try:
-            result = await kubectl_json("get", f"projects.{_GROUP}")
+            result = await kubectl_json("get", f"projects.{_GROUP}", cluster=self._cluster)
         except Exception as e:  # noqa: BLE001
             return [err(f"kargo: cannot list projects: {e}")]
         return [
@@ -74,7 +81,7 @@ class KargoGitOpsAdapter(GitOpsAdapter):
         args = ["get", f"stages.{_GROUP}"]
         args += ["-n", project] if project else ["-A"]
         try:
-            result = await kubectl_json(*args)
+            result = await kubectl_json(*args, cluster=self._cluster)
         except Exception as e:  # noqa: BLE001
             return [err(f"kargo: cannot list stages: {e}")]
         out = []
@@ -99,7 +106,7 @@ class KargoGitOpsAdapter(GitOpsAdapter):
         if not project:
             return err("kargo: a project (namespace) is required — pass scope/project")
         try:
-            s = await kubectl_json("get", f"stages.{_GROUP}", name, "-n", project)
+            s = await kubectl_json("get", f"stages.{_GROUP}", name, "-n", project, cluster=self._cluster)
         except Exception as e:  # noqa: BLE001
             return err(f"kargo: cannot read stage {name!r} in project {project!r}: {e}")
         status = s.get("status", {})
@@ -130,7 +137,7 @@ class KargoGitOpsAdapter(GitOpsAdapter):
         if not project:
             return [err("kargo: a project (namespace) is required to list freight")]
         try:
-            result = await kubectl_json("get", f"freights.{_GROUP}", "-n", project, "--sort-by=.metadata.creationTimestamp")
+            result = await kubectl_json("get", f"freights.{_GROUP}", "-n", project, "--sort-by=.metadata.creationTimestamp", cluster=self._cluster)
         except Exception as e:  # noqa: BLE001
             return [err(f"kargo: cannot list freight in {project!r}: {e}")]
         items = result.get("items", [])
@@ -164,7 +171,7 @@ class KargoGitOpsAdapter(GitOpsAdapter):
             f"  freight: {resolved}\n"
         )
         try:
-            out = await kubectl("create", "-f", "-", stdin=manifest)
+            out = await kubectl("create", "-f", "-", stdin=manifest, cluster=self._cluster)
             promo = out.split()[0].split("/")[-1] if out else ""
             logger.warning("gitops/kargo: PROMOTION %s created — %s/%s ← freight %s", promo, project, stage, resolved)
             return {"ok": True, "promotion": promo, "project": project, "stage": stage, "freight": resolved}
@@ -174,7 +181,7 @@ class KargoGitOpsAdapter(GitOpsAdapter):
     async def _resolve_freight(self, project: str, ref: str) -> str:
         """Freight name from a name-or-alias reference; "" when not found."""
         try:
-            await kubectl_json("get", f"freights.{_GROUP}", ref, "-n", project)
+            await kubectl_json("get", f"freights.{_GROUP}", ref, "-n", project, cluster=self._cluster)
             return ref
         except Exception:  # noqa: BLE001 — not a name; try alias
             pass
@@ -188,7 +195,7 @@ class KargoGitOpsAdapter(GitOpsAdapter):
             return [err("kargo: a project (namespace) is required to list promotions")]
         args = ["get", f"promotions.{_GROUP}", "-n", project, "--sort-by=.metadata.creationTimestamp"]
         try:
-            result = await kubectl_json(*args)
+            result = await kubectl_json(*args, cluster=self._cluster)
         except Exception as e:  # noqa: BLE001
             return [err(f"kargo: cannot list promotions in {project!r}: {e}")]
         promos = []

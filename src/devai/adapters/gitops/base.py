@@ -28,20 +28,68 @@ tool call degrades into an answer the agent can reason about.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import hashlib
 import json
 import logging
+import tempfile
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 KUBECTL_TIMEOUT = 30
 
+# CA bundles for user-connected clusters, written once per content hash so a
+# remote call never re-writes the same file. /tmp is pod-local and wiped with
+# the pod — acceptable for PUBLIC CA material (the CA cert is not a secret in
+# the confidentiality sense; the bearer token never touches disk).
+_CA_DIR = Path(tempfile.gettempdir()) / "devai-gitops-ca"
 
-async def kubectl(*args: str, timeout: int = KUBECTL_TIMEOUT, stdin: str = "") -> str:
-    """Run kubectl, return stdout. Raises RuntimeError on a non-zero exit."""
+
+def cluster_kubectl_flags(cluster: dict[str, Any] | None) -> list[str]:
+    """kubectl flags targeting a user-connected cluster; [] = in-cluster.
+
+    ``cluster`` shape (from ``settings.connections.user_cluster``):
+    ``{server, token, ca_data (base64 PEM, optional), namespace?}``. With no
+    CA the call falls back to --insecure-skip-tls-verify — the connector UI
+    says so, and the bearer token still authenticates the caller.
+    """
+    if not cluster or not cluster.get("server"):
+        return []
+    flags = [f"--server={cluster['server']}"]
+    if cluster.get("token"):
+        flags.append(f"--token={cluster['token']}")
+    ca_data = str(cluster.get("ca_data") or "").strip()
+    if ca_data:
+        try:
+            pem = base64.b64decode(ca_data, validate=True)
+        except (binascii.Error, ValueError):
+            pem = ca_data.encode()  # already PEM text
+        digest = hashlib.sha256(pem).hexdigest()[:16]
+        ca_file = _CA_DIR / f"{digest}.crt"
+        if not ca_file.exists():
+            _CA_DIR.mkdir(parents=True, exist_ok=True)
+            ca_file.write_bytes(pem)
+        flags.append(f"--certificate-authority={ca_file}")
+    else:
+        flags.append("--insecure-skip-tls-verify=true")
+    return flags
+
+
+async def kubectl(
+    *args: str, timeout: int = KUBECTL_TIMEOUT, stdin: str = "", cluster: dict[str, Any] | None = None
+) -> str:
+    """Run kubectl, return stdout. Raises RuntimeError on a non-zero exit.
+
+    ``cluster`` targets a user-connected cluster instead of the in-cluster
+    service account (see :func:`cluster_kubectl_flags`).
+    """
     proc = await asyncio.create_subprocess_exec(
         "kubectl",
+        *cluster_kubectl_flags(cluster),
         *args,
         stdin=asyncio.subprocess.PIPE if stdin else None,
         stdout=asyncio.subprocess.PIPE,
@@ -55,9 +103,11 @@ async def kubectl(*args: str, timeout: int = KUBECTL_TIMEOUT, stdin: str = "") -
     return stdout.decode().strip()
 
 
-async def kubectl_json(*args: str, timeout: int = KUBECTL_TIMEOUT) -> dict[str, Any]:
+async def kubectl_json(
+    *args: str, timeout: int = KUBECTL_TIMEOUT, cluster: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Run kubectl with -o json and parse the result."""
-    out = await kubectl(*args, "-o", "json", timeout=timeout)
+    out = await kubectl(*args, "-o", "json", timeout=timeout, cluster=cluster)
     return json.loads(out) if out else {}
 
 

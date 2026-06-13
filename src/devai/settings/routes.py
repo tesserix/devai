@@ -263,6 +263,57 @@ async def trial_status(request: Request) -> dict[str, Any]:
 # ── delete ──────────────────────────────────────────────────────────────────
 
 
+# ── MCP marketplace ─────────────────────────────────────────────────────────
+
+
+def _mcp_catalog_entry(rec: Any) -> dict[str, Any]:
+    """One registry MCPServer → a marketplace card (no secrets, UI-safe)."""
+    raw = getattr(rec, "raw", None) or {}
+    meta = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+    labels = meta.get("labels", {}) if isinstance(meta, dict) else {}
+    tools = raw.get("tools") if isinstance(raw, dict) else None
+    endpoint = (raw.get("endpoint") if isinstance(raw, dict) else "") or getattr(rec, "url", "") or ""
+    # First-party DevAI servers are always-on platform infra; flag them so the
+    # UI shows "built-in" instead of a Connect button.
+    is_builtin = "devai.svc.cluster.local" in str(endpoint) or labels.get("devai.io/source") == "devai"
+    return {
+        "name": getattr(rec, "name", ""),
+        "display_name": (raw.get("displayName") if isinstance(raw, dict) else "") or getattr(rec, "name", ""),
+        "description": getattr(rec, "description", "") or (raw.get("description", "") if isinstance(raw, dict) else ""),
+        "endpoint": str(endpoint),
+        "auth_mode": (raw.get("authMode") if isinstance(raw, dict) else "") or "none",
+        "transport": getattr(rec, "type", "") or "streamable-http",
+        "category": labels.get("devai.io/category", ""),
+        "tools": list(tools) if isinstance(tools, list) else [],
+        "tool_count": len(tools) if isinstance(tools, list) else 0,
+        "builtin": bool(is_builtin),
+    }
+
+
+@router.get("/mcp/marketplace")
+async def mcp_marketplace(request: Request) -> dict[str, Any]:
+    """Browse every MCP server in the registry — the marketplace a user picks
+    from to connect their own servers (`builtin: false` entries are
+    connectable; `builtin: true` are the platform's always-on servers)."""
+    await _require_principal(request)
+    client = getattr(request.app.state, "registry_client", None)
+    if client is None:
+        from devai.registry import create_registry_client
+
+        client = create_registry_client(getattr(request.app.state, "config", None))
+    try:
+        servers = client.list_mcp_servers()
+    except Exception:  # noqa: BLE001 — empty marketplace beats a 500
+        logger.warning("settings: MCP marketplace registry read failed", exc_info=True)
+        servers = []
+    entries = [_mcp_catalog_entry(s) for s in servers]
+    return {
+        "servers": entries,
+        "connectable": [e for e in entries if not e["builtin"]],
+        "builtin": [e for e in entries if e["builtin"]],
+    }
+
+
 @router.delete("/connectors/{scope}/{scope_id}/{connector_key}")
 async def delete_connector(scope: str, scope_id: str, connector_key: str, request: Request) -> dict[str, str]:
     principal = await _require_principal(request)
