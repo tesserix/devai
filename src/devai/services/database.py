@@ -161,6 +161,46 @@ class Database:
     # Agent Executions
     # =========================================================================
 
+    async def record_llm_call(
+        self,
+        *,
+        run_id: str,
+        agent_name: str,
+        provider: str,
+        model: str,
+        tokens_input: int,
+        tokens_output: int,
+        cost_usd: float,
+        duration_ms: float,
+        status: str = "ok",
+    ) -> None:
+        """Persist one LLM call as a completed agent_executions row.
+
+        This is what feeds the analytics rollups (top agents by cost,
+        cost-by-model, cost timeseries, the agent table). One row per
+        call — the SUM/AVG aggregations stay correct, and it works for
+        EVERY pipeline (the blueprint executor never calls the legacy
+        record_agent_start/complete pair). Best-effort by contract.
+        """
+        try:
+            await self.pool.execute(
+                """INSERT INTO agent_executions
+                   (run_id, agent_name, status, started_at, completed_at, duration_ms,
+                    provider, model, tokens_input, tokens_output, llm_cost_usd)
+                   VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6, $7, $8, $9)""",
+                run_id,
+                agent_name or "unknown",
+                "completed" if status == "ok" else "failed",
+                int(duration_ms),
+                provider,
+                model,
+                int(tokens_input),
+                int(tokens_output),
+                float(cost_usd),
+            )
+        except Exception:  # noqa: BLE001 — accounting must never break an LLM call
+            logger.debug("record_llm_call failed (agent=%s)", agent_name, exc_info=True)
+
     async def record_agent_start(self, run_id: str, agent_name: str, provider: str, model: str) -> str:
         row = await self.pool.fetchrow(
             """INSERT INTO agent_executions (run_id, agent_name, status, started_at, provider, model)
@@ -1009,3 +1049,48 @@ class Database:
             session_id,
             status,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Process-global analytics writer
+# ─────────────────────────────────────────────────────────────────────────
+#
+# The LLM instrumentation (adapters/llm/instrumented.py) and the turn-usage
+# accountant (pipeline/service.py) run deep inside call stacks that have no
+# StageDeps or app.state. Like the usage ledger, they reach the database
+# through this lazily-built process-global — built once from settings, never
+# raising, None when Postgres isn't configured.
+
+_GLOBAL_DB: Database | None = None
+_GLOBAL_DB_FAILED = False
+
+
+async def get_global_db() -> Database | None:
+    """Lazily-connected process-global Database; None when unavailable."""
+    global _GLOBAL_DB, _GLOBAL_DB_FAILED
+    if _GLOBAL_DB is not None:
+        return _GLOBAL_DB
+    if _GLOBAL_DB_FAILED:
+        return None
+    try:
+        from devai.config import settings
+
+        dsn = getattr(settings, "database_url", "") or ""
+        if not dsn:
+            _GLOBAL_DB_FAILED = True
+            return None
+        db = Database(dsn)
+        await db.connect()
+        _GLOBAL_DB = db
+        return db
+    except Exception:  # noqa: BLE001 — analytics persistence is best-effort
+        logger.info("global analytics db unavailable — Postgres rollups disabled", exc_info=True)
+        _GLOBAL_DB_FAILED = True
+        return None
+
+
+def set_global_db(db: Database | None) -> None:
+    """Test/bootstrap hook — inject or clear the process-global Database."""
+    global _GLOBAL_DB, _GLOBAL_DB_FAILED
+    _GLOBAL_DB = db
+    _GLOBAL_DB_FAILED = False

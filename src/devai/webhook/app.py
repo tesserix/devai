@@ -43,6 +43,18 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # LangSmith tracing FIRST — the SDK reads LANGCHAIN_* from the
+        # process env, but deployments configure DEVAI_LANGCHAIN_*. Without
+        # this export+init the API server never traced anything (the CLI and
+        # SRE server already do it; this app was the gap).
+        try:
+            from devai.services.tracing import init_langsmith
+
+            config.export_langsmith_env()
+            init_langsmith()
+        except Exception:  # noqa: BLE001 — tracing is optional, never blocks startup
+            logger.exception("langsmith init failed (non-fatal)")
+
         # Build the aregistry client FIRST so every downstream service —
         # PipelineService stages, SpecializationService, dashboard
         # routes — shares the same instance (and the same 30 s cache).
@@ -792,9 +804,7 @@ def create_app(
         except Exception as e:
             checks["queue"] = f"degraded: {e}"
 
-        all_ok = all(
-            v == "ok" or v.startswith("ok ") for k, v in checks.items() if k not in visibility_only
-        )
+        all_ok = all(v == "ok" or v.startswith("ok ") for k, v in checks.items() if k not in visibility_only)
         return JSONResponse(
             content={"status": "ready" if all_ok else "not_ready", "checks": checks},
             status_code=200 if all_ok else 503,

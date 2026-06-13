@@ -378,7 +378,14 @@ async def _enrich_teams(principal: Principal, request: Request) -> None:
     The service is optional (`request.app.state.team_service`). If it's
     absent or errors, the principal simply has no teams — the unscoped
     view — so teams are purely additive and never break auth.
+
+    Also grants the "admin" role to configured platform owners
+    (DEVAI_ADMIN_EMAILS): every user-principal path runs through here, and
+    bff-stamped identities otherwise carry NO roles, which would leave the
+    deployment without a single admin (analytics' global views, the by-user
+    usage table, …).
     """
+    _apply_admin_role(principal)
     team_service = getattr(request.app.state, "team_service", None)
     if team_service is None:
         return
@@ -386,6 +393,19 @@ async def _enrich_teams(principal: Principal, request: Request) -> None:
         principal.team_ids = await team_service.teams_for(principal.uid or principal.email)
     except Exception:  # noqa: BLE001
         logger.debug("team enrichment failed for %s", principal.email, exc_info=True)
+
+
+def _apply_admin_role(principal: Principal) -> None:
+    """Add "admin" to the principal's roles when its email is allowlisted."""
+    try:
+        from devai.config import settings
+
+        admins = {e.strip().lower() for e in (settings.admin_emails or "").split(",") if e.strip()}
+        email = (principal.email or "").lower()
+        if email and email in admins and "admin" not in principal.roles:
+            principal.roles.append("admin")
+    except Exception:  # noqa: BLE001 — role enrichment must never break auth
+        logger.debug("admin role enrichment failed", exc_info=True)
 
 
 def trace_id_from_request(request: Request) -> str:

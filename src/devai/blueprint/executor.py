@@ -97,6 +97,97 @@ def _parse_json_lenient(text: str) -> Any:
     return json.loads(t.strip())
 
 
+def _stage_trace(spec: StageSpec, task: DevAITask) -> Any:
+    """LangSmith trace context for one stage attempt; no-op when disabled.
+
+    The legacy LangGraph agents were traced via @traceable; the blueprint
+    executor calls LLM adapters directly, so without this the new pipeline
+    was invisible in LangSmith ("traces are all missing").
+    """
+    try:
+        from devai.services.tracing import is_tracing_enabled
+
+        if not is_tracing_enabled():
+            return contextlib.nullcontext(None)
+        from langsmith.run_helpers import trace
+
+        return trace(
+            name=f"stage:{spec.name}",
+            run_type="chain",
+            inputs={"intent": (task.intent or "")[:500], "handler": spec.stage},
+            metadata={
+                "run_id": task.id,
+                "blueprint": task.blueprint or "",
+                "repo": task.repo or "",
+                "agent": spec.resolved_agent() or "",
+                "triggered_by": task.triggered_by or "",
+            },
+        )
+    except Exception:  # noqa: BLE001 — tracing must never break a stage
+        return contextlib.nullcontext(None)
+
+
+# Strong refs for fire-and-forget eval writes (asyncio only weak-refs tasks).
+_EVAL_TASKS: set[Any] = set()
+
+
+def _record_stage_evals(spec: StageSpec, task: DevAITask, data: dict[str, Any] | None) -> None:
+    """Persist quality-gate outcomes from a stage's handover as eval rows.
+
+    review_decision / security_decision / test counts / build_status map to
+    0..1 scores in agent_evals — the analytics quality view aggregates them.
+    Fire-and-forget: scoring must never slow or break the run.
+    """
+    if not data:
+        return
+    evals: list[tuple[str, float, bool]] = []  # (evaluator, score, passed)
+    review = str(data.get("review_decision") or "").lower()
+    if review:
+        ok = review in ("approve", "approved", "pass")
+        evals.append(("review", 1.0 if ok else 0.0, ok))
+    security = str(data.get("security_decision") or "").lower()
+    if security:
+        ok = security in ("approve", "approved", "pass", "passed")
+        evals.append(("security", 1.0 if ok else 0.0, ok))
+    total = data.get("test_total")
+    if isinstance(total, int) and total > 0:
+        passed_n = int(data.get("test_passed") or 0)
+        evals.append(("tests", passed_n / total, int(data.get("test_failed") or 0) == 0))
+    build = str(data.get("build_status") or "").lower()
+    if build:
+        ok = build in ("success", "passed", "green")
+        evals.append(("build", 1.0 if ok else 0.0, ok))
+    if not evals:
+        return
+
+    async def _write() -> None:
+        try:
+            from devai.services.database import get_global_db
+
+            db = await get_global_db()
+            if db is None:
+                return
+            for evaluator, score, passed in evals:
+                await db.record_eval(
+                    run_id=task.id,
+                    evaluator=evaluator,
+                    score=score,
+                    passed=passed,
+                    stage=spec.name,
+                    agent_name=spec.resolved_agent() or "",
+                    triggered_by=task.triggered_by or "",
+                )
+        except Exception:  # noqa: BLE001 — eval capture is best-effort
+            logger.debug("eval persistence failed for stage %s", spec.name, exc_info=True)
+
+    try:
+        t = asyncio.get_running_loop().create_task(_write())
+        _EVAL_TASKS.add(t)
+        t.add_done_callback(_EVAL_TASKS.discard)
+    except RuntimeError:
+        pass  # no running loop (sync test context)
+
+
 def _finalize_agent_statuses(task: DevAITask, status: str = "cancelled") -> None:
     """Close out lingering 'running' agent statuses when a run stops — the
     cards must never pulse on a terminal run."""
@@ -353,6 +444,9 @@ class BlueprintExecutor:
             task.transition(result.next_state)
         task.stages_completed.append(spec.name)
         task.current_stage = ""
+        # Quality-gate outcomes (review/security/tests/build) become eval rows
+        # — the ONLY writer of agent_evals, feeding the analytics quality view.
+        _record_stage_evals(spec, task, result.data)
 
         self._emit(task, _ev(StageEventPhase.COMPLETED, duration_ms=duration_ms, message=result.message))
 
@@ -464,7 +558,15 @@ class BlueprintExecutor:
         """
         for attempt in range(1, max_attempts + 1):
             try:
-                return ("ok", await self._execute_supervised(stage, spec, task, timeout))
+                # LangSmith span per attempt — LLM calls inside inherit this
+                # parent through contextvars, so a run reads as
+                # stage → llm-call trees in the LangSmith project.
+                with _stage_trace(spec, task) as _rt:
+                    result = await self._execute_supervised(stage, spec, task, timeout)
+                    if _rt is not None and isinstance(result, StageResult):
+                        with contextlib.suppress(Exception):
+                            _rt.end(outputs={"message": result.message[:500]})
+                    return ("ok", result)
             except _RunStopped:
                 # User pressed STOP while the stage was executing. The old
                 # behavior only honored stop at LEVEL boundaries, so a

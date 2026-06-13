@@ -95,7 +95,10 @@ class PgVectorMemoryAdapter(MemoryAdapter):
             raise AdapterNotConfigured("pgvector adapter requires a reachable Database")
 
         mt = MemoryType.parse(memory_type)
-        memory_id = uuid.uuid4()
+        # str, not UUID: the bootstrap schema declares agent_memories.id as
+        # TEXT, and asyncpg refuses a UUID object for a text column (every
+        # prod write failed with DataError until this was stringified).
+        memory_id = str(uuid.uuid4())
         now = time.time()
 
         embedding = await self._maybe_embed(content)
@@ -222,8 +225,9 @@ class PgVectorMemoryAdapter(MemoryAdapter):
         if not await self._ensure_db():
             return False
         result = await self._db.pool.execute(
-            "UPDATE agent_memories SET is_active = FALSE WHERE id = $1::uuid",
-            provider_id,
+            # No ::uuid cast — id is TEXT in the bootstrap schema.
+            "UPDATE agent_memories SET is_active = FALSE WHERE id = $1",
+            str(provider_id),
         )
         # `UPDATE 0` vs `UPDATE 1`
         return result.split()[-1] != "0"

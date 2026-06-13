@@ -257,6 +257,12 @@ class Settings(BaseSettings):
     # Webhook routes are always exempt — they authenticate via HMAC.
     require_auth: bool = False
 
+    # Comma-separated emails granted the "admin" role on every authenticated
+    # request. Prod principals arrive from the auth-bff with NO roles, so
+    # without this nobody is admin — analytics then scopes everyone to their
+    # personal usage view and the global/by-user rollups are unreachable.
+    admin_emails: str = ""
+
     # Shared secret the auth-bff includes (header X-Auth-Bff-Secret) so the
     # backend only trusts X-Forwarded-* identity headers from the bff. When
     # empty, X-Forwarded-* is trusted unconditionally (today's behavior).

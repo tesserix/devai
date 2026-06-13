@@ -201,6 +201,19 @@ class PipelineService:
                         run_id=run_id,
                     )
                 )
+            # Durable sink: a completed agent_executions row so the Postgres
+            # analytics rollups see legacy-loop calls too.
+            self._spawn(
+                self._persist_turn_execution(
+                    run_id=run_id,
+                    agent=str(envelope.get("agent") or ""),
+                    provider=provider,
+                    model=model,
+                    tok_in=tok_in,
+                    tok_out=tok_out,
+                    cost=cost,
+                )
+            )
             if envelope.get("trial") and email:
                 from devai.settings.trial import get_trial_meter
 
@@ -210,6 +223,29 @@ class PipelineService:
             pass  # no running loop (sync test context)
         except Exception:  # noqa: BLE001
             logger.debug("turn usage accounting failed", exc_info=True)
+
+    @staticmethod
+    async def _persist_turn_execution(
+        *, run_id: str, agent: str, provider: str, model: str, tok_in: int, tok_out: int, cost: float
+    ) -> None:
+        try:
+            from devai.services.database import get_global_db
+
+            db = await get_global_db()
+            if db is None:
+                return
+            await db.record_llm_call(
+                run_id=run_id,
+                agent_name=agent or provider,
+                provider=provider,
+                model=model,
+                tokens_input=tok_in,
+                tokens_output=tok_out,
+                cost_usd=cost,
+                duration_ms=0.0,
+            )
+        except Exception:  # noqa: BLE001 — analytics persistence is best-effort
+            logger.debug("turn execution persistence failed", exc_info=True)
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
