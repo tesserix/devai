@@ -4,6 +4,18 @@ FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dc
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl && rm -rf /var/lib/apt/lists/*
 
+# CHART-11: pin kubectl and verify its SHA256 (same pattern as Dockerfile.sre).
+# The API image needs it for the GitOps surface: services/argocd.py (release
+# deploys) and adapters/gitops (argocd/kargo/flux tools + /mcp/gitops) all
+# talk to the cluster through kubectl + CRD RBAC. Lands in the runtime stage
+# via the existing COPY --from=builder /usr/local/bin.
+ARG KUBECTL_VERSION=v1.31.4
+ARG KUBECTL_SHA256=298e19e9c6c17199011404278f0ff8168a7eca4217edad9097af577023a5620f
+RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+        -o /usr/local/bin/kubectl \
+    && echo "${KUBECTL_SHA256}  /usr/local/bin/kubectl" | sha256sum -c - \
+    && chmod +x /usr/local/bin/kubectl
+
 WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
