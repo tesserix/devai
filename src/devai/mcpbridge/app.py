@@ -7,21 +7,20 @@ downstream, so a user who connects (say) draw.io or Postgres gets its tools
 without anything ever speaking stdio outside this pod.
 
 Per request, an ASGI middleware lifts the ``x-mcp-secret`` / ``x-mcp-prefs``
-headers into a contextvar; the per-name server spawns (and briefly caches) the
+headers into a contextvar; the per-name server spawns the
 stdio process with that secret substituted into its launch env. Only commands
 on the allowlist may run.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from devai.mcpbridge.runner import LaunchSpec, command_allowed, open_stdio_session
+from devai.mcpbridge.runner import LaunchSpec, command_allowed, stdio_session
 
 logger = logging.getLogger(__name__)
 
@@ -70,54 +69,33 @@ def load_catalog_specs(client: Any) -> dict[str, LaunchSpec]:
     return out
 
 
-class _SessionCache:
-    """Reuse a spawned stdio session per (server, secret) for a short window."""
-
-    def __init__(self) -> None:
-        self._sessions: dict[str, tuple[Any, Any]] = {}  # key -> (session, aclose)
-
-    @staticmethod
-    def _key(name: str, secret: str) -> str:
-        return f"{name}:{hashlib.sha256(secret.encode()).hexdigest()[:12]}"
-
-    async def get(self, name: str, spec: LaunchSpec, secret: str, prefs: dict[str, Any]) -> Any:
-        key = self._key(name, secret)
-        cached = self._sessions.get(key)
-        if cached is not None:
-            return cached[0]
-        env = spec.resolve_env(secret=secret, prefs={str(k): str(v) for k, v in prefs.items()})
-        session, aclose = await open_stdio_session(spec, env)
-        self._sessions[key] = (session, aclose)
-        return session
-
-    async def close(self) -> None:
-        for _, aclose in self._sessions.values():
-            try:
-                await aclose()
-            except Exception:  # noqa: BLE001
-                pass
-        self._sessions.clear()
+def _env_for(spec: LaunchSpec) -> dict[str, str]:
+    """Resolve the launch env from the current request's secret/prefs."""
+    prefs = {str(k): str(v) for k, v in _current_prefs().items()}
+    return spec.resolve_env(secret=_SECRET.get(), prefs=prefs)
 
 
-def _build_bridge_server(name: str, spec: LaunchSpec, cache: _SessionCache) -> Any:
-    """A low-level MCP Server proxying to the spawned stdio process for ``name``."""
+def _build_bridge_server(name: str, spec: LaunchSpec) -> Any:
+    """A low-level MCP Server proxying to the spawned stdio process for ``name``.
+
+    A fresh stdio session is opened per call within the SAME task (anyio
+    cancel scopes are task-bound — a cross-task cached session crashes the
+    SDK). npx caches the package after the first spawn so re-spawns are quick.
+    """
     import mcp.types as t
     from mcp.server.lowlevel import Server
 
     server: Any = Server(f"devai-bridge-{name}")
 
-    async def _session() -> Any:
-        return await cache.get(name, spec, _SECRET.get(), _current_prefs())
-
     @server.list_tools()
     async def _list_tools() -> list[Any]:
-        s = await _session()
-        return list((await s.list_tools()).tools)
+        async with stdio_session(spec, _env_for(spec)) as s:
+            return list((await s.list_tools()).tools)
 
     @server.call_tool()
     async def _call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
-        s = await _session()
-        result = await s.call_tool(tool_name, arguments or {})
+        async with stdio_session(spec, _env_for(spec)) as s:
+            result = await s.call_tool(tool_name, arguments or {})
         content = getattr(result, "content", None)
         if content is not None:
             return content
@@ -132,7 +110,6 @@ def create_bridge_app(settings: Any) -> Any:
     from starlette.responses import JSONResponse
 
     allowed = [c.strip() for c in str(getattr(settings, "mcpbridge_allowed_commands", "npx")).split(",") if c.strip()]
-    cache = _SessionCache()
     mounted: dict[str, LaunchSpec] = {}
 
     @asynccontextmanager
@@ -148,7 +125,7 @@ def create_bridge_app(settings: Any) -> Any:
                 logger.warning("mcpbridge: %r command %r not allowed — skipped", name, spec.command)
                 continue
             try:
-                server = _build_bridge_server(name, spec, cache)
+                server = _build_bridge_server(name, spec)
                 manager = StreamableHTTPSessionManager(app=server, stateless=True)
                 cm = manager.run()
                 await cm.__aenter__()
@@ -174,7 +151,6 @@ def create_bridge_app(settings: Any) -> Any:
                     await cm.__aexit__(None, None, None)
                 except Exception:  # noqa: BLE001
                     pass
-            await cache.close()
 
     app = FastAPI(title="devai-mcp-bridge", lifespan=lifespan)
 

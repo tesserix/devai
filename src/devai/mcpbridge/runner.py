@@ -24,6 +24,7 @@ Security model (everything streamable-https to the mesh):
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -78,29 +79,26 @@ def command_allowed(command: str, allowed: list[str]) -> bool:
     return base in allowed
 
 
-async def open_stdio_session(spec: LaunchSpec, env: dict[str, str], *, timeout: float = 60.0):
-    """Spawn the stdio MCP server and return (session, aclose).
+@asynccontextmanager
+async def stdio_session(spec: LaunchSpec, env: dict[str, str], *, timeout: float = 60.0):
+    """Spawn the stdio MCP server, yield an initialized ClientSession, tear down.
 
-    Lazy-imports the mcp SDK. ``aclose`` tears the process + streams down.
-    Raises on spawn/initialize failure so the caller drops the session.
+    MUST be entered and exited within the SAME task: the mcp SDK's stdio
+    transport uses anyio task groups whose cancel scopes are task-bound, so a
+    session opened in one request task and closed in another raises
+    "Attempted to exit a cancel scope that isn't the current task's". The
+    bridge therefore opens a fresh session per call (npx caches the package
+    after the first spawn, so re-spawns are fast). Lazy-imports the mcp SDK.
     """
-    from contextlib import AsyncExitStack
-
     import anyio
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    stack = AsyncExitStack()
-    try:
-        params = StdioServerParameters(command=spec.command, args=spec.args, env=env or None)
+    params = StdioServerParameters(command=spec.command, args=spec.args, env=env or None)
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
         with anyio.fail_after(timeout):
-            read, write = await stack.enter_async_context(stdio_client(params))
-            session = await stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
-        return session, stack.aclose
-    except Exception:
-        await stack.aclose()
-        raise
+        yield session
 
 
-__all__ = ["LaunchSpec", "command_allowed", "open_stdio_session"]
+__all__ = ["LaunchSpec", "command_allowed", "stdio_session"]
