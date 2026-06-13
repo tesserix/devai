@@ -23,6 +23,10 @@ spec:
       namespace:
         type: string
         description: Kubernetes namespace (blank = default)
+      cluster:
+        type: string
+        description: "Optional \u2014 the name of one of YOUR connected Kubernetes clusters (Settings\
+          \ \u2192 Kubernetes Cluster). Omit to use the platform cluster."
   tags:
   - gitops
   - mcp-tool

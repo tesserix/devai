@@ -33,6 +33,10 @@ spec:
       kind:
         type: string
         description: kustomization | helmrelease | gitrepository | helmrepository | ocirepository
+      cluster:
+        type: string
+        description: "Optional \u2014 the name of one of YOUR connected Kubernetes clusters (Settings\
+          \ \u2192 Kubernetes Cluster). Omit to use the platform cluster."
     required:
     - name
     - suspended

@@ -280,7 +280,11 @@ class _RunSpecializationStage(PipelineStage):
 
             # In a dry run, mutating tools (PR/issue creation, kubectl/argocd
             # writes, paging) are offered to the model but short-circuited.
-            dispatcher = ToolDispatcher(self.deps.scm, dry_run=getattr(task, "dry_run", False))
+            dispatcher = ToolDispatcher(
+                self.deps.scm,
+                dry_run=getattr(task, "dry_run", False),
+                triggered_by=getattr(task, "triggered_by", "") or "",
+            )
 
         tool_specs = dispatcher.build_tool_specs(spec.allowed_tools)
         messages = [LLMMessage(role=LLMRole.USER, content=self._build_user_prompt(spec, task))]

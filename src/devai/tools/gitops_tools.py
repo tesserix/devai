@@ -98,7 +98,60 @@ async def _resolve_cluster(ctx: ToolContext, name: str) -> tuple[dict[str, Any] 
             f"ERROR: no connected cluster named {name!r} for {email}. "
             + (f"Available: {', '.join(names)}" if names else "Connect one in Settings → Kubernetes Cluster.")
         )
+    from devai.config import settings
+
+    if bool(getattr(settings, "gitops_require_cluster_ca", False)) and not str(cluster.get("ca_data") or "").strip():
+        return None, (
+            f"ERROR: cluster {name!r} has no CA certificate and policy "
+            "(DEVAI_GITOPS_REQUIRE_CLUSTER_CA) forbids insecure TLS — add the CA cert to the "
+            "connector in Settings → Kubernetes Cluster."
+        )
     return cluster, ""
+
+
+async def _resolve_api_adapter(ctx: ToolContext, provider: str, name: str) -> tuple[Any, str]:
+    """Build an API-mode adapter for the caller's external Argo CD / Kargo.
+
+    ``mode == "kubectl"`` connectors aren't API-reachable — tell the caller to
+    use the ``cluster`` arg instead. Returns (adapter, "") or (None, error).
+    """
+    email = (ctx.triggered_by or "").strip()
+    if "@" not in email:
+        return None, f"ERROR: this call carries no user identity, so a personal {provider} cannot be resolved"
+    from devai.config import settings
+
+    mutations = bool(getattr(settings, "gitops_mutations_enabled", True))
+    if provider == "argocd":
+        from devai.settings.connections import user_argocd
+
+        conn = await user_argocd(email, name)
+        if conn is None or not conn.get("server_url"):
+            return None, f"ERROR: no connected Argo CD named {name!r} for {email} (Settings → Argo CD)."
+        if conn.get("mode") == "kubectl":
+            return None, f"ERROR: Argo CD {name!r} is kubectl-mode — use the 'cluster' arg with its cluster instead."
+        from devai.adapters.gitops.argocd_api import ArgoCDApiAdapter
+
+        return ArgoCDApiAdapter(conn["server_url"], conn.get("token", ""), mutations_enabled=mutations), ""
+    if provider == "kargo":
+        from devai.settings.connections import user_kargo
+
+        conn = await user_kargo(email, name)
+        if conn is None or not conn.get("api_url"):
+            return None, f"ERROR: no connected Kargo named {name!r} for {email} (Settings → Kargo)."
+        if conn.get("mode") == "kubectl":
+            return None, f"ERROR: Kargo {name!r} is kubectl-mode — use the 'cluster' arg with its cluster instead."
+        from devai.adapters.gitops.kargo_api import KargoApiAdapter
+
+        return (
+            KargoApiAdapter(
+                conn["api_url"],
+                conn.get("token", ""),
+                default_project=conn.get("project", ""),
+                mutations_enabled=mutations,
+            ),
+            "",
+        )
+    return None, f"ERROR: {provider} has no API mode"
 
 
 def _make(provider: str, method: str, *, mutating: bool = False, arg_map: dict[str, str] | None = None):
@@ -113,7 +166,14 @@ def _make(provider: str, method: str, *, mutating: bool = False, arg_map: dict[s
     def factory(ctx: ToolContext) -> Handler:
         async def handler(args: dict[str, Any]) -> str:
             cluster_name = str(args.pop("cluster", "") or "").strip()
-            if cluster_name:
+            # provider-specific instance arg: argocd_* tools accept `argocd`,
+            # kargo_* tools accept `kargo` → a user's external API-mode instance.
+            instance_name = str(args.pop(provider, "") or "").strip() if provider in ("argocd", "kargo") else ""
+            if instance_name:
+                adapter, problem = await _resolve_api_adapter(ctx, provider, instance_name)
+                if problem:
+                    return problem
+            elif cluster_name:
                 cluster, problem = await _resolve_cluster(ctx, cluster_name)
                 if problem:
                     return problem
@@ -150,11 +210,31 @@ _CLUSTER = {
         "(Settings → Kubernetes Cluster). Omit to use the platform cluster."
     ),
 }
+_ARGOCD_INSTANCE = {
+    "type": "string",
+    "description": (
+        "Optional — the name of one of YOUR connected Argo CD instances "
+        "(Settings → Argo CD, API mode). Targets that managed Argo CD's API directly."
+    ),
+}
+_KARGO_INSTANCE = {
+    "type": "string",
+    "description": (
+        "Optional — the name of one of YOUR connected Kargo control planes "
+        "(Settings → Kargo, API mode). Targets that Kargo's API directly."
+    ),
+}
 
 
-def _obj(props: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
-    # Every gitops tool can target a user-connected cluster via `cluster`.
-    schema: dict[str, Any] = {"type": "object", "properties": {**props, "cluster": _CLUSTER}}
+def _obj(props: dict[str, Any], required: list[str] | None = None, *, instance: str = "") -> dict[str, Any]:
+    # Every gitops tool can target a user-connected cluster via `cluster`;
+    # argocd_*/kargo_* tools also take an `argocd`/`kargo` API-mode instance.
+    extra: dict[str, Any] = {"cluster": _CLUSTER}
+    if instance == "argocd":
+        extra["argocd"] = _ARGOCD_INSTANCE
+    elif instance == "kargo":
+        extra["kargo"] = _KARGO_INSTANCE
+    schema: dict[str, Any] = {"type": "object", "properties": {**props, **extra}}
     if required:
         schema["required"] = required
     return schema
@@ -321,6 +401,17 @@ def register_gitops_tools(*, overwrite: bool = False) -> None:
         _make("flux", "set_suspended", mutating=True),
         overwrite=overwrite,
     )
+
+    # Expose the API-mode instance arg on the argocd_*/kargo_* tools so the
+    # model can target a user's external Argo CD / Kargo (resolved in _make).
+    from devai.tools.registry import _REGISTRY  # noqa: PLC0415
+
+    for tool_name, entry in _REGISTRY.items():
+        instance = "argocd" if tool_name.startswith("argocd_") else "kargo" if tool_name.startswith("kargo_") else ""
+        if not instance:
+            continue
+        props = entry.spec.parameters.setdefault("properties", {})
+        props.setdefault(instance, _ARGOCD_INSTANCE if instance == "argocd" else _KARGO_INSTANCE)
 
 
 # Self-register at import (mirrors web/shell/checkpoint tool families).

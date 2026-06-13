@@ -14,12 +14,21 @@ metadata:
     mcp.devai.io/wire-name: scm_close_issue
 spec:
   displayName: Scm Close Issue
-  description: "Scm Close Issue \u2014 tool served by the scm MCP server."
+  description: Close an issue or work item (e.g. after the release that ships it).
   version: '1'
   server: scm-mcp
   inputSchema:
     type: object
-    properties: {}
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      issue_id:
+        type: integer
+        description: Issue number or work item ID
+    required:
+    - repo
+    - issue_id
   tags:
   - mcp-tool
   - scm

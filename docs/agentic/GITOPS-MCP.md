@@ -68,13 +68,41 @@ honors the platform gate. A failed backend answers with a readable
   - **release_manager** — upgraded with the full GitOps toolset and
     controller-aware deploy guidance.
 
-## Per-tenant MCP connectors (Settings)
+## Per-user / per-tenant connections (Settings)
 
-The Settings → MCP Server connector is `multi`: a user/tenant can register
-any number of external MCP servers (name, endpoint, auth token, optional
-custom auth header). Tokens are written to GCP Secret Manager under the
-owner's scope (`devai-user-<uid>-mcp-<instance>-mcp_token`) — only a
-SecretRef lands in Postgres, and resolution is scope-isolated
-(user→team→tenant→global), so one tenant can never see or use another's
-servers. Hub-side consumption of per-user connectors is the next phase
-(the discovery hook is `mcphub/discovery.py`).
+Five multi-instance connector families let a user wire their own
+infrastructure — all stored with secrets in **that user's** GCP SM scope
+(`devai-user-<uid>-<family>-<instance>-<field>`), only a SecretRef in
+Postgres, resolution scope-isolated (user→team→tenant→global):
+
+| Family | Consumed by |
+|---|---|
+| **Kubernetes Cluster** | every gitops tool's `cluster` arg → kubectl-against-your-cluster (`adapters/gitops/base.cluster_kubectl_flags`) |
+| **Argo CD** (API mode) | argocd_* tools' `argocd` arg → `adapters/gitops/argocd_api` (REST) |
+| **Kargo** (API mode) | kargo_* tools' `kargo` arg → `adapters/gitops/kargo_api` (Connect-RPC) |
+| **Cloud Account** (gcp/aws/azure) | `cloud_*` tools → `adapters/cloud` |
+| **MCP Server** | the Hub federates them per-caller (below) |
+
+Identity flows through `ToolContext.triggered_by` — set by the agentruntime
+runner **and** the legacy `ToolDispatcher` — so a tool call resolves the
+calling user's own connection. Calls with no user identity (MCP-hub service
+calls) safely fall back to the platform default. Policy knob
+`DEVAI_GITOPS_REQUIRE_CLUSTER_CA` forbids `--insecure-skip-tls-verify` when a
+connected cluster has no CA cert.
+
+## Per-user MCP federation (the Hub)
+
+`mcphub/personal.py` federates each caller's **own** connected MCP servers
+into the Hub aggregate, namespaced `usr-<instance>__<tool>` and visible only
+to that user (`MCPHub.list_tools_for(email)` / `call_tool(..., email=)`,
+keyed off the principal the ASGI middleware terminated). User endpoints are
+SSRF-screened with a public-host-allowing guard (block loopback/link-local/
+private/metadata + DNS-rebinding; allow public). Legs connect on demand, are
+cached per email for 120s, and carry the user's token on their chosen header
+(`Authorization: Bearer …` or a custom `x-api-key`-style header).
+
+## MCP Marketplace
+
+`GET /api/settings/mcp/marketplace` lists every registry MCP server
+(`connectable` vs always-on `builtin`); the dashboard Settings page renders a
+browse-and-connect grid that pre-fills the MCP connector form.

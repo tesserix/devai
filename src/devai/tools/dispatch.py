@@ -90,8 +90,12 @@ class ToolDispatcher:
     others are built with no args.
     """
 
-    def __init__(self, scm: Any | None = None, *, dry_run: bool = False) -> None:
+    def __init__(self, scm: Any | None = None, *, dry_run: bool = False, triggered_by: str = "") -> None:
         self._scm = scm
+        # Who triggered this run — threaded into the registry ToolContext so
+        # identity-scoped tools (e.g. gitops with cluster=<user's cluster>)
+        # resolve the caller's own connections, not just the platform's.
+        self._triggered_by = triggered_by
         # When true, MUTATING_TOOLS are blocked at execute() time.
         self._dry_run = dry_run
         # name → (schema dict, module path)
@@ -168,7 +172,7 @@ class ToolDispatcher:
             if entry is None:
                 return None
             try:
-                handler = entry.factory(registry.ToolContext(scm=self._scm))
+                handler = entry.factory(registry.ToolContext(scm=self._scm, triggered_by=self._triggered_by))
             except Exception:  # noqa: BLE001 — a broken factory degrades to "unknown"
                 logger.exception("tool %r registry factory raised", name)
                 return None

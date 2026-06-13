@@ -98,4 +98,68 @@ async def user_cluster_names(email: str, *, svc: SettingsService | None = None) 
     return [str(c.get("k8s_name") or c.get("instance_id", "")) for c in conns]
 
 
-__all__ = ["user_cluster", "user_cluster_names", "user_connections"]
+async def user_argocd(email: str, name: str = "", *, svc: SettingsService | None = None) -> dict[str, Any] | None:
+    """One of the user's connected Argo CD instances (Settings → Argo CD).
+
+    Shape: ``{name, mode, server_url, token, app_namespace}``. ``name`` blank →
+    the user's only Argo CD (None when zero or several)."""
+    conns = await user_connections(email, "argocd", svc=svc)
+    if not conns:
+        return None
+    chosen = _named(conns, name, "argocd_name") if name else (conns[0] if len(conns) == 1 else None)
+    if chosen is None:
+        return None
+    return {
+        "name": chosen.get("argocd_name") or chosen.get("instance_id", ""),
+        "mode": chosen.get("provider", "api"),
+        "server_url": chosen.get("argocd_server_url", ""),
+        "token": chosen.get("argocd_token", ""),
+        "app_namespace": chosen.get("argocd_app_namespace", ""),
+    }
+
+
+async def user_kargo(email: str, name: str = "", *, svc: SettingsService | None = None) -> dict[str, Any] | None:
+    """One of the user's connected Kargo control planes (Settings → Kargo).
+
+    Shape: ``{name, mode, api_url, token, project}``."""
+    conns = await user_connections(email, "kargo", svc=svc)
+    if not conns:
+        return None
+    chosen = _named(conns, name, "kargo_name") if name else (conns[0] if len(conns) == 1 else None)
+    if chosen is None:
+        return None
+    return {
+        "name": chosen.get("kargo_name") or chosen.get("instance_id", ""),
+        "mode": chosen.get("provider", "api"),
+        "api_url": chosen.get("kargo_api_url", ""),
+        "token": chosen.get("kargo_token", ""),
+        "project": chosen.get("kargo_project", ""),
+    }
+
+
+async def user_cloud(email: str, name: str = "", *, svc: SettingsService | None = None) -> dict[str, Any] | None:
+    """One of the user's connected cloud accounts (Settings → Cloud Account).
+
+    Returns the resolved connector dict (provider + creds joined from SM),
+    ready for ``adapters.cloud.create_cloud_adapter``. ``name`` blank → the
+    user's only account (None when zero or several)."""
+    conns = await user_connections(email, "cloud", svc=svc)
+    if not conns:
+        return None
+    return _named(conns, name, "cloud_name") if name else (conns[0] if len(conns) == 1 else None)
+
+
+async def user_cloud_names(email: str, *, svc: SettingsService | None = None) -> list[str]:
+    conns = await user_connections(email, "cloud", svc=svc)
+    return [str(c.get("cloud_name") or c.get("instance_id", "")) for c in conns]
+
+
+__all__ = [
+    "user_argocd",
+    "user_cloud",
+    "user_cloud_names",
+    "user_cluster",
+    "user_cluster_names",
+    "user_connections",
+    "user_kargo",
+]

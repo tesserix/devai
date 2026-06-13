@@ -23,6 +23,14 @@ spec:
       project:
         type: string
         description: Argo CD project filter (optional)
+      cluster:
+        type: string
+        description: "Optional \u2014 the name of one of YOUR connected Kubernetes clusters (Settings\
+          \ \u2192 Kubernetes Cluster). Omit to use the platform cluster."
+      argocd:
+        type: string
+        description: "Optional \u2014 the name of one of YOUR connected Argo CD instances (Settings \u2192\
+          \ Argo CD, API mode). Targets that managed Argo CD's API directly."
   tags:
   - gitops
   - mcp-tool

@@ -474,6 +474,17 @@ class Settings(BaseSettings):
     kargo_default_project: str = ""
     # Namespace Flux objects default to when a tool call omits one.
     flux_namespace: str = "flux-system"
+    # TLS policy for user-connected clusters: when true, a connected cluster
+    # MUST carry a CA cert — gitops tools refuse to target a cluster with no
+    # CA rather than falling back to --insecure-skip-tls-verify. Default false
+    # keeps onboarding frictionless (the connector UI warns either way).
+    gitops_require_cluster_ca: bool = False
+
+    # --- cloud adapter ---
+    # Backend for the cloud-account family (consumes Settings → Cloud Account
+    # connectors). gcp | aws | azure | noop. Per-user creds resolve from the
+    # caller's connector; this is only the platform default / fallback.
+    cloud_provider: str = "noop"
 
     # --- Cloudflare ---
     cloudflare_api_token: str = ""

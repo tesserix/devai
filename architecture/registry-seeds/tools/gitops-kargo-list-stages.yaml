@@ -24,6 +24,14 @@ spec:
       project:
         type: string
         description: Kargo project (its namespace)
+      cluster:
+        type: string
+        description: "Optional \u2014 the name of one of YOUR connected Kubernetes clusters (Settings\
+          \ \u2192 Kubernetes Cluster). Omit to use the platform cluster."
+      kargo:
+        type: string
+        description: "Optional \u2014 the name of one of YOUR connected Kargo control planes (Settings\
+          \ \u2192 Kargo, API mode). Targets that Kargo's API directly."
   tags:
   - gitops
   - mcp-tool

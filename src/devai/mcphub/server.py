@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 # resolves to the curated `core` surface in current_profile().
 _CURRENT_PROFILE: ContextVar[ToolProfile | None] = ContextVar("mcphub_profile", default=None)
 
+# The caller's email, set alongside the profile by the ASGI middleware. Drives
+# per-user MCP federation (their own connected servers). "" = anonymous/system.
+_CURRENT_EMAIL: ContextVar[str] = ContextVar("mcphub_email", default="")
+
 
 def set_current_profile(profile: ToolProfile) -> None:
     _CURRENT_PROFILE.set(profile)
@@ -41,6 +45,14 @@ def set_current_profile(profile: ToolProfile) -> None:
 
 def current_profile() -> ToolProfile:
     return _CURRENT_PROFILE.get() or ToolProfile.default()
+
+
+def set_current_email(email: str) -> None:
+    _CURRENT_EMAIL.set(email or "")
+
+
+def current_email() -> str:
+    return _CURRENT_EMAIL.get() or ""
 
 
 # Roles/emails that get the full (still budget-capped) surface. Kept tiny and
@@ -86,7 +98,8 @@ def build_hub_server(hub: MCPHub) -> Any:
 
     @server.list_tools()
     async def _list_tools() -> list[Any]:
-        budget = hub.list_tools(current_profile())
+        # Shared registry surface + the caller's OWN connected MCP servers.
+        budget = await hub.list_tools_for(current_email(), current_profile())
         if budget.truncated:
             logger.info(
                 "mcphub: served %d tools (%d cut to budget)", len(budget.selected), len(budget.dropped_by_budget)
@@ -98,7 +111,7 @@ def build_hub_server(hub: MCPHub) -> Any:
 
     @server.call_tool()
     async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
-        result = await hub.call_tool(name, arguments)
+        result = await hub.call_tool(name, arguments, email=current_email())
         # Pass the downstream's content blocks straight through; if a leg returns
         # a bare value, wrap it so the client always gets valid content.
         content = getattr(result, "content", None)

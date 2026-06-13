@@ -25,7 +25,12 @@ from collections.abc import AsyncIterator
 
 from devai.config import settings
 from devai.mcphub.hub import MCPHub
-from devai.mcphub.server import build_hub_server, profile_for_principal, set_current_profile
+from devai.mcphub.server import (
+    build_hub_server,
+    profile_for_principal,
+    set_current_email,
+    set_current_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +155,9 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
 
         requested = request.query_params.get("profile", "")
         set_current_profile(profile_for_principal(principal, requested))
+        # Per-user MCP federation keys on the caller's email (their own
+        # connected servers); blank for anonymous/service callers.
+        set_current_email(principal.email if principal else "")
         return await call_next(request)
 
     @app.get("/healthz")

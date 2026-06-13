@@ -34,6 +34,7 @@ from devai.mcphub.model import (
     route,
     route_uri,
 )
+from devai.mcphub.personal import PersonalLegs
 from devai.mcphub.profile import BudgetResult, ToolProfile, select
 
 if TYPE_CHECKING:
@@ -68,6 +69,11 @@ class MCPHub:
         self._tools: dict[str, FederatedTool] = {}  # namespaced name -> tool
         self._prompts: dict[str, FederatedPrompt] = {}
         self._resources: dict[str, FederatedResource] = {}  # namespaced uri -> resource
+
+        # Per-caller federation of the user's OWN connected MCP servers
+        # (Settings → MCP Server). Resolved + connected on demand, scoped to
+        # the calling principal, never shared across users.
+        self.personal = PersonalLegs(connect_timeout=connect_timeout)
 
         # Reverse path: set by the server to emit a single tools/list_changed to
         # clients when the aggregate changes (registry/cache change, leg drop).
@@ -112,6 +118,8 @@ class MCPHub:
             self._tools.clear()
             self._prompts.clear()
             self._resources.clear()
+        with suppress(Exception):
+            await self.personal.close()
 
     async def _ensure_connected(self, spec: Any) -> None:
         existing = self._connections.get(spec.name)
@@ -231,13 +239,49 @@ class MCPHub:
         """Return the caller's budgeted, namespaced tool surface (§6.5)."""
         return select(list(self._tools.values()), profile or ToolProfile.default())
 
+    async def list_tools_for(self, email: str, profile: ToolProfile | None = None) -> BudgetResult:
+        """The shared budgeted surface PLUS the caller's own MCP servers' tools.
+
+        Personal tools (``usr-<instance>__<tool>``) are appended AFTER budget
+        selection so a user always sees every tool of the servers they
+        connected — they're never cut to the shared budget. Empty email →
+        just the shared surface.
+        """
+        base = self.list_tools(profile)
+        descriptors = await self.personal.tool_descriptors(email) if email else []
+        if not descriptors:
+            return base
+        personal = [
+            FederatedTool(
+                name=d["name"],
+                server=d["name"].split("__", 1)[0],
+                wire_name=d["name"].split("__", 1)[-1],
+                description=d.get("description", ""),
+                input_schema=d.get("input_schema") or {"type": "object"},
+                tier="core",
+                labels={"devai.io/personal": "true"},
+            )
+            for d in descriptors
+        ]
+        return BudgetResult(
+            selected=[*base.selected, *personal],
+            dropped_by_filter=base.dropped_by_filter,
+            dropped_by_budget=base.dropped_by_budget,
+        )
+
     def list_prompts(self) -> list[FederatedPrompt]:
         return list(self._prompts.values())
 
     def list_resources(self) -> list[FederatedResource]:
         return list(self._resources.values())
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+    async def call_tool(self, name: str, arguments: dict[str, Any], *, email: str = "") -> Any:
+        # A personal-leg tool (usr-…__…) routes to the caller's OWN server —
+        # only ever resolvable with the caller's email, so isolation holds.
+        if self.personal.owns(name):
+            if not email:
+                raise DownstreamError(f"mcphub: {name!r} is a personal MCP tool but the call carries no identity")
+            return await self.personal.call(email, name, arguments or {})
         server, wire = route(name)
         conn = self._healthy_leg(server, name)
         return await conn.call_tool(wire, arguments or {})
