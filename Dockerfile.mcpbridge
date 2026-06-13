@@ -1,0 +1,42 @@
+# devai-mcp-bridge — serves stdio MCP servers (npx) over streamable-https.
+# Python (the bridge app) + Node (to run the npx-based MCP servers).
+
+# CHART-11: pin python:3.12-slim by digest for reproducible builds.
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY pyproject.toml .
+COPY src/ src/
+RUN pip install --no-cache-dir .
+
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
+
+# Node.js 22 (provides npx) for the stdio MCP servers. NodeSource keeps the
+# image lean vs. bundling a full toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /app/src /app/src
+
+WORKDIR /app
+
+# Non-root with a writable HOME + npm cache + sandbox workspace (the filesystem
+# MCP server is scoped to /workspace). Root FS is mounted read-only by the
+# chart; these dirs are the only writable surface.
+RUN useradd -m -u 1000 devai \
+    && mkdir -p /workspace /home/devai/.npm \
+    && chown -R devai:devai /app /workspace /home/devai
+USER 1000
+ENV HOME=/home/devai NPM_CONFIG_CACHE=/home/devai/.npm
+
+EXPOSE 8099
+
+ENTRYPOINT ["python", "-m", "devai.mcpbridge"]

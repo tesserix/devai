@@ -92,18 +92,33 @@ def _spec_for(conn: dict[str, Any]) -> DownstreamSpec | None:
     url = str(conn.get("mcp_url") or "").strip()
     if not url:
         return None
-    try:
-        check_external_endpoint(url)
-    except ValueError as e:
-        logger.warning("mcphub: dropping personal MCP %r — %s", conn.get("instance_id"), e)
-        return None
     token = str(conn.get("mcp_token") or "").strip()
-    header = str(conn.get("mcp_auth_header") or "").strip() or "Authorization"
     headers: dict[str, str] = {}
-    if token:
-        # A bare header name defaults to a Bearer scheme on Authorization;
-        # a custom header (x-api-key, …) gets the raw token.
-        headers[header] = f"Bearer {token}" if header.lower() == "authorization" else token
+
+    if _is_bridge_endpoint(url):
+        # The endpoint is OUR in-cluster stdio bridge (a catalog stdio server).
+        # It's a trusted internal service, so it bypasses the external SSRF
+        # guard; the user's secret rides as x-mcp-secret for the bridge to
+        # inject into the spawned process's env, plus any non-secret prefs.
+        if token:
+            headers["x-mcp-secret"] = token
+        import json as _json
+
+        prefs = {k: v for k, v in conn.items() if k not in ("mcp_url", "mcp_token", "mcp_auth_header", "instance_id", "provider")}
+        if prefs:
+            headers["x-mcp-prefs"] = _json.dumps(prefs)
+    else:
+        try:
+            check_external_endpoint(url)
+        except ValueError as e:
+            logger.warning("mcphub: dropping personal MCP %r — %s", conn.get("instance_id"), e)
+            return None
+        header = str(conn.get("mcp_auth_header") or "").strip() or "Authorization"
+        if token:
+            # A bare header name defaults to a Bearer scheme on Authorization;
+            # a custom header (x-api-key, …) gets the raw token.
+            headers[header] = f"Bearer {token}" if header.lower() == "authorization" else token
+
     transport = "sse" if str(conn.get("provider") or "").lower() == "sse" else "streamable-http"
     return DownstreamSpec(
         name=_seg(str(conn.get("instance_id") or "default")),
@@ -112,6 +127,12 @@ def _spec_for(conn: dict[str, Any]) -> DownstreamSpec | None:
         auth_mode="header",
         headers=headers,
     )
+
+
+def _is_bridge_endpoint(url: str) -> bool:
+    """True for DevAI's own in-cluster stdio bridge (trusted internal service)."""
+    host = urlparse(url).hostname or ""
+    return host.startswith("devai-mcp-bridge") or "/bridge/" in url
 
 
 @dataclass(slots=True)

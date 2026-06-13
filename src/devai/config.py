@@ -486,6 +486,15 @@ class Settings(BaseSettings):
     # caller's connector; this is only the platform default / fallback.
     cloud_provider: str = "noop"
 
+    # --- MCP stdio bridge (devai-mcp-bridge) ---
+    # Serves the registry's stdio catalog servers (draw.io, filesystem,
+    # Postgres, …) over streamable-https so the hub can federate them.
+    mcpbridge_enabled: bool = True
+    mcpbridge_port: int = 8099
+    # Only these commands may be spawned from a catalog launch spec (basename
+    # match; "*" allows all). A published catalog entry can't run anything else.
+    mcpbridge_allowed_commands: str = "npx"
+
     # --- Cloudflare ---
     cloudflare_api_token: str = ""
     cloudflare_account_id: str = ""
