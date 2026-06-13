@@ -203,8 +203,14 @@ def discover(
         # Catalog templates (marketplace browse-and-connect entries) are NOT
         # shared downstream legs — they're per-user connect targets. The hub
         # must not auto-dial them (no shared credential, per-user endpoint).
-        # They reach a user only after they connect (mcphub/personal.py).
-        if spec.labels.get("mcp.devai.io/catalog") == "true":
+        # They reach a user only after they connect (mcphub/personal.py). The
+        # registry flattens spec to the top of `raw` and drops metadata.labels,
+        # so detect via the spec `catalog` flag (and the label as a fallback).
+        raw = getattr(rec, "raw", None) or {}
+        is_catalog = (isinstance(raw, dict) and bool(raw.get("catalog"))) or spec.labels.get(
+            "mcp.devai.io/catalog"
+        ) == "true"
+        if is_catalog:
             continue
         if not spec.is_servable():
             logger.info(

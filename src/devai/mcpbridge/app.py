@@ -51,9 +51,13 @@ def load_catalog_specs(client: Any) -> dict[str, LaunchSpec]:
         raw = getattr(rec, "raw", None) or {}
         if not isinstance(raw, dict):
             continue
+        # The registry flattens spec to the top of `raw` and drops
+        # metadata.labels, so detect a catalog template via the spec `catalog`
+        # flag (falling back to the label if a future client preserves it).
         meta = raw.get("metadata", {})
         labels = meta.get("labels", {}) if isinstance(meta, dict) else {}
-        if labels.get("mcp.devai.io/catalog") != "true":
+        is_catalog = bool(raw.get("catalog")) or labels.get("mcp.devai.io/catalog") == "true"
+        if not is_catalog:
             continue
         stdio = raw.get("stdio")
         if not isinstance(stdio, dict) or not stdio.get("command"):

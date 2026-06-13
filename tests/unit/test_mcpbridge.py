@@ -37,8 +37,10 @@ def test_resolve_env_drops_unresolved_placeholders():
 
 
 def test_load_catalog_specs_picks_stdio_catalog_only():
-    def rec(name, labels, raw_extra):
-        return SimpleNamespace(name=name, raw={"metadata": {"labels": labels}, **raw_extra})
+    # The real registry FLATTENS spec to the top of `raw` and drops
+    # metadata.labels — so catalog detection keys off the spec `catalog` flag.
+    def rec(name, **raw_extra):
+        return SimpleNamespace(name=name, raw=dict(raw_extra))
 
     class _Client:
         def list_mcp_servers(self):
@@ -46,16 +48,14 @@ def test_load_catalog_specs_picks_stdio_catalog_only():
                 # stdio catalog → included, keyed by endpoint segment
                 rec(
                     "catalog-drawio-mcp",
-                    {"mcp.devai.io/catalog": "true"},
-                    {
-                        "endpoint": "http://devai-mcp-bridge.devai.svc.cluster.local:8099/bridge/drawio",
-                        "stdio": {"command": "npx", "args": ["-y", "drawio-mcp-server"]},
-                    },
+                    catalog=True,
+                    endpoint="http://devai-mcp-bridge.devai.svc.cluster.local:8099/bridge/drawio",
+                    stdio={"command": "npx", "args": ["-y", "drawio-mcp-server"]},
                 ),
                 # http catalog (no stdio) → skipped
-                rec("catalog-github-mcp", {"mcp.devai.io/catalog": "true"}, {"endpoint": "https://api.githubcopilot.com/mcp/"}),
-                # non-catalog server → skipped
-                rec("gitops-mcp", {"devai.io/source": "devai"}, {"endpoint": "http://x/mcp", "stdio": {"command": "npx"}}),
+                rec("catalog-github-mcp", catalog=True, endpoint="https://api.githubcopilot.com/mcp/"),
+                # non-catalog server with stdio → skipped (not a catalog template)
+                rec("gitops-mcp", endpoint="http://x/mcp", stdio={"command": "npx"}),
             ]
 
     specs = load_catalog_specs(_Client())
