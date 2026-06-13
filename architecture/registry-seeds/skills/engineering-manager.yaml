@@ -16,7 +16,7 @@ spec:
   category: planning
   tools:
   - scm_get_repo_tree
-  - scm_read_file
+  - scm_get_file_content
   - scm_list_files
   - repo_profile
   handoverSchema:

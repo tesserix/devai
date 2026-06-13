@@ -1,0 +1,41 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-flux-suspend
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: flux_suspend
+spec:
+  displayName: Flux Suspend
+  description: "Suspend or resume Flux reconciliation of an object (suspended=true freezes it \u2014 e.g.\
+    \ during an incident). Mutating \u2014 gated and audited."
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      name:
+        type: string
+        description: Target name
+      suspended:
+        type: boolean
+        description: true = suspend, false = resume
+      namespace:
+        type: string
+        description: Kubernetes namespace (blank = default)
+      kind:
+        type: string
+        description: kustomization | helmrelease | gitrepository | helmrepository | ocirepository
+    required:
+    - name
+    - suspended
+  tags:
+  - gitops
+  - mcp-tool

@@ -1,0 +1,36 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-flux-get-object
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: flux_get_object
+spec:
+  displayName: Flux Get Object
+  description: 'Detail for one Flux Kustomization/HelmRelease: conditions, source ref, revision, suspension.'
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      name:
+        type: string
+        description: Target name
+      namespace:
+        type: string
+        description: Kubernetes namespace (blank = default)
+      kind:
+        type: string
+        description: kustomization | helmrelease | gitrepository | helmrepository | ocirepository
+    required:
+    - name
+  tags:
+  - gitops
+  - mcp-tool

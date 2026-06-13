@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-flux-list-helmreleases
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: flux_list_helmreleases
+spec:
+  displayName: Flux List Helmreleases
+  description: List Flux HelmReleases with Ready condition, suspension and last applied revision.
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      namespace:
+        type: string
+        description: Kubernetes namespace (blank = default)
+  tags:
+  - gitops
+  - mcp-tool

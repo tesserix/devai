@@ -1,0 +1,29 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-kargo-list-stages
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: kargo_list_stages
+spec:
+  displayName: Kargo List Stages
+  description: List Kargo stages (dev/staging/prod) with phase, health and current freight. Omit project
+    to list across all projects.
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      project:
+        type: string
+        description: Kargo project (its namespace)
+  tags:
+  - gitops
+  - mcp-tool

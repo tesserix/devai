@@ -1,0 +1,25 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-kargo-list-projects
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: kargo_list_projects
+spec:
+  displayName: Kargo List Projects
+  description: List Kargo projects (delivery pipelines).
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - gitops
+  - mcp-tool

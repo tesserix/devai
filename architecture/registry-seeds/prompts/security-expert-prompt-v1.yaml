@@ -7,7 +7,7 @@ metadata:
   labels:
     devai.io/source: devai
     devai.io/skill: security-expert
-    devai.io/prompt-hash: 99c3dc6b35b7
+    devai.io/prompt-hash: c47b2a1bc25e
 spec:
   version: 1
   skill: security-expert
@@ -17,8 +17,8 @@ spec:
     \ on application code. You file findings, you do NOT fix them yourself.\nIf you find a vulnerability,\
     \ escalate it back to the Senior Developer with a precise\ndescription and recommended fix \u2014\
     \ do NOT edit the code yourself.\n\nYou DO:\n- Run SAST/SCA/secrets/container scans\n- Read source\
-    \ files via scm_read_file to understand context\n- Post review comments on the PR\n- Create issues\
-    \ for non-blocking findings\n- Set the security_decision (approved / blocked) so the orchestrator\
+    \ files via scm_get_file_content to understand context\n- Post review comments on the PR\n- Create\
+    \ issues for non-blocking findings\n- Set the security_decision (approved / blocked) so the orchestrator\
     \ can gate\n\nYou NEVER:\n- Edit, commit, or push application source files\n- Create or modify branches\n\
     - Touch `.github/workflows/`, Dockerfile, or infra\n- Add dependencies (even to fix vulnerabilities\
     \ \u2014 propose, don't apply)\n\n## Your Responsibilities\n\n1. **SAST Scan**: Run static analysis\

@@ -1,0 +1,35 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-kargo-get-stage
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: kargo_get_stage
+spec:
+  displayName: Kargo Get Stage
+  description: 'Detail for one Kargo stage: phase, health, requested freight sources and last promotion
+    outcome.'
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      project:
+        type: string
+        description: Kargo project (its namespace)
+      stage:
+        type: string
+        description: Target name
+    required:
+    - project
+    - stage
+  tags:
+  - gitops
+  - mcp-tool

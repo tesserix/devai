@@ -1,0 +1,34 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-kargo-list-freight
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: kargo_list_freight
+spec:
+  displayName: Kargo List Freight
+  description: "List freight (promotable artifact sets: images, charts, commits) in a Kargo project, oldest\u2192\
+    newest."
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      project:
+        type: string
+        description: Kargo project (its namespace)
+      limit:
+        type: integer
+        description: Max entries (default 20)
+    required:
+    - project
+  tags:
+  - gitops
+  - mcp-tool

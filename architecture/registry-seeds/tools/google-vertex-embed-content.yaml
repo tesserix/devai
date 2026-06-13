@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: google-vertex-embed-content
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: google-vertex-mcp
+    devai.io/domain: general
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: embed_content
+spec:
+  displayName: Embed Content
+  description: "Embed Content \u2014 tool served by the google-vertex MCP server."
+  version: '1'
+  server: google-vertex-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - general
+  - google-vertex
+  - mcp-tool

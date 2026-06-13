@@ -1,0 +1,34 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-kargo-list-promotions
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: kargo_list_promotions
+spec:
+  displayName: Kargo List Promotions
+  description: "Recent promotions of a Kargo project (optionally one stage) with phase + message \u2014\
+    \ the release history."
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      project:
+        type: string
+        description: Kargo project (its namespace)
+      stage:
+        type: string
+        description: Stage filter (optional)
+    required:
+    - project
+  tags:
+  - gitops
+  - mcp-tool

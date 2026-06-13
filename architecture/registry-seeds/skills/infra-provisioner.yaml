@@ -15,7 +15,7 @@ spec:
     \ for infra changes."
   category: orchestration
   tools:
-  - scm_read_file
+  - scm_get_file_content
   - scm_commit_file
   - validate_dockerfile
   - validate_helm_lint

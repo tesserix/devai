@@ -1,0 +1,39 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-kargo-promote
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: kargo_promote
+spec:
+  displayName: Kargo Promote
+  description: "Promote a freight (by name or alias) into a Kargo stage \u2014 THE release action. Mutating\
+    \ \u2014 gated and audited."
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      project:
+        type: string
+        description: Kargo project (its namespace)
+      stage:
+        type: string
+        description: Target name
+      freight:
+        type: string
+        description: Freight name or alias
+    required:
+    - project
+    - stage
+    - freight
+  tags:
+  - gitops
+  - mcp-tool

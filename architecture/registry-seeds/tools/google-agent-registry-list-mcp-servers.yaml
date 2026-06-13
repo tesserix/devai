@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: google-agent-registry-list-mcp-servers
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: google-agent-registry-mcp
+    devai.io/domain: general
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: list_mcp_servers
+spec:
+  displayName: List Mcp Servers
+  description: "List Mcp Servers \u2014 tool served by the google-agent-registry MCP server."
+  version: '1'
+  server: google-agent-registry-mcp
+  inputSchema:
+    type: object
+    properties: {}
+  tags:
+  - general
+  - google-agent-registry
+  - mcp-tool

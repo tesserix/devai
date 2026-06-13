@@ -447,6 +447,22 @@ class Settings(BaseSettings):
     argocd_sync_timeout: int = 300  # seconds to wait for ArgoCD sync
     argocd_health_timeout: int = 120  # seconds to wait for healthy status
 
+    # --- gitops adapter ---
+    # Backend for deps.gitops / the default GitOps tool target. One of:
+    # argocd | kargo | flux | noop. See src/devai/adapters/gitops/.
+    gitops_provider: str = "argocd"
+    # Which backends the /mcp/gitops domain exposes side by side (comma list).
+    # Each builds independently; one missing controller drops only its tools.
+    gitops_mcp_providers: str = "argocd,kargo,flux"
+    # Master gate for mutating GitOps operations (sync / promote / rollback /
+    # reconcile / suspend). When false every backend refuses with a clear
+    # message — read-only inspection keeps working.
+    gitops_mutations_enabled: bool = True
+    # Kargo project (namespace) assumed when a tool call omits one.
+    kargo_default_project: str = ""
+    # Namespace Flux objects default to when a tool call omits one.
+    flux_namespace: str = "flux-system"
+
     # --- Cloudflare ---
     cloudflare_api_token: str = ""
     cloudflare_account_id: str = ""

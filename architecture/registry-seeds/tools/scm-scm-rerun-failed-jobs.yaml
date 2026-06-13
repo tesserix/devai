@@ -1,0 +1,35 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-rerun-failed-jobs
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: scm_rerun_failed_jobs
+spec:
+  displayName: Scm Rerun Failed Jobs
+  description: "Re-run only the FAILED jobs of a workflow run \u2014 re-test after a fix or to rule out\
+    \ a flake without pushing an empty commit. Poll scm_ci_status afterwards for the verdict."
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      run_id:
+        type: string
+        description: Workflow run id to re-run failed jobs for
+    required:
+    - repo
+    - run_id
+  tags:
+  - mcp-tool
+  - scm

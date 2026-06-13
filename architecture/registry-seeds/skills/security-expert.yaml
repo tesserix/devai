@@ -17,8 +17,8 @@ spec:
   tools:
   - scm_get_pr_diff
   - scm_get_repo_tree
-  - scm_read_file
-  - scm_post_pr_review
+  - scm_get_file_content
+  - scm_create_pr_review
   - scm_create_issue
   - security_scan_sast
   - security_scan_dependencies

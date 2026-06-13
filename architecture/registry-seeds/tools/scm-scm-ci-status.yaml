@@ -1,0 +1,36 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-ci-status
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: scm_ci_status
+spec:
+  displayName: Scm Ci Status
+  description: "Ground-truth CI verdict for a branch: the newest run of EVERY workflow with its conclusion\
+    \ (success/failure/in_progress). Use this to verify your fix actually turned the builds green before\
+    \ declaring success \u2014 narration doesn't count, this does."
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      branch:
+        type: string
+        description: Branch to check (the story/work branch)
+    required:
+    - repo
+    - branch
+  tags:
+  - mcp-tool
+  - scm

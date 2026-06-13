@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Agent
+metadata:
+  name: release-promoter-agent
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/skill: release-promoter
+spec:
+  skill: release-promoter
+  promptRef: release-promoter-prompt-v1
+  llm:
+    provider: claude
+    model: claude-sonnet-4-20250514
+    temperature: null
+    maxTokens: null
+  limits:
+    maxTurns: 25
+    timeoutSeconds: 900
+  runtime:
+    kind: yaml_only
+    pythonClass: null
+  riskLevel: critical
+  roleColor: admin

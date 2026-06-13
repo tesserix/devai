@@ -1,0 +1,31 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-argocd-sync
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: argocd_sync
+spec:
+  displayName: Argocd Sync
+  description: "Trigger a sync of an Argo CD Application (converge cluster to Git). Mutating \u2014 gated\
+    \ and audited."
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      name:
+        type: string
+        description: Target name
+    required:
+    - name
+  tags:
+  - gitops
+  - mcp-tool

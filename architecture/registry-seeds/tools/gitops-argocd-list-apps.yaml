@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-argocd-list-apps
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: argocd_list_apps
+spec:
+  displayName: Argocd List Apps
+  description: List Argo CD Applications with sync + health status. Optionally filter by Argo CD project.
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      project:
+        type: string
+        description: Argo CD project filter (optional)
+  tags:
+  - gitops
+  - mcp-tool

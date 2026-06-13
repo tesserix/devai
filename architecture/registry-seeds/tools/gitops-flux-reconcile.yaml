@@ -1,0 +1,37 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-flux-reconcile
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: flux_reconcile
+spec:
+  displayName: Flux Reconcile
+  description: "Request an immediate Flux reconcile of a Kustomization/HelmRelease/source (what `flux\
+    \ reconcile` does). Mutating \u2014 gated and audited."
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      name:
+        type: string
+        description: Target name
+      namespace:
+        type: string
+        description: Kubernetes namespace (blank = default)
+      kind:
+        type: string
+        description: kustomization | helmrelease | gitrepository | helmrepository | ocirepository
+    required:
+    - name
+  tags:
+  - gitops
+  - mcp-tool

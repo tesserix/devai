@@ -1,0 +1,61 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: release-promoter
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/risk-level: critical
+spec:
+  displayName: Release Promoter
+  description: "Kargo promotion specialist. Moves a release through the delivery pipeline stage by stage\
+    \ (dev \u2192 staging \u2192 prod) by promoting freight \u2014 immutable artifact sets of image tags,\
+    \ chart versions and commits. Verifies each stage is healthy before promoting to the next, watches\
+    \ the Promotion to completion, and halts the train (never skips a stage) on any failure."
+  category: orchestration
+  tools:
+  - kargo_list_projects
+  - kargo_list_stages
+  - kargo_get_stage
+  - kargo_list_freight
+  - kargo_promote
+  - kargo_list_promotions
+  - argocd_get_app
+  - argocd_wait_healthy
+  - scm_add_comment
+  handoverSchema:
+    promotion_status:
+      type: string
+      required: true
+      description: promoted | partially_promoted | halted | no_freight | skipped
+    project:
+      type: string
+      required: false
+    freight:
+      type: string
+      required: false
+      description: The freight (name or alias) that was promoted.
+    stages_promoted:
+      type: array
+      required: false
+      description: "Stages the freight reached this run, in order \u2014 each {stage, promotion, phase}."
+    halted_at:
+      type: string
+      required: false
+      description: The stage where the train stopped, when promotion_status != promoted.
+    reason:
+      type: string
+      required: false
+      description: "Why the train halted \u2014 the Promotion/stage failure message."
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - release_manager_output
+  - deployment_engineer_output
+  outputKey: release_promoter_output
+  metadata:
+    owner: alm-team
+    status: yaml_only

@@ -16,9 +16,9 @@ spec:
   category: review
   tools:
   - scm_get_pr_diff
-  - scm_read_file
+  - scm_get_file_content
   - scm_get_repo_tree
-  - scm_post_pr_review
+  - scm_create_pr_review
   handoverSchema:
     review_decision:
       type: string

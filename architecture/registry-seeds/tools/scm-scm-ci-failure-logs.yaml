@@ -1,0 +1,36 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: scm-scm-ci-failure-logs
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: scm-mcp
+    devai.io/domain: scm
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: scm_ci_failure_logs
+spec:
+  displayName: Scm Ci Failure Logs
+  description: "Failure forensics for a red workflow run: failed job names, failed steps, and a log tail\
+    \ (secrets redacted). Start every debug round here \u2014 read the ACTUAL errors, then fix the workflow\
+    \ file or the code, push to the branch, and re-check scm_ci_status."
+  version: '1'
+  server: scm-mcp
+  inputSchema:
+    type: object
+    properties:
+      repo:
+        type: string
+        description: Repository identifier
+      run_id:
+        type: string
+        description: Workflow run id or its html URL (from scm_ci_status)
+    required:
+    - repo
+    - run_id
+  tags:
+  - mcp-tool
+  - scm

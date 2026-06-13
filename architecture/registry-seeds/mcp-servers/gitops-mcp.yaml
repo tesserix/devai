@@ -1,0 +1,37 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: gitops-mcp
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    devai.io/category: gitops
+spec:
+  name: gitops-mcp
+  displayName: DevAI GitOps MCP
+  description: "GitOps delivery operations across all three controllers behind one interface — Argo CD (app status, sync, history, rollback), Kargo (stages, freight, promotions), and Flux CD (kustomizations, helm releases, sources, reconcile, suspend). Backed by the adapters.gitops family; mutating tools are gated by DEVAI_GITOPS_MUTATIONS_ENABLED and audited."
+  endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/gitops
+  authMode: jwt
+  tools:
+  - argocd_list_apps
+  - argocd_get_app
+  - argocd_sync
+  - argocd_wait_healthy
+  - argocd_app_history
+  - argocd_rollback
+  - kargo_list_projects
+  - kargo_list_stages
+  - kargo_get_stage
+  - kargo_list_freight
+  - kargo_promote
+  - kargo_list_promotions
+  - flux_list_kustomizations
+  - flux_list_helmreleases
+  - flux_get_object
+  - flux_list_sources
+  - flux_reconcile
+  - flux_suspend
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: gitops-mcp

@@ -1,0 +1,69 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: deployment-engineer
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    devai.io/category: orchestration
+    devai.io/risk-level: high
+spec:
+  displayName: Deployment Engineer
+  description: 'GitOps deployment specialist. Owns the moment between "merged" and "serving traffic":
+    verifies the Argo CD app (or Flux Kustomization/ HelmRelease) picked up the new revision, watches
+    sync + health converge, diagnoses stuck or degraded rollouts from controller conditions, and rolls
+    back when the new revision cannot become healthy. Fluent in both Argo CD and Flux semantics.'
+  category: orchestration
+  tools:
+  - argocd_list_apps
+  - argocd_get_app
+  - argocd_sync
+  - argocd_wait_healthy
+  - argocd_app_history
+  - argocd_rollback
+  - flux_list_kustomizations
+  - flux_list_helmreleases
+  - flux_get_object
+  - flux_list_sources
+  - flux_reconcile
+  - flux_suspend
+  - scm_get_file_content
+  - scm_list_files
+  - scm_add_comment
+  handoverSchema:
+    rollout_status:
+      type: string
+      required: true
+      description: healthy | degraded | rolled_back | stuck | not_found
+    controller:
+      type: string
+      required: false
+      description: "argocd | flux \u2014 which GitOps controller manages the app"
+    app:
+      type: string
+      required: false
+      description: The Application / Kustomization / HelmRelease verified.
+    revision:
+      type: string
+      required: false
+      description: The revision now serving (or rolled back to).
+    diagnosis:
+      type: string
+      required: false
+      description: "For degraded/stuck rollouts \u2014 the condition messages and the likely cause."
+    actions_taken:
+      type: array
+      required: false
+      description: "Each {action, target, result} \u2014 sync, reconcile, rollback, suspend."
+    summary:
+      type: string
+      required: true
+  contextKeys:
+  - release_manager_output
+  - infra_provisioner_output
+  - story_branches
+  outputKey: deployment_engineer_output
+  metadata:
+    owner: alm-team
+    status: yaml_only

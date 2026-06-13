@@ -1,0 +1,30 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: gitops-argocd-get-app
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: gitops-mcp
+    devai.io/domain: gitops
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: argocd_get_app
+spec:
+  displayName: Argocd Get App
+  description: Sync status, health, revision, recent conditions and source repo/path of one Argo CD Application.
+  version: '1'
+  server: gitops-mcp
+  inputSchema:
+    type: object
+    properties:
+      name:
+        type: string
+        description: Target name
+    required:
+    - name
+  tags:
+  - gitops
+  - mcp-tool

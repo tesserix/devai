@@ -15,9 +15,9 @@ spec:
     on test failures.
   category: review
   tools:
-  - scm_read_file
+  - scm_get_file_content
   - scm_commit_file
-  - validate_e2e_playwright
+  - run_playwright_test
   - validate_e2e_cypress
   - validate_unit_tests
   handoverSchema:

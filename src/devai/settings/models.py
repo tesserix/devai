@@ -242,11 +242,22 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         provider_attr="mcp_endpoint",
         providers=("streamable_http", "sse"),
         multi=True,
-        description="Connect an external MCP server your agents can call.",
+        description=(
+            "Connect external MCP servers your agents can call — add as many as you need. "
+            "Tokens live in GCP Secret Manager under YOUR scope only; other tenants never "
+            "see your servers or credentials."
+        ),
         fields=(
             _f("mcp_name", "Name", "mcp_name", required=True, placeholder="my-tools"),
             _f("mcp_url", "Endpoint URL", "mcp_url", required=True, placeholder="https://host/mcp"),
-            _f("mcp_token", "Bearer Token", "mcp_token", secret=True),
+            _f("mcp_token", "Auth Token", "mcp_token", secret=True),
+            _f(
+                "mcp_auth_header",
+                "Auth Header",
+                "mcp_auth_header",
+                placeholder="Authorization (default) | x-api-key | ...",
+                help="Header the token is sent under. Default sends 'Authorization: Bearer <token>'.",
+            ),
         ),
     ),
     ConnectorSpec(

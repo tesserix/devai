@@ -13,6 +13,8 @@ here. What ships:
   - ``scm``    — the 13 SCM operations from the tool registry, backed by
                  ``SCMToolExecutor`` + an scm client built from settings. Real:
                  read a repo, open a PR, post a review, etc.
+  - ``gitops`` — Argo CD / Kargo / Flux operations (list/status/sync/promote/
+                 reconcile/rollback) backed by the ``adapters.gitops`` family.
   - ``sample`` — ``sample_ping`` / ``sample_echo``, a trivial always-works domain
                  to prove end-to-end federation.
 
@@ -85,6 +87,37 @@ def scm_domain(settings: Settings) -> list[DomainTool]:
     return out
 
 
+def gitops_domain(settings: Settings) -> list[DomainTool]:
+    """The GitOps domain: Argo CD / Kargo / Flux operations from the tool
+    registry, backed by the ``adapters.gitops`` family (kubectl + CRD RBAC).
+
+    Providers come from ``settings.gitops_mcp_providers``; a provider whose
+    controller isn't reachable simply contributes no tools (each backend
+    degrades independently, and a tool call against a missing controller
+    answers with a readable error rather than raising).
+    """
+    from devai.tools import registry as tool_registry
+
+    raw = str(getattr(settings, "gitops_mcp_providers", "") or "argocd,kargo,flux")
+    prefixes = tuple(f"{p.strip().lower()}_" for p in raw.split(",") if p.strip())
+    if not prefixes:
+        return []
+
+    ctx = tool_registry.ToolContext(agent_name="mcp-hub")
+    names = sorted(n for n in tool_registry.known() if n.startswith(prefixes))
+    out = [
+        DomainTool(
+            name=bt.spec.name,
+            description=bt.spec.description,
+            input_schema=bt.spec.parameters or {"type": "object", "properties": {}},
+            handler=bt.handler,
+        )
+        for bt in tool_registry.bind(names, ctx)
+    ]
+    logger.info("mcphub: gitops domain exposes %d tools (%s)", len(out), raw)
+    return out
+
+
 def sample_domain() -> list[DomainTool]:
     """A trivial domain that always works — proves end-to-end federation."""
 
@@ -120,6 +153,7 @@ def build_domains(settings: Settings) -> dict[str, list[DomainTool]]:
     """Build all configured domains. Empty domains are dropped."""
     domains = {
         "scm": scm_domain(settings),
+        "gitops": gitops_domain(settings),
         "sample": sample_domain(),
     }
     return {seg: tools for seg, tools in domains.items() if tools}

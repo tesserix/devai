@@ -37,7 +37,7 @@ def _load_tool_schemas() -> dict[str, dict]:
     from devai.tools import registry as R
     for m in ("scm_tools", "github_tools", "file_tools", "document_tools",
               "checkpoint_tools", "shell_tools", "web_tools", "security_tools",
-              "validation_tools", "dispatch"):
+              "validation_tools", "gitops_tools", "dispatch"):
         try:
             importlib.import_module(f"devai.tools.{m}")
         except Exception:  # noqa: BLE001 — best-effort; missing dep just means fewer schemas
@@ -59,6 +59,8 @@ def _domain(tool: str, server_short: str) -> str:
         return "quality"
     if tool.startswith("scm_"):
         return "scm"
+    if tool.startswith(("argocd_", "kargo_", "flux_")):
+        return "gitops"
     if tool.startswith("sre_") or server_short == "sre":
         return "sre"
     if tool.startswith("devai_pipeline_"):
@@ -74,7 +76,8 @@ def _domain(tool: str, server_short: str) -> str:
 
 def _risk(tool: str) -> str:
     hot = ("commit", "merge", "create_pr", "create_pull", "create_branch", "close_issue",
-           "dispatch", "scan", "sbom", "delete", "rollback")
+           "dispatch", "scan", "sbom", "delete", "rollback", "promote", "sync",
+           "reconcile", "suspend")
     return "medium" if any(h in tool for h in hot) else "low"
 
 
