@@ -91,3 +91,52 @@ def test_personal_bridge_endpoint_uses_x_mcp_secret():
     # in-cluster bridge bypassed the external SSRF guard.
     assert spec.headers["x-mcp-secret"] == "postgres://u:p@h/db"
     assert "Authorization" not in spec.headers
+
+
+async def test_load_catalog_specs_resilient_retries_then_succeeds(monkeypatch):
+    """A transient registry failure at boot is retried, not fatal — so a hiccup
+    can't permanently zero the bridge."""
+    from types import SimpleNamespace
+
+    import devai.mcpbridge.app as app_mod
+
+    calls = {"n": 0}
+
+    class _Client:
+        def list_mcp_servers(self):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("registry not ready")
+            return [
+                SimpleNamespace(
+                    name="catalog-drawio-mcp",
+                    raw={"catalog": True, "endpoint": "http://b/bridge/drawio", "stdio": {"command": "npx", "args": ["-y", "x"]}},
+                )
+            ]
+
+    monkeypatch.setattr(app_mod, "create_registry_client", lambda settings: _Client())
+
+    async def _instant_sleep(_):
+        return None
+
+    monkeypatch.setattr(app_mod.asyncio, "sleep", _instant_sleep, raising=False)
+    specs = await app_mod.load_catalog_specs_resilient(object(), attempts=5, delay=0.0)
+    assert set(specs) == {"drawio"}
+    assert calls["n"] == 3  # failed twice, succeeded on the third
+
+
+async def test_load_catalog_specs_resilient_gives_up_empty(monkeypatch):
+    import devai.mcpbridge.app as app_mod
+
+    class _Down:
+        def list_mcp_servers(self):
+            raise RuntimeError("down")
+
+    monkeypatch.setattr(app_mod, "create_registry_client", lambda settings: _Down())
+
+    async def _instant_sleep(_):
+        return None
+
+    monkeypatch.setattr(app_mod.asyncio, "sleep", _instant_sleep, raising=False)
+    specs = await app_mod.load_catalog_specs_resilient(object(), attempts=3, delay=0.0)
+    assert specs == {}

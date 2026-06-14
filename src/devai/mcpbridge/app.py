@@ -14,6 +14,7 @@ on the allowlist may run.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from devai.mcpbridge.runner import LaunchSpec, command_allowed, stdio_session
+from devai.registry import create_registry_client
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +42,17 @@ def load_catalog_specs(client: Any) -> dict[str, LaunchSpec]:
     served at ``/bridge/drawio`` → key ``drawio``. Best-effort: registry errors
     yield an empty map (the bridge serves nothing rather than crashing).
     """
-    out: dict[str, LaunchSpec] = {}
     try:
         records = client.list_mcp_servers()
     except Exception:  # noqa: BLE001
         logger.warning("mcpbridge: registry read failed; no servers mounted", exc_info=True)
-        return out
+        return {}
+    return _specs_from_records(records)
+
+
+def _specs_from_records(records: Any) -> dict[str, LaunchSpec]:
+    """Pure parse: registry records → {segment: LaunchSpec} (no I/O)."""
+    out: dict[str, LaunchSpec] = {}
     for rec in records:
         raw = getattr(rec, "raw", None) or {}
         if not isinstance(raw, dict):
@@ -67,6 +74,29 @@ def load_catalog_specs(client: Any) -> dict[str, LaunchSpec]:
             continue
         out[seg] = LaunchSpec.from_spec(stdio)
     return out
+
+
+async def load_catalog_specs_resilient(settings: Any, *, attempts: int = 12, delay: float = 6.0) -> dict[str, LaunchSpec]:
+    """Catalog specs with a bounded startup retry on registry unavailability.
+
+    The bridge mounts its servers ONCE at boot. If the registry is briefly
+    unreachable then (a cold start, an agentregistry roll), a single read would
+    leave the bridge serving 0 servers permanently. Retry the read — distinct
+    from an empty-but-healthy result — so a transient hiccup can't zero the
+    bridge for the pod's whole life. Gives up after ``attempts`` (~72s) and
+    serves empty rather than crashlooping.
+    """
+    last_err: Exception | None = None
+    for i in range(1, attempts + 1):
+        try:
+            records = create_registry_client(settings).list_mcp_servers()
+            return _specs_from_records(records)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            logger.warning("mcpbridge: registry read failed (attempt %d/%d) — retrying in %.0fs", i, attempts, delay)
+            await asyncio.sleep(delay)
+    logger.error("mcpbridge: registry unreachable after %d attempts (%s) — serving 0 servers", attempts, last_err)
+    return {}
 
 
 def _env_for(spec: LaunchSpec) -> dict[str, str]:
@@ -116,9 +146,7 @@ def create_bridge_app(settings: Any) -> Any:
     async def lifespan(app: Any):  # noqa: ANN001
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-        from devai.registry import create_registry_client
-
-        specs = load_catalog_specs(create_registry_client(settings))
+        specs = await load_catalog_specs_resilient(settings)
         entered: list[Any] = []
         for name, spec in specs.items():
             if not command_allowed(spec.command, allowed):
