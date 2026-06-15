@@ -77,6 +77,12 @@ class StageDeps:
     # `deps.llm` when the user configured nothing. Untyped to avoid an
     # import cycle; None when the Settings capability is disabled.
     llm_resolver: Any = None
+    # Per-principal SCM resolution (settings.scm_resolver.PrincipalSCMResolver).
+    # Code that touches git should prefer `await deps.scm_for_principal(email)`
+    # over reading `deps.scm` directly — so a run uses the triggering user's own
+    # PAT / GitHub App instead of the platform's global App. Untyped to avoid an
+    # import cycle; None when the Settings capability is disabled.
+    scm_resolver: Any = None
 
     # Pluggable LLM providers — None means "stages use their hardcoded
     # default provider" (the way existing agents do today). Once we move
@@ -128,6 +134,25 @@ class StageDeps:
             if adapter is not None:
                 return adapter
         return self.llm
+
+    async def scm_for_principal(self, email: str) -> SCMClient | None:
+        """The triggering user's own SCM client (their Settings connector —
+        PAT or their own GitHub App), falling back to the platform client.
+
+        Human principals with an SCM connector get their own git credentials;
+        everyone else (no connector, or webhook/system triggers) gets the
+        shared platform client ``deps.scm``. The returned client is owned by
+        the resolver when it's the user's — callers must NOT close it; closing
+        ``deps.scm`` (the platform client) is also forbidden (it's shared).
+        """
+        if self.scm_resolver is None:
+            return self.scm
+        is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
+        if is_human:
+            client = await self.scm_resolver.resolve_for_email(email)
+            if client is not None:
+                return client
+        return self.scm
 
     async def role_llm_for_principal(self, email: str, role: str) -> LLMAdapter | None:
         """Role-priced chain on the TRIGGERING USER's credentials.

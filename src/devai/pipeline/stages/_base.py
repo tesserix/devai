@@ -42,11 +42,20 @@ logger = logging.getLogger(__name__)
 # per-task (each run executes in its own context), so concurrent runs never
 # cross creds.
 _agent_config_ctx: contextvars.ContextVar[Any] = contextvars.ContextVar("devai_agent_config", default=None)
+# Per-run SCM client override (the triggering user's own PAT / GitHub App),
+# set by AgentAdapter.execute so a bridged legacy agent talks to git via the
+# user's credentials instead of the platform's global client.
+_agent_scm_ctx: contextvars.ContextVar[Any] = contextvars.ContextVar("devai_agent_scm", default=None)
 
 
 def current_agent_config(default: Any) -> Any:
     """The per-run agent config override, or ``default`` (deps.config)."""
     return _agent_config_ctx.get(None) or default
+
+
+def current_agent_scm(default: Any) -> Any:
+    """The per-run SCM client override, or ``default`` (deps.scm)."""
+    return _agent_scm_ctx.get(None) or default
 
 
 def run_correlation_label(task_id: str) -> str:
@@ -128,7 +137,19 @@ class AgentAdapter(PipelineStage):
 
             update_turn_context(triggered_by=email)
 
+        # Per-principal SCM: build the agent against the triggering user's own
+        # git client (PAT / GitHub App) when they have a Source Control
+        # connector; else the platform client. Threaded via a contextvar so
+        # every bridged agent picks it up without per-subclass changes.
+        agent_scm = self.deps.scm
+        try:
+            if is_human and getattr(self.deps, "scm_resolver", None) is not None:
+                agent_scm = await self.deps.scm_for_principal(email) or self.deps.scm
+        except Exception:  # noqa: BLE001
+            logger.debug("stage %s: per-user SCM resolution failed", self.name(), exc_info=True)
+
         token = _agent_config_ctx.set(agent_config)
+        scm_token = _agent_scm_ctx.set(agent_scm)
         try:
             agent = self._make_agent()
         except Exception as e:  # noqa: BLE001
@@ -140,6 +161,7 @@ class AgentAdapter(PipelineStage):
             agent = None
         finally:
             _agent_config_ctx.reset(token)
+            _agent_scm_ctx.reset(scm_token)
 
         if agent is None:
             logger.warning(
@@ -303,10 +325,12 @@ def _safe_agent(factory: Callable[[Any, Any, Any, Any], Any], deps: StageDeps) -
     if deps.scm is None or deps.state_manager is None:
         return None
     try:
-        # Build with the per-run config (the triggering user's overlay when
-        # present), so the agent's LLM uses the user's keys/model.
+        # Build with the per-run config + SCM client (the triggering user's
+        # overlay/credentials when present), so the agent's LLM uses the user's
+        # keys/model and its git ops use the user's PAT / GitHub App.
         config = current_agent_config(deps.config)
-        return factory(deps.scm, deps.state_manager, config, deps.event_bus)
+        scm = current_agent_scm(deps.scm)
+        return factory(scm, deps.state_manager, config, deps.event_bus)
     except Exception:  # noqa: BLE001 — agent construction is allowed to fail in tests
         logger.exception("agent construction failed")
         return None

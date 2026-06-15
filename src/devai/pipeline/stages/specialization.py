@@ -278,12 +278,21 @@ class _RunSpecializationStage(PipelineStage):
         if dispatcher is None:
             from devai.tools.dispatch import ToolDispatcher
 
+            triggered_by = getattr(task, "triggered_by", "") or ""
+            # Per-principal SCM: the agent's git tools use the TRIGGERING user's
+            # own PAT / GitHub App (Settings → Source Control), not the platform
+            # App. Falls back to deps.scm when the user configured nothing.
+            scm = self.deps.scm
+            try:
+                scm = await self.deps.scm_for_principal(triggered_by) or self.deps.scm
+            except Exception:  # noqa: BLE001
+                pass
             # In a dry run, mutating tools (PR/issue creation, kubectl/argocd
             # writes, paging) are offered to the model but short-circuited.
             dispatcher = ToolDispatcher(
-                self.deps.scm,
+                scm,
                 dry_run=getattr(task, "dry_run", False),
-                triggered_by=getattr(task, "triggered_by", "") or "",
+                triggered_by=triggered_by,
             )
 
         tool_specs = dispatcher.build_tool_specs(spec.allowed_tools)

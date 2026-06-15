@@ -196,7 +196,11 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         family="scm",
         provider_attr="scm_provider",
         providers=("github", "gitlab", "azure_devops"),
-        description="The git host DevAI reads from and opens PRs against.",
+        description=(
+            "The git host DevAI reads from and opens PRs against — connected with YOUR own "
+            "credentials, not the platform's. Use a Personal Access Token, or (GitHub only) "
+            "your own GitHub App. The auth method is inferred from which fields you fill."
+        ),
         fields=(
             _f(
                 "scm_token",
@@ -204,10 +208,38 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
                 "scm_token",
                 secret=True,
                 placeholder="ghp_...",
-                help="Personal access token or GitLab/ADO token.",
+                help="PAT path — GitHub/GitLab/ADO token. Leave blank if using a GitHub App below.",
             ),
             _f("scm_base_url", "API Base URL", "scm_base_url", placeholder="(blank for public github.com)"),
             _f("scm_organization", "Organization", "scm_organization"),
+            # ── GitHub App path (GitHub only) — an alternative to the PAT. Fill
+            # all three and DevAI authenticates as YOUR app (JWT → installation
+            # token), used for both REST and GraphQL.
+            _f(
+                "github_app_id",
+                "GitHub App ID",
+                "github_app_id",
+                placeholder="123456",
+                help="GitHub App: numeric App ID. Fill App ID + Installation ID + Private Key to use App auth.",
+                provider="github",
+            ),
+            _f(
+                "github_app_installation_id",
+                "GitHub App Installation ID",
+                "github_app_installation_id",
+                placeholder="12345678",
+                help="GitHub App: the installation ID on your org/account.",
+                provider="github",
+            ),
+            _f(
+                "github_app_private_key",
+                "GitHub App Private Key (PEM)",
+                "github_app_private_key",
+                secret=True,
+                placeholder="-----BEGIN RSA PRIVATE KEY-----",
+                help="GitHub App: the PEM private key. Stored in your own GCP Secret Manager scope.",
+                provider="github",
+            ),
         ),
     ),
     ConnectorSpec(

@@ -103,7 +103,15 @@ class AgentRunner:
                 stub=True,
             )
 
-        ctx = self._build_tool_context(spec, task)
+        # Per-principal SCM: the agent's git tools use the TRIGGERING user's
+        # own credentials (their PAT / GitHub App), falling back to the
+        # platform client. Resolved here (async) and handed to the context.
+        scm = self.deps.scm
+        try:
+            scm = await self.deps.scm_for_principal(task.triggered_by or "") or self.deps.scm
+        except Exception:  # noqa: BLE001
+            logger.debug("AgentRunner: per-principal SCM resolution failed — using platform client", exc_info=True)
+        ctx = self._build_tool_context(spec, task, scm=scm)
         bound = tool_registry.bind(list(spec.allowed_tools), ctx)
         handlers = {b.spec.name: b.handler for b in bound}
         tools = [b.spec for b in bound]
@@ -276,7 +284,9 @@ class AgentRunner:
 
     # ── Tool context ──────────────────────────────────────────────────
 
-    def _build_tool_context(self, spec: Specialization, task: DevAITask) -> tool_registry.ToolContext:
+    def _build_tool_context(
+        self, spec: Specialization, task: DevAITask, *, scm: Any = None
+    ) -> tool_registry.ToolContext:
         redis = getattr(self.deps.state_manager, "redis", None)
         return tool_registry.ToolContext(
             repo=task.repo,
@@ -285,7 +295,7 @@ class AgentRunner:
             agent_name=spec.name,
             triggered_by=task.triggered_by or "",
             trace_id=task.trace_id or "",
-            scm=self.deps.scm,
+            scm=scm if scm is not None else self.deps.scm,
             redis=redis,
             llm=self.deps.llm,
             web_search=(self.deps.extra or {}).get("web_search"),

@@ -182,6 +182,26 @@ class DevAIChatAgent:
         self._principal: Principal | None = None
         self._trace_id: str | None = None
 
+    async def _scm_for_principal(self) -> Any:
+        """A fresh SCM client for the current conversation's user — their own
+        PAT / GitHub App (Settings → Source Control) — falling back to the
+        platform client. The caller build-and-closes it (no resolver cache)."""
+        from devai.scm import create_scm_client
+
+        email = getattr(self._principal, "email", "") if self._principal else ""
+        if email and "@" in email and not email.startswith(("webhook:", "system:")):
+            try:
+                from devai.settings.scm_resolver import PrincipalSCMResolver
+                from devai.settings.service import get_settings_service
+
+                svc = get_settings_service()
+                if svc is not None:
+                    overlay = await PrincipalSCMResolver(self.config, svc).settings_for_email(email)
+                    return create_scm_client(overlay)
+            except Exception:  # noqa: BLE001
+                logger.debug("chat: per-user SCM resolution failed — using platform client", exc_info=True)
+        return create_scm_client(self.config)
+
     def _build_tools(self) -> list:
         """Build LangChain tools that query platform data."""
         state = self.state
@@ -482,9 +502,7 @@ class DevAIChatAgent:
         @tool
         async def scm_get_file(repo: str, path: str, branch: str = "") -> str:
             """Read a file from a source code repository. Provide repo (org/repo), file path, and optional branch."""
-            from devai.scm import create_scm_client
-
-            scm = create_scm_client(config)
+            scm = await agent_self._scm_for_principal()
             try:
                 content = await scm.get_file_content(repo, path, ref=branch or None)
                 return content[:8000]  # Limit to 8K chars
@@ -496,9 +514,7 @@ class DevAIChatAgent:
         @tool
         async def scm_list_files(repo: str, path: str = "", branch: str = "") -> str:
             """List files in a directory of a source code repository."""
-            from devai.scm import create_scm_client
-
-            scm = create_scm_client(config)
+            scm = await agent_self._scm_for_principal()
             try:
                 files = await scm.list_files(repo, path, ref=branch or None)
                 if isinstance(files, list):
@@ -515,9 +531,7 @@ class DevAIChatAgent:
         @tool
         async def scm_get_repo_tree(repo: str) -> str:
             """Get the full file tree of a repository. Returns all file paths."""
-            from devai.scm import create_scm_client
-
-            scm = create_scm_client(config)
+            scm = await agent_self._scm_for_principal()
             try:
                 tree = await scm.get_repo_tree(repo)
                 paths = [item.get("path", "") for item in tree if item.get("type") in ("blob", "file")]
@@ -530,9 +544,7 @@ class DevAIChatAgent:
         @tool
         async def scm_get_pr(repo: str, pr_number: int) -> str:
             """Get pull request details including title, body, status, and diff summary."""
-            from devai.scm import create_scm_client
-
-            scm = create_scm_client(config)
+            scm = await agent_self._scm_for_principal()
             try:
                 pr = await scm.get_pull_request(repo, pr_number)
                 diff = await scm.get_pr_diff(repo, pr_number)
@@ -555,9 +567,7 @@ class DevAIChatAgent:
         @tool
         async def scm_get_issue(repo: str, issue_number: int) -> str:
             """Get a GitHub/GitLab issue with title, body, labels, and comments."""
-            from devai.scm import create_scm_client
-
-            scm = create_scm_client(config)
+            scm = await agent_self._scm_for_principal()
             try:
                 issue = await scm.get_issue(repo, issue_number)
                 return json.dumps(

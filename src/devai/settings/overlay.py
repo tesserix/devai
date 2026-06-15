@@ -170,6 +170,27 @@ async def build_overlay(
                 if value:
                     overrides[fld.settings_attr] = value
 
+        # SCM auth method: inferred from WHICH credentials the user supplied,
+        # so a user picks PAT *or* GitHub App without a separate selector. App
+        # path needs all three (id + installation + key); otherwise a token is
+        # the PAT/gitlab/ado path. This is what delinks a user from the
+        # platform's global GitHub App — their connector drives create_scm_client.
+        if connector_key == "scm":
+            has_app = (
+                bool(c.prefs.get("github_app_id"))
+                and bool(c.prefs.get("github_app_installation_id"))
+                and bool(c.secret_refs.get("github_app_private_key"))
+            )
+            if has_app:
+                overrides["scm_auth_method"] = "github_app"
+            elif c.secret_refs.get("scm_token"):
+                provider = (c.provider or "github").lower()
+                overrides["scm_auth_method"] = {
+                    "github": "pat",
+                    "gitlab": "gitlab_token",
+                    "azure_devops": "ado_pat",
+                }.get(provider, "pat")
+
         # LLM model policy: the user's enabled-models choice (Settings UI
         # toggles). Stored as a list or comma-joined string in prefs;
         # exposed as `llm_enabled_models` for the resolver's allowlist wrap.

@@ -41,7 +41,7 @@ Connection flow:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from devai.scm.base import AuthMethod, SCMClient, SCMProvider
 
@@ -56,6 +56,14 @@ DEFAULT_URLS = {
     SCMProvider.GITLAB: "https://gitlab.com",
     SCMProvider.AZURE_DEVOPS: "https://dev.azure.com",
 }
+
+
+def _as_int(value: Any) -> int:
+    """Coerce a github_app_id / installation_id to int (overlay stores str)."""
+    try:
+        return int(str(value).strip() or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def create_scm_client(config: Settings) -> SCMClient:
@@ -78,13 +86,17 @@ def create_scm_client(config: Settings) -> SCMClient:
     if provider == SCMProvider.GITHUB:
         from devai.scm.github_client import GitHubSCMClient
 
+        # getattr + int-coerce so a per-user settings overlay (which stores
+        # github_app_id / installation_id as strings) is honored exactly like
+        # the global config — the seam that lets a user's own GitHub App drive
+        # the client instead of the platform's.
         return GitHubSCMClient(
             base_url=base_url,
             auth_method=auth_method,
             token=token,
-            app_id=config.github_app_id,
-            app_private_key=config.github_app_private_key,
-            installation_id=config.github_app_installation_id,
+            app_id=_as_int(getattr(config, "github_app_id", 0)),
+            app_private_key=getattr(config, "github_app_private_key", "") or "",
+            installation_id=_as_int(getattr(config, "github_app_installation_id", 0)),
             org=getattr(config, "github_org", ""),
         )
 

@@ -178,10 +178,15 @@ async def build_runtime(
     # configure an LLM connector execute on THEIR provider/keys, isolated
     # per tenant. None service → resolver returns None → deps.llm default.
     llm_resolver = None
+    scm_resolver = None
     if settings_service is not None:
         from devai.settings.llm_resolver import PrincipalLLMResolver
+        from devai.settings.scm_resolver import PrincipalSCMResolver
 
         llm_resolver = PrincipalLLMResolver(config, settings_service)
+        # Per-principal SCM: a run triggered by a user with a Source Control
+        # connector talks to git via THEIR PAT / GitHub App, not the global App.
+        scm_resolver = PrincipalSCMResolver(config, settings_service)
 
     deps = StageDeps(
         config=config,
@@ -194,6 +199,7 @@ async def build_runtime(
         secrets=secrets_adapter,
         settings_service=settings_service,
         llm_resolver=llm_resolver,
+        scm_resolver=scm_resolver,
         extra=extra or None,
     )
 
