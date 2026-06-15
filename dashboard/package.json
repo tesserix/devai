@@ -11,7 +11,7 @@
   "dependencies": {
     "@types/dompurify": "^3.2.0",
     "clsx": "^2.1.1",
-    "dompurify": "^3.4.8",
+    "dompurify": "^3.4.10",
     "firebase": "^12.14.0",
     "lucide-react": "^0.475.0",
     "next": "^16.2.7",
