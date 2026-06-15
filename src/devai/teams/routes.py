@@ -52,6 +52,26 @@ async def _creator(request: Request) -> str:
     return "system@devai"
 
 
+async def _require_team_admin(request: Request, team_id: str) -> None:
+    """Gate team mutations (add member / create crew) to a team admin.
+
+    Membership data is the isolation boundary, so altering it must be
+    admin-only — otherwise any caller could add themselves to a team and
+    inherit its shared org credentials. A global ``admin`` role overrides.
+    An unauthenticated caller is always rejected (these are sensitive writes,
+    regardless of the global require_auth flag).
+    """
+    principal = await _principal(request)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    if "admin" in (principal.roles or []):
+        return
+    svc = _svc(request)
+    user_key = principal.uid or principal.email
+    if not await svc.is_team_admin(team_id, user_key):
+        raise HTTPException(status_code=403, detail="team admin role required")
+
+
 # ── Teams ─────────────────────────────────────────────────────────────
 
 
@@ -95,6 +115,7 @@ class AddMemberBody(BaseModel):
 
 @router.post("/{team_id}/members", status_code=201)
 async def add_member(request: Request, team_id: str, body: AddMemberBody) -> dict[str, bool]:
+    await _require_team_admin(request, team_id)
     ok = await _svc(request).add_member(team_id, body.user_uid, body.roles)
     return {"ok": ok}
 
@@ -116,6 +137,7 @@ class CreateCrewBody(BaseModel):
 
 @router.post("/{team_id}/crews", status_code=201)
 async def create_crew(request: Request, team_id: str, body: CreateCrewBody) -> dict[str, str]:
+    await _require_team_admin(request, team_id)
     if not any(m.get("specialization") == body.lead for m in body.members):
         raise HTTPException(status_code=400, detail="lead must be one of the crew members")
     crew_id = await _svc(request).create_crew(

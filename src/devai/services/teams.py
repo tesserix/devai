@@ -54,6 +54,60 @@ class TeamService:
             logger.debug("teams_for(%s) failed (table missing?)", user_key, exc_info=True)
             return []
 
+    async def orgs_for(self, user_key: str) -> list[str]:
+        """Org ids the user belongs to — the distinct ``teams.org_id`` of every
+        team they're a member of. This is the VERIFIABLE org boundary: a user
+        is "in org X" iff they're a member of at least one team whose org_id is
+        X, so an org-scoped connector can never be resolved cross-org."""
+        if not user_key:
+            return []
+        try:
+            rows = await self._pool.fetch(
+                """SELECT DISTINCT t.org_id
+                   FROM team_members m JOIN teams t ON t.id = m.team_id
+                   WHERE m.user_uid = $1 AND COALESCE(t.org_id, '') <> ''""",
+                user_key,
+            )
+            return [r["org_id"] for r in rows]
+        except Exception:  # noqa: BLE001 — tables may not be bootstrapped yet
+            logger.debug("orgs_for(%s) failed (table missing?)", user_key, exc_info=True)
+            return []
+
+    async def is_team_admin(self, team_id: str, user_key: str) -> bool:
+        """True when the user is an ``admin`` member of the team. Team-scoped
+        connector writes require this (not mere membership)."""
+        if not (team_id and user_key):
+            return False
+        try:
+            row = await self._pool.fetchrow(
+                "SELECT roles FROM team_members WHERE team_id = $1 AND user_uid = $2",
+                team_id,
+                user_key,
+            )
+            return bool(row) and "admin" in (row["roles"] or [])
+        except Exception:  # noqa: BLE001
+            logger.debug("is_team_admin(%s,%s) failed", team_id, user_key, exc_info=True)
+            return False
+
+    async def is_org_admin(self, org_id: str, user_key: str) -> bool:
+        """True when the user is an admin of ANY team in the org — the gate for
+        org-scoped connector writes."""
+        if not (org_id and user_key):
+            return False
+        try:
+            row = await self._pool.fetchrow(
+                """SELECT 1
+                   FROM team_members m JOIN teams t ON t.id = m.team_id
+                   WHERE m.user_uid = $1 AND t.org_id = $2 AND 'admin' = ANY(m.roles)
+                   LIMIT 1""",
+                user_key,
+                org_id,
+            )
+            return bool(row)
+        except Exception:  # noqa: BLE001
+            logger.debug("is_org_admin(%s,%s) failed", org_id, user_key, exc_info=True)
+            return False
+
     async def members(self, team_id: str) -> list[dict[str, Any]]:
         try:
             rows = await self._pool.fetch(

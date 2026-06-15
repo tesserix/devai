@@ -72,6 +72,11 @@ class Principal:
     # table at request time). Empty = no team scoping; the user sees the
     # global/unscoped view (back-compat with every pre-teams trigger path).
     team_ids: list[str] = field(default_factory=list)
+    # Orgs this principal belongs to — the distinct teams.org_id of their
+    # teams (resolved with team_ids). This is the VERIFIABLE org boundary used
+    # for org-scoped connectors: membership can't be spoofed (it's derived from
+    # team_members), so an org connector never resolves cross-org.
+    org_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +88,7 @@ class Principal:
             "roles": list(self.roles),
             "display_name": self.display_name,
             "team_ids": list(self.team_ids),
+            "org_ids": list(self.org_ids),
         }
 
     @classmethod
@@ -98,6 +104,7 @@ class Principal:
             roles=list(data.get("roles") or []),
             display_name=data.get("display_name", ""),
             team_ids=list(data.get("team_ids") or []),
+            org_ids=list(data.get("org_ids") or []),
         )
 
     @property
@@ -390,7 +397,10 @@ async def _enrich_teams(principal: Principal, request: Request) -> None:
     if team_service is None:
         return
     try:
-        principal.team_ids = await team_service.teams_for(principal.uid or principal.email)
+        user_key = principal.uid or principal.email
+        principal.team_ids = await team_service.teams_for(user_key)
+        if hasattr(team_service, "orgs_for"):
+            principal.org_ids = await team_service.orgs_for(user_key)
     except Exception:  # noqa: BLE001
         logger.debug("team enrichment failed for %s", principal.email, exc_info=True)
 

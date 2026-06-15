@@ -40,20 +40,37 @@ async def _require_principal(request: Request) -> Principal:
     return principal
 
 
-def _authorize(principal: Principal, scope: Scope, scope_id: str) -> None:
-    """Enforce who may manage which scope."""
+async def _authorize(request: Request, principal: Principal, scope: Scope, scope_id: str) -> None:
+    """Enforce who may WRITE a connector at a given scope.
+
+    - user:   only your own scope.
+    - team:   you must be a TEAM ADMIN of that team (membership alone is not
+              enough — a shared team credential is admin-managed).
+    - org:    you must be an ORG ADMIN (admin of a team in that org).
+    - tenant/global: platform admin only.
+    A global ``admin`` role overrides all of these.
+    """
     is_admin = "admin" in (principal.roles or [])
     if scope == Scope.USER:
         if scope_id and scope_id not in (principal.uid, principal.email):
             raise HTTPException(status_code=403, detail="Cannot manage another user's settings")
         return
+    if is_admin:
+        return
+    team_service = getattr(request.app.state, "team_service", None)
+    user_key = principal.uid or principal.email
     if scope == Scope.TEAM:
-        if not is_admin and scope_id not in (principal.team_ids or []):
-            raise HTTPException(status_code=403, detail="Not a member of that team")
+        ok = team_service is not None and await team_service.is_team_admin(scope_id, user_key)
+        if not ok:
+            raise HTTPException(status_code=403, detail="Team admin role required to manage team settings")
+        return
+    if scope == Scope.ORG:
+        ok = team_service is not None and await team_service.is_org_admin(scope_id, user_key)
+        if not ok:
+            raise HTTPException(status_code=403, detail="Org admin role required to manage org settings")
         return
     # tenant / global
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Admin role required for tenant/global settings")
+    raise HTTPException(status_code=403, detail="Admin role required for tenant/global settings")
 
 
 def _scope_default(principal: Principal) -> tuple[Scope, str]:
@@ -84,19 +101,50 @@ async def list_my_settings(request: Request) -> dict[str, Any]:
     + (if admin) tenant/global. Secret values are never included."""
     principal = await _require_principal(request)
     svc = _svc(request)
+    team_service = getattr(request.app.state, "team_service", None)
+    user_key = principal.uid or principal.email
+    is_admin = "admin" in (principal.roles or [])
 
-    scopes: list[tuple[Scope, str]] = [(Scope.USER, principal.uid or principal.email)]
+    scopes: list[tuple[Scope, str]] = [(Scope.USER, user_key)]
     for team_id in principal.team_ids or []:
         scopes.append((Scope.TEAM, team_id))
+    for org_id in getattr(principal, "org_ids", []) or []:
+        scopes.append((Scope.ORG, org_id))
     if principal.tenant_id:
         scopes.append((Scope.TENANT, principal.tenant_id))
     scopes.append((Scope.GLOBAL, ""))
 
+    # Which scopes can THIS caller write? (drives the UI's scope selector +
+    # whether an inherited connector shows as editable). Team/org need admin.
+    writable_scopes: list[dict[str, str]] = [{"scope": "user", "scope_id": user_key, "label": "Just me"}]
+    for team_id in principal.team_ids or []:
+        if is_admin or (team_service is not None and await team_service.is_team_admin(team_id, user_key)):
+            writable_scopes.append({"scope": "team", "scope_id": team_id, "label": f"Team {team_id}"})
+    for org_id in getattr(principal, "org_ids", []) or []:
+        if is_admin or (team_service is not None and await team_service.is_org_admin(org_id, user_key)):
+            writable_scopes.append({"scope": "org", "scope_id": org_id, "label": f"Org {org_id}"})
+
     out: list[dict[str, Any]] = []
+    # shared[connector_key] = the broadest non-user scope that already provides
+    # it, so the UI can warn before a user sets a personal override.
+    shared: dict[str, dict[str, str]] = {}
     for scope, scope_id in scopes:
         for c in await svc.list_connectors(scope, scope_id):
-            out.append(c.public_dict())
-    return {"connectors": out, "secrets_writable": await svc.secrets_writable()}
+            d = c.public_dict()
+            out.append(d)
+            if scope != Scope.USER and c.connector_key not in shared:
+                shared[c.connector_key] = {
+                    "scope": scope.value,
+                    "scope_id": scope_id,
+                    "provider": c.provider,
+                    "updated_by": c.updated_by,
+                }
+    return {
+        "connectors": out,
+        "secrets_writable": await svc.secrets_writable(),
+        "writable_scopes": writable_scopes,
+        "shared": shared,
+    }
 
 
 # ── upsert ──────────────────────────────────────────────────────────────────
@@ -125,7 +173,7 @@ async def upsert_connector(request: Request) -> dict[str, Any]:
         scope_id = principal.uid or principal.email
     else:
         scope_id = body.get("scope_id", "")
-    _authorize(principal, scope, scope_id)
+    await _authorize(request, principal, scope, scope_id)
 
     secret_values = body.get("secrets") or {}
     if secret_values and not await svc.secrets_writable():
@@ -337,7 +385,7 @@ async def clear_secret(
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid scope") from None
     sid = "" if scope_id == "-" else scope_id
-    _authorize(principal, scope_enum, sid)
+    await _authorize(request, principal, scope_enum, sid)
     instance_id = request.query_params.get("instance_id", "default")
     ok = await svc.clear_secret_field(
         scope_enum, sid, connector_key, field_key, instance_id, actor=principal.email
@@ -355,7 +403,7 @@ async def delete_connector(scope: str, scope_id: str, connector_key: str, reques
         raise HTTPException(status_code=400, detail="invalid scope") from None
     # "-" means the global empty scope_id (path can't be empty).
     sid = "" if scope_id == "-" else scope_id
-    _authorize(principal, scope_enum, sid)
+    await _authorize(request, principal, scope_enum, sid)
     instance_id = request.query_params.get("instance_id", "default")
     ok = await svc.delete_connector(scope_enum, sid, connector_key, instance_id, actor=principal.email)
     return {"status": "deleted" if ok else "not_found"}

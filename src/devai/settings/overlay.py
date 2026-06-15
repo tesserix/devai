@@ -95,6 +95,11 @@ async def build_overlay(
     lookups: list[tuple[Scope, str]] = [(Scope.GLOBAL, "")]
     if getattr(principal, "tenant_id", ""):
         lookups.append((Scope.TENANT, principal.tenant_id))
+    # Org scope (teams.org_id) sits between tenant and team — a shared
+    # connector for the whole org. Resolved ONLY for the principal's verified
+    # org_ids (derived from team membership), so it never crosses orgs.
+    for org_id in getattr(principal, "org_ids", []) or []:
+        lookups.append((Scope.ORG, org_id))
     for team_id in getattr(principal, "team_ids", []) or []:
         lookups.append((Scope.TEAM, team_id))
     # User rows may be keyed by uid (GIP) or email (local auth / run records

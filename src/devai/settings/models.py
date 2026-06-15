@@ -14,16 +14,20 @@ from typing import Any
 
 
 class Scope(str, Enum):
-    """Ownership scope for a connector. Resolution order: user→team→tenant→global."""
+    """Ownership scope for a connector. Resolution (most→least specific):
+    user → team → org → tenant → global. ``org`` is the business org
+    (teams.org_id, verified via team membership); ``tenant`` is the auth pool.
+    """
 
     USER = "user"
     TEAM = "team"
+    ORG = "org"
     TENANT = "tenant"
     GLOBAL = "global"
 
     @classmethod
     def order(cls) -> list[Scope]:
-        return [cls.USER, cls.TEAM, cls.TENANT, cls.GLOBAL]
+        return [cls.USER, cls.TEAM, cls.ORG, cls.TENANT, cls.GLOBAL]
 
 
 @dataclass(frozen=True, slots=True)

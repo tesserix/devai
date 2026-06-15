@@ -9,6 +9,8 @@ import {
   type SettingsCatalog,
   type SettingsConnector,
   type SettingsConnectorSpec,
+  type SharedConnector,
+  type WritableScope,
 } from "@/lib/api";
 
 /**
@@ -24,8 +26,6 @@ import {
  * Theme: tokens only (var(--ink-*), var(--surface-*)) — no raw Tailwind grays.
  */
 
-const SCOPES = ["user", "team", "tenant", "global"] as const;
-
 export default function SettingsPage() {
   const [catalog, setCatalog] = useState<SettingsCatalog | null>(null);
   const [connectors, setConnectors] = useState<SettingsConnector[]>([]);
@@ -38,6 +38,10 @@ export default function SettingsPage() {
   const [mcpPrefill, setMcpPrefill] = useState<
     { provider?: string; instanceId?: string; values?: Record<string, string> } | null
   >(null);
+  // Scopes the caller can write (Just me / teams + orgs they admin) and which
+  // connectors are already provided by a broader (team/org) scope.
+  const [writableScopes, setWritableScopes] = useState<WritableScope[]>([]);
+  const [shared, setShared] = useState<Record<string, SharedConnector>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,6 +50,8 @@ export default function SettingsPage() {
       const [cat, mine] = await Promise.all([api.getSettingsCatalog(), api.listSettings()]);
       setCatalog(cat);
       setConnectors(mine.connectors);
+      setWritableScopes(mine.writable_scopes ?? [{ scope: "user", scope_id: "", label: "Just me" }]);
+      setShared(mine.shared ?? {});
       // Trial state is advisory — never block the page on it.
       api.getTrialStatus().then(setTrial).catch(() => setTrial(null));
     } catch (e) {
@@ -179,6 +185,8 @@ export default function SettingsPage() {
                 }}
                 onDeleted={() => void load()}
                 prefill={spec.key === "mcp" ? mcpPrefill ?? undefined : undefined}
+                writableScopes={writableScopes}
+                sharedBy={shared[spec.key]}
               />
             );
           })}
@@ -389,6 +397,8 @@ function ConnectorCard({
   onSaved,
   onDeleted,
   prefill,
+  writableScopes,
+  sharedBy,
 }: {
   spec: SettingsConnectorSpec;
   configured: SettingsConnector[];
@@ -398,6 +408,8 @@ function ConnectorCard({
   onSaved: () => void;
   onDeleted: () => void;
   prefill?: { provider?: string; instanceId?: string; values?: Record<string, string> };
+  writableScopes?: WritableScope[];
+  sharedBy?: SharedConnector;
 }) {
   const confirm = useConfirm();
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
@@ -487,6 +499,18 @@ function ConnectorCard({
         </button>
       </div>
 
+      {sharedBy && (
+        <div className="mt-3 text-xs rounded-md px-3 py-2 bg-[var(--surface-raised)] border border-sky-500/30 text-[var(--ink-200)] flex items-center gap-2">
+          <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+          <span>
+            Provided by your {sharedBy.scope === "org" ? "org" : "team"}{" "}
+            <span className="text-[var(--ink-100)]">{sharedBy.scope_id}</span>
+            {sharedBy.provider ? ` (${sharedBy.provider})` : ""} — you inherit it automatically. Add your own only to
+            override it just for you.
+          </span>
+        </div>
+      )}
+
       {rows.length > 0 && (
         <div className="mt-4 space-y-2">
           {rows.map((r) => (
@@ -549,6 +573,8 @@ function ConnectorCard({
             onSaved();
           }}
           prefill={editTarget ?? prefill}
+          writableScopes={writableScopes}
+          sharedBy={sharedBy}
         />
       )}
     </div>
@@ -560,15 +586,21 @@ function ConnectorForm({
   secretsWritable,
   onSaved,
   prefill,
+  writableScopes,
+  sharedBy,
 }: {
   spec: SettingsConnectorSpec;
   secretsWritable: boolean;
   onSaved: () => void;
   // Pre-populate the form (e.g. "Connect" from the MCP marketplace).
   prefill?: { provider?: string; instanceId?: string; values?: Record<string, string> };
+  writableScopes?: WritableScope[];
+  sharedBy?: SharedConnector;
 }) {
-  const [scope, setScope] = useState<string>("user");
-  const [scopeId, setScopeId] = useState("");
+  const confirm = useConfirm();
+  const scopeOptions = writableScopes && writableScopes.length ? writableScopes : [{ scope: "user", scope_id: "", label: "Just me" }];
+  const [scope, setScope] = useState<string>(scopeOptions[0]?.scope || "user");
+  const [scopeId, setScopeId] = useState(scopeOptions[0]?.scope_id || "");
   const [provider, setProvider] = useState(prefill?.provider || spec.providers[0] || "");
   const [instanceId, setInstanceId] = useState(prefill?.instanceId || "default");
   const [values, setValues] = useState<Record<string, string>>(prefill?.values || {});
@@ -624,6 +656,19 @@ function ConnectorForm({
   };
 
   const save = async () => {
+    // Override guard: saving at user scope when the org/team already provides
+    // this connector — confirm, don't block (user scope wins by design).
+    if (scope === "user" && sharedBy) {
+      const where = sharedBy.scope === "org" ? `org ${sharedBy.scope_id}` : `team ${sharedBy.scope_id}`;
+      const ok = await confirm({
+        title: `Your ${where} already provides ${spec.label}`,
+        message:
+          `You inherit it automatically — you don't need your own. Saving here overrides it ` +
+          `just for you. Proceed with a personal override?`,
+        confirmLabel: "Override for me",
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -664,26 +709,25 @@ function ConnectorForm({
     <div className="mt-4 pt-4 border-t border-[var(--surface-border)] space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="text-xs text-[var(--ink-300)]">Scope</span>
-          <select className="field mt-1 w-full" value={scope} onChange={(e) => setScope(e.target.value)}>
-            {SCOPES.map((s) => (
-              <option key={s} value={s}>
-                {s}
+          <span className="text-xs text-[var(--ink-300)]">Apply to</span>
+          <select
+            className="field mt-1 w-full"
+            value={`${scope}:${scopeId}`}
+            onChange={(e) => {
+              const opt = scopeOptions.find((s) => `${s.scope}:${s.scope_id}` === e.target.value);
+              if (opt) {
+                setScope(opt.scope);
+                setScopeId(opt.scope_id);
+              }
+            }}
+          >
+            {scopeOptions.map((s) => (
+              <option key={`${s.scope}:${s.scope_id}`} value={`${s.scope}:${s.scope_id}`}>
+                {s.label}
               </option>
             ))}
           </select>
         </label>
-        {scope !== "global" && scope !== "user" && (
-          <label className="block">
-            <span className="text-xs text-[var(--ink-300)]">{scope} id</span>
-            <input
-              className="field mt-1 w-full"
-              value={scopeId}
-              onChange={(e) => setScopeId(e.target.value)}
-              placeholder={`${scope} id`}
-            />
-          </label>
-        )}
         <label className="block">
           <span className="text-xs text-[var(--ink-300)]">Provider</span>
           <select

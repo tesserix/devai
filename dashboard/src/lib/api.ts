@@ -230,7 +230,12 @@ export const api = {
     apiFetch<SettingsCatalog>("/settings/catalog"),
 
   listSettings: () =>
-    apiFetch<{ connectors: SettingsConnector[]; secrets_writable: boolean }>("/settings"),
+    apiFetch<{
+      connectors: SettingsConnector[];
+      secrets_writable: boolean;
+      writable_scopes?: WritableScope[];
+      shared?: Record<string, SharedConnector>;
+    }>("/settings"),
 
   saveConnector: (body: SaveConnectorInput) =>
     apiFetch<{ status: string; connector: SettingsConnector }>("/settings/connectors", {
@@ -1144,6 +1149,22 @@ export interface SaveConnectorInput {
   instance_id?: string;
   prefs?: Record<string, unknown>;
   secrets?: Record<string, string>;
+}
+
+// A scope the caller is allowed to WRITE (drives the scope selector).
+export interface WritableScope {
+  scope: string; // user | team | org
+  scope_id: string;
+  label: string;
+}
+
+// A connector already provided at a broader (team/org/…) scope — used to warn
+// before a user sets a personal override.
+export interface SharedConnector {
+  scope: string;
+  scope_id: string;
+  provider: string;
+  updated_by: string;
 }
 
 export interface McpMarketplaceEntry {
