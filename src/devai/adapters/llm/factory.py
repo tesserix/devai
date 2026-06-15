@@ -220,9 +220,9 @@ def create_llm_chain(settings: Any) -> LLMAdapter:
     ``DEVAI_LLM_FALLBACK_PROVIDER`` is an ordered, comma-separated list of
     backends that pick up a call when everything before them raised or
     answered with an error — outages degrade down the chain instead of
-    failing the workflow. The canonical prod order:
+    failing the workflow. The default order behind the anthropic primary:
 
-        vertex_gemini → groq → openrouter → anthropic
+        anthropic → openai → vertex_gemini → groq
 
     Links that are unconfigured (no key), unknown, or duplicates of an
     earlier link are skipped with a log — a half-configured chain still
@@ -270,6 +270,7 @@ _ROLE_CRED_ATTRS = (
     "vertex_project",
     "vertex_location",
     "llm_role_chain_provider",
+    "llm_fallback_provider",
 )
 
 
@@ -279,54 +280,64 @@ def _role_cache_key(settings: Any, role: str) -> str:
 
 
 def create_role_llm(settings: Any, role: str) -> LLMAdapter:
-    """Role-routed adapter: pins the role's configured model and fails over
-    primary (anthropic) → llm_role_chain_provider (gateway = Claude on
-    Vertex) with the SAME model id preserved down the chain.
+    """Capability-aware role-routed adapter.
 
-    Role fields: llm_model_<role> on Settings — dev_ui (claude-fable-5),
-    dev_api (claude-opus-4-8), review/planning (claude-sonnet-4-6),
-    utility/boardroom_panel (claude-haiku-4-5), boardroom_moderator.
-    Unknown/empty role → the plain configured adapter. Cached per role.
+    DYNAMIC: looks at which providers are actually CONNECTED for this
+    settings/overlay and resolves the role to the tier-appropriate model on
+    each — the configured ``llm_model_<role>`` is honored on its OWN provider
+    (an Anthropic tenant is unchanged) and every OTHER connected provider
+    contributes ITS model for the same tier (heavy → openai ``o3`` / groq
+    ``llama`` …), chained as ordered fallbacks so a provider outage degrades
+    instead of failing ("no failures"). Empty/unknown role → no pin (each
+    link's provider default). See adapters.llm.capabilities + model_policy
+    (No Fable: any claude-fable-* id maps to 4.8). Cached per (role, creds).
     """
     cache_key = _role_cache_key(settings, role)
     cached = _ROLE_CHAIN_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    # Provider follows the MODEL: role models are claude-* → anthropic
-    # primary (gemini-* → vertex, llama/mixtral → groq). Without this, a
-    # vertex_gemini-primary deployment would feed claude model ids to the
-    # Gemini API and silently degrade every role pin to fallback defaults.
-    model = str(getattr(settings, f"llm_model_{role}", "") or "")
-    if model.startswith("claude"):
-        primary = create_llm_adapter(settings, provider="anthropic")
-    elif model.startswith("gemini"):
-        primary = create_llm_adapter(settings, provider="vertex_gemini")
-    elif model.startswith(("llama", "mixtral")):
-        primary = create_llm_adapter(settings, provider="groq")
-    else:
-        primary = create_llm_adapter(settings)
-    if primary.provider_name == "noop":
-        primary = create_llm_adapter(settings)  # keyless role provider → configured default
-    chain: list[LLMAdapter] = [primary]
-    fb_name = str(getattr(settings, "llm_role_chain_provider", "") or "").lower()
-    if fb_name and llm_registry.has(fb_name) and fb_name != primary.provider_name:
-        fb = create_llm_adapter(settings, provider=fb_name)
-        if fb.provider_name != "noop":
-            chain.append(fb)
+    from devai.adapters.llm.capabilities import model_for, natural_provider, ordered_providers, tier_for_model
+    from devai.adapters.llm.model_policy import normalize_model, provider_serves
 
-    base: LLMAdapter = primary
-    if len(chain) > 1:
+    model = normalize_model(str(getattr(settings, f"llm_model_{role}", "") or ""))
+    tier = tier_for_model(model)
+    # Connected providers in preference order — the role model's own provider
+    # first, then the global default, the claude-preserving gateway, and the
+    # llm_fallback_provider order. noop (keyless) links are skipped inline.
+    order = ordered_providers(settings, prefer=natural_provider(model))
+
+    links: list[LLMAdapter] = []
+    for p in order:
+        adapter = create_llm_adapter(settings, provider=p)
+        if adapter.provider_name == "noop":
+            continue
+        if not model:
+            pm = ""  # role has no opinion → this provider's default model
+        elif not links and provider_serves(p, model):
+            pm = model  # honor the configured id on its own provider (primary)
+        else:
+            pm = model_for(p, tier)  # this provider's model for the role's tier
+        links.append(PinnedModelLLMAdapter(adapter, pm) if pm else adapter)
+
+    if not links:
+        # Nothing connected — degrade to the plain default adapter (noop-safe).
+        fallback = create_llm_adapter(settings)
+        base: LLMAdapter = PinnedModelLLMAdapter(fallback, model) if model else fallback
+    elif len(links) == 1:
+        base = links[0]
+    else:
         from devai.adapters.llm.fallback import FallbackLLMAdapter
 
-        base = FallbackLLMAdapter(*chain, preserve_model=True)
+        # preserve_model=False so each FALLBACK link applies its own pinned
+        # tier model; the primary still honors an explicit per-call override.
+        base = FallbackLLMAdapter(*links, preserve_model=False)
 
-    adapter = PinnedModelLLMAdapter(base, model) if model else base
     if len(_ROLE_CHAIN_CACHE) >= _ROLE_CHAIN_CACHE_MAX:
         _ROLE_CHAIN_CACHE.clear()
-    _ROLE_CHAIN_CACHE[cache_key] = adapter
-    logger.info("role LLM route %r: %s (model=%s)", role, adapter.provider_name, model or "default")
-    return adapter
+    _ROLE_CHAIN_CACHE[cache_key] = base
+    logger.info("role LLM route %r: %s (tier=%s, model=%s)", role, base.provider_name, tier, model or "default")
+    return base
 
 
 def role_llm_or(settings: Any, role: str, fallback: Any) -> Any:

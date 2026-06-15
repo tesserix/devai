@@ -17,24 +17,63 @@ is the Noop the overhead is two attribute reads — effectively free.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import AsyncIterator
 from typing import Any
 
 from devai.adapters.llm.base import LLMAdapter, LLMRequest, LLMResponse
 
+logger = logging.getLogger(__name__)
+
 
 class InstrumentedLLMAdapter(LLMAdapter):
-    """Pure delegate: forwards everything, records usage on the way out."""
+    """Pure delegate: forwards everything, records usage on the way out.
+
+    Also the single chokepoint for model-id POLICY (see
+    ``adapters.llm.model_policy``): every call is coerced onto a model this
+    provider can serve — Fable ids fall back to 4.8, and a cross-family pin
+    (e.g. a claude id reaching an OpenAI adapter) degrades to the provider's
+    own default instead of a 4xx. Because the factory wraps every backend in
+    this delegate, the policy holds for EVERY caller with no call-site change.
+    """
+
+    # Once-per-(provider, original-model) so a recurring coercion logs once.
+    _COERCE_WARNED: set[tuple[str, str]] = set()
 
     def __init__(self, inner: LLMAdapter) -> None:
         self._inner = inner
         self.provider_name = inner.provider_name
         self.default_model = inner.default_model
 
+    def _coerce_model(self, request: LLMRequest) -> LLMRequest:
+        """Keep the call on a model this provider can serve. No-op when the
+        request carries no model or already fits the provider."""
+        original = request.model or ""
+        if not original:
+            return request
+        from devai.adapters.llm.model_policy import coerce_model
+
+        coerced = coerce_model(self.provider_name, original)
+        if coerced == original:
+            return request
+        sig = (self.provider_name, original)
+        if sig not in self._COERCE_WARNED:
+            self._COERCE_WARNED.add(sig)
+            logger.info(
+                "llm model policy: %r is not served by provider %s — using %s",
+                original,
+                self.provider_name,
+                coerced or "the provider default",
+            )
+        from dataclasses import replace
+
+        return replace(request, model=coerced)
+
     # ── Instrumented surface ─────────────────────────────────────────
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
+        request = self._coerce_model(request)
         started = time.perf_counter()
         try:
             # Two child trace planes, both nesting under the executor's stage
@@ -121,6 +160,7 @@ class InstrumentedLLMAdapter(LLMAdapter):
             pass
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMResponse]:
+        request = self._coerce_model(request)
         started = time.perf_counter()
         last: LLMResponse | None = None
         try:

@@ -237,6 +237,9 @@ export const api = {
       shared?: Record<string, SharedConnector>;
     }>("/settings"),
 
+  // What LLM providers are connected + how each agent role routes (no secrets).
+  llmCapabilities: () => apiFetch<LlmCapabilities>("/settings/llm/capabilities", { soft: true }),
+
   saveConnector: (body: SaveConnectorInput) =>
     apiFetch<{ status: string; connector: SettingsConnector }>("/settings/connectors", {
       method: "POST",
@@ -1173,6 +1176,14 @@ export interface WritableScope {
   scope: string; // user | team | org
   scope_id: string;
   label: string;
+}
+
+// What LLM providers are connected for the caller + how each agent role
+// resolves to a concrete (provider, model). From GET /settings/llm/capabilities.
+export interface LlmCapabilities {
+  connected: string[];
+  primary: string;
+  roles: Record<string, { tier: string; provider: string; model: string }>;
 }
 
 // A connector already provided at a broader (team/org/…) scope — used to warn

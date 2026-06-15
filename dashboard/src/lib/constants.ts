@@ -89,7 +89,7 @@ export const AGENT_INFO: Record<
   staff_reviewer: {
     label: "Staff Reviewer",
     icon: "R",
-    provider: "Claude",
+    provider: "OpenAI",
     color: "#c2410c",
     role: "specialist",
   },
@@ -103,7 +103,7 @@ export const AGENT_INFO: Record<
   ci_monitor: {
     label: "CI Monitor",
     icon: "C",
-    provider: "OpenAI",
+    provider: "Claude",
     color: "#a16207",
     role: "specialist",
   },
@@ -124,7 +124,7 @@ export const AGENT_INFO: Record<
   release_manager: {
     label: "Release Manager",
     icon: "R",
-    provider: "OpenAI",
+    provider: "Groq",
     color: "#047857",
     role: "specialist",
   },

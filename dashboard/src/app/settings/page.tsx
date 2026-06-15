@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, KeyRound, Loader2, Pencil, Plus, Save, Store, Trash2, Users } from "lucide-react";
 import { useConfirm } from "@/components/confirm-dialog";
+import { LlmCapabilitiesPanel } from "@/components/llm-capabilities-panel";
 import {
   api,
   type McpMarketplaceEntry,
@@ -44,6 +45,7 @@ export default function SettingsPage() {
   // connectors are already provided by a broader (team/org) scope.
   const [writableScopes, setWritableScopes] = useState<WritableScope[]>([]);
   const [shared, setShared] = useState<Record<string, SharedConnector>>({});
+  const [capsRefresh, setCapsRefresh] = useState(0); // bumps after each load → refetch LLM routing
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,6 +56,7 @@ export default function SettingsPage() {
       setConnectors(mine.connectors);
       setWritableScopes(mine.writable_scopes ?? [{ scope: "user", scope_id: "", label: "Just me" }]);
       setShared(mine.shared ?? {});
+      setCapsRefresh((k) => k + 1); // re-resolve LLM routing against the new connectors
       // Trial state is advisory — never block the page on it.
       api.getTrialStatus().then(setTrial).catch(() => setTrial(null));
     } catch (e) {
@@ -168,6 +171,7 @@ export default function SettingsPage() {
       ) : (
         <div className="mt-6 space-y-4">
           <TeamOrgPanel onChanged={() => void load()} />
+          <LlmCapabilitiesPanel refreshKey={capsRefresh} />
           {catalog?.connectors.map((spec) => {
             const configured = connectors.filter((c) => c.connector_key === spec.key);
             return (

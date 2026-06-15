@@ -308,6 +308,35 @@ async def trial_status(request: Request) -> dict[str, Any]:
     }
 
 
+# ── LLM capabilities (what's connected + how each agent routes) ─────────────
+
+
+@router.get("/llm/capabilities")
+async def llm_capabilities(request: Request) -> dict[str, Any]:
+    """The LLM providers CONNECTED for the caller (their own connectors +
+    inherited platform config) and how each agent role resolves to a concrete
+    ``(provider, model)`` — so the UI can show the system knows how it's
+    configured. Read-only; never returns keys."""
+    principal = await _require_principal(request)
+    svc = _svc(request)
+
+    from devai.config import settings as base_settings
+
+    overlay = base_settings
+    try:
+        from devai.settings.llm_resolver import PrincipalLLMResolver
+
+        overlay = await PrincipalLLMResolver(base_settings, svc).settings_for_email(
+            principal.email or principal.uid
+        )
+    except Exception:  # noqa: BLE001 — degrade to platform view, never 500
+        logger.warning("llm capabilities: overlay resolution failed — using platform config", exc_info=True)
+
+    from devai.adapters.llm.capabilities import describe_capabilities
+
+    return describe_capabilities(overlay)
+
+
 # ── delete ──────────────────────────────────────────────────────────────────
 
 

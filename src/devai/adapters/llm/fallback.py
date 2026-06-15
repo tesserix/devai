@@ -29,7 +29,7 @@ class FallbackLLMAdapter(LLMAdapter):
 
     ``preserve_model=True`` keeps the request's model id down the chain —
     used by role routes where the fallback provider serves the SAME models
-    (the gateway routes Claude on Vertex, so `claude-fable-5` is valid on
+    (the gateway routes Claude on Vertex, so `claude-opus-4-8` is valid on
     both links). Default behavior clears the model so heterogeneous
     fallbacks use their own defaults.
     """

@@ -408,9 +408,9 @@ def test_pinned_model_defaults_but_never_overrides():
             seen["model"] = request.model
             return await super().generate(request)
 
-    pinned = PinnedModelLLMAdapter(_Inner(), "claude-fable-5")
+    pinned = PinnedModelLLMAdapter(_Inner(), "claude-haiku-4-5-20251001")
     asyncio.run(pinned.generate(LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")])))
-    assert seen["model"] == "claude-fable-5"
+    assert seen["model"] == "claude-haiku-4-5-20251001"
     asyncio.run(
         pinned.generate(
             LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8")
@@ -442,18 +442,20 @@ def test_fallback_preserve_model_keeps_id_down_the_chain():
     chain = FallbackLLMAdapter(_Dead(), _Vertex(), preserve_model=True)
     asyncio.run(
         chain.generate(
-            LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-fable-5")
+            LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8")
         )
     )
     # Same model id served by the Vertex-routing gateway — NOT cleared.
-    assert seen["model"] == "claude-fable-5"
+    assert seen["model"] == "claude-opus-4-8"
 
 
 def test_role_routing_defaults_match_the_strategy():
     from devai.config import Settings
 
     s = Settings()
-    assert s.llm_model_dev_ui == "claude-fable-5"
+    # No Fable anywhere — UI work runs on the 4.8 model like API work.
+    assert s.llm_model_dev_ui == "claude-opus-4-8"
+    assert "fable" not in s.llm_model_dev_ui.lower()
     assert s.llm_model_dev_api == "claude-opus-4-8"
     assert s.llm_model_boardroom_panel.startswith("claude-haiku")
     assert s.llm_model_boardroom_moderator.startswith("claude-sonnet")
@@ -468,11 +470,158 @@ def test_dev_model_picker_routes_ui_vs_api():
     agent = SeniorDeveloperAgent.__new__(SeniorDeveloperAgent)
 
     class _Cfg2:
-        llm_model_dev_ui = "claude-fable-5"
+        llm_model_dev_ui = "claude-sonnet-4-6"
         llm_model_dev_api = "claude-opus-4-8"
 
     agent.config = _Cfg2()
     ui_state = {"stories": [{"title": "Storefront layout and navigation", "skills": ["frontend"]}], "active_story_index": 0}
     api_state = {"stories": [{"title": "Order processing endpoints", "skills": ["api", "database"]}], "active_story_index": 0}
-    assert agent._model_for_story(ui_state) == "claude-fable-5"
+    assert agent._model_for_story(ui_state) == "claude-sonnet-4-6"
     assert agent._model_for_story(api_state) == "claude-opus-4-8"
+
+
+# ── model policy: no Fable + provider/model fit ───────────────────────────
+
+
+def test_model_policy_normalizes_fable_to_48():
+    from devai.adapters.llm.model_policy import FABLE_FALLBACK_MODEL, coerce_model, normalize_model
+
+    assert FABLE_FALLBACK_MODEL == "claude-opus-4-8"
+    assert normalize_model("claude-fable-5") == "claude-opus-4-8"
+    assert normalize_model("claude-fable-5-20991231") == "claude-opus-4-8"
+    # Fable normalized AND kept (anthropic serves claude).
+    assert coerce_model("anthropic", "claude-fable-5") == "claude-opus-4-8"
+    # Non-fable claude id is untouched on anthropic.
+    assert coerce_model("anthropic", "claude-sonnet-4-6") == "claude-sonnet-4-6"
+
+
+def test_model_policy_provider_fit():
+    from devai.adapters.llm.model_policy import coerce_model, provider_serves
+
+    # A claude id on OpenAI can't be served → clear to provider default.
+    assert provider_serves("openai", "claude-opus-4-8") is False
+    assert coerce_model("openai", "claude-opus-4-8") == ""
+    # The right pairings hold.
+    assert provider_serves("openai", "o3") is True
+    assert provider_serves("openai", "gpt-4.1") is True
+    assert provider_serves("groq", "llama-3.3-70b-versatile") is True
+    assert provider_serves("vertex_gemini", "gemini-3.1-pro-preview") is True
+    # Gateway routes aliases to any backend — never overridden.
+    assert provider_serves("gateway", "claude-opus-4-8") is True
+    assert coerce_model("gateway", "claude-fable-5") == "claude-opus-4-8"  # still de-fabled
+    # Fallback-chain provider string: served if ANY link serves.
+    assert provider_serves("openai→gateway", "claude-opus-4-8") is True
+    # Unknown/custom ids are left alone (no confident mismatch).
+    assert coerce_model("openai", "some-custom-finetune") == "some-custom-finetune"
+    # No pin → no change.
+    assert coerce_model("openai", "") == ""
+
+
+def test_instrumented_adapter_applies_model_policy():
+    import asyncio
+
+    from devai.adapters.llm.instrumented import InstrumentedLLMAdapter
+
+    seen = {}
+
+    class _OpenAI(NoopLLMAdapter):
+        provider_name = "openai"
+
+        async def generate(self, request):
+            seen["model"] = request.model
+            return await super().generate(request)
+
+    wrapped = InstrumentedLLMAdapter(_OpenAI())
+    # A claude id reaching an OpenAI backend → cleared to the provider default.
+    asyncio.run(
+        wrapped.generate(LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8"))
+    )
+    assert seen["model"] == ""
+    # A fable id on an anthropic backend → mapped to 4.8 (and kept).
+    seen.clear()
+
+    class _Anthropic(NoopLLMAdapter):
+        provider_name = "anthropic"
+
+        async def generate(self, request):
+            seen["model"] = request.model
+            return await super().generate(request)
+
+    wrapped2 = InstrumentedLLMAdapter(_Anthropic())
+    asyncio.run(
+        wrapped2.generate(LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-fable-5"))
+    )
+    assert seen["model"] == "claude-opus-4-8"
+
+
+# ── ordered fallback: anthropic → openai → vertex → groq (no failures) ─────
+
+
+def test_default_fallback_order_is_anthropic_openai_vertex_groq():
+    from devai.config import Settings
+
+    s = Settings()
+    assert s.llm_provider == "anthropic"  # primary
+    assert s.llm_fallback_provider == "openai,vertex_gemini,groq"
+
+
+def test_platform_and_role_chains_build_in_order(monkeypatch):
+    """The platform chain degrades anthropic→openai→vertex→groq; role chains
+    add the claude-preserving gateway right after the primary."""
+    from devai.adapters.llm import factory
+    from devai.config import Settings
+
+    class _Fake:
+        def __init__(self, name: str) -> None:
+            self.provider_name = name
+            self.default_model = ""
+
+    def fake_create(settings, provider=None):
+        name = (provider or getattr(settings, "llm_provider", "noop") or "noop").lower()
+        return _Fake(name)
+
+    monkeypatch.setattr(factory, "create_llm_adapter", fake_create)
+    factory._ROLE_CHAIN_CACHE.clear()
+    try:
+        s = Settings()
+        # Platform default adapter: primary + the fallback order.
+        chain = factory.create_llm_chain(s)
+        assert chain.provider_name == "anthropic→openai→vertex_gemini→groq"
+
+        # Role chain for a claude-pinned role: anthropic primary, gateway
+        # (claude-on-vertex) first, then the same ordered fallbacks.
+        role = factory.create_role_llm(s, "dev_api")
+        assert role.provider_name == "anthropic→gateway→openai→vertex_gemini→groq"
+    finally:
+        factory._ROLE_CHAIN_CACHE.clear()
+
+
+def test_role_chain_adapts_to_connected_providers(monkeypatch):
+    """create_role_llm picks each connected provider's TIER-appropriate model:
+    OpenAI+Groq connected (no Anthropic) → a heavy role is openai o3 → groq llama."""
+    from devai.adapters.llm import factory
+    from devai.config import Settings
+
+    class _Fake:
+        def __init__(self, name: str) -> None:
+            self.provider_name = name
+            self.default_model = ""
+
+    live = {"openai", "groq"}  # no anthropic / gateway / vertex
+
+    def fake_create(settings, provider=None):
+        name = (provider or getattr(settings, "llm_provider", "noop") or "noop").lower()
+        return _Fake(name if name in live else "noop")
+
+    monkeypatch.setattr(factory, "create_llm_adapter", fake_create)
+    factory._ROLE_CHAIN_CACHE.clear()
+    try:
+        role = factory.create_role_llm(Settings(), "dev_api")  # heavy tier
+        assert role.provider_name == "openai→groq"
+        # primary link pinned to OpenAI's heavy model (o3), not a claude id.
+        first = role._chain[0]
+        assert getattr(first, "_model", "") == "o3"
+        second = role._chain[1]
+        assert getattr(second, "_model", "") == "llama-3.3-70b-versatile"
+    finally:
+        factory._ROLE_CHAIN_CACHE.clear()

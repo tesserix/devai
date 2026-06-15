@@ -55,6 +55,44 @@ async def _require_principal(request: Request):
         return None
 
 
+async def _llm_preflight(request: Request, principal: Any) -> None:
+    """Fail fast (400) when the caller has NO usable LLM provider, so a run
+    doesn't start and then die mid-stage — a clear "connect a provider" message
+    up front beats a runbook three stages in.
+
+    Conservative by design: skips entirely without ``app.state.config``
+    (tests / minimal deps), never blocks on its OWN resolution error, and
+    blocks only when ZERO providers are connected for the caller AND there is
+    no trial allowance. With any platform/user key configured this never fires.
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is None:
+        return
+    try:
+        from devai.adapters.llm.capabilities import connected_providers
+
+        overlay = config
+        svc = getattr(request.app.state, "settings_service", None)
+        email = (getattr(principal, "email", "") or getattr(principal, "uid", "")) if principal else ""
+        if svc is not None and email:
+            from devai.settings.llm_resolver import PrincipalLLMResolver
+
+            overlay = await PrincipalLLMResolver(config, svc).settings_for_email(email)
+        connected = connected_providers(overlay)
+    except Exception:  # noqa: BLE001 — a preflight must never block on its own error
+        logger.debug("llm preflight skipped (resolution error)", exc_info=True)
+        return
+    if connected or int(getattr(config, "llm_trial_token_budget", 0) or 0) > 0:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "No LLM provider is connected for this run. Add an LLM API key in "
+            "Settings → LLM Provider (Anthropic, OpenAI, Vertex, or Groq) and try again."
+        ),
+    )
+
+
 async def _authorize_run(request: Request, task: dict[str, Any] | None):
     """Resolve the caller and enforce team membership on the run's owning team.
 
@@ -274,6 +312,9 @@ async def dispatch_run(request: Request, body: DispatchBody) -> DispatchResponse
     if team_service is not None and not team_service.can_dispatch(principal, team_id):
         raise HTTPException(status_code=403, detail=f"not a member of team {team_id}")
 
+    # Capability preflight: refuse a run the caller has no LLM for, clearly.
+    await _llm_preflight(request, principal)
+
     # Fold composer context into the handover bag so the AgentRunner can
     # hydrate @-mentions + image attachments. The caller-supplied bag is
     # SANITIZED first: reserved control keys would otherwise let any caller
@@ -347,6 +388,7 @@ async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
     if not intent:
         raise HTTPException(status_code=400, detail="requirements text is required")
     principal = await _require_principal(request)
+    await _llm_preflight(request, principal)
     agent_context: dict[str, Any] = {"requirements": intent}
     if body.issue_number is not None:
         agent_context["trigger_ref"] = str(body.issue_number)

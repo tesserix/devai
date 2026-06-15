@@ -87,7 +87,7 @@ class ClaudeProvider:
 
     def __init__(self, config: Settings, model: str | None = None) -> None:
         """``model`` overrides the global default per role — the dev agent
-        runs claude-fable-5 for UI work and claude-opus-4-8 for API work,
+        runs the UI model for UI work and claude-opus-4-8 for API work,
         reviewers run the review model, etc. (config llm_model_* fields)."""
         from devai.services.tracing import wrap_anthropic_client
 

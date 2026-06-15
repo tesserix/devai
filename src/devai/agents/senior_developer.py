@@ -163,9 +163,10 @@ class SeniorDeveloperAgent(BaseAgent):
     def _model_for_story(self, state: ALMState) -> str | None:
         """Pick the implementation model from the active story's nature.
 
-        UI work → config.llm_model_dev_ui (claude-fable-5: strongest design
-        intuition); everything else → config.llm_model_dev_api
-        (claude-opus-4-8: deepest coding). Empty config → provider default.
+        UI work → config.llm_model_dev_ui; everything else →
+        config.llm_model_dev_api (claude-opus-4-8: deepest coding). Empty
+        config → provider default. (No Fable: a claude-fable-* id anywhere is
+        force-mapped to 4.8 by adapters.llm.model_policy.)
         """
         stories = state.get("stories") or []
         idx = state.get("active_story_index", 0)
@@ -185,10 +186,10 @@ class SeniorDeveloperAgent(BaseAgent):
 
     async def _execute_graph(self, state: ALMState, a2a: A2ABus) -> dict[str, Any]:
         """Implement the active story on its own feature branch."""
-        # Model routing: UI/frontend stories get the design-strongest model
-        # (claude-fable-5); API/backend/data stories get the deep-coding one
-        # (claude-opus-4-8). Routed per STORY, not per run — a full-stack
-        # epic uses the right specialist model for each piece.
+        # Model routing: UI/frontend stories get config.llm_model_dev_ui;
+        # API/backend/data stories get the deep-coding one (claude-opus-4-8).
+        # Routed per STORY, not per run — a full-stack epic uses the right
+        # specialist model for each piece.
         claude = ClaudeProvider(self.config, model=self._model_for_story(state))
         # Pre-wire the executor with run_id + redis + identity so every
         # scm_commit_file call shows up in the dashboard's REPO tab in

@@ -686,19 +686,22 @@ class Settings(BaseSettings):
 
     # Runtime fallback: ordered comma-separated providers that pick up a
     # call when everything before them failed (each link uses its own
-    # default model). Canonical order: "groq,openrouter,anthropic" behind a
-    # vertex_gemini primary. Unconfigured links are skipped; empty disables.
-    llm_fallback_provider: str = ""
+    # default model). Default order behind the anthropic primary:
+    # OpenAI → Vertex (Gemini) → Groq — so a provider outage degrades down
+    # the chain instead of failing the run ("no failures"). Links with no key
+    # are skipped with a log; empty disables runtime fallback.
+    llm_fallback_provider: str = "openai,vertex_gemini,groq"
 
     # --- per-ROLE model routing ---
     # Each role resolves to a model + a provider failover chain:
     #   configured primary (anthropic) → llm_role_chain_provider — the
     # gateway routes Claude on VERTEX server-side, so the SAME model id is
-    # preserved down the chain (Fable 5 on Anthropic → Fable 5 on Vertex).
+    # preserved down the chain (Opus 4.8 on Anthropic → Opus 4.8 on Vertex).
     # Unconfigured fallback links skip with a log; empty disables the link.
     llm_role_chain_provider: str = "gateway"
-    # Frontend/UI implementation — intuitive, design-strong output.
-    llm_model_dev_ui: str = "claude-fable-5"
+    # Frontend/UI implementation — strongest coding model. NO Fable: any
+    # claude-fable-* id is force-mapped to 4.8 by adapters.llm.model_policy.
+    llm_model_dev_ui: str = "claude-opus-4-8"
     # Backend/API + DB + infra implementation — deepest coding model.
     llm_model_dev_api: str = "claude-opus-4-8"
     # Code review / security / QA verdicts.

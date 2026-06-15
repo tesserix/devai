@@ -279,3 +279,58 @@ def test_select_blueprint_for_trigger_pr_maps_to_pr_review():
     assert _select_blueprint_for_trigger(cfg, "PR") == "pr-review"
     assert _select_blueprint_for_trigger(cfg, "github_issue") == "alm-pipeline"
     assert _select_blueprint_for_trigger(cfg, "manual") == "alm-pipeline"
+
+
+# ── LLM preflight: fail fast when nothing is connected ────────────────────
+
+
+class _NoLLMCfg:
+    llm_provider = "anthropic"
+    llm_role_chain_provider = "gateway"
+    llm_fallback_provider = "openai,vertex_gemini,groq"
+    anthropic_api_key = ""
+    openai_api_key = ""
+    groq_api_key = ""
+    openrouter_api_key = ""
+    vertex_project = ""
+    vertex_base_url = ""
+    llm_gateway_base_url = ""
+    llm_noop_canned_text = "x"
+    llm_trial_token_budget = 0
+
+
+def _preflight_req(config):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config, settings_service=None)))
+
+
+@pytest.mark.asyncio
+async def test_llm_preflight_blocks_with_no_provider_and_no_trial():
+    from fastapi import HTTPException
+
+    from devai.pipeline.routes import _llm_preflight
+
+    with pytest.raises(HTTPException) as ei:
+        await _llm_preflight(_preflight_req(_NoLLMCfg()), None)
+    assert ei.value.status_code == 400
+    assert "LLM provider" in ei.value.detail
+
+
+@pytest.mark.asyncio
+async def test_llm_preflight_allows_with_trial_budget():
+    from devai.pipeline.routes import _llm_preflight
+
+    cfg = _NoLLMCfg()
+    cfg.llm_trial_token_budget = 5000  # platform chain serves trial users
+    await _llm_preflight(_preflight_req(cfg), None)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_llm_preflight_skips_without_app_config():
+    from types import SimpleNamespace
+
+    from devai.pipeline.routes import _llm_preflight
+
+    req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    await _llm_preflight(req, None)  # no config → never blocks (tests/minimal deps)
