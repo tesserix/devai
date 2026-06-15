@@ -17,6 +17,7 @@ import { useMemo } from "react";
 
 export interface BoardroomMessage {
   from_agent?: string;
+  to_agent?: string;
   subject?: string;
   body?: string;
   timestamp?: number;
@@ -64,6 +65,18 @@ export function BoardroomGraph({
         }
       }
     }
+    // Direct routing edges: an explicit from → to (non-broadcast) message is a
+    // real exchange — draw it as an arrow even without a name mention in text,
+    // so non-debate stages (where agents message each other directly) still
+    // show prominent connections.
+    for (const m of messages) {
+      const from = m.from_agent || "";
+      const to = m.to_agent || "";
+      if (!from || from === "supervisor" || from === to) continue;
+      if (!to || to === "boardroom" || to === "supervisor") continue;
+      if (!seats.has(from) || !seats.has(to)) continue;
+      edges.push([from, to]);
+    }
     const lastSpeaker = [...messages].reverse().find((m) => m.from_agent && m.from_agent !== "supervisor")?.from_agent;
     const noteCount = messages.filter((m) => m.from_agent === "supervisor").length;
     return { names, seats, edges, lastSpeaker, noteCount };
@@ -100,28 +113,47 @@ export function BoardroomGraph({
     <div className="rounded-lg p-2" style={{ background: "var(--surface-muted)" }}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Boardroom debate graph">
         <defs>
-          <marker id="br-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#f59e0b" />
+          <marker id="br-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3.4" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L8,3.4 L0,6.8 Z" fill="#f59e0b" />
+          </marker>
+          <marker id="br-spoke-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#8b5cf6" />
           </marker>
           <filter id="br-shadow" x="-50%" y="-50%" width="200%" height="200%">
             <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#000" floodOpacity="0.45" />
           </filter>
         </defs>
-        {/* spokes: supervisor tracks every seat */}
+        {/* spokes: each seat reports to the supervisor — solid directional
+            arrow (seat → SUP) so the flow is always clearly visible, even when
+            there are no seat-to-seat challenges. */}
         {model.names.map((name) => {
           const p = pos.get(name)!;
+          const r = seatRadius(name);
+          const dx = cx - p.x;
+          const dy = cy - p.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const ux = dx / d;
+          const uy = dy / d;
+          const x1 = p.x + ux * (r + 1);
+          const y1 = p.y + uy * (r + 1);
+          const x2 = cx - ux * (20 + 8); // 20 = supervisor radius, 8 = arrow gap
+          const y2 = cy - uy * (20 + 8);
           return (
             <line
               key={`spoke-${name}`}
-              x1={cx}
-              y1={cy}
-              x2={p.x}
-              y2={p.y}
-              stroke="var(--border)"
-              strokeWidth={1}
-              strokeDasharray="3 4"
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke="#8b5cf6"
+              strokeWidth={1.6}
               opacity={0.6}
-            />
+              markerEnd="url(#br-spoke-arrow)"
+            >
+              {live && (
+                <animate attributeName="opacity" values="0.75;0.35;0.75" dur="2.4s" repeatCount="indefinite" />
+              )}
+            </line>
           );
         })}
 
@@ -241,8 +273,8 @@ export function BoardroomGraph({
         })}
       </svg>
       <p className="px-2 pb-1 text-[10px]" style={{ color: "var(--ink-muted)" }}>
-        Mesh debate: every seat sees and challenges the whole table — amber arcs are challenges,
-        dashed spokes are the supervisor&apos;s notes. Node size = participation.
+        Every seat reports to the supervisor (indigo arrows); amber arrows are seat-to-seat
+        challenges. Node size = participation.
       </p>
     </div>
   );

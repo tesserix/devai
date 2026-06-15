@@ -182,6 +182,16 @@ export function BlueprintDAG({
         aria-label={`${graph.title} stage graph`}
         style={{ display: "block", margin: "0 auto" }}
       >
+        <defs>
+          {/* Directional flow arrows — consistent with the mesh views. */}
+          <marker id="dag-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#6b7488" />
+          </marker>
+          <marker id="dag-arrow-done" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#10b981" />
+          </marker>
+        </defs>
+
         {/* Lane headers */}
         {lanes.map((lane, i) => {
           if (lane === "_") return null;
@@ -232,7 +242,7 @@ export function BlueprintDAG({
           // vertical midpoint so same-column edges are a clean straight line
           // and cross-lane edges curve smoothly.
           const ay = a.y + NODE_H; // bottom-center of source
-          const by = b.y; // top-center of target
+          const by = b.y - 3; // just above the target's top edge (arrowhead gap)
           const midY = (ay + by) / 2;
           const d = `M ${a.cx} ${ay} C ${a.cx} ${midY}, ${b.cx} ${midY}, ${b.cx} ${by}`;
           return (
@@ -240,9 +250,11 @@ export function BlueprintDAG({
               <path
                 d={d}
                 fill="none"
-                strokeWidth={1.5}
+                strokeWidth={1.75}
                 strokeDasharray={e.kind === "conditional" ? "5 4" : undefined}
-                stroke={traversed ? "#10b981" : "var(--border)"}
+                stroke={traversed ? "#10b981" : "#6b7488"}
+                opacity={traversed ? 0.9 : 0.7}
+                markerEnd={traversed ? "url(#dag-arrow-done)" : "url(#dag-arrow)"}
               />
               {e.kind === "conditional" && e.label && (
                 <text

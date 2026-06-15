@@ -91,6 +91,7 @@ export function StageDetailModal({
 
   const graphMsgs: BoardroomMessage[] = relevant.map((m) => ({
     from_agent: m.from_agent,
+    to_agent: m.to_agent,
     subject: m.subject,
     body: m.body,
     timestamp: typeof m.timestamp === "number" ? m.timestamp : Date.parse(String(m.timestamp ?? 0)) / 1000 || 0,
