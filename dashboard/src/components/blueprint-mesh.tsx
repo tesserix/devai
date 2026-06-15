@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { BlueprintGraph } from "@/lib/api";
 import type { RunStateOverlay } from "@/components/blueprint-dag";
+import { GraphDefs, EDGE } from "@/components/graph-defs";
 
 /**
  * Blueprint mesh — the pipeline as a force-directed interconnected graph
@@ -167,19 +168,7 @@ export function BlueprintMesh({
   return (
     <div className="w-full overflow-hidden rounded-lg" style={{ background: "var(--surface-2, #0c0f17)" }}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 600 }}>
-        <defs>
-          {/* Directional arrowheads — neutral + "traversed" (source done). */}
-          <marker id="mesh-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#7c8598" />
-          </marker>
-          <marker id="mesh-arrow-done" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#10b981" />
-          </marker>
-          {/* Soft elevation for the nodes — gives the circles depth. */}
-          <filter id="mesh-shadow" x="-50%" y="-50%" width="200%" height="200%">
-            <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" floodColor="#000" floodOpacity="0.45" />
-          </filter>
-        </defs>
+        <GraphDefs idPrefix="mesh" />
 
         {/* directed edges: prerequisite → stage, arrow shows execution flow */}
         {links.map(([a, b], i) => {
@@ -204,10 +193,10 @@ export function BlueprintMesh({
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke={traversed ? "#10b981" : "#6b7488"}
-              strokeWidth={traversed ? 2 : 1.5}
-              opacity={traversed ? 0.85 : 0.6}
-              markerEnd={traversed ? "url(#mesh-arrow-done)" : "url(#mesh-arrow)"}
+              stroke={traversed ? EDGE.done : EDGE.flow}
+              strokeWidth={2}
+              opacity={traversed ? 0.95 : 0.85}
+              markerEnd="url(#mesh-arrow)"
             />
           );
         })}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { GraphDefs, EDGE } from "@/components/graph-defs";
 
 /**
  * Boardroom sprawl graph — the debate as a living network, not a sequence.
@@ -112,17 +113,7 @@ export function BoardroomGraph({
   return (
     <div className="rounded-lg p-2" style={{ background: "var(--surface-muted)" }}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Boardroom debate graph">
-        <defs>
-          <marker id="br-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3.4" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0,0 L8,3.4 L0,6.8 Z" fill="#f59e0b" />
-          </marker>
-          <marker id="br-spoke-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#8b5cf6" />
-          </marker>
-          <filter id="br-shadow" x="-50%" y="-50%" width="200%" height="200%">
-            <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#000" floodOpacity="0.45" />
-          </filter>
-        </defs>
+        <GraphDefs idPrefix="br" />
         {/* spokes: each seat reports to the supervisor — solid directional
             arrow (seat → SUP) so the flow is always clearly visible, even when
             there are no seat-to-seat challenges. */}
@@ -145,13 +136,13 @@ export function BoardroomGraph({
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke="#8b5cf6"
-              strokeWidth={1.6}
-              opacity={0.6}
-              markerEnd="url(#br-spoke-arrow)"
+              stroke={EDGE.spoke}
+              strokeWidth={2}
+              opacity={0.9}
+              markerEnd="url(#br-arrow)"
             >
               {live && (
-                <animate attributeName="opacity" values="0.75;0.35;0.75" dur="2.4s" repeatCount="indefinite" />
+                <animate attributeName="opacity" values="1;0.5;1" dur="2.4s" repeatCount="indefinite" />
               )}
             </line>
           );
@@ -183,13 +174,13 @@ export function BoardroomGraph({
               key={`${a}>${b}`}
               d={`M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`}
               fill="none"
-              stroke="#f59e0b"
-              strokeWidth={1.75}
-              opacity={0.85}
+              stroke={EDGE.challenge}
+              strokeWidth={2}
+              opacity={0.95}
               markerEnd="url(#br-arrow)"
             >
               {live && (
-                <animate attributeName="opacity" values="0.9;0.4;0.9" dur="2.2s" repeatCount="indefinite" />
+                <animate attributeName="opacity" values="1;0.5;1" dur="2.2s" repeatCount="indefinite" />
               )}
             </path>
           );

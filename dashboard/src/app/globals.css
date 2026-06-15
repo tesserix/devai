@@ -84,6 +84,14 @@
   --accent-soft-bd:   rgba(71, 85, 105, 0.20);
   --accent-soft-ink:  #1e293b;
 
+  /* Graph edges — used by every graph view (DAG, mesh, boardroom) via the
+   * reusable GraphDefs + these vars, so arrows stay prominent and consistent
+   * across light & dark. Light mode: dark, saturated strokes that pop on paper. */
+  --graph-edge:      #475569;   /* default flow / dependency / report */
+  --graph-spoke:     #7c3aed;   /* seat → supervisor */
+  --graph-challenge: #c2740c;   /* seat ↔ seat challenge */
+  --graph-done:      #15803d;   /* traversed (source stage done) */
+
   /* States — kept compact and functional. */
   --ok:           #2d4a2b;          /* moss-700, mark8ly's success */
   --ok-soft-bg:   rgba(45, 74, 43, 0.08);
@@ -147,6 +155,13 @@
   --accent-soft-bg-2: rgba(148, 163, 184, 0.14);
   --accent-soft-bd:   rgba(148, 163, 184, 0.22);
   --accent-soft-ink:  #cbd5e1;
+
+  /* Graph edges — dark mode: light, bright strokes that pop on the near-black
+   * canvas (mirrors the light-mode set in :root). */
+  --graph-edge:      #9aa3b5;   /* default flow / dependency / report */
+  --graph-spoke:     #a78bfa;   /* seat → supervisor */
+  --graph-challenge: #f59e0b;   /* seat ↔ seat challenge */
+  --graph-done:      #10b981;   /* traversed (source stage done) */
 
   --ok:           #84cc16;
   --ok-soft-bg:   rgba(132, 204, 22, 0.10);

@@ -28,6 +28,7 @@ import { clsx } from "clsx";
 import { Check, ShieldQuestion } from "lucide-react";
 import type { BlueprintGraph, BlueprintGraphNode } from "@/lib/api";
 import type { RunState } from "@/components/run-state-badge";
+import { GraphDefs, EDGE } from "@/components/graph-defs";
 
 export interface StageOverlay {
   /** Canonical state for this stage. */
@@ -182,15 +183,7 @@ export function BlueprintDAG({
         aria-label={`${graph.title} stage graph`}
         style={{ display: "block", margin: "0 auto" }}
       >
-        <defs>
-          {/* Directional flow arrows — consistent with the mesh views. */}
-          <marker id="dag-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#6b7488" />
-          </marker>
-          <marker id="dag-arrow-done" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#10b981" />
-          </marker>
-        </defs>
+        <GraphDefs idPrefix="dag" />
 
         {/* Lane headers */}
         {lanes.map((lane, i) => {
@@ -250,11 +243,11 @@ export function BlueprintDAG({
               <path
                 d={d}
                 fill="none"
-                strokeWidth={1.75}
+                strokeWidth={2}
                 strokeDasharray={e.kind === "conditional" ? "5 4" : undefined}
-                stroke={traversed ? "#10b981" : "#6b7488"}
-                opacity={traversed ? 0.9 : 0.7}
-                markerEnd={traversed ? "url(#dag-arrow-done)" : "url(#dag-arrow)"}
+                stroke={traversed ? EDGE.done : EDGE.flow}
+                opacity={traversed ? 0.95 : 0.85}
+                markerEnd="url(#dag-arrow)"
               />
               {e.kind === "conditional" && e.label && (
                 <text
