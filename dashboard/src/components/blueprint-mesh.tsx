@@ -162,53 +162,117 @@ export function BlueprintMesh({
   }, [graph]);
 
   const stateOf = (name: string) => overlay?.[name]?.state;
+  const radiusOf = (n: Sim) => 11 + Math.min(11, n.deg * 1.7);
 
   return (
     <div className="w-full overflow-hidden rounded-lg" style={{ background: "var(--surface-2, #0c0f17)" }}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 600 }}>
-        {/* edges */}
-        {links.map(([a, b], i) => (
-          <line
-            key={i}
-            x1={nodes[a].x}
-            y1={nodes[a].y}
-            x2={nodes[b].x}
-            y2={nodes[b].y}
-            stroke="var(--surface-border, #2a2f3a)"
-            strokeWidth={1}
-            opacity={0.55}
-          />
-        ))}
+        <defs>
+          {/* Directional arrowheads — neutral + "traversed" (source done). */}
+          <marker id="mesh-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#7c8598" />
+          </marker>
+          <marker id="mesh-arrow-done" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#10b981" />
+          </marker>
+          {/* Soft elevation for the nodes — gives the circles depth. */}
+          <filter id="mesh-shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" floodColor="#000" floodOpacity="0.45" />
+          </filter>
+        </defs>
+
+        {/* directed edges: prerequisite → stage, arrow shows execution flow */}
+        {links.map(([a, b], i) => {
+          const na = nodes[a];
+          const nb = nodes[b];
+          const dx = nb.x - na.x;
+          const dy = nb.y - na.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const ux = dx / d;
+          const uy = dy / d;
+          const ra = radiusOf(na);
+          const rb = radiusOf(nb);
+          const x1 = na.x + ux * (ra + 2);
+          const y1 = na.y + uy * (ra + 2);
+          const x2 = nb.x - ux * (rb + 7);
+          const y2 = nb.y - uy * (rb + 7);
+          const traversed = stateOf(na.name) === "done";
+          return (
+            <line
+              key={i}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke={traversed ? "#10b981" : "#6b7488"}
+              strokeWidth={traversed ? 2 : 1.5}
+              opacity={traversed ? 0.85 : 0.6}
+              markerEnd={traversed ? "url(#mesh-arrow-done)" : "url(#mesh-arrow)"}
+            />
+          );
+        })}
+
         {/* nodes */}
         {nodes.map((n) => {
           const st = stateOf(n.name);
-          const r = 9 + Math.min(10, n.deg * 1.6);
+          const r = radiusOf(n);
           const running = st === "running";
           const done = st === "done";
           const failed = st === "failed";
-          const ring = running ? "#f59e0b" : done ? "#10b981" : failed ? "#ef4444" : "transparent";
+          const ring = running ? "#f59e0b" : done ? "#10b981" : failed ? "#ef4444" : "";
+          const initial = (n.title || n.name).trim().charAt(0).toUpperCase();
           return (
             <g key={n.name}>
-              {running && (
-                <circle cx={n.x} cy={n.y} r={r + 6} fill="none" stroke="#f59e0b" strokeWidth={1.5} opacity={0.5}>
-                  <animate attributeName="r" values={`${r + 3};${r + 11};${r + 3}`} dur="1.6s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.6;0;0.6" dur="1.6s" repeatCount="indefinite" />
+              {/* state ring (outside the body so it never hides the fill) */}
+              {ring && (
+                <circle cx={n.x} cy={n.y} r={r + 3.5} fill="none" stroke={ring} strokeWidth={2.25} opacity={0.95}>
+                  {running && (
+                    <animate attributeName="opacity" values="1;0.25;1" dur="1.3s" repeatCount="indefinite" />
+                  )}
                 </circle>
               )}
+              {running && (
+                <circle cx={n.x} cy={n.y} r={r + 7} fill="none" stroke="#f59e0b" strokeWidth={1.5} opacity={0.5}>
+                  <animate attributeName="r" values={`${r + 4};${r + 13};${r + 4}`} dur="1.6s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.55;0;0.55" dur="1.6s" repeatCount="indefinite" />
+                </circle>
+              )}
+              {/* body + thin rim + top sheen → a dimensional "chip" */}
               <circle
                 cx={n.x}
                 cy={n.y}
                 r={r}
                 fill={n.color}
-                stroke={ring}
-                strokeWidth={ring === "transparent" ? 0 : 2.5}
-                opacity={failed ? 0.9 : 1}
+                stroke="rgba(255,255,255,0.22)"
+                strokeWidth={1}
+                opacity={failed ? 0.92 : 1}
+                filter="url(#mesh-shadow)"
+              />
+              <ellipse
+                cx={n.x}
+                cy={n.y - r * 0.32}
+                rx={r * 0.62}
+                ry={r * 0.4}
+                fill="rgba(255,255,255,0.28)"
+                style={{ pointerEvents: "none" }}
               />
               <text
                 x={n.x}
-                y={n.y + r + 12}
+                y={n.y + r * 0.34}
+                textAnchor="middle"
+                fontSize={r * 0.82}
+                fontWeight={700}
+                fill="#fff"
+                style={{ pointerEvents: "none" }}
+              >
+                {initial}
+              </text>
+              <text
+                x={n.x}
+                y={n.y + r + 13}
                 textAnchor="middle"
                 fontSize={10}
+                fontWeight={500}
                 fill="var(--ink-soft, #9aa3b2)"
                 style={{ pointerEvents: "none" }}
               >

@@ -51,6 +51,8 @@ interface BlueprintDAGProps {
   onApprove?: (stageName: string) => void;
   /** Called when a gate-pending stage is rejected. Enables the inline button. */
   onReject?: (stageName: string) => void;
+  /** Click a stage node to inspect it (agent activity / debate drill-in). */
+  onNodeClick?: (stageName: string, agent?: string) => void;
   /** Compact node sizing for tight cards (blueprint preview). */
   dense?: boolean;
   className?: string;
@@ -101,6 +103,7 @@ export function BlueprintDAG({
   overlay,
   onApprove,
   onReject,
+  onNodeClick,
   dense = false,
   className,
 }: BlueprintDAGProps) {
@@ -267,9 +270,18 @@ export function BlueprintDAG({
 
           const running = state === "running";
           const done = state === "done";
+          // Agentic stages (those with an agent persona) drill into a graphical
+          // agent-activity / debate view on click.
+          const inspectable = Boolean(onNodeClick && n.agent);
 
           return (
-            <g key={n.name} opacity={skipped ? 0.5 : 1}>
+            <g
+              key={n.name}
+              opacity={skipped ? 0.5 : 1}
+              onClick={inspectable ? () => onNodeClick?.(n.name, n.agent) : undefined}
+              style={inspectable ? { cursor: "pointer" } : undefined}
+            >
+              {inspectable && <title>Click to inspect this agent&apos;s activity</title>}
               {/* RUNNING: an obvious pulsing glow ring so in-progress stages
                   clearly "blink" (opacity + width both animate, fast cadence). */}
               {running && (
@@ -306,6 +318,17 @@ export function BlueprintDAG({
               </rect>
               {/* lane accent bar */}
               <rect x={n.x} y={n.y} width={4} height={NODE_H} rx={2} fill={color} />
+              {/* inspect affordance — tells the user this agent node is clickable */}
+              {inspectable && (
+                <text
+                  x={n.x + NODE_W - 9}
+                  y={n.y + NODE_H - 7}
+                  textAnchor="end"
+                  style={{ fontSize: 11, fill: "var(--ink-muted)", opacity: 0.7 }}
+                >
+                  ⤢
+                </text>
+              )}
 
               {/* title */}
               <text

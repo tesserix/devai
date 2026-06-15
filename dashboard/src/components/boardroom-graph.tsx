@@ -89,11 +89,24 @@ export function BoardroomGraph({
     });
   });
 
-  const dedupedEdges = [...new Set(model.edges.map(([a, b]) => (a < b ? `${a}|${b}` : `${b}|${a}`)))];
+  // Directed challenge edges (challenger → challenged). Keep BOTH directions
+  // when present — they bend to opposite sides so the arrows never overlap.
+  const directedEdges = [...new Set(model.edges.map(([a, b]) => `${a}>${b}`))].map(
+    (k) => k.split(">") as [string, string],
+  );
+  const seatRadius = (name: string) => Math.min(10 + (model.seats.get(name)?.count ?? 1) * 2.2, 19);
 
   return (
     <div className="rounded-lg p-2" style={{ background: "var(--surface-muted)" }}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Boardroom debate graph">
+        <defs>
+          <marker id="br-arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#f59e0b" />
+          </marker>
+          <filter id="br-shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#000" floodOpacity="0.45" />
+          </filter>
+        </defs>
         {/* spokes: supervisor tracks every seat */}
         {model.names.map((name) => {
           const p = pos.get(name)!;
@@ -112,25 +125,39 @@ export function BoardroomGraph({
           );
         })}
 
-        {/* challenge arcs: seat ↔ seat */}
-        {dedupedEdges.map((key) => {
-          const [a, b] = key.split("|");
+        {/* directed challenge arcs: challenger → challenged (arrowhead at target) */}
+        {directedEdges.map(([a, b]) => {
           const pa = pos.get(a);
           const pb = pos.get(b);
           if (!pa || !pb) return null;
-          const mx = (pa.x + pb.x) / 2 + (cy - (pa.y + pb.y) / 2) * 0.25;
-          const my = (pa.y + pb.y) / 2 + ((pa.x + pb.x) / 2 - cx) * 0.25;
+          const ra = seatRadius(a);
+          const rb = seatRadius(b);
+          const dx = pb.x - pa.x;
+          const dy = pb.y - pa.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const ux = dx / d;
+          const uy = dy / d;
+          const bend = 16;
+          // Control point bent perpendicular to the line; opposing edges (b→a)
+          // bend the other way, so two-way challenges read as separate arrows.
+          const mx = (pa.x + pb.x) / 2 - uy * bend;
+          const my = (pa.y + pb.y) / 2 + ux * bend;
+          const x1 = pa.x + ux * (ra + 1);
+          const y1 = pa.y + uy * (ra + 1);
+          const x2 = pb.x - ux * (rb + 7);
+          const y2 = pb.y - uy * (rb + 7);
           return (
             <path
-              key={key}
-              d={`M ${pa.x} ${pa.y} Q ${mx} ${my} ${pb.x} ${pb.y}`}
+              key={`${a}>${b}`}
+              d={`M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`}
               fill="none"
               stroke="#f59e0b"
-              strokeWidth={1.5}
-              opacity={0.75}
+              strokeWidth={1.75}
+              opacity={0.85}
+              markerEnd="url(#br-arrow)"
             >
               {live && (
-                <animate attributeName="opacity" values="0.75;0.25;0.75" dur="2.2s" repeatCount="indefinite" />
+                <animate attributeName="opacity" values="0.9;0.4;0.9" dur="2.2s" repeatCount="indefinite" />
               )}
             </path>
           );
@@ -144,7 +171,17 @@ export function BoardroomGraph({
               <animate attributeName="opacity" values="0.8;0.1;0.8" dur="1.8s" repeatCount="indefinite" />
             </circle>
           )}
-          <circle cx={cx} cy={cy} r={20} fill="#8b5cf6" opacity={0.92} />
+          <circle
+            cx={cx}
+            cy={cy}
+            r={20}
+            fill="#8b5cf6"
+            stroke="rgba(255,255,255,0.28)"
+            strokeWidth={1}
+            opacity={0.96}
+            filter="url(#br-shadow)"
+          />
+          <ellipse cx={cx} cy={cy - 7} rx={12} ry={7} fill="rgba(255,255,255,0.28)" style={{ pointerEvents: "none" }} />
           <text x={cx} y={cy + 3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: "#fff" }}>
             SUP
           </text>
@@ -168,9 +205,26 @@ export function BoardroomGraph({
                   <animate attributeName="opacity" values="0.9;0.1;0.9" dur="1.1s" repeatCount="indefinite" />
                 </circle>
               )}
-              <circle cx={p.x} cy={p.y} r={r} fill={color} opacity={0.9}>
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={r}
+                fill={color}
+                stroke="rgba(255,255,255,0.22)"
+                strokeWidth={1}
+                opacity={0.95}
+                filter="url(#br-shadow)"
+              >
                 <title>{`${display(name)} — ${seat.count} statement(s)\n${seat.last}`}</title>
               </circle>
+              <ellipse
+                cx={p.x}
+                cy={p.y - r * 0.32}
+                rx={r * 0.6}
+                ry={r * 0.38}
+                fill="rgba(255,255,255,0.28)"
+                style={{ pointerEvents: "none" }}
+              />
               <text
                 x={p.x}
                 y={p.y + r + 12}

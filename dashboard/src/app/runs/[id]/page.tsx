@@ -36,6 +36,7 @@ import { ChatPanel } from "@/components/chat-panel";
 import { LiveLogs } from "@/components/live-logs";
 import { RepoPanel } from "@/components/repo-panel";
 import { RunDAG } from "@/components/pipeline-flow";
+import { StageDetailModal, type StageMessage } from "@/components/stage-detail-modal";
 import { CheckpointTimeline, type Checkpoint } from "@/components/checkpoint-timeline";
 import { RunStateBadge, normalizeRunState } from "@/components/run-state-badge";
 import { GuidancePanel, HelpPopover } from "@/components/guidance";
@@ -96,6 +97,7 @@ export default function RunDetailPage() {
   const [gates, setGates] = useState<Gate[]>([]);
   const [a2a, setA2a] = useState<A2AMessage[]>([]);
   const [delegation, setDelegation] = useState<DelegationPlan | null>(null);
+  const [selectedStage, setSelectedStage] = useState<{ name: string; agent?: string } | null>(null);
 
   const refreshRun = useCallback(async () => {
     if (!runId) return;
@@ -171,6 +173,19 @@ export default function RunDetailPage() {
   const effectiveDelegation =
     delegation ?? (ctx.delegation_plan as DelegationPlan | undefined) ?? null;
   const injections = ctx.injections ?? [];
+
+  // Every A2A message we know about for the stage drill-in: the persisted bag
+  // (carries payload.stage) merged with the live SSE feed, deduped by id.
+  const stageMessages: StageMessage[] = useMemo(() => {
+    const persisted = (ctx.a2a_messages as StageMessage[] | undefined) ?? [];
+    const live = a2a as unknown as StageMessage[];
+    const byKey = new Map<string, StageMessage>();
+    for (const m of [...persisted, ...live]) {
+      const key = m.id || `${m.from_agent}|${m.subject}|${m.timestamp}`;
+      if (!byKey.has(key)) byKey.set(key, m);
+    }
+    return [...byKey.values()];
+  }, [ctx.a2a_messages, a2a]);
 
   const checkpoints: Checkpoint[] = useMemo(
     () =>
@@ -392,8 +407,18 @@ export default function RunDetailPage() {
                     pendingGates={pendingGates}
                     onApprove={approveGate}
                     onReject={rejectGate}
+                    onNodeClick={(name, agent) => setSelectedStage({ name, agent })}
                   />
                 </section>
+
+                {selectedStage && (
+                  <StageDetailModal
+                    stage={selectedStage}
+                    messages={stageMessages}
+                    live={!isTerminal}
+                    onClose={() => setSelectedStage(null)}
+                  />
+                )}
 
                 {/* Failure callout */}
                 {norm === "failed" && (run?.error || run?.failed_stage) && (

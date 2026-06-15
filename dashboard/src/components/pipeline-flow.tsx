@@ -136,12 +136,14 @@ export function RunDAG({
   pendingGates,
   onApprove,
   onReject,
+  onNodeClick,
 }: {
   blueprint: string;
   run: (PipelineRun & RunStageShape) | null;
   pendingGates?: PendingGates;
   onApprove?: (stage: string) => void;
   onReject?: (stage: string) => void;
+  onNodeClick?: (stage: string, agent?: string) => void;
 }) {
   const [graph, setGraph] = useState<BlueprintGraph | null>(null);
   const [error, setError] = useState<string>("");
@@ -201,7 +203,13 @@ export function RunDAG({
       {view === "mesh" ? (
         <BlueprintMesh graph={graph} overlay={overlay} />
       ) : (
-        <BlueprintDAG graph={graph} overlay={overlay} onApprove={onApprove} onReject={onReject} />
+        <BlueprintDAG
+          graph={graph}
+          overlay={overlay}
+          onApprove={onApprove}
+          onReject={onReject}
+          onNodeClick={onNodeClick}
+        />
       )}
     </div>
   );
