@@ -352,9 +352,11 @@ class PipelineService:
         # empty queue. Re-running the reconciler periodically re-enqueues any
         # non-terminal, non-active run; idempotent via the SADD guard, and
         # the claim/stop guards make resurrection of finished runs impossible.
+        reconcile_every = max(5, int(getattr(self.config, "pipeline_reconcile_interval", 15) or 15))
+
         async def _reconcile_loop() -> None:
             while True:
-                await asyncio.sleep(60)
+                await asyncio.sleep(reconcile_every)
                 try:
                     await self._reconcile_orphans()
                 except Exception:  # noqa: BLE001

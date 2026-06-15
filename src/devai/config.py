@@ -351,6 +351,10 @@ class Settings(BaseSettings):
     pipeline_reaper_interval: int = 30  # seconds between stale-claim sweeps
     pipeline_claim_ttl: int = 180  # seconds; refreshed every claim_ttl/4 while running
     pipeline_queue_poll_interval: float = 1.0  # seconds workers wait when the queue is empty
+    # Seconds between orphan re-enqueue sweeps. This is the safety net that
+    # recovers a run stranded by the shared api/sre queue (a stranded run only
+    # advances on this tick) — kept short so PENDING never lingers minutes.
+    pipeline_reconcile_interval: int = 15
     pipeline_event_ring_size: int = 1000  # SSE replay buffer
     pipeline_task_ttl: int = 86400 * 30  # 30 days — keep parity with redis_result_ttl
 
