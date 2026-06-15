@@ -22,19 +22,23 @@ from devai.pipeline.types import DevAITask
 
 class _Cfg:
     pipeline_label = "x"
+    llm_model_boardroom_panel = ""
+    llm_model_boardroom_moderator = ""
 
 
 class _ScriptedLLM:
-    """Returns canned text per call; raises where the script says 'RAISE'."""
+    """Returns canned text per call; raises where the script says 'RAISE'.
+    Records the per-call request.model so tests can assert provider routing."""
 
-    provider_name = "fake"
-
-    def __init__(self, script: list[str]):
+    def __init__(self, script: list[str], provider_name: str = "fake"):
         self.script = script
         self.calls = 0
+        self.models: list[str] = []
+        self.provider_name = provider_name
 
     async def generate(self, request):
         self.calls += 1
+        self.models.append(getattr(request, "model", "") or "")
         text = self.script.pop(0) if self.script else "POSITION: fine\nCHALLENGE: none\nCONCEDE: nothing"
         if text == "RAISE":
             raise RuntimeError("panelist offline")
@@ -47,8 +51,21 @@ class _ScriptedLLM:
         return r
 
 
-def _stage(llm, config=None):
-    deps = StageDeps(config=_Cfg(), llm=llm)
+class _AlwaysRaiseLLM:
+    """Every seat call fails — exercises the zero-positions degrade path."""
+
+    provider_name = "fake"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, request):
+        self.calls += 1
+        raise RuntimeError("provider outage")
+
+
+def _stage(llm, config=None, cfg=None):
+    deps = StageDeps(config=cfg or _Cfg(), llm=llm)
     return _BoardroomDebateStage(deps, config or {})
 
 
@@ -126,3 +143,61 @@ async def test_no_llm_skips_visibly():
     task = DevAITask(intent="anything", blueprint="b", repo="o/r")
     result = await s.execute(task)
     assert result.data.get("boardroom_skipped") is True
+    assert result.data.get("boardroom_skip_reason") == "no_llm"
+
+
+@pytest.mark.asyncio
+async def test_non_claude_provider_runs_on_provider_default_model():
+    """A user on OpenAI/Gemini/Groq must NOT get a forced claude-* id — the
+    debate runs on their provider's own default model (model='')."""
+
+    class _OpenAICfg(_Cfg):
+        llm_model_boardroom_panel = "claude-haiku-4-5-20251001"
+        llm_model_boardroom_moderator = "claude-sonnet-4-6"
+
+    ok = "POSITION: fine\nCHALLENGE: none — I agree with the table\nCONCEDE: nothing"
+    llm = _ScriptedLLM(
+        [ok] * 4 + ["AGREED: all\nDISPUTED: nothing", "## Decision\nok\n## Dissent\nnone"],
+        provider_name="openai",
+    )
+    s = _stage(llm, {"rounds": "1"}, cfg=_OpenAICfg())
+    result = await s.execute(s_task := DevAITask(intent="pick stack", blueprint="b", repo="o/r"))
+    assert s_task is not None
+    # The configured models are Claude — but the resolved provider is OpenAI,
+    # so EVERY call must defer to the provider default (empty model id).
+    assert llm.models, "expected the debate to actually call the LLM"
+    assert all(m == "" for m in llm.models), f"forced a cross-provider model: {llm.models}"
+    assert result.data["boardroom_decision"].startswith("## Decision")
+
+
+@pytest.mark.asyncio
+async def test_claude_provider_uses_tiered_models():
+    """Anthropic users keep the cheap-panel / strong-moderator split."""
+
+    class _ClaudeCfg(_Cfg):
+        llm_model_boardroom_panel = "claude-haiku-4-5-20251001"
+        llm_model_boardroom_moderator = "claude-sonnet-4-6"
+
+    ok = "POSITION: fine\nCHALLENGE: none — I agree with the table\nCONCEDE: nothing"
+    llm = _ScriptedLLM(
+        [ok] * 4 + ["AGREED: all\nDISPUTED: nothing", "## Decision\nok\n## Dissent\nnone"],
+        provider_name="anthropic",
+    )
+    s = _stage(llm, {"rounds": "1"}, cfg=_ClaudeCfg())
+    await s.execute(DevAITask(intent="pick stack", blueprint="b", repo="o/r"))
+    # First 4 calls are panel seats (haiku); the synthesis + decision use sonnet.
+    assert llm.models[:4] == ["claude-haiku-4-5-20251001"] * 4
+    assert llm.models[-1] == "claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
+async def test_zero_positions_degrades_not_raises():
+    """Every seat failing must NOT raise (→ recovery/runbook/needs-human); it
+    degrades to a visible skip and writes no hollow decision."""
+    s = _stage(_AlwaysRaiseLLM(), {"rounds": "1"})
+    result = await s.execute(DevAITask(intent="anything", blueprint="b", repo="o/r"))
+    assert result.data.get("boardroom_skipped") is True
+    assert result.data.get("boardroom_skip_reason") == "panel_unreachable"
+    # No hollow plan leaks downstream.
+    assert "boardroom_decision" not in result.data
+    assert "technical_plan" not in result.data

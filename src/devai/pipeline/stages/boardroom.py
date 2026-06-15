@@ -165,6 +165,23 @@ _MODERATOR_BRIEF = (
     "strongest open challenges are."
 )
 
+# Providers whose NATIVE model ids include `claude-*`. When the user's
+# resolved chain isn't one of these, the boardroom runs on that provider's
+# OWN default model instead of forcing a Claude id it can't serve — forcing
+# the id was the root cause of "every seat absent → runbook → needs human"
+# for users on OpenAI/Gemini/Groq.
+_CLAUDE_PROVIDERS = {"anthropic", "gateway"}  # gateway = Claude-on-Vertex
+
+
+def _serves_claude(provider_name: str) -> bool:
+    """True when ANY link in the resolved chain can serve a `claude-*` id.
+
+    A chain's ``provider_name`` may be a fallback string like ``openai→gateway``;
+    the model succeeds as long as one link is Claude-capable.
+    """
+    parts = (provider_name or "").lower().replace("→", " ").replace(",", " ").split()
+    return any(p in _CLAUDE_PROVIDERS or "anthropic" in p for p in parts)
+
 
 class _BoardroomDebateStage(PipelineStage):
     def __init__(self, deps: StageDeps, config: dict[str, str]) -> None:
@@ -177,43 +194,114 @@ class _BoardroomDebateStage(PipelineStage):
     # ── helpers ─────────────────────────────────────────────────────
 
     def _llm_usable(self) -> bool:
+        """A platform LLM exists at all — used only to phrase the skip reason
+        ('no LLM configured' vs 'your free trial is used up')."""
         llm = self.deps.llm
         return llm is not None and getattr(llm, "provider_name", "noop") != "noop"
 
-    def _chain(self):
-        """Role-routed adapter (anthropic → gateway/Vertex, same model id);
-        degrades to deps.llm when the role factory can't build."""
-        cached = getattr(self, "_role_chain", None)
-        if cached is not None:
-            return cached
-        try:
-            from devai.adapters.llm import create_role_llm
+    @staticmethod
+    def _chain_usable(chain: Any) -> bool:
+        return chain is not None and "noop" not in str(getattr(chain, "provider_name", "noop")).lower()
 
-            chain = create_role_llm(self.deps.config, "")
-            # Tests/minimal deps inject deps.llm directly with no provider
-            # keys configured — a noop role chain must not shadow it.
-            if "noop" in str(getattr(chain, "provider_name", "noop")):
-                chain = self.deps.llm
-            self._role_chain = chain
+    async def _role_chain_for(self, email: str, role: str) -> Any:
+        """The triggering user's role-routed chain (their OWN credentials), or
+        None when their trial budget is exhausted / no LLM resolves."""
+        try:
+            return await self.deps.role_llm_for_principal(email or "", role)
         except Exception:  # noqa: BLE001
-            self._role_chain = self.deps.llm
-        return self._role_chain
+            return None
+
+    async def _setup_llm(self, email: str) -> bool:
+        """Resolve the panel + moderator chains on the user's OWN credentials
+        and pick provider-appropriate models. Returns False (and sets
+        ``self._skip_reason``) when no usable LLM is available — the caller
+        then degrades to a clean, visible skip instead of failing the run.
+
+        Provider-agnostic by design: when the resolved provider can serve the
+        configured Claude boardroom models we use the cheap-panel / strong-
+        moderator split; otherwise the debate runs on the user's OWN provider
+        default model (GPT, Gemini, Llama, …). The boardroom must NEVER force a
+        Claude id onto a provider that can't serve it — that was the cause of
+        'every seat absent → runbook → needs human'.
+        """
+        cfg = self.deps.config
+        panel_cfg = str(getattr(cfg, "llm_model_boardroom_panel", "") or "")
+        mod_cfg = str(getattr(cfg, "llm_model_boardroom_moderator", "") or "")
+
+        # Route by role so claude-* models prefer Anthropic when the user has
+        # it; the per-user trial/budget policy is honored (None = exhausted).
+        mod = await self._role_chain_for(email, "boardroom_moderator")
+        panel = await self._role_chain_for(email, "boardroom_panel")
+        if mod is None and panel is None:
+            # A permissive deployment returns the platform chain (never None);
+            # None for both means strict mode + the user's trial is spent.
+            self._skip_reason = "trial_exhausted" if self._llm_usable() else "no_llm"
+            return False
+        mod = mod or panel
+        panel = panel or mod
+
+        if self._chain_usable(mod) and _serves_claude(getattr(mod, "provider_name", "")):
+            # Anthropic/gateway: cheap Haiku panel, strong Sonnet moderator.
+            self._mod_chain, self._mod_model = mod, mod_cfg
+            self._panel_chain, self._panel_model = panel, panel_cfg
+        else:
+            # The user's provider can't serve the configured Claude models —
+            # run the WHOLE debate on their provider's own default model.
+            plain = await self._role_chain_for(email, "")
+            chain = plain if self._chain_usable(plain) else mod
+            self._mod_chain = self._panel_chain = chain
+            self._mod_model = self._panel_model = ""
+
+        if not self._chain_usable(self._mod_chain):
+            self._skip_reason = "no_llm"
+            return False
+        logger.info(
+            "boardroom LLM: panel=%s (model=%s) moderator=%s (model=%s) for %s",
+            getattr(self._panel_chain, "provider_name", "?"),
+            self._panel_model or "provider-default",
+            getattr(self._mod_chain, "provider_name", "?"),
+            self._mod_model or "provider-default",
+            email or "anonymous",
+        )
+        return True
+
+    def _skip_result(self) -> StageResult:
+        """A clean, VISIBLE skip. The boardroom is advisory, so when it can't
+        run it degrades (the pipeline continues with the standard planner)
+        rather than failing into the recovery → runbook → needs-human path.
+        It writes NO boardroom_decision/technical_plan, so nothing downstream
+        mistakes a non-debate for a real plan."""
+        reason = getattr(self, "_skip_reason", "") or "no_llm"
+        messages = {
+            "no_llm": (
+                "boardroom skipped — no LLM is configured for this run. Add your LLM API key in "
+                "Settings → LLM Provider to enable the planning debate. The pipeline continues "
+                "with the standard planner."
+            ),
+            "trial_exhausted": (
+                "boardroom skipped — your free LLM trial allowance is used up. Add your own LLM "
+                "API key in Settings → LLM Provider. The pipeline continues with the standard planner."
+            ),
+            "panel_unreachable": (
+                "boardroom skipped — the panel could not be reached (every LLM call failed). The "
+                "pipeline continues with the standard planner; re-run to retry the debate."
+            ),
+        }
+        return StageResult(
+            message=messages.get(reason, messages["no_llm"]),
+            data={"boardroom_skipped": True, "boardroom_skip_reason": reason},
+        )
 
     async def _say(self, system: str, prompt: str, *, max_tokens: int = 700, moderator: bool = False) -> str:
-        """Panel seats run on the CHEAP boardroom model (many parallel
-        debater calls); the moderator's syntheses and the decision document
-        get the stronger one."""
+        """Panel seats run on the CHEAP boardroom model (many parallel debater
+        calls); the moderator's syntheses + decision get the stronger one.
+        Both fall back to the provider's default model when it isn't
+        Claude-capable (resolved once in ``_setup_llm``)."""
         from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
 
-        model = str(
-            getattr(
-                self.deps.config,
-                "llm_model_boardroom_moderator" if moderator else "llm_model_boardroom_panel",
-                "",
-            )
-            or ""
-        )
-        response = await self._chain().generate(
+        chain = self._mod_chain if moderator else self._panel_chain
+        model = self._mod_model if moderator else self._panel_model
+        response = await chain.generate(
             LLMRequest(
                 system=system,
                 messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
@@ -251,7 +339,7 @@ class _BoardroomDebateStage(PipelineStage):
         topic? Up to 2 new specialist seats are created with full context
         and join the debate — 'fetch and borrow any other agents' without
         being limited to a fixed catalog."""
-        if not self._llm_usable():
+        if not self._chain_usable(getattr(self, "_mod_chain", None)):
             return []
         try:
             import json as _json
@@ -304,35 +392,18 @@ class _BoardroomDebateStage(PipelineStage):
     # ── the meeting ─────────────────────────────────────────────────
 
     async def execute(self, task: DevAITask) -> StageResult:
-        # Honor the triggering user's own LLM connector (their keys, with the
-        # boardroom's role-priced models requested per call) for the whole
-        # debate. Set before any _say() so every seat + the moderator run on
-        # it. A user with no connector rides the trial-metered platform chain;
-        # at exhaustion the debate refuses clearly instead of leaking onto the
-        # shared keys.
-        try:
-            user_llm = await self.deps.role_llm_for_principal(task.triggered_by or "", "")
-            if user_llm is None and self._llm_usable():
-                # A platform LLM exists but the policy refused it: the user has
-                # no connector and their trial budget is spent/disabled. (When
-                # NO LLM exists at all, fall through to the visible skip.)
-                raise RuntimeError(
-                    "no LLM available for this debate — your free trial allowance "
-                    "is used up. Add your own LLM API key in Settings → LLM Provider."
-                )
-            if (
-                user_llm is not None
-                and getattr(user_llm, "provider_name", "noop") != "noop"
-                and user_llm is not self.deps.llm
-            ):
-                self._role_chain = user_llm
-                logger.info("boardroom: using per-user LLM for %s", task.triggered_by)
-        except RuntimeError:
-            raise
-        except Exception:  # noqa: BLE001
-            logger.debug("boardroom: per-user LLM resolution failed — using role chain", exc_info=True)
+        # The whole debate runs on the TRIGGERING USER's own LLM connector
+        # (their keys), provider-agnostically: Anthropic/gateway users get the
+        # cheap-panel / strong-moderator Claude split; everyone else debates on
+        # their own provider's default model. When no LLM resolves (no key /
+        # trial spent) the boardroom degrades to a clean, visible skip — it is
+        # an ADVISORY stage and must never fail the pipeline into the
+        # recovery → runbook → needs-human path.
         self._triggered_by = task.triggered_by or ""
         self._run_id = task.id
+        self._skip_reason = ""
+        if not await self._setup_llm(task.triggered_by or ""):
+            return self._skip_result()
 
         topic = (
             str(self.config.get("topic") or "")
@@ -340,11 +411,6 @@ class _BoardroomDebateStage(PipelineStage):
             or task.intent
         )
         has_repo = bool(task.repo)
-        if not self._llm_usable():
-            return StageResult(
-                message="boardroom skipped — no usable LLM (plan quality degraded, run continues)",
-                data={"boardroom_skipped": True},
-            )
 
         rounds = max(1, min(4, int(self.config.get("rounds", 2) or 2)))
         recruited = False
@@ -472,16 +538,20 @@ class _BoardroomDebateStage(PipelineStage):
                 consensus_reached = True
                 break  # genuine consensus — don't burn remaining rounds
 
-        # An empty table is a FAILURE, not a meeting: if every panelist call
-        # errored, raise so the executor retries / the recovery agent
-        # engages — returning a hollow "decision" silently downgraded the
-        # whole feature (live incident: an SDK kwarg bug made all seats
-        # 'absent' in 0.7s and the run sailed on without any debate).
+        # An empty table is not a meeting: every panelist call errored
+        # (transient outage, mid-debate budget exhaustion, …). Degrade to a
+        # VISIBLE skip rather than escalating an advisory stage into the
+        # recovery → runbook → needs-human path. Crucially we write NO
+        # boardroom_decision/technical_plan, so the standard planner still
+        # makes the real plan — a hollow "decision" never silently ships
+        # (the failure mode the previous hard-raise guarded against).
         if not positions:
-            raise RuntimeError(
-                "boardroom collected zero positions — every panelist call failed; "
-                "see transcript: " + " | ".join(transcript[-3:])[:400]
+            logger.warning(
+                "boardroom collected zero positions — every panelist call failed: %s",
+                " | ".join(transcript[-3:])[:400],
             )
+            self._skip_reason = "panel_unreachable"
+            return self._skip_result()
 
         # Final decision document.
         decision = await self._final_decision(topic, positions, consensus_reached)

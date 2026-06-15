@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Users } from "lucide-react";
 import { BoardroomGraph, type BoardroomMessage } from "@/components/boardroom-graph";
+import { BoardroomFlow } from "@/components/boardroom-flow";
 
 /**
  * Boardroom outcome card — the dedicated view for the "Brainstorm first"
@@ -18,7 +19,16 @@ export interface BoardroomOutcome {
   consensus?: boolean;
   budget_hit?: boolean;
   transcript?: string;
+  skipped?: boolean;
+  skipReason?: string;
 }
+
+const SKIP_COPY: Record<string, string> = {
+  no_llm: "The boardroom debate was skipped because no LLM is configured for this run.",
+  trial_exhausted: "The boardroom debate was skipped because your free LLM trial allowance is used up.",
+  panel_unreachable:
+    "The boardroom debate was skipped — the panel couldn't be reached (every LLM call failed). Re-run to retry the debate.",
+};
 
 export function BoardroomCard({
   outcome,
@@ -30,6 +40,43 @@ export function BoardroomCard({
   live?: boolean;
 }) {
   const [showTranscript, setShowTranscript] = useState(false);
+
+  // Skipped (advisory stage couldn't run) — surface it as a friendly,
+  // actionable note, NOT a failure. The run continued with the standard
+  // planner; the only action the user may want is to add an LLM key.
+  if (outcome?.skipped && !outcome?.decision) {
+    const reason = outcome.skipReason || "no_llm";
+    const needsKey = reason === "no_llm" || reason === "trial_exhausted";
+    return (
+      <section
+        className="rounded-lg border p-4"
+        style={{ borderColor: "var(--accent-soft-bd)", background: "var(--surface)" }}
+      >
+        <div className="flex items-center gap-2 mb-1.5">
+          <Users className="w-4 h-4" style={{ color: "var(--warn-ink)" }} />
+          <h3 className="text-sm font-semibold" style={{ color: "var(--ink-strong)" }}>
+            Boardroom skipped
+          </h3>
+        </div>
+        <p className="text-[13px] leading-relaxed" style={{ color: "var(--ink)" }}>
+          {SKIP_COPY[reason] ?? SKIP_COPY.no_llm}
+        </p>
+        <p className="text-xs mt-1.5" style={{ color: "var(--ink-muted)" }}>
+          This is an optional planning step — the run continued with the standard planner.
+        </p>
+        {needsKey && (
+          <a
+            href="/settings"
+            className="inline-block mt-2.5 text-xs font-medium hover:underline"
+            style={{ color: "var(--accent)" }}
+          >
+            Add your LLM API key in Settings →
+          </a>
+        )}
+      </section>
+    );
+  }
+
   // Show during a LIVE debate (graph only) and after (graph + decision).
   if (!outcome?.decision && messages.length === 0) return null;
 
@@ -66,9 +113,18 @@ export function BoardroomCard({
       </div>
 
       {messages.length > 0 && (
-        <div className="mb-3">
-          <BoardroomGraph messages={messages} live={live} />
-        </div>
+        <>
+          {/* The whole debate workflow: Convened → rounds → Decision. */}
+          <BoardroomFlow
+            messages={messages}
+            consensus={outcome?.consensus}
+            decided={Boolean(outcome?.decision)}
+            live={live}
+          />
+          <div className="mb-3">
+            <BoardroomGraph messages={messages} live={live} />
+          </div>
+        </>
       )}
 
       <div className="flex flex-wrap items-center gap-1.5 mb-3">

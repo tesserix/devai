@@ -426,6 +426,8 @@ export default function RunDetailPage() {
                     consensus: ctx.boardroom_consensus as boolean | undefined,
                     budget_hit: ctx.boardroom_budget_hit as boolean | undefined,
                     transcript: ctx.boardroom_transcript as string | undefined,
+                    skipped: ctx.boardroom_skipped as boolean | undefined,
+                    skipReason: ctx.boardroom_skip_reason as string | undefined,
                   }}
                 />
 
