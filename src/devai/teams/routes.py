@@ -77,7 +77,17 @@ async def _require_team_admin(request: Request, team_id: str) -> None:
 
 @router.get("")
 async def list_teams(request: Request) -> list[dict[str, Any]]:
-    return await _svc(request).list_teams()
+    """The caller's OWN teams (enriched with their role + org + member count).
+
+    Scoped to the caller — a user only ever sees teams they belong to (no
+    cross-team/org listing). A global admin sees all teams."""
+    principal = await _principal(request)
+    svc = _svc(request)
+    if principal is not None and "admin" in (principal.roles or []):
+        return await svc.list_teams()
+    if principal is None:
+        return []
+    return await svc.teams_with_role_for(principal.uid or principal.email)
 
 
 class CreateTeamBody(BaseModel):
@@ -117,6 +127,13 @@ class AddMemberBody(BaseModel):
 async def add_member(request: Request, team_id: str, body: AddMemberBody) -> dict[str, bool]:
     await _require_team_admin(request, team_id)
     ok = await _svc(request).add_member(team_id, body.user_uid, body.roles)
+    return {"ok": ok}
+
+
+@router.delete("/{team_id}/members/{user_uid}")
+async def remove_member(request: Request, team_id: str, user_uid: str) -> dict[str, bool]:
+    await _require_team_admin(request, team_id)
+    ok = await _svc(request).remove_member(team_id, user_uid)
     return {"ok": ok}
 
 

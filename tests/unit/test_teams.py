@@ -127,3 +127,56 @@ def test_can_dispatch_rules():
     assert svc.can_dispatch(Principal(email="x"), "team-9") is True
     # synthetic (webhook/cron) principal — unscoped
     assert svc.can_dispatch(None, "team-1") is True
+
+
+# ── Org identity + admin gates (team/org connector sharing) ─────────────
+
+
+@pytest.mark.asyncio
+async def test_orgs_for_returns_distinct_org_ids():
+    pool = FakePool(rows=[{"org_id": "tesserix"}])
+    svc = TeamService(FakeDB(pool))
+    assert await svc.orgs_for("uid-1") == ["tesserix"]
+    assert await svc.orgs_for("") == []
+
+
+@pytest.mark.asyncio
+async def test_is_team_admin_checks_roles():
+    admin_svc = TeamService(FakeDB(FakePool(row={"roles": ["admin", "developer"]})))
+    assert await admin_svc.is_team_admin("team-1", "uid-1") is True
+    member_svc = TeamService(FakeDB(FakePool(row={"roles": ["developer"]})))
+    assert await member_svc.is_team_admin("team-1", "uid-2") is False
+    none_svc = TeamService(FakeDB(FakePool(row=None)))
+    assert await none_svc.is_team_admin("team-1", "uid-3") is False
+    assert await admin_svc.is_team_admin("", "uid-1") is False
+
+
+@pytest.mark.asyncio
+async def test_is_org_admin_truthy_on_match():
+    yes = TeamService(FakeDB(FakePool(row={"?column?": 1})))
+    assert await yes.is_org_admin("tesserix", "uid-1") is True
+    no = TeamService(FakeDB(FakePool(row=None)))
+    assert await no.is_org_admin("tesserix", "uid-2") is False
+
+
+@pytest.mark.asyncio
+async def test_teams_with_role_for_enriches():
+    pool = FakePool(rows=[{"id": "team-1", "name": "Platform", "org_id": "tesserix", "roles": ["admin"], "member_count": 3}])
+    svc = TeamService(FakeDB(pool))
+    teams = await svc.teams_with_role_for("uid-1")
+    assert teams[0]["is_admin"] is True
+    assert teams[0]["org_id"] == "tesserix"
+    assert teams[0]["member_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_remove_member_executes_delete():
+    pool = FakePool()
+    svc = TeamService(FakeDB(pool))
+    assert await svc.remove_member("team-1", "uid-1") is True
+    assert any("DELETE FROM team_members" in q for q, _ in pool.executed)
+
+
+def test_principal_org_ids_roundtrip():
+    p = Principal(email="a@b.com", team_ids=["team-1"], org_ids=["tesserix"])
+    assert Principal.from_dict(p.to_dict()).org_ids == ["tesserix"]

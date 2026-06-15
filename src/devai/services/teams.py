@@ -108,6 +108,47 @@ class TeamService:
             logger.debug("is_org_admin(%s,%s) failed", org_id, user_key, exc_info=True)
             return False
 
+    async def teams_with_role_for(self, user_key: str) -> list[dict[str, Any]]:
+        """The caller's teams enriched with their role + org + member count —
+        what the dashboard's Team & Org panel lists."""
+        if not user_key:
+            return []
+        try:
+            rows = await self._pool.fetch(
+                """SELECT t.id, t.name, t.org_id, m.roles,
+                          (SELECT count(*) FROM team_members mm WHERE mm.team_id = t.id) AS member_count
+                   FROM team_members m JOIN teams t ON t.id = m.team_id
+                   WHERE m.user_uid = $1
+                   ORDER BY t.created_at DESC""",
+                user_key,
+            )
+            return [
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "org_id": r["org_id"],
+                    "roles": list(r["roles"] or []),
+                    "is_admin": "admin" in (r["roles"] or []),
+                    "member_count": int(r["member_count"] or 0),
+                }
+                for r in rows
+            ]
+        except Exception:  # noqa: BLE001
+            logger.debug("teams_with_role_for(%s) failed", user_key, exc_info=True)
+            return []
+
+    async def remove_member(self, team_id: str, user_uid: str) -> bool:
+        try:
+            await self._pool.execute(
+                "DELETE FROM team_members WHERE team_id = $1 AND user_uid = $2",
+                team_id,
+                user_uid,
+            )
+            return True
+        except Exception:  # noqa: BLE001
+            logger.warning("remove_member(%s,%s) failed", team_id, user_uid, exc_info=True)
+            return False
+
     async def members(self, team_id: str) -> list[dict[str, Any]]:
         try:
             rows = await self._pool.fetch(

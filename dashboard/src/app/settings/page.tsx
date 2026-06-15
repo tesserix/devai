@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, KeyRound, Loader2, Pencil, Plus, Save, Store, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, KeyRound, Loader2, Pencil, Plus, Save, Store, Trash2, Users } from "lucide-react";
 import { useConfirm } from "@/components/confirm-dialog";
 import {
   api,
@@ -10,6 +10,8 @@ import {
   type SettingsConnector,
   type SettingsConnectorSpec,
   type SharedConnector,
+  type TeamMember,
+  type TeamSummary,
   type WritableScope,
 } from "@/lib/api";
 
@@ -165,6 +167,7 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="mt-6 space-y-4">
+          <TeamOrgPanel onChanged={() => void load()} />
           {catalog?.connectors.map((spec) => {
             const configured = connectors.filter((c) => c.connector_key === spec.key);
             return (
@@ -215,6 +218,183 @@ export default function SettingsPage() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Team & Org — create a team, tag it with an org, manage members. Once you
+ *  have a team/org you admin, connectors gain "Apply to: Team/Org" so you can
+ *  share a credential with everyone instead of each person setting their own. */
+function TeamOrgPanel({ onChanged }: { onChanged: () => void }) {
+  const confirm = useConfirm();
+  const [teams, setTeams] = useState<TeamSummary[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [orgId, setOrgId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [manage, setManage] = useState<string | null>(null); // team id whose members are open
+
+  const load = useCallback(() => {
+    api.listMyTeams().then(setTeams).catch(() => setTeams([]));
+  }, []);
+  useEffect(() => {
+    if (open && teams === null) load();
+  }, [open, teams, load]);
+
+  const create = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.createTeam(name.trim(), orgId.trim());
+      setName("");
+      setOrgId("");
+      load();
+      onChanged(); // refresh Settings so the new team/org shows in "Apply to"
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not create team");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel p-5">
+      <button className="flex items-center justify-between w-full gap-4" onClick={() => setOpen((v) => !v)}>
+        <div className="text-left">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-[var(--ink-50)] font-medium">Team &amp; Org</h2>
+            {teams && <span className="pill text-xs">{teams.length}</span>}
+          </div>
+          <p className="text-sm text-[var(--ink-300)] mt-1">
+            Set up a team and tag it with your org (e.g. <code>tesserix</code>). Then any connector below gets an
+            <span className="text-[var(--ink-100)]"> Apply to: Team / Org</span> option — share a GitHub App or key
+            once and everyone inherits it. You become the team admin.
+          </p>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-[var(--ink-400)] transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-4">
+          {/* Create */}
+          <div className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-raised)] p-3">
+            <div className="label-eyebrow mb-2">Create a team</div>
+            <div className="grid sm:grid-cols-3 gap-2">
+              <input className="field text-sm" placeholder="Team name (e.g. Platform)" value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="field text-sm" placeholder="Org id (e.g. tesserix)" value={orgId} onChange={(e) => setOrgId(e.target.value)} />
+              <button className="btn-secondary text-sm flex items-center justify-center gap-1" disabled={busy || !name.trim()} onClick={create}>
+                <Plus className="w-3.5 h-3.5" /> Create team
+              </button>
+            </div>
+            <p className="text-[11px] text-[var(--ink-400)] mt-1.5">
+              The org id is the umbrella all your teams share — connectors saved at org scope reach every team in it.
+            </p>
+            {err && <p className="text-xs text-red-300 mt-1">{err}</p>}
+          </div>
+
+          {/* Your teams */}
+          {teams && teams.length > 0 ? (
+            <div className="space-y-2">
+              <div className="label-eyebrow">Your teams</div>
+              {teams.map((t) => (
+                <div key={t.id} className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-raised)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[var(--ink-100)] text-sm font-medium truncate">{t.name}</span>
+                      {t.org_id && <span className="pill text-[10px]">org: {t.org_id}</span>}
+                      {t.is_admin && <span className="pill text-[10px] text-sky-400">admin</span>}
+                      <span className="text-[10px] text-[var(--ink-400)]">{t.member_count ?? 0} member(s)</span>
+                    </div>
+                    {t.is_admin && (
+                      <button className="btn-secondary text-xs" onClick={() => setManage(manage === t.id ? null : t.id)}>
+                        Members
+                      </button>
+                    )}
+                  </div>
+                  {manage === t.id && <TeamMembers teamId={t.id} confirm={confirm} onChanged={onChanged} />}
+                </div>
+              ))}
+            </div>
+          ) : (
+            teams && <p className="text-sm text-[var(--ink-400)]">You're not in any team yet — create one above.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Members manager for one team (admin only). Add by email/uid + role, remove. */
+function TeamMembers({
+  teamId,
+  confirm,
+  onChanged,
+}: {
+  teamId: string;
+  confirm: ReturnType<typeof useConfirm>;
+  onChanged: () => void;
+}) {
+  const [members, setMembers] = useState<TeamMember[] | null>(null);
+  const [uid, setUid] = useState("");
+  const [admin, setAdmin] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api.teamMembers(teamId).then(setMembers).catch(() => setMembers([]));
+  }, [teamId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const add = async () => {
+    if (!uid.trim()) return;
+    setBusy(true);
+    try {
+      await api.addTeamMember(teamId, uid.trim(), admin ? ["admin"] : ["developer"]);
+      setUid("");
+      setAdmin(false);
+      load();
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[var(--surface-border)] space-y-2">
+      <div className="grid sm:grid-cols-[1fr_auto_auto] gap-2 items-center">
+        <input className="field text-sm" placeholder="Member email or uid" value={uid} onChange={(e) => setUid(e.target.value)} />
+        <label className="text-xs text-[var(--ink-300)] flex items-center gap-1.5">
+          <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} /> admin
+        </label>
+        <button className="btn-secondary text-xs flex items-center gap-1" disabled={busy || !uid.trim()} onClick={add}>
+          <Plus className="w-3 h-3" /> Add
+        </button>
+      </div>
+      {members?.map((m) => (
+        <div key={m.user_uid} className="flex items-center justify-between text-sm rounded px-2 py-1.5 bg-[var(--surface-base)]">
+          <span className="text-[var(--ink-100)] truncate">
+            {m.user_uid}
+            {(m.roles || []).includes("admin") && <span className="pill text-[10px] text-sky-400 ml-2">admin</span>}
+          </span>
+          <button
+            className="text-[var(--ink-400)] hover:text-red-400 p-1"
+            title="Remove member"
+            onClick={async () => {
+              const ok = await confirm({ title: `Remove ${m.user_uid}?`, message: "They lose access to this team's shared connectors.", confirmLabel: "Remove", tone: "danger" });
+              if (!ok) return;
+              await api.removeTeamMember(teamId, m.user_uid);
+              load();
+              onChanged();
+            }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

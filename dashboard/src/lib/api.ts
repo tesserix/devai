@@ -291,6 +291,23 @@ export const api = {
       body: JSON.stringify({ server }),
     }),
 
+  // ── Teams & Orgs (share connectors with your team/org) ───────────────
+  listMyTeams: () => apiFetch<TeamSummary[]>("/teams", { soft: true }),
+  createTeam: (name: string, org_id: string) =>
+    apiFetch<{ team_id: string }>("/teams", { method: "POST", body: JSON.stringify({ name, org_id }) }),
+  teamMembers: (teamId: string) =>
+    apiFetch<TeamMember[]>(`/teams/${encodeURIComponent(teamId)}/members`, { soft: true }),
+  addTeamMember: (teamId: string, user_uid: string, roles: string[]) =>
+    apiFetch<{ ok: boolean }>(`/teams/${encodeURIComponent(teamId)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ user_uid, roles }),
+    }),
+  removeTeamMember: (teamId: string, userUid: string) =>
+    apiFetch<{ ok: boolean }>(
+      `/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userUid)}`,
+      { method: "DELETE" }
+    ),
+
   // Pipeline. The Fiber pipeline serializes a task as {id, state, current_stage,
   // …} but the dashboard's PipelineRun shape is {run_id, stage, agents}. Normalize
   // at the boundary so a missing run_id never reaches run.run_id.slice() and
@@ -1165,6 +1182,21 @@ export interface SharedConnector {
   scope_id: string;
   provider: string;
   updated_by: string;
+}
+
+export interface TeamSummary {
+  id: string;
+  name: string;
+  org_id: string;
+  roles?: string[];
+  is_admin?: boolean;
+  member_count?: number;
+}
+
+export interface TeamMember {
+  user_uid: string;
+  roles: string[];
+  joined_at?: string;
 }
 
 export interface McpMarketplaceEntry {
