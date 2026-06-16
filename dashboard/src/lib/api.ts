@@ -1146,6 +1146,7 @@ export interface KagentCatalog {
   enabled: boolean;
   passthrough: boolean;
   models: { provider: string; model: string; suffix: string }[];
+  enabled_models: string[];
 }
 
 export interface SettingsCatalog {

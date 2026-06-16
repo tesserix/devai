@@ -243,22 +243,33 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
     list.push(m.model);
     byProvider.set(m.provider, list);
   }
-  // Toggle persists per-user via the `kagent` connector (provider on/off),
-  // resolved per run by the overlay — so it sticks across sessions/restarts.
-  const toggle = async () => {
+  // The on/off switch and the per-model selection both persist per-user via the
+  // `kagent` connector (provider on/off + prefs.enabled_models). Enabling a model
+  // makes kagent-agent-sync provision that variant's pod automatically (and reap
+  // it when nobody has it enabled) — fully dynamic, no redeploy.
+  const save = async (provider: string, enabledModels: string[]) => {
     setBusy(true);
     try {
       await api.saveConnector({
         scope: "user",
         scope_id: "",
         connector_key: "kagent",
-        provider: kagent.enabled ? "off" : "on",
+        provider,
+        prefs: { enabled_models: enabledModels },
       });
       onChanged();
     } finally {
       setBusy(false);
     }
   };
+  const toggle = () => void save(kagent.enabled ? "off" : "on", kagent.enabled_models);
+  const toggleModel = (model: string) =>
+    void save(
+      kagent.enabled ? "on" : "off",
+      kagent.enabled_models.includes(model)
+        ? kagent.enabled_models.filter((m) => m !== model)
+        : [...kagent.enabled_models, model],
+    );
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex items-center justify-between">
@@ -277,8 +288,9 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
         </button>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        When you enable kagent (connector below) and configure one of these providers, your long-lived
-        agents run on <strong>your own key</strong> and chosen model, falling back across the others.
+        Click a model to <strong>enable</strong> it for your runs — kagent spins up that model&apos;s pod
+        automatically (and removes it when nobody&apos;s using it). Your agents run on <strong>your own
+        key</strong> and chosen model, falling back across the others you enabled.
       </p>
       {kagent.models.length === 0 ? (
         <p className="mt-3 text-xs text-muted-foreground">No kagent models configured.</p>
@@ -287,11 +299,25 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
           {Array.from(byProvider.entries()).map(([provider, models]) => (
             <div key={provider} className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium capitalize">{provider}</span>
-              {models.map((model) => (
-                <span key={model} className="rounded bg-muted px-2 py-0.5 text-xs">
-                  {model}
-                </span>
-              ))}
+              {models.map((model) => {
+                const on = kagent.enabled_models.includes(model);
+                return (
+                  <button
+                    key={model}
+                    onClick={() => toggleModel(model)}
+                    disabled={busy}
+                    title={on ? "Enabled — click to disable" : "Click to enable"}
+                    className={`rounded px-2 py-0.5 text-xs transition disabled:opacity-50 ${
+                      on
+                        ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/40 hover:bg-emerald-500/25"
+                        : "bg-muted text-muted-foreground hover:bg-muted/70"
+                    }`}
+                  >
+                    {on ? "✓ " : ""}
+                    {model}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </div>

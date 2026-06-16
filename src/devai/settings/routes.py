@@ -80,32 +80,111 @@ def _scope_default(principal: Principal) -> tuple[Scope, str]:
 # ── catalog ───────────────────────────────────────────────────────────────
 
 
-async def _kagent_catalog_public(principal: Principal, svc: Any) -> dict[str, Any]:
-    """The kagent runtime model catalog for the Settings UI: which (provider,
-    model) variants kagent can run a user's agent on (passthrough = the user's
-    own key). ``enabled`` reflects THIS user's effective setting (their kagent
-    connector overlay), not just the platform default — so the toggle is
-    accurate. The UI cross-references the models with /settings/models/{provider}
-    to show only what the user has a key for."""
+def _kagent_supported_catalog() -> list[dict[str, str]]:
+    """The operator-curated menu of supported (provider, model) variants
+    (config kagent_catalog). The set a user may enable from."""
     import json as _json
 
+    from devai.config import settings as base
+
+    out: list[dict[str, str]] = []
+    try:
+        for it in _json.loads(str(getattr(base, "kagent_catalog", "") or "[]")):
+            if isinstance(it, dict) and it.get("provider") and it.get("model"):
+                out.append(
+                    {"suffix": str(it.get("suffix", "")), "provider": str(it["provider"]), "model": str(it["model"])}
+                )
+    except (ValueError, TypeError):
+        pass
+    return out
+
+
+async def _kagent_user_enabled_models(principal: Principal, svc: Any) -> list[str]:
+    """The model ids THIS user enabled for kagent (their kagent connector's
+    prefs.enabled_models). Drives which variants get provisioned."""
+    email = getattr(principal, "email", "") or ""
+    lister = getattr(svc, "list_user_connectors_by_email", None)
+    if lister is None or not email:
+        return []
+    try:
+        for c in await lister(email):
+            if c.connector_key == "kagent":
+                em = (c.prefs or {}).get("enabled_models")
+                if isinstance(em, list):
+                    return [str(m) for m in em]
+    except Exception:  # noqa: BLE001 — never break the catalog on a settings read
+        return []
+    return []
+
+
+async def _kagent_catalog_public(principal: Principal, svc: Any) -> dict[str, Any]:
+    """The kagent runtime model catalog for the Settings UI: the supported menu,
+    plus THIS user's effective on/off (their connector overlay) and which models
+    they've enabled — so the UI can render per-model toggles."""
     from devai.config import settings as base
     from devai.settings.overlay import build_overlay
 
     overlay = await build_overlay(base, principal, svc)
-    models: list[dict[str, str]] = []
-    try:
-        for it in _json.loads(str(getattr(base, "kagent_catalog", "") or "[]")):
-            if isinstance(it, dict) and it.get("provider") and it.get("model"):
-                models.append(
-                    {"provider": str(it["provider"]), "model": str(it["model"]), "suffix": str(it.get("suffix", ""))}
-                )
-    except (ValueError, TypeError):
-        models = []
     return {
         "enabled": bool(getattr(overlay, "kagent_enabled", False)),
         "passthrough": bool(getattr(base, "kagent_passthrough", False)),
-        "models": models,
+        "models": _kagent_supported_catalog(),
+        "enabled_models": await _kagent_user_enabled_models(principal, svc),
+    }
+
+
+def _require_kagent_service(request: Request) -> None:
+    """Gate the active-variants endpoint to a trusted internal service.
+
+    The kagent-agent-sync reconciler presents the SAME shared bearer the MCP Hub
+    uses (``DEVAI_MCP_HUB_SERVICE_TOKEN``); devai-api already accepts it via
+    :func:`identity._principal_from_service_bearer`, yielding a ``service``-role
+    principal. Reusing it means one key, one rotation — no new secret. The
+    endpoint returns non-sensitive data (the union of which models users enabled,
+    no creds), so any authenticated service identity is sufficient."""
+    from devai.identity import _principal_from_service_bearer
+
+    principal = _principal_from_service_bearer(request)
+    if principal is None or "service" not in (principal.roles or []):
+        raise HTTPException(status_code=401, detail="service token required")
+
+
+def _kagent_default_model(catalog: list[dict[str, str]]) -> str:
+    """The fallback model when a user turned kagent ON but hasn't picked any model
+    yet — so "kagent on" alone provisions at least one usable variant instead of
+    nothing. The first catalog entry for ``kagent_model_provider`` (else the first
+    entry overall). Mirrors the dispatch fallback in job_runner."""
+    from devai.config import settings as base
+
+    provider = str(getattr(base, "kagent_model_provider", "anthropic") or "anthropic").lower()
+    for e in catalog:
+        if e["provider"].lower() == provider:
+            return e["model"]
+    return catalog[0]["model"] if catalog else ""
+
+
+@router.get("/kagent/active-variants")
+async def kagent_active_variants(request: Request) -> dict[str, Any]:
+    """The variants kagent-agent-sync should provision RIGHT NOW: the union of
+    every user's enabled models (∩ the supported catalog), for users whose kagent
+    switch is on. Service-token gated. Returns a ready-to-use ``param`` string."""
+    _require_kagent_service(request)
+    svc = _svc(request)
+    catalog = _kagent_supported_catalog()
+    default_model = _kagent_default_model(catalog)
+    wanted: set[str] = set()
+    for c in await svc.list_all_by_key("kagent"):
+        if str(c.provider).lower() != "on":  # only users who turned kagent on
+            continue
+        em = (c.prefs or {}).get("enabled_models")
+        picked = [str(m) for m in em] if isinstance(em, list) else []
+        # kagent on but no model chosen → provision the platform default so the
+        # user isn't left with a live switch and zero working variants.
+        wanted.update(picked or ([default_model] if default_model else []))
+    variants = [e for e in catalog if e["model"] in wanted]
+    return {
+        "variants": variants,
+        "param": ",".join(f"{e['suffix']}:kagent-mc-{e['suffix']}" for e in variants),
     }
 
 

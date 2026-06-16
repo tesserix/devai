@@ -111,6 +111,26 @@ class SettingsService:
     async def list_connectors(self, scope: Scope, scope_id: str) -> list[Connector]:
         return await self._load_rows(scope, scope_id)
 
+    async def list_all_by_key(self, connector_key: str) -> list[Connector]:
+        """Every connector of one kind across ALL users/scopes. Used by the
+        kagent active-variants reconcile (the union of which models users
+        enabled) — never returns secret values, only prefs/provider/scope.
+        """
+        if self._pool is None:
+            return [c for c in self._mem.values() if c.connector_key == connector_key]
+        try:
+            rows = await self._pool.fetch(
+                f"""SELECT scope, scope_id, connector_key, instance_id, provider,
+                           prefs, secret_refs, enabled, updated_by,
+                           to_char(updated_at,'YYYY-MM-DD\"T\"HH24:MI:SSZ') AS updated_at
+                    FROM {_TABLE} WHERE connector_key=$1""",
+                connector_key,
+            )
+            return [_row_to_connector(r) for r in rows]
+        except Exception:
+            logger.exception("settings: list_all_by_key failed (%s)", connector_key)
+            return [c for c in self._mem.values() if c.connector_key == connector_key]
+
     async def list_user_connectors_by_email(self, email: str) -> list[Connector]:
         """User-scope connectors for an email, matched by scope_id OR
         updated_by. Connectors are saved under the GIP uid (principal.uid)
