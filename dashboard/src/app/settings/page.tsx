@@ -8,6 +8,7 @@ import {
   api,
   type McpMarketplaceEntry,
   type SettingsCatalog,
+  type KagentCatalog,
   type SettingsConnector,
   type SettingsConnectorSpec,
   type SharedConnector,
@@ -172,6 +173,7 @@ export default function SettingsPage() {
         <div className="mt-6 space-y-4">
           <TeamOrgPanel onChanged={() => void load()} />
           <LlmCapabilitiesPanel refreshKey={capsRefresh} />
+          {catalog?.kagent && <KagentRuntimePanel kagent={catalog.kagent} />}
           {catalog?.connectors.map((spec) => {
             const configured = connectors.filter((c) => c.connector_key === spec.key);
             return (
@@ -229,6 +231,51 @@ export default function SettingsPage() {
 /** Team & Org — create a team, tag it with an org, manage members. Once you
  *  have a team/org you admin, connectors gain "Apply to: Team/Org" so you can
  *  share a credential with everyone instead of each person setting their own. */
+function KagentRuntimePanel({ kagent }: { kagent: KagentCatalog }) {
+  // Group the catalog models by provider so the user sees which provider/model
+  // combos kagent can run their agents on (with their own key, via passthrough).
+  const byProvider = new Map<string, string[]>();
+  for (const m of kagent.models) {
+    const list = byProvider.get(m.provider) ?? [];
+    list.push(m.model);
+    byProvider.set(m.provider, list);
+  }
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">kagent runtime — available models</h3>
+        <span
+          className={`rounded px-2 py-0.5 text-xs ${
+            kagent.enabled ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {kagent.enabled ? "enabled" : "off"}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        When you enable kagent (connector below) and configure one of these providers, your long-lived
+        agents run on <strong>your own key</strong> and chosen model, falling back across the others.
+      </p>
+      {kagent.models.length === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">No kagent models configured.</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {Array.from(byProvider.entries()).map(([provider, models]) => (
+            <div key={provider} className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium capitalize">{provider}</span>
+              {models.map((model) => (
+                <span key={model} className="rounded bg-muted px-2 py-0.5 text-xs">
+                  {model}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TeamOrgPanel({ onChanged }: { onChanged: () => void }) {
   const confirm = useConfirm();
   const [teams, setTeams] = useState<TeamSummary[] | null>(null);

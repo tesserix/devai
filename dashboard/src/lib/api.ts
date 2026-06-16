@@ -1142,10 +1142,17 @@ export interface SettingsConnectorSpec {
   fields: SettingsField[];
 }
 
+export interface KagentCatalog {
+  enabled: boolean;
+  passthrough: boolean;
+  models: { provider: string; model: string; suffix: string }[];
+}
+
 export interface SettingsCatalog {
   connectors: SettingsConnectorSpec[];
   secrets_writable: boolean;
   has_db: boolean;
+  kagent?: KagentCatalog;
 }
 
 export interface SettingsConnector {

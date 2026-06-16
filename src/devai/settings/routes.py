@@ -80,15 +80,42 @@ def _scope_default(principal: Principal) -> tuple[Scope, str]:
 # ── catalog ───────────────────────────────────────────────────────────────
 
 
+def _kagent_catalog_public() -> dict[str, Any]:
+    """The kagent runtime model catalog for the Settings UI: which (provider,
+    model) variants kagent can run a user's agent on (passthrough = the user's
+    own key). The UI cross-references this with /settings/models/{provider} to
+    show only what the user has a key for."""
+    import json as _json
+
+    from devai.config import settings as base
+
+    models: list[dict[str, str]] = []
+    try:
+        for it in _json.loads(str(getattr(base, "kagent_catalog", "") or "[]")):
+            if isinstance(it, dict) and it.get("provider") and it.get("model"):
+                models.append(
+                    {"provider": str(it["provider"]), "model": str(it["model"]), "suffix": str(it.get("suffix", ""))}
+                )
+    except (ValueError, TypeError):
+        models = []
+    return {
+        "enabled": bool(getattr(base, "kagent_enabled", False)),
+        "passthrough": bool(getattr(base, "kagent_passthrough", False)),
+        "models": models,
+    }
+
+
 @router.get("/catalog")
 async def get_catalog(request: Request) -> dict[str, Any]:
-    """The connector catalog (field definitions) + backend capability flags."""
+    """The connector catalog (field definitions) + capability flags + the kagent
+    runtime model catalog."""
     await _require_principal(request)
     svc = _svc(request)
     return {
         "connectors": catalog_public(),
         "secrets_writable": await svc.secrets_writable(),
         "has_db": svc.has_db,
+        "kagent": _kagent_catalog_public(),
     }
 
 
