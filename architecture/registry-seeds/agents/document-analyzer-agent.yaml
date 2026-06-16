@@ -8,12 +8,12 @@ metadata:
     devai.io/source: devai
     devai.io/category: planning
     devai.io/skill: document-analyzer
-    # kagent test target: marks this agent long-lived so kagent-agent-sync
-    # reconciles it into a controller-managed Deployment, and the dispatcher
-    # routes it over A2A WHEN the kagent switch is on (Settings → kagent, or
-    # DEVAI_KAGENT_ENABLED). With the switch off it runs as a Job exactly as
-    # before — the label alone changes nothing in the DevAI pipeline.
-    devai.io/runtime: kagent
+    # NOTE: no devai.io/runtime label → this agent runs on the DEFAULT path: an
+    # ephemeral K8s Job per run (spins up when the pipeline calls it, terminates
+    # after). That's the right fit for a 3-node cluster — zero standing pods.
+    # kagent (a long-lived, always-warm Deployment) is opt-in: add
+    # `devai.io/runtime: kagent` to an agent ONLY when it's hit constantly and
+    # cold-start hurts AND there's node headroom for a standing pod.
 spec:
   skill: document-analyzer
   promptRef: document-analyzer-prompt-v1
