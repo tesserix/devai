@@ -137,45 +137,69 @@ So kagent's 401 is simply that it points at the **one placeholder** platform key
 (OpenAI). DevAI's real platform providers are **Anthropic and Vertex**. No Bedrock
 exists or is used anywhere in DevAI — don't add it for kagent.
 
-### 6b. The architectural point: kagent shares the PLATFORM key, not per-user keys
+### 6b. Two ways to feed keys to kagent
 
-- **DevAI's per-user keys** (`devai-user-<uid>-…`) are resolved **per run** by the
-  `PrincipalLLMResolver` overlay and injected into each ephemeral **Job** — so a run
-  bills against *the triggering user's own* key (per-user isolation + metering).
-- **A kagent agent is a long-lived, shared Deployment** with a **static `ModelConfig`**
-  fixed at reconcile time. It has no per-A2A-request model context, so it **cannot use
-  per-user keys** — every call rides one **shared platform key**, regardless of who
-  triggered it (the A2A protocol forwards identity, not model credentials).
-- **Implication:** routing an agent to kagent means its LLM calls use the **shared
-  platform key** and lose per-user attribution/metering. If per-user billing matters
-  for that agent, keep it on the **Job path** (switch off / don't label it). This is a
-  deliberate trade-off of the standing-runtime model — not a bug. True per-user LLM in
-  kagent would require passing the user's model config through every A2A request *and*
-  a per-request dynamic ModelConfig, which kagent does not support.
+kagent supports **all the providers DevAI uses** — `Anthropic, OpenAI, AzureOpenAI,
+Gemini, GeminiVertexAI, AnthropicVertexAI, Bedrock, Ollama`. There are two key modes,
+and the right answer depends on whether you want per-user keys.
 
-### 6c. Recommendation (reuse, don't rewire)
+**Mode 1 — shared platform key (`apiKeySecret`).** The ModelConfig holds a static
+secret ref; every call uses one shared key. Simple; fine for platform agents that
+don't need per-user billing. Today this is OpenAI + the placeholder → 401.
 
-kagent should **not** own a separate key plane. Pick one, best first:
+**Mode 2 — per-user keys via `apiKeyPassthrough` (the answer to "each user uses their
+own key").** kagent ModelConfig has a boolean **`apiKeyPassthrough`**:
 
-1. **Switch kagent's `default-model-config` to Anthropic** (DevAI's real platform key).
-   Add an ExternalSecret `kagent-anthropic` (sync `prod-devai-anthropic-api-key` into
-   `kagent-system`, mirroring `kagent-openai`) and set the ModelConfig to
-   `provider: Anthropic`, `model: claude-sonnet-4-20250514` (DevAI's `DEVAI_CLAUDE_MODEL`).
-   One real key, already owned by DevAI, already in the cluster. **Most reliable.**
-2. **Route through `devai-ai-gateway`** (single key plane): set the ModelConfig
-   `baseURL` to the gateway's OpenAI-compatible route
-   (`http://ai-gateway.agentgateway-system.svc.cluster.local:8080/openai`) so the
-   gateway injects the key — but only after the gateway's OpenAI upstream has a real
-   key (today the platform OpenAI key is the placeholder).
-3. **Populate the real OpenAI key** in `prod-devai-openai-api-key` (the ExternalSecret
-   re-syncs). Works, but keeps OpenAI as a second key plane DevAI otherwise barely uses.
+> *"forwards the Bearer token from incoming A2A requests directly to the LLM provider
+> as the API key … for federated identity, to avoid separate secret management."*
+> (mutually exclusive with `apiKeySecret`.)
 
-> **Action (operator-owned infra change in `tesserix-k8s` + GCP SM, not done here):**
-> implement option 1 — point kagent at the real Anthropic platform key. Touches the
-> kagent chart's ModelConfig + a new `kagent-anthropic` ExternalSecret; `default-model-config`
-> is created by the upstream chart, so override it via chart values or replace it with an
-> Anthropic ModelConfig and update `registry.modelConfig` in
-> `tesserix-k8s/charts/apps/kagent-agent-sync/values.yaml`.
+This is purpose-built for exactly this. **One shared kagent agent Deployment** serves
+every user, and each A2A request carries *that user's* key as the `Authorization:
+Bearer` token, which kagent forwards to the provider. **No per-user Deployments, no
+syncing per-user secrets into `kagent-system`.** It reuses DevAI's existing per-user
+resolution — the same `PrincipalLLMResolver` overlay that already gives the **Job**
+path the triggering user's key.
+
+### 6c. Recommended design — per-user kagent via passthrough
+
+```
+DevAI dispatch (JobRunnerStage._maybe_dispatch_kagent)
+  1. resolve the principal's LLM connector (provider, model, KEY) via the overlay
+     — already done for the Job path (settings_overlay / PrincipalLLMResolver)
+  2. KagentClient.dispatch sends Authorization: Bearer <user's LLM key>
+     (today it only sends X-Forwarded-User + the bff service token)
+        │  POST {kagent}/api/a2a/kagent-system/<agent>
+        ▼
+kagent agent  (ModelConfig: apiKeyPassthrough=true, provider=Anthropic, claude-sonnet-4)
+  3. forwards the Bearer token to the provider as the API key → user's own key, billed to them
+```
+
+**What to build (two small, well-scoped changes):**
+- **Infra (`tesserix-k8s`):** a ModelConfig with `apiKeyPassthrough: true` +
+  `provider: Anthropic` + `model: claude-sonnet-4-20250514`; point
+  `kagent-agent-sync` `registry.modelConfig` at it. No secret needed (passthrough).
+- **DevAI (`src/devai/agentic/kagent_client.py` + `job_runner.py`):** resolve the
+  principal's key from their connector (the overlay already exposes it) and pass it as
+  `Authorization: Bearer …` on `dispatch()`. Falls back to the shared ModelConfig (or
+  the Job path) when the user has no own key.
+
+**Provider note:** one ModelConfig fixes the *provider* (the key varies per user). DevAI
+standardizes on Anthropic/Claude, so an Anthropic passthrough ModelConfig fits most
+agents. For users on a different provider, dispatch to a provider-matched passthrough
+agent variant, or fall back to the Job path. Vertex/Bedrock are available the same way
+if needed.
+
+**Simple baseline (if you just want kagent working now, before per-user):** point
+`default-model-config` at the **real Anthropic platform key** — add a `kagent-anthropic`
+ExternalSecret (sync `prod-devai-anthropic-api-key`) and set the ModelConfig to
+`provider: Anthropic`. Shared key, but real, so agents run. Layer passthrough on top
+afterward for per-user.
+
+> **Status:** design verified against the live CRD (`apiKeyPassthrough` exists,
+> all providers supported). Not yet implemented — it's a `tesserix-k8s` ModelConfig +
+> a small `kagent_client` change. Correcting the earlier note in this doc's history that
+> said kagent "cannot use per-user keys" — with `apiKeyPassthrough`, it can.
 
 ---
 
