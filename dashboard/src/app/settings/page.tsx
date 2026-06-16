@@ -233,6 +233,17 @@ export default function SettingsPage() {
 /** Team & Org — create a team, tag it with an org, manage members. Once you
  *  have a team/org you admin, connectors gain "Apply to: Team/Org" so you can
  *  share a credential with everyone instead of each person setting their own. */
+const KAGENT_PROVIDER_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  vertex: "Vertex",
+  vertex_gemini: "Vertex",
+  gemini: "Gemini",
+  groq: "Groq",
+  bedrock: "Bedrock",
+};
+const kagentProviderLabel = (p: string) => KAGENT_PROVIDER_LABELS[p.toLowerCase()] ?? p;
+
 function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   // Group the catalog models by provider so the user sees which provider/model
@@ -243,6 +254,7 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
     list.push(m.model);
     byProvider.set(m.provider, list);
   }
+  const enabledCount = kagent.enabled_models.length;
   // The on/off switch and the per-model selection both persist per-user via the
   // `kagent` connector (provider on/off + prefs.enabled_models). Enabling a model
   // makes kagent-agent-sync provision that variant's pod automatically (and reap
@@ -272,54 +284,81 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
     );
   return (
     <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">kagent runtime — available models</h3>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">kagent runtime</h3>
+          {kagent.enabled && enabledCount > 0 && (
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600">
+              {enabledCount} model{enabledCount === 1 ? "" : "s"} enabled
+            </span>
+          )}
+        </div>
         <button
           onClick={() => void toggle()}
           disabled={busy}
+          role="switch"
+          aria-checked={kagent.enabled}
           title={kagent.enabled ? "Disable kagent for your runs" : "Enable kagent for your runs"}
-          className={`rounded px-2.5 py-0.5 text-xs font-medium transition disabled:opacity-50 ${
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-50 ${
             kagent.enabled
               ? "bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25"
               : "bg-muted text-muted-foreground hover:bg-muted/70"
           }`}
         >
-          {busy ? "saving…" : kagent.enabled ? "enabled — click to disable" : "off — click to enable"}
+          <span className={`h-1.5 w-1.5 rounded-full ${kagent.enabled ? "bg-emerald-500" : "bg-muted-foreground/50"}`} />
+          {busy ? "saving…" : kagent.enabled ? "On" : "Off"}
         </button>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Click a model to <strong>enable</strong> it for your runs — kagent spins up that model&apos;s pod
-        automatically (and removes it when nobody&apos;s using it). Your agents run on <strong>your own
-        key</strong> and chosen model, falling back across the others you enabled.
+        Long-lived agents run on standing pods instead of one-shot jobs. Click a model to{" "}
+        <strong>enable</strong> it — kagent spins up that model&apos;s pod automatically within a couple of
+        minutes (and reaps it when nobody&apos;s using it). Runs use <strong>your own key</strong> and your
+        chosen model, falling back across the others you enabled.
       </p>
       {kagent.models.length === 0 ? (
         <p className="mt-3 text-xs text-muted-foreground">No kagent models configured.</p>
       ) : (
-        <div className="mt-3 space-y-2">
-          {Array.from(byProvider.entries()).map(([provider, models]) => (
-            <div key={provider} className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium capitalize">{provider}</span>
-              {models.map((model) => {
-                const on = kagent.enabled_models.includes(model);
-                return (
-                  <button
-                    key={model}
-                    onClick={() => toggleModel(model)}
-                    disabled={busy}
-                    title={on ? "Enabled — click to disable" : "Click to enable"}
-                    className={`rounded px-2 py-0.5 text-xs transition disabled:opacity-50 ${
-                      on
-                        ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/40 hover:bg-emerald-500/25"
-                        : "bg-muted text-muted-foreground hover:bg-muted/70"
-                    }`}
-                  >
-                    {on ? "✓ " : ""}
-                    {model}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+        <div className="mt-3">
+          {!kagent.enabled && (
+            <p className="mb-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              kagent is <strong>off</strong> — your picks are saved, but no pods run until you switch it{" "}
+              <span className="text-emerald-600">On</span> above.
+            </p>
+          )}
+          <div className={`space-y-2.5 ${kagent.enabled ? "" : "opacity-60"}`}>
+            {Array.from(byProvider.entries()).map(([provider, models]) => {
+              const onCount = models.filter((m) => kagent.enabled_models.includes(m)).length;
+              return (
+                <div key={provider} className="flex flex-wrap items-center gap-2">
+                  <span className="w-20 shrink-0 text-xs font-medium text-foreground/80">
+                    {kagentProviderLabel(provider)}
+                    {onCount > 0 && <span className="ml-1 text-[10px] text-emerald-600">{onCount}</span>}
+                  </span>
+                  {models.map((model) => {
+                    const on = kagent.enabled_models.includes(model);
+                    return (
+                      <button
+                        key={model}
+                        onClick={() => toggleModel(model)}
+                        disabled={busy}
+                        title={on ? "Enabled — click to disable" : "Click to enable"}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs transition disabled:opacity-50 ${
+                          on
+                            ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/40 hover:bg-emerald-500/25"
+                            : "bg-muted text-muted-foreground ring-1 ring-transparent hover:bg-muted/70 hover:ring-border"
+                        }`}
+                      >
+                        <span className={on ? "text-emerald-500" : "text-muted-foreground/40"}>
+                          {on ? "✓" : "+"}
+                        </span>
+                        {model}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
