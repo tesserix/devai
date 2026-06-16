@@ -8,6 +8,12 @@ metadata:
     devai.io/source: devai
     devai.io/category: planning
     devai.io/skill: document-analyzer
+    # kagent test target: marks this agent long-lived so kagent-agent-sync
+    # reconciles it into a controller-managed Deployment, and the dispatcher
+    # routes it over A2A WHEN the kagent switch is on (Settings → kagent, or
+    # DEVAI_KAGENT_ENABLED). With the switch off it runs as a Job exactly as
+    # before — the label alone changes nothing in the DevAI pipeline.
+    devai.io/runtime: kagent
 spec:
   skill: document-analyzer
   promptRef: document-analyzer-prompt-v1
