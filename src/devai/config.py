@@ -664,8 +664,16 @@ class Settings(BaseSettings):
     # granularity), then the entry for their fallback_model, then the rest.
     kagent_catalog: str = (
         '[{"suffix":"anthropic","provider":"anthropic","model":"claude-sonnet-4-5-20250929"},'
+        '{"suffix":"anthropic-sonnet-4-6","provider":"anthropic","model":"claude-sonnet-4-6"},'
         '{"suffix":"anthropic-opus","provider":"anthropic","model":"claude-opus-4-8"},'
-        '{"suffix":"openai","provider":"openai","model":"gpt-4.1"}]'
+        '{"suffix":"openai","provider":"openai","model":"gpt-4.1"},'
+        '{"suffix":"openai-gpt-5-4","provider":"openai","model":"gpt-5.4"},'
+        '{"suffix":"openai-gpt-5-5","provider":"openai","model":"gpt-5.5"},'
+        '{"suffix":"openai-gpt-4o","provider":"openai","model":"gpt-4o"},'
+        '{"suffix":"openai-o3","provider":"openai","model":"o3"},'
+        '{"suffix":"openai-o4-mini","provider":"openai","model":"o4-mini"},'
+        '{"suffix":"openai-o3-mini","provider":"openai","model":"o3-mini"},'
+        '{"suffix":"openai-gpt-4-1-mini","provider":"openai","model":"gpt-4.1-mini"}]'
     )
 
     # --- LLM adapter ---
