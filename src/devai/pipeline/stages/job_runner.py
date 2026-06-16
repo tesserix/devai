@@ -60,6 +60,22 @@ _KAGENT_PROVIDER_KEY_ATTR: dict[str, str] = {
     "vertex_gemini": "vertex_api_key",
 }
 
+
+def _a2a_failed(result: dict[str, Any] | None) -> bool:
+    """True when an A2A result reports a failure (so we should fall back).
+
+    A transport-OK dispatch can still carry an LLM failure — kagent sets
+    ``status.state=failed`` and/or ``metadata.kagent_error_code`` (bad key, bad
+    model, rate limit). Treat either as a failure for the fallback chain.
+    """
+    if not isinstance(result, dict):
+        return True
+    status = result.get("status")
+    if isinstance(status, dict) and status.get("state") == "failed":
+        return True
+    meta = result.get("metadata")
+    return bool(isinstance(meta, dict) and meta.get("kagent_error_code"))
+
 # Stage handlers that genuinely cannot run as a Job (touch state.redis,
 # call SCM mid-flight, etc.) can declare `runner: inline` in their YAML.
 # This handler honours that hint by returning a stub immediately so the
@@ -325,9 +341,7 @@ class JobRunnerStage(PipelineStage):
         fails when a Job would have worked.
         """
         from devai.agentic.kagent_client import (
-            KagentError,
             create_kagent_client,
-            extract_a2a_text,
         )
 
         # Cheap label check FIRST — the 99% Job path pays no settings cost.
@@ -357,36 +371,62 @@ class JobRunnerStage(PipelineStage):
             )
             return None
 
-        # Per-user keys: when passthrough is on, forward the triggering user's
-        # OWN LLM key as the A2A Bearer token (the kagent ModelConfig is
-        # apiKeyPassthrough, so it has no shared key). Isolation guardrails:
-        #   • HUMAN principals only — a real LLM credential is forwarded, so
-        #     system/webhook/cron runs (which would resolve the service/global
-        #     key) never passthrough; they fall back to the Job path.
-        #   • CONNECTOR-scoped keys only — _kagent_user_key returns a key only
-        #     when it came from the principal's Settings connector overlay
-        #     (user/team/org/tenant), never the platform base key. Resolution is
-        #     per-principal, so no user can ever receive another user's key.
-        #   • No own key → Job path (never bill a kagent run to a shared key).
-        # The key is never logged or persisted (only the Authorization header).
-        api_key = ""
-        if bool(getattr(settings, "kagent_passthrough", False)):
-            email = task.triggered_by or ""
-            is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
-            api_key = self._kagent_user_key(settings) if is_human else ""
-            if not api_key:
-                logger.info(
-                    "stage %s: no own LLM key for kagent passthrough (principal=%s) — using Job path",
-                    self._stage_name,
-                    email or "system",
-                )
-                return None
-
         namespace = str(getattr(settings, "kagent_default_namespace", "") or "") or None
         message = self._kagent_message(task)
+
+        # Shared-key mode (no passthrough): dispatch to the bare agent, no Bearer.
+        if not bool(getattr(settings, "kagent_passthrough", False)):
+            result = await self._kagent_dispatch_one(client, task, target, message, namespace, "")
+            if result is None or _a2a_failed(result):
+                return None
+            return self._kagent_result(target, result, namespace)
+
+        # Passthrough mode: forward each user's OWN key. Isolation guardrails:
+        #   • HUMAN principals only — a real credential is forwarded, so
+        #     system/webhook/cron runs never passthrough; they use a Job.
+        #   • CONNECTOR-scoped keys only (_kagent_user_key) — never the platform
+        #     base key; per-principal, so no user gets another user's key.
+        # The key is never logged or persisted (only the Authorization header).
+        email = task.triggered_by or ""
+        is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
+        if not is_human:
+            logger.info("stage %s: non-human principal — kagent passthrough skipped, using Job", self._stage_name)
+            return None
+
+        # Ordered provider chain — the user's primary first, then the other
+        # catalog providers they hold a key for (fallback). Each provider maps to
+        # a variant `<agent>-<provider>` on its passthrough ModelConfig. We fall
+        # to the next provider on a transport error OR an LLM failure (bad key,
+        # bad model, rate limit). Exhausted → Job path.
+        for provider in self._kagent_provider_chain(settings):
+            key = self._kagent_user_key(settings, provider)
+            if not key:
+                continue
+            variant = f"{target}-{provider}"
+            result = await self._kagent_dispatch_one(client, task, variant, message, namespace, key)
+            if result is None:
+                continue
+            if _a2a_failed(result):
+                logger.warning(
+                    "stage %s: kagent variant %s returned an LLM failure — trying next provider",
+                    self._stage_name,
+                    variant,
+                )
+                continue
+            return self._kagent_result(variant, result, namespace)
+
+        logger.info("stage %s: no working kagent provider for %s — using Job path", self._stage_name, email)
+        return None
+
+    async def _kagent_dispatch_one(
+        self, client: Any, task: DevAITask, agent: str, message: str, namespace: str | None, api_key: str
+    ) -> dict[str, Any] | None:
+        """One A2A dispatch; returns the result, or None on transport error."""
+        from devai.agentic.kagent_client import KagentError
+
         try:
-            result = await client.dispatch(
-                target,
+            return await client.dispatch(
+                agent,
                 message,
                 namespace=namespace,
                 triggered_by=task.triggered_by or "",
@@ -396,26 +436,30 @@ class JobRunnerStage(PipelineStage):
                 message_id=f"{task.id}:{self._stage_name}",
             )
         except KagentError:
-            logger.warning(
-                "stage %s: kagent dispatch to %s failed — falling back to Job path",
-                self._stage_name,
-                target,
-                exc_info=True,
-            )
+            logger.warning("stage %s: kagent dispatch to %s failed", self._stage_name, agent, exc_info=True)
             return None
 
-        text = extract_a2a_text(result)
-        logger.info(
-            "stage %s: dispatched to kagent agent %s (ns=%s)",
-            self._stage_name,
-            target,
-            namespace or "kagent-system",
-        )
+    def _kagent_result(self, agent: str, result: dict[str, Any], namespace: str | None) -> StageResult:
+        from devai.agentic.kagent_client import extract_a2a_text
+
+        logger.info("stage %s: dispatched to kagent agent %s (ns=%s)", self._stage_name, agent, namespace or "kagent-system")
         return StageResult(
             next_state=self._next_state(),
-            message=f"{self._stage_name}: kagent agent {target} completed",
-            data={f"{self._stage_name}_output": {"runtime": "kagent", "text": text, "a2a_result": result}},
+            message=f"{self._stage_name}: kagent agent {agent} completed",
+            data={f"{self._stage_name}_output": {"runtime": "kagent", "agent": agent, "text": extract_a2a_text(result)}},
         )
+
+    def _kagent_provider_chain(self, settings: Any) -> list[str]:
+        """Ordered list of catalog providers to try: the user's primary first,
+        then the rest of the catalog (fallback). The catalog is the set of
+        provider variants the chart provisioned (`kagent_provider_variants`)."""
+        catalog = [p.strip().lower() for p in str(getattr(self.deps.config, "kagent_provider_variants", "") or "").split(",") if p.strip()]
+        if not catalog:
+            catalog = [str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic").lower()]
+        primary = str(getattr(settings, "llm_provider", "") or "").lower()
+        chain = [primary] if primary in catalog else []
+        chain += [p for p in catalog if p not in chain]
+        return chain
 
     async def _kagent_settings(self, task: DevAITask) -> Any:
         """Resolve the effective kagent settings for this run's principal.
@@ -439,17 +483,17 @@ class JobRunnerStage(PipelineStage):
             return self.deps.config
         return await self.deps.settings_overlay(principal)
 
-    def _kagent_user_key(self, settings: Any) -> str:
-        """The triggering user's OWN LLM key for the kagent provider, or "".
+    def _kagent_user_key(self, settings: Any, provider: str | None = None) -> str:
+        """The triggering user's OWN LLM key for ``provider``, or "".
 
         Only the user's configured connector key is returned — never the
         platform fallthrough. We check the overlay's `overlaid_attrs` so that a
         run with no per-user connector (where the provider attr resolves to the
         base/platform key) forwards nothing, keeping per-user billing honest. If
-        the user configured a different provider than the kagent ModelConfig,
-        the matched attr isn't in their overrides → "" → Job path.
+        the user has no connector for ``provider``, the matched attr isn't in
+        their overrides → "" → that provider is skipped.
         """
-        provider = str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic").lower()
+        provider = (provider or str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic")).lower()
         attr = _KAGENT_PROVIDER_KEY_ATTR.get(provider, "anthropic_api_key")
         overlaid = set(getattr(settings, "overlaid_attrs", []) or [])
         if attr not in overlaid:

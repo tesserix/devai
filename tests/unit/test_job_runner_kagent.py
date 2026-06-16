@@ -50,6 +50,7 @@ def _deps(
         kagent_enabled=kagent_enabled,
         kagent_passthrough=kagent_passthrough,
         kagent_model_provider="anthropic",
+        kagent_provider_variants="anthropic,openai",
         agentgateway_url="",
         auth_bff_shared_secret="",
     )
@@ -150,6 +151,45 @@ async def test_passthrough_no_user_key_falls_back_to_job(monkeypatch):
     )
     result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="bob@x.com"))
     assert result.data.get("review_code_stub") is True
+
+
+@pytest.mark.asyncio
+async def test_passthrough_falls_back_across_providers(monkeypatch):
+    """User's primary provider variant fails (bad model/key) → dispatch falls
+    back to the next catalog provider they have a key for."""
+
+    class _Failover:
+        calls: list = []
+
+        async def dispatch(self, agent, message, **kw):
+            _Failover.calls.append(agent)
+            if agent.endswith("-openai"):
+                return {"status": {"state": "failed", "message": {"parts": [{"kind": "text", "text": "404 model"}]}}}
+            return {"status": {"state": "completed", "message": {"parts": [{"kind": "text", "text": "ok"}]}}}
+
+    _Failover.calls = []
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _Failover())
+    # One LLM connector, provider=openai, holding BOTH provider keys.
+    conn = Connector(
+        scope=Scope.USER,
+        scope_id="alice@x.com",
+        connector_key="llm",
+        provider="openai",
+        secret_refs={"openai_api_key": "ref-o", "anthropic_api_key": "ref-a"},
+        enabled=True,
+    )
+    svc = _FakeSettingsService([conn], secrets={"ref-o": "sk-openai", "ref-a": "sk-ant"})
+    deps = _deps(
+        kagent_url="http://kagent:8083",
+        agent_labels={"devai.io/runtime": "kagent"},
+        kagent_passthrough=True,
+        settings_service=svc,
+    )
+    result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="alice@x.com"))
+
+    # primary (openai) tried first and failed → fell back to anthropic.
+    assert _Failover.calls == ["reviewer-agent-openai", "reviewer-agent-anthropic"]
+    assert result.data["review_code_output"]["agent"] == "reviewer-agent-anthropic"
 
 
 @pytest.mark.asyncio

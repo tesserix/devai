@@ -652,6 +652,11 @@ class Settings(BaseSettings):
     # provider that ModelConfig targets, so DevAI forwards the matching key.
     kagent_passthrough: bool = False
     kagent_model_provider: str = "anthropic"
+    # The provider variants the kagent catalog provisioned (matches
+    # kagent-agent-sync values.kagentModels suffixes). A passthrough run
+    # dispatches to the variant `<agent>-<provider>` matching the user's Settings
+    # provider, then falls back across the rest of this list on failure.
+    kagent_provider_variants: str = "anthropic,openai"
 
     # --- LLM adapter ---
     # Single switch picks the default LLM backend; specialization YAMLs
