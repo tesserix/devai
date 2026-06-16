@@ -17,6 +17,16 @@ metadata:
 spec:
   skill: document-analyzer
   promptRef: document-analyzer-prompt-v1
+  # systemPrompt is what the kagent export renders into the kagent Agent CR's
+  # spec.systemMessage (kagent requires it to be non-empty). The DevAI Job/inline
+  # path ignores it — there the python_class above drives the agent — so this only
+  # shapes how the agent behaves when it runs inside kagent.
+  systemPrompt: >-
+    You are DevAI's Document Analyzer. Given requirement documents, an issue, or a
+    PR description, extract the key functional and non-functional requirements,
+    constraints, and acceptance criteria, and summarize them concisely for the
+    downstream planning agents. Be precise; never invent requirements that are not
+    stated in the source.
   llm:
     provider: gemini
     model: gemini-3.1-pro-preview
