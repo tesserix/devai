@@ -248,6 +248,9 @@ const kagentProviderLabel = (p: string) => KAGENT_PROVIDER_LABELS[p.toLowerCase(
 function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Record<string, KagentModelState>>({});
+  // null = not yet known; false = no agent is labelled for kagent (dormant) → runs
+  // use on-demand Jobs and enabling a model here provisions nothing.
+  const [configured, setConfigured] = useState<boolean | null>(null);
   // Group the catalog models by provider so the user sees which provider/model
   // combos kagent can run their agents on (with their own key, via passthrough).
   const byProvider = new Map<string, string[]>();
@@ -278,12 +281,16 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
   useEffect(() => {
     if (!kagent.enabled) {
       setStatus({});
+      setConfigured(null);
       return;
     }
     let alive = true;
     const tick = async () => {
       const r = await api.kagentRuntimeStatus();
-      if (alive && r) setStatus(r.models);
+      if (alive && r) {
+        setStatus(r.models);
+        setConfigured(r.agents_configured);
+      }
     };
     void tick();
     const id = setInterval(() => void tick(), 8000);
@@ -391,6 +398,14 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
             <p className="mb-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">
               kagent is <strong>off</strong> — your picks are saved, but no pods run until you switch it{" "}
               <span className="text-emerald-600">On</span> above.
+            </p>
+          )}
+          {kagent.enabled && configured === false && (
+            <p className="mb-2 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 ring-1 ring-amber-500/30">
+              No agent is currently set to use kagent, so your runs execute <strong>on-demand as
+              Jobs</strong> (spun up per run, then torn down) — these picks provision nothing yet.
+              kagent runs a standing pod only once an agent is labelled for it (an admin step), which
+              is reserved for a constantly-hit agent with spare node capacity.
             </p>
           )}
           <div className={`space-y-2.5 ${kagent.enabled ? "" : "opacity-60"}`}>

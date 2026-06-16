@@ -1,15 +1,60 @@
 # kagent Integration — long-lived agents over A2A
 
-> **Status (2026-06-16): working end-to-end on prod.** A DevAI agent labelled
-> `devai.io/runtime=kagent` is reconciled into a kagent-managed Deployment and is
-> reachable over A2A; the dispatcher routes to it when the kagent switch is on.
-> One **infra caveat** remains: kagent's model backend uses a placeholder OpenAI
-> key — see [§6](#6-model-backend--reuse-the-existing-ai-gateway).
+> **Status (2026-06-17): integration works end-to-end, but DORMANT on prod by
+> design.** kagent agents are **always-warm standing pods** (one Deployment per
+> labelled-agent × enabled-model), not per-call. On the current **3-node** prod
+> cluster that doesn't pay off, so **no agent is labelled `devai.io/runtime=kagent`**
+> today and **everything runs on-demand as Jobs** (see §0). The code + the dynamic
+> Settings UI stay in place (default-off) for a future genuinely-hot agent once
+> there's node headroom — see [§0a](#0a-re-enabling-kagent) to switch it back on.
 
-kagent (solo.io, `kagent-system`) is an opt-in runtime for **long-lived, standing**
-agents — the complement to DevAI's default **ephemeral K8s Job per run**. Use kagent
-for an agent that should stay resident and be addressable over A2A between runs; use
-Jobs for per-run, fan-out pipeline work.
+---
+
+## 0. Execution model — Jobs (default) vs kagent (opt-in)
+
+DevAI runs every agent **on-demand** by default: `JobRunnerStage`
+(`src/devai/pipeline/stages/job_runner.py`) submits **one ephemeral K8s Job per
+agent run** — it spins up when the pipeline calls the agent, does the work, and
+terminates. **Zero standing footprint.** kagent is the opposite: a resident
+Deployment that's always running so it can be addressed over A2A with no
+cold-start.
+
+|                    | **Ephemeral Job** (default)            | **kagent** (opt-in)                         |
+|--------------------|----------------------------------------|---------------------------------------------|
+| Lifecycle          | pops up on call → runs → terminates     | always-running standing pod                 |
+| Idle footprint     | **zero**                                | 1 pod per (labelled agent × enabled model)  |
+| Cold start         | yes (Job scheduling, seconds)           | none (pod is warm)                          |
+| Per-user LLM keys  | ✅ `PrincipalLLMResolver`               | ✅ ModelConfig `apiKeyPassthrough`          |
+| Multi-model + fallback | ✅ `role_llm_*` / resolver          | ✅ per-model variants + dispatch chain      |
+| Fits a 3-node cluster | ✅ always                            | only for a few hot agents with headroom     |
+
+**Why kagent is off here.** Each kagent agent pod requests ~384Mi. Labelling all
+40 registry agents × 4 enabled models = ~160 standing pods ≈ 60Gi — it doesn't fit
+3 nodes, and most pipeline agents run briefly per-run (a perfect Job fit, a poor
+standing-pod fit). Crucially, **per-user keys, multi-provider, and fallback already
+work on the Job path** via `PrincipalLLMResolver` — so running on Jobs loses none
+of that. kagent's *only* unique win is zero cold-start, which is worth a standing
+pod only for an agent hit constantly (e.g. an interactive chat agent) **and** only
+when the cluster has room.
+
+**Rule of thumb:** default everything to Jobs. Reach for kagent for a specific,
+constantly-hit agent where cold-start hurts — and label *just that one*.
+
+### 0a. Re-enabling kagent
+
+1. **Resolve the prompt at export time first.** 39 of 40 registry agents keep their
+   system prompt in a referenced `Prompt` artifact (`spec.promptRef`), not inline.
+   kagent requires a non-empty `systemMessage`, and the export does **not** resolve
+   `promptRef` today — so labelling a promptRef-only agent renders an *invalid* CR
+   (empty systemMessage, controller rejects it). Before labelling such an agent, add
+   the one-line export resolution in `agentic-registry`: `kagent.Build` Options gain
+   a `SystemPrompt`, set from a `resolveSystemPrompt` helper (follows `spec.promptRef`
+   → `Prompt.spec.systemPrompt`), wired in both `v0ExportKagent*` handlers. (Agents
+   with an inline `spec.systemPrompt`, like the old document-analyzer target, don't
+   need this.)
+2. **Label the one hot agent** (§2) — not all of them.
+3. **Mind the pod budget** — pods = labelled agents × the models users enable in
+   Settings. Keep both small on a 3-node cluster.
 
 ---
 
@@ -51,9 +96,9 @@ DISPATCH (DevAI)     JobRunnerStage._maybe_dispatch_kagent → KagentClient (A2A
      labels:
        devai.io/runtime: kagent
    spec:
-     systemPrompt: >-          # REQUIRED for kagent (see Bug 1)
-       <the agent's system message>
-   ```
+     systemPrompt: >-          # REQUIRED unless the export resolves promptRef
+       <the agent's system message>   # (see §0a) — kagent needs a non-empty
+   ```                                #  systemMessage or the controller rejects it.
 2. **Re-seed the registry** — bump `reseedNonce` in
    `tesserix-k8s/charts/apps/devai-registry-bootstrap/values.yaml` (re-runs the
    bootstrap, which clones devai@main and POSTs the seeds), or `argocd app sync
@@ -64,7 +109,10 @@ DISPATCH (DevAI)     JobRunnerStage._maybe_dispatch_kagent → KagentClient (A2A
 5. Trigger a run that uses the agent → it routes over A2A; the api log shows
    `dispatched to kagent agent <name>`.
 
-**Reference test target:** `document-analyzer-agent` is labelled `devai.io/runtime=kagent`.
+**Current state:** **no agent is labelled** — `document-analyzer-agent` was the
+reference target but was unlabelled (devai `7fa91f0`) when kagent went dormant, so
+it runs on-demand as a Job like every other agent. Re-label it (or a hotter agent)
+per §0a to bring kagent back.
 
 ---
 

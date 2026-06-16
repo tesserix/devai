@@ -1157,6 +1157,7 @@ export interface KagentCatalog {
 export type KagentModelState = "running" | "provisioning" | "off" | "enabled";
 export interface KagentRuntimeStatus {
   available: boolean; // false → controller unreachable, status is best-effort
+  agents_configured: boolean; // false → no agent labelled for kagent; runs use on-demand Jobs
   models: Record<string, KagentModelState>;
 }
 

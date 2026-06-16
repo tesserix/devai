@@ -1,7 +1,12 @@
 # kagent — dynamic, UI-driven model provisioning
 
-**Status:** Shipped — 2026-06-16. Replaces the static catalog (11 standing variants)
-with demand-driven Agent variants; the ModelConfig menu stays provisioned (cheap CRs).
+**Status:** Shipped 2026-06-16, **DORMANT since 2026-06-17.** The mechanism works
+(demand-driven Agent variants; ModelConfig menu stays as cheap CRs), but kagent itself
+was put dormant on the 3-node prod cluster — kagent agents are always-warm standing
+pods, so everything runs on-demand as Jobs instead. No agent is labelled
+`devai.io/runtime=kagent` today. See `docs/agentic/KAGENT-INTEGRATION.md` §0 for the
+Jobs-vs-kagent decision and §0a to re-enable. This dynamic provisioning is exactly the
+control you'd want when re-enabling: pods only for the models a user explicitly enables.
 **Goal:** a user enables models in **Settings**; kagent then **automatically provisions the
 variant pods for exactly those models** — no chart edit, no redeploy — and **reaps** the
 ones nobody uses. Solves the "every catalog model = a standing pod" explosion.

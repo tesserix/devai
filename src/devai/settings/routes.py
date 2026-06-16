@@ -188,12 +188,12 @@ async def kagent_active_variants(request: Request) -> dict[str, Any]:
     }
 
 
-async def _kagent_live_model_status() -> dict[str, str] | None:
-    """Map model id → ``running`` | ``provisioning`` from the kagent controller's
-    ``/api/agents`` (each item carries the model id + a Ready condition). Returns
-    None when the controller is unreachable/unconfigured, so the caller degrades
-    to enablement-only status. Plain HTTP over the path devai already uses for
-    A2A dispatch — no extra RBAC."""
+async def _kagent_live_model_status() -> tuple[dict[str, str], int] | None:
+    """``(model id → running|provisioning, count of DevAI-managed kagent agents)``
+    from the kagent controller's ``/api/agents``, or None if it's unreachable. The
+    managed count is 0 when no agent is labelled for kagent (dormant) — that lets
+    the panel say "runs use on-demand Jobs" instead of showing models stuck
+    "provisioning". Plain HTTP over the path devai already uses for A2A — no RBAC."""
     from devai.config import settings as base
 
     url = str(getattr(base, "kagent_url", "") or "").rstrip("/")
@@ -211,7 +211,11 @@ async def _kagent_live_model_status() -> dict[str, str] | None:
         return None
 
     out: dict[str, str] = {}
+    managed = 0
     for it in data:
+        labels = ((it.get("agent") or {}).get("metadata") or {}).get("labels") or {}
+        if labels.get("app.kubernetes.io/managed-by") == "agentic-registry":
+            managed += 1
         model = it.get("model")
         if not model:
             continue
@@ -222,30 +226,35 @@ async def _kagent_live_model_status() -> dict[str, str] | None:
         # 'running' wins if any variant on this model is Ready.
         if out.get(model) != "running":
             out[model] = "running" if ready else "provisioning"
-    return out
+    return out, managed
 
 
 @router.get("/kagent/runtime-status")
 async def kagent_runtime_status(request: Request) -> dict[str, Any]:
     """Per-model live status for the Settings UI: ``running`` (pod Ready),
-    ``provisioning`` (enabled, pod not up yet), ``off`` (not enabled), or
-    ``enabled`` (enabled but the controller is unreachable so readiness is
-    unknown). Lets the panel show the pod actually coming up after a toggle."""
+    ``provisioning`` (enabled, pod coming up), ``off`` (not enabled), or
+    ``enabled`` (enabled but readiness unknown / kagent dormant). ``agents_configured``
+    is False when NO agent is labelled for kagent — then runs use on-demand Jobs and
+    enabled models read ``enabled`` (intent) rather than a misleading ``provisioning``."""
     principal = await _require_principal(request)
     svc = _svc(request)
     enabled = set(await _kagent_user_enabled_models(principal, svc))
     live = await _kagent_live_model_status()
+    status_map = live[0] if live is not None else {}
+    configured = live is not None and live[1] > 0
     catalog = _kagent_supported_catalog()
     models: dict[str, str] = {}
     for e in catalog:
         m = e["model"]
         if m not in enabled:
             models[m] = "off"
-        elif live is None:
-            models[m] = "enabled"  # controller unknown → fall back to intent
+        elif live is None or not configured:
+            # controller unknown, or kagent dormant (no labelled agent) — nothing
+            # will provision, so show intent, not a stuck "provisioning".
+            models[m] = "enabled"
         else:
-            models[m] = live.get(m, "provisioning")  # enabled but no variant yet
-    return {"available": live is not None, "models": models}
+            models[m] = status_map.get(m, "provisioning")  # enabled but no variant yet
+    return {"available": live is not None, "agents_configured": configured, "models": models}
 
 
 @router.get("/catalog")
