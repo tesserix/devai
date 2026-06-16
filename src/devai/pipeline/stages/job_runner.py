@@ -60,6 +60,16 @@ _KAGENT_PROVIDER_KEY_ATTR: dict[str, str] = {
     "vertex_gemini": "vertex_api_key",
 }
 
+# The Settings attribute holding each provider's selected model — so a per-model
+# dispatch can match the user's chosen model to a catalog variant.
+_KAGENT_PROVIDER_MODEL_ATTR: dict[str, str] = {
+    "anthropic": "claude_model",
+    "openai": "openai_model",
+    "groq": "groq_model",
+    "openrouter": "openrouter_model",
+    "vertex_gemini": "vertex_gemini_model",
+}
+
 
 def _a2a_failed(result: dict[str, Any] | None) -> bool:
     """True when an A2A result reports a failure (so we should fall back).
@@ -393,29 +403,29 @@ class JobRunnerStage(PipelineStage):
             logger.info("stage %s: non-human principal — kagent passthrough skipped, using Job", self._stage_name)
             return None
 
-        # Ordered provider chain — the user's primary first, then the other
-        # catalog providers they hold a key for (fallback). Each provider maps to
-        # a variant `<agent>-<provider>` on its passthrough ModelConfig. We fall
-        # to the next provider on a transport error OR an LLM failure (bad key,
-        # bad model, rate limit). Exhausted → Job path.
-        for provider in self._kagent_provider_chain(settings):
+        # Ordered (suffix, provider) chain — the user's chosen (provider, model)
+        # first, then their fallback_model, then the rest of the catalog they
+        # hold a key for. Each entry maps to a variant `<agent>-<suffix>` on its
+        # passthrough ModelConfig. Fall to the next on a transport error OR an LLM
+        # failure (bad key, bad model, rate limit). Exhausted → Job path.
+        for suffix, provider in self._kagent_variant_chain(settings):
             key = self._kagent_user_key(settings, provider)
             if not key:
                 continue
-            variant = f"{target}-{provider}"
+            variant = f"{target}-{suffix}"
             result = await self._kagent_dispatch_one(client, task, variant, message, namespace, key)
             if result is None:
                 continue
             if _a2a_failed(result):
                 logger.warning(
-                    "stage %s: kagent variant %s returned an LLM failure — trying next provider",
+                    "stage %s: kagent variant %s returned an LLM failure — trying next",
                     self._stage_name,
                     variant,
                 )
                 continue
             return self._kagent_result(variant, result, namespace)
 
-        logger.info("stage %s: no working kagent provider for %s — using Job path", self._stage_name, email)
+        logger.info("stage %s: no working kagent variant for %s — using Job path", self._stage_name, email)
         return None
 
     async def _kagent_dispatch_one(
@@ -449,16 +459,65 @@ class JobRunnerStage(PipelineStage):
             data={f"{self._stage_name}_output": {"runtime": "kagent", "agent": agent, "text": extract_a2a_text(result)}},
         )
 
-    def _kagent_provider_chain(self, settings: Any) -> list[str]:
-        """Ordered list of catalog providers to try: the user's primary first,
-        then the rest of the catalog (fallback). The catalog is the set of
-        provider variants the chart provisioned (`kagent_provider_variants`)."""
-        catalog = [p.strip().lower() for p in str(getattr(self.deps.config, "kagent_provider_variants", "") or "").split(",") if p.strip()]
-        if not catalog:
-            catalog = [str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic").lower()]
-        primary = str(getattr(settings, "llm_provider", "") or "").lower()
-        chain = [primary] if primary in catalog else []
-        chain += [p for p in catalog if p not in chain]
+    def _kagent_catalog(self) -> list[dict[str, str]]:
+        """The (provider, model)→suffix catalog (config kagent_catalog, JSON).
+        Falls back to a provider-only catalog from kagent_provider_variants."""
+        raw = str(getattr(self.deps.config, "kagent_catalog", "") or "").strip()
+        if raw:
+            try:
+                items = json.loads(raw)
+                out = []
+                for it in items if isinstance(items, list) else []:
+                    if isinstance(it, dict) and it.get("suffix") and it.get("provider"):
+                        out.append(
+                            {
+                                "suffix": str(it["suffix"]).lower(),
+                                "provider": str(it["provider"]).lower(),
+                                "model": str(it.get("model", "")),
+                            }
+                        )
+                if out:
+                    return out
+            except (ValueError, TypeError):
+                logger.warning("stage %s: kagent_catalog is not valid JSON — using provider fallback", self._stage_name)
+        return [
+            {"suffix": p.strip().lower(), "provider": p.strip().lower(), "model": ""}
+            for p in str(getattr(self.deps.config, "kagent_provider_variants", "anthropic") or "").split(",")
+            if p.strip()
+        ]
+
+    def _kagent_variant_chain(self, settings: Any) -> list[tuple[str, str]]:
+        """Ordered (suffix, provider) variants to try for this principal:
+        the user's chosen (provider, model) first, then their fallback_model,
+        then the rest of the catalog. Per-model granularity: the user's
+        connector model selects the exact catalog entry; with no model set we
+        take the provider's first catalog entry (its default)."""
+        catalog = self._kagent_catalog()
+        provider = str(getattr(settings, "llm_provider", "") or "").lower()
+        model = ""
+        if provider in _KAGENT_PROVIDER_MODEL_ATTR:
+            model = str(getattr(settings, _KAGENT_PROVIDER_MODEL_ATTR[provider], "") or "")
+
+        chain: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        def add(entry: dict[str, str] | None) -> None:
+            if entry and entry["suffix"] not in seen:
+                chain.append((entry["suffix"], entry["provider"]))
+                seen.add(entry["suffix"])
+
+        # 1. the user's exact (provider, model), else the provider's default entry.
+        match = next((e for e in catalog if e["provider"] == provider and model and e["model"] == model), None)
+        if match is None:
+            match = next((e for e in catalog if e["provider"] == provider), None)
+        add(match)
+        # 2. the user's fallback_model (any provider), matched by model id.
+        fallback = str(getattr(settings, "llm_user_fallback_model", "") or "")
+        if fallback:
+            add(next((e for e in catalog if e["model"] == fallback), None))
+        # 3. the rest of the catalog (fallback) — keys are checked per entry later.
+        for e in catalog:
+            add(e)
         return chain
 
     async def _kagent_settings(self, task: DevAITask) -> Any:

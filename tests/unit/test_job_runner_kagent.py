@@ -51,6 +51,11 @@ def _deps(
         kagent_passthrough=kagent_passthrough,
         kagent_model_provider="anthropic",
         kagent_provider_variants="anthropic,openai",
+        kagent_catalog=(
+            '[{"suffix":"anthropic","provider":"anthropic","model":"claude-x"},'
+            '{"suffix":"openai","provider":"openai","model":"gpt-4.1"},'
+            '{"suffix":"openai-o3","provider":"openai","model":"o3"}]'
+        ),
         agentgateway_url="",
         auth_bff_shared_secret="",
     )
@@ -151,6 +156,34 @@ async def test_passthrough_no_user_key_falls_back_to_job(monkeypatch):
     )
     result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="bob@x.com"))
     assert result.data.get("review_code_stub") is True
+
+
+@pytest.mark.asyncio
+async def test_passthrough_per_model_variant(monkeypatch):
+    """User picks a specific model (openai o3) → dispatch targets the per-model
+    variant `<agent>-openai-o3`, not the provider default `<agent>-openai`."""
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _FakeKagentClient())
+    conn = Connector(
+        scope=Scope.USER,
+        scope_id="alice@x.com",
+        connector_key="llm",
+        provider="openai",
+        prefs={"openai_model": "o3"},
+        secret_refs={"openai_api_key": "ref-o"},
+        enabled=True,
+    )
+    svc = _FakeSettingsService([conn], secrets={"ref-o": "sk-openai-alice"})
+    deps = _deps(
+        kagent_url="http://kagent:8083",
+        agent_labels={"devai.io/runtime": "kagent"},
+        kagent_passthrough=True,
+        settings_service=svc,
+    )
+    result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="alice@x.com"))
+
+    assert _FakeKagentClient.last_call["agent"] == "reviewer-agent-openai-o3"
+    assert _FakeKagentClient.last_call["api_key"] == "sk-openai-alice"
+    assert result.data["review_code_output"]["agent"] == "reviewer-agent-openai-o3"
 
 
 @pytest.mark.asyncio

@@ -657,6 +657,15 @@ class Settings(BaseSettings):
     # dispatches to the variant `<agent>-<provider>` matching the user's Settings
     # provider, then falls back across the rest of this list on failure.
     kagent_provider_variants: str = "anthropic,openai"
+    # JSON catalog of the kagent (provider, model) variants — MUST mirror
+    # kagent-agent-sync values.kagentModels. Each entry {suffix, provider, model}
+    # maps a user's chosen (provider, model) to the variant `<agent>-<suffix>`.
+    # DevAI picks the entry matching the user's connector model (per-model
+    # granularity), then the entry for their fallback_model, then the rest.
+    kagent_catalog: str = (
+        '[{"suffix":"anthropic","provider":"anthropic","model":"claude-sonnet-4-5-20250929"},'
+        '{"suffix":"openai","provider":"openai","model":"gpt-4.1"}]'
+    )
 
     # --- LLM adapter ---
     # Single switch picks the default LLM backend; specialization YAMLs
