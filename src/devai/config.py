@@ -664,6 +664,7 @@ class Settings(BaseSettings):
     # granularity), then the entry for their fallback_model, then the rest.
     kagent_catalog: str = (
         '[{"suffix":"anthropic","provider":"anthropic","model":"claude-sonnet-4-5-20250929"},'
+        '{"suffix":"anthropic-opus","provider":"anthropic","model":"claude-opus-4-8"},'
         '{"suffix":"openai","provider":"openai","model":"gpt-4.1"}]'
     )
 
