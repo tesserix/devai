@@ -49,6 +49,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Maps a kagent ModelConfig provider → the Settings attribute holding that
+# provider's API key, so a passthrough dispatch forwards the user's matching
+# key. Mirrors the connector field keys in settings/models.py.
+_KAGENT_PROVIDER_KEY_ATTR: dict[str, str] = {
+    "anthropic": "anthropic_api_key",
+    "openai": "openai_api_key",
+    "groq": "groq_api_key",
+    "openrouter": "openrouter_api_key",
+    "vertex_gemini": "vertex_api_key",
+}
+
 # Stage handlers that genuinely cannot run as a Job (touch state.redis,
 # call SCM mid-flight, etc.) can declare `runner: inline` in their YAML.
 # This handler honours that hint by returning a stub immediately so the
@@ -346,6 +357,22 @@ class JobRunnerStage(PipelineStage):
             )
             return None
 
+        # Per-user keys: when passthrough is on, forward the triggering user's
+        # OWN LLM key as the A2A Bearer token (the kagent ModelConfig is
+        # apiKeyPassthrough, so it has no shared key). A user with no own key
+        # for the kagent provider falls back to the Job path — we never bill a
+        # kagent run to the platform key under passthrough.
+        api_key = ""
+        if bool(getattr(settings, "kagent_passthrough", False)):
+            api_key = self._kagent_user_key(settings)
+            if not api_key:
+                logger.info(
+                    "stage %s: %s has no own LLM key for kagent passthrough — using Job path",
+                    self._stage_name,
+                    task.triggered_by or "run",
+                )
+                return None
+
         namespace = str(getattr(settings, "kagent_default_namespace", "") or "") or None
         message = self._kagent_message(task)
         try:
@@ -355,6 +382,7 @@ class JobRunnerStage(PipelineStage):
                 namespace=namespace,
                 triggered_by=task.triggered_by or "",
                 trace_id=task.trace_id or "",
+                api_key=api_key,
                 request_id=f"{task.id}:{self._stage_name}",
                 message_id=f"{task.id}:{self._stage_name}",
             )
@@ -401,6 +429,23 @@ class JobRunnerStage(PipelineStage):
         if principal is None:
             return self.deps.config
         return await self.deps.settings_overlay(principal)
+
+    def _kagent_user_key(self, settings: Any) -> str:
+        """The triggering user's OWN LLM key for the kagent provider, or "".
+
+        Only the user's configured connector key is returned — never the
+        platform fallthrough. We check the overlay's `overlaid_attrs` so that a
+        run with no per-user connector (where the provider attr resolves to the
+        base/platform key) forwards nothing, keeping per-user billing honest. If
+        the user configured a different provider than the kagent ModelConfig,
+        the matched attr isn't in their overrides → "" → Job path.
+        """
+        provider = str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic").lower()
+        attr = _KAGENT_PROVIDER_KEY_ATTR.get(provider, "anthropic_api_key")
+        overlaid = set(getattr(settings, "overlaid_attrs", []) or [])
+        if attr not in overlaid:
+            return ""
+        return str(getattr(settings, attr, "") or "")
 
     def _kagent_message(self, task: DevAITask) -> str:
         """Compose the A2A message text handed to the kagent agent.

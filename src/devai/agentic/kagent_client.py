@@ -95,14 +95,19 @@ class KagentClient:
         namespace: str | None = None,
         triggered_by: str = "",
         trace_id: str = "",
+        api_key: str = "",
         request_id: str = "devai-dispatch",
         message_id: str = "devai-message",
     ) -> dict[str, Any]:
         """Send a task to a kagent agent; return the parsed A2A result.
 
         Identity is forwarded on the same X-Forwarded-* headers the rest of the
-        platform uses, so the kagent agent sees who triggered it. Raises
-        KagentError on transport error or a JSON-RPC error response.
+        platform uses, so the kagent agent sees who triggered it. When
+        ``api_key`` is set it rides as the ``Authorization: Bearer`` token: a
+        kagent ModelConfig with ``apiKeyPassthrough`` forwards that token to the
+        LLM provider as the API key, so a shared agent runs on the triggering
+        user's OWN key (no per-user secret in kagent). Raises KagentError on
+        transport error or a JSON-RPC error response.
         """
         import httpx  # lazy — keeps cold-start light when kagent is unused
 
@@ -118,6 +123,9 @@ class KagentClient:
             headers["X-Forwarded-User"] = triggered_by
         if trace_id:
             headers["X-Trace-Id"] = trace_id
+        # Per-user LLM key for apiKeyPassthrough ModelConfigs. Never logged.
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:

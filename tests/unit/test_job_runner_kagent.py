@@ -36,11 +36,20 @@ def _agent_meta(name: str, labels: dict[str, str]):
     )
 
 
-def _deps(*, kagent_url: str, agent_labels: dict[str, str], kagent_enabled: bool = True, settings_service=None):
+def _deps(
+    *,
+    kagent_url: str,
+    agent_labels: dict[str, str],
+    kagent_enabled: bool = True,
+    kagent_passthrough: bool = False,
+    settings_service=None,
+):
     config = SimpleNamespace(
         kagent_url=kagent_url,
         kagent_default_namespace="kagent-system",
         kagent_enabled=kagent_enabled,
+        kagent_passthrough=kagent_passthrough,
+        kagent_model_provider="anthropic",
         agentgateway_url="",
         auth_bff_shared_secret="",
     )
@@ -53,8 +62,9 @@ def _deps(*, kagent_url: str, agent_labels: dict[str, str], kagent_enabled: bool
 class _FakeSettingsService:
     """Minimal SettingsService for build_overlay — returns the given connectors."""
 
-    def __init__(self, connectors: list[Connector]):
+    def __init__(self, connectors: list[Connector], secrets: dict[str, str] | None = None):
         self._connectors = connectors
+        self._secrets = secrets or {}
 
     async def list_connectors(self, scope, scope_id):
         return [c for c in self._connectors if c.scope == scope and c.scope_id == scope_id]
@@ -63,7 +73,7 @@ class _FakeSettingsService:
         return [c for c in self._connectors if c.scope == Scope.USER and c.scope_id == email]
 
     async def resolve_secret(self, ref):
-        return None
+        return self._secrets.get(ref)
 
 
 def _stage(deps) -> JobRunnerStage:
@@ -94,6 +104,52 @@ async def test_routes_to_kagent_when_labelled_and_configured(monkeypatch):
     assert _FakeKagentClient.last_call["namespace"] == "kagent-system"
     assert _FakeKagentClient.last_call["triggered_by"] == "alice@x.com"
     assert _FakeKagentClient.last_call["trace_id"] == "t-1"
+
+
+@pytest.mark.asyncio
+async def test_passthrough_forwards_user_own_key(monkeypatch):
+    """With passthrough on, the triggering user's OWN Anthropic key (their
+    connector, resolved via the overlay) is forwarded as the A2A Bearer token."""
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _FakeKagentClient())
+    user_llm = Connector(
+        scope=Scope.USER,
+        scope_id="alice@x.com",
+        connector_key="llm",
+        provider="anthropic",
+        secret_refs={"anthropic_api_key": "ref-anthropic"},
+        enabled=True,
+    )
+    svc = _FakeSettingsService([user_llm], secrets={"ref-anthropic": "sk-ant-alice-key"})
+    deps = _deps(
+        kagent_url="http://kagent:8083",
+        agent_labels={"devai.io/runtime": "kagent"},
+        kagent_passthrough=True,
+        settings_service=svc,
+    )
+    result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="alice@x.com"))
+
+    assert result.data["review_code_output"]["runtime"] == "kagent"
+    assert _FakeKagentClient.last_call["api_key"] == "sk-ant-alice-key"
+
+
+@pytest.mark.asyncio
+async def test_passthrough_no_user_key_falls_back_to_job(monkeypatch):
+    """Passthrough on but the user has no own key for the kagent provider →
+    Job path (never bill a kagent run to the platform key under passthrough)."""
+
+    class _NoDispatch:
+        async def dispatch(self, *a, **k):
+            raise AssertionError("must not dispatch to kagent without the user's own key")
+
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _NoDispatch())
+    deps = _deps(
+        kagent_url="http://kagent:8083",
+        agent_labels={"devai.io/runtime": "kagent"},
+        kagent_passthrough=True,
+        settings_service=_FakeSettingsService([]),  # no connectors → no user key
+    )
+    result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="bob@x.com"))
+    assert result.data.get("review_code_stub") is True
 
 
 @pytest.mark.asyncio

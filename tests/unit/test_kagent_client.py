@@ -94,6 +94,22 @@ async def test_dispatch_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dispatch_forwards_api_key_as_bearer(monkeypatch):
+    _install_fake_httpx(monkeypatch, _FakeResponse(200, {"jsonrpc": "2.0", "result": {}}))
+    c = KagentClient("http://kagent:8083", namespace="kagent-system")
+    await c.dispatch("reviewer", "x", api_key="sk-ant-user")
+    assert _FakeAsyncClient.last_call["headers"]["Authorization"] == "Bearer sk-ant-user"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_no_api_key_sends_no_authorization(monkeypatch):
+    _install_fake_httpx(monkeypatch, _FakeResponse(200, {"jsonrpc": "2.0", "result": {}}))
+    c = KagentClient("http://kagent:8083")
+    await c.dispatch("reviewer", "x")
+    assert "Authorization" not in _FakeAsyncClient.last_call["headers"]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_http_error(monkeypatch):
     _install_fake_httpx(monkeypatch, _FakeResponse(500, text="boom"))
     c = KagentClient("http://kagent:8083")

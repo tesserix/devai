@@ -642,6 +642,16 @@ class Settings(BaseSettings):
     # on/off), or platform-wide via the chart — resolved per run, so toggling it
     # takes effect on the next run with no restart.
     kagent_enabled: bool = False
+    # Per-user keys for kagent. When kagent_passthrough is true, the kagent
+    # ModelConfig is set to `apiKeyPassthrough` (no shared secret) and DevAI
+    # forwards the TRIGGERING USER's own LLM key as the A2A Bearer token, so a
+    # standing kagent agent runs on each user's own key (reusing the same
+    # per-user connector overlay as the Job path). A user with no own key for
+    # `kagent_model_provider` falls back to the Job path. False = shared-key
+    # ModelConfig (no Bearer forwarded). kagent_model_provider names the
+    # provider that ModelConfig targets, so DevAI forwards the matching key.
+    kagent_passthrough: bool = False
+    kagent_model_provider: str = "anthropic"
 
     # --- LLM adapter ---
     # Single switch picks the default LLM backend; specialization YAMLs
