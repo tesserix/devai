@@ -97,6 +97,10 @@ class Agent:
     prompts: list[Any] = field(default_factory=list)
     mcp_servers: list[Any] = field(default_factory=list)
     a2a: dict[str, Any] = field(default_factory=dict)
+    # metadata.labels from the registry envelope (preserved through _unwrap).
+    # `devai.io/runtime=kagent` marks an agent the kagent controller manages as
+    # a long-lived Deployment — the dispatcher routes those over A2A.
+    labels: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -449,6 +453,12 @@ def _unwrap(item: dict[str, Any], key: str) -> dict[str, Any]:
                 flat["name"] = meta["name"]
             if meta.get("tag") and "version" not in flat:
                 flat["version"] = meta["tag"]
+            # Project metadata.labels up too. The flatten otherwise drops them,
+            # but the dispatcher needs `devai.io/runtime` to decide whether an
+            # agent is kagent-managed — the same label the kagent-agent-sync
+            # reconciler selects on, so DevAI and the reconciler agree.
+            if isinstance(meta.get("labels"), dict) and "labels" not in flat:
+                flat["labels"] = meta["labels"]
         return flat
     return item
 
@@ -526,6 +536,7 @@ def _parse_agent(d: dict[str, Any]) -> Agent:
         prompts=list(prompts or []),
         mcp_servers=list(d.get("mcpServers") or []),
         a2a=dict(d.get("a2a") or {}),
+        labels={str(k): str(v) for k, v in (d.get("labels") or {}).items()},
         raw=d,
     )
 

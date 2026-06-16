@@ -20,6 +20,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# The registry label that marks an agent as kagent-managed (a long-lived,
+# controller-reconciled Deployment) rather than a per-run Job. The
+# kagent-agent-sync reconciler selects on the same label, so the reconciler
+# and the dispatcher agree on which agents kagent owns.
+RUNTIME_LABEL = "devai.io/runtime"
+RUNTIME_KAGENT = "kagent"
+
 # Kubernetes object names (agents, namespaces) are RFC-1123 DNS labels:
 # lowercase alphanumerics and '-', starting/ending alphanumeric. Validating
 # before interpolation prevents path traversal / SSRF via crafted segments
@@ -130,6 +137,45 @@ class KagentClient:
         return body.get("result", body) if isinstance(body, dict) else body
 
 
+def extract_a2a_text(result: Any) -> str:
+    """Pull the agent's reply text out of an A2A ``message/send`` result.
+
+    A2A ``message/send`` returns either a Message (``{role, parts:[...]}``) or a
+    Task (``{status:{message:{parts}}, artifacts:[{parts}], history:[...]}``).
+    We look in the most-specific places first and concatenate every text part
+    we find, so the dispatcher gets the agent's output regardless of which
+    shape the controller returns. Returns "" when there is no text to surface
+    (the caller still keeps the raw result for the dashboard).
+    """
+
+    def _parts_text(parts: Any) -> list[str]:
+        out: list[str] = []
+        if isinstance(parts, list):
+            for p in parts:
+                if isinstance(p, dict) and p.get("kind") == "text" and isinstance(p.get("text"), str):
+                    out.append(p["text"])
+        return out
+
+    if not isinstance(result, dict):
+        return str(result) if result else ""
+
+    chunks: list[str] = []
+    # 1. Task.status.message.parts — the agent's final message.
+    status = result.get("status")
+    if isinstance(status, dict) and isinstance(status.get("message"), dict):
+        chunks += _parts_text(status["message"].get("parts"))
+    # 2. Task.artifacts[].parts — produced artifacts.
+    artifacts = result.get("artifacts")
+    if isinstance(artifacts, list):
+        for art in artifacts:
+            if isinstance(art, dict):
+                chunks += _parts_text(art.get("parts"))
+    # 3. A bare Message result (no Task wrapper).
+    if not chunks:
+        chunks += _parts_text(result.get("parts"))
+    return "\n".join(c for c in chunks if c).strip()
+
+
 def create_kagent_client(settings: Any) -> KagentClient | None:
     """Build a KagentClient from settings, or None when kagent isn't wired.
 
@@ -146,4 +192,11 @@ def create_kagent_client(settings: Any) -> KagentClient | None:
         return None
 
 
-__all__ = ["KagentClient", "KagentError", "create_kagent_client"]
+__all__ = [
+    "RUNTIME_KAGENT",
+    "RUNTIME_LABEL",
+    "KagentClient",
+    "KagentError",
+    "create_kagent_client",
+    "extract_a2a_text",
+]

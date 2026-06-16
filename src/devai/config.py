@@ -627,15 +627,21 @@ class Settings(BaseSettings):
     # means "no gateway, talk direct" — useful in dev clusters that
     # haven't installed agentgateway yet.
     #
-    # kagent_url is reserved for the future A2A handoff path; setting
-    # it today is harmless (the runner only reads it when an agent
-    # explicitly tries to hand off to another runner pod).
+    # kagent_url points at the kagent controller's A2A endpoint. When set (and
+    # kagent_enabled), an agent labelled `devai.io/runtime=kagent` is dispatched
+    # over A2A to its long-lived kagent Deployment instead of a one-shot Job.
     agentgateway_url: str = ""
     kagent_url: str = ""
     # Namespace the kagent controller serves A2A agents under
     # ({kagent_url}/api/a2a/{namespace}/{agent}); matches the kagent-agent-sync
     # targetNamespace. Only consulted when dispatching to a kagent-managed agent.
     kagent_default_namespace: str = "kagent-system"
+    # Master switch for kagent A2A dispatch (binds DEVAI_KAGENT_ENABLED). Default
+    # OFF — every agent runs as a K8s Job even if labelled kagent. Turn it on
+    # per user/team/org/tenant via the Settings "kagent" connector (provider
+    # on/off), or platform-wide via the chart — resolved per run, so toggling it
+    # takes effect on the next run with no restart.
+    kagent_enabled: bool = False
 
     # --- LLM adapter ---
     # Single switch picks the default LLM backend; specialization YAMLs

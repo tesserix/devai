@@ -135,6 +135,29 @@ class StageDeps:
                 return adapter
         return self.llm
 
+    async def settings_overlay(self, principal: Any) -> Settings:
+        """The triggering principal's Settings overlay over the base config.
+
+        Generic per-principal settings accessor for stages that need a
+        non-LLM/non-SCM connector value (e.g. the kagent runtime switch). Uses
+        full scope resolution (global → tenant → org → team → user) when handed
+        a rich ``Principal``. Falls back to ``self.config`` when the Settings
+        capability is disabled or there is no principal — so callers can always
+        use the return value as their settings object.
+
+        Mirrors ``llm_for_principal`` / ``scm_for_principal``: dynamic (reads
+        connectors per call, so a Settings change lands on the next run with no
+        restart) and never raises out.
+        """
+        if self.settings_service is None or principal is None:
+            return self.config
+        try:
+            from devai.settings.overlay import build_overlay
+
+            return await build_overlay(self.config, principal, self.settings_service)
+        except Exception:  # noqa: BLE001 — settings must never break a stage
+            return self.config
+
     async def scm_for_principal(self, email: str) -> SCMClient | None:
         """The triggering user's own SCM client (their Settings connector —
         PAT or their own GitHub App), falling back to the platform client.

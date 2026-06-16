@@ -272,6 +272,37 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         ),
     ),
     ConnectorSpec(
+        key="kagent",
+        label="kagent Runtime",
+        family="runtime",
+        # provider_attr ends with `_enabled`, so the overlay coerces the
+        # on/off provider value straight to the bool `kagent_enabled`.
+        provider_attr="kagent_enabled",
+        providers=("on", "off"),
+        description=(
+            "Run agents labelled `devai.io/runtime=kagent` as long-lived kagent "
+            "Deployments reached over A2A, instead of one-shot Kubernetes Jobs. "
+            "Off = always use Jobs. Leave the fields blank to use the platform's "
+            "kagent controller; set them to point at your own."
+        ),
+        fields=(
+            _f(
+                "kagent_url",
+                "Controller URL",
+                "kagent_url",
+                placeholder="http://kagent-controller.kagent-system.svc.cluster.local:8083",
+                help="kagent controller A2A endpoint. Blank uses the platform default.",
+            ),
+            _f(
+                "kagent_namespace",
+                "Namespace",
+                "kagent_default_namespace",
+                placeholder="kagent-system",
+                help="Namespace the controller serves agents under.",
+            ),
+        ),
+    ),
+    ConnectorSpec(
         key="mcp",
         label="MCP Server",
         family="mcp",

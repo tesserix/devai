@@ -56,7 +56,7 @@ flowchart LR
 | **agentregistry (aregistry)** | `agentregistry-system` | 12121 | Catalog. `/v0/{agents,skills,prompts,servers,health}`. pgvector for semantic search. |
 | **agentgateway** | `agentgateway-system` | 9092 | solo.io MCP dispatch gateway. Routes `/mcp/{name}` → backend MCP server. |
 | **ai-gateway** | `agentgateway-system` | 8080 | nginx LLM proxy. Routes `/anthropic/*` + `/openai/*` to public APIs, injects API keys server-side. |
-| **kagent** | `kagent-system` | 8083 | Agent lifecycle controller (solo.io). Deployed; **not yet** wired into pipeline. |
+| **kagent** | `kagent-system` | 8083 | Agent lifecycle controller (solo.io). Reconciles agents labelled `devai.io/runtime=kagent` into Deployments; the dispatcher routes those over A2A (all other agents stay Job-dispatched). |
 
 → Edit: [`diagrams/01-component-topology.drawio`](diagrams/01-component-topology.drawio)
 
@@ -356,7 +356,9 @@ identity / control-plane wiring degrades to "system" attribution.
 
 | Status | Item |
 |---|---|
-| ⚠️ Deferred | **kagent dispatch.** Currently deployed but devai dispatches Jobs directly to the K8s API. Wiring kagent as the agent lifecycle controller is future work — see `docs/deploy/CONTROL-PLANES.md` |
+| ✅ Done | **kagent dispatch (opt-in, per-agent).** `JobRunnerStage` routes an agent over A2A through the kagent controller when its registry record carries `devai.io/runtime=kagent` and `DEVAI_KAGENT_URL` is set; otherwise it dispatches a K8s Job. Degrades to the Job path on any kagent error. `kagent-agent-sync` reconciles the same labelled agents into Deployments. See `src/devai/pipeline/stages/job_runner.py::_maybe_dispatch_kagent` + `src/devai/agentic/kagent_client.py` |
+| ✅ Done | **Dynamic on/off switch.** kagent is a `kagent` connector in the Settings catalog (`settings/models.py`, provider `on`/`off` → `kagent_enabled`, plus optional controller URL/namespace fields). Resolved per run through `build_overlay` with full scope precedence (user → team → org → tenant → global → `DEVAI_KAGENT_ENABLED` base), so toggling it lands on the next run with **no restart**. The Settings UI renders it automatically from the catalog. `JobRunnerStage._kagent_settings` reads the overlay before dispatch. |
+| ⚠️ Caveat | Confirm the kagent controller's A2A `message/send` contract in-cluster before labelling a hot-path agent — the result-shape parsing in `extract_a2a_text` is defensive but unverified against the live 0.9.7 controller |
 | ⚠️ Deferred | **agentgateway provider backends.** The gateway is in the topology but solo.io's MCP routing rules are not configured for our specific MCP servers — currently `routed_via=agentgateway` produces a URL that resolves on path but agentgateway's MCP backend resolution is still TODO in `tesserix-k8s/charts/apps/agentgateway` |
 | ✅ Done | Aregistry profile injection into Job env (this PR) |
 | ✅ Done | Identity propagation end-to-end (prior PR) |

@@ -114,18 +114,29 @@ class JobRunnerStage(PipelineStage):
         return self._stage_name
 
     async def execute(self, task: DevAITask) -> StageResult:
-        runtime = self._runtime()
-        watcher = self._watcher()
-
-        if runtime is None or watcher is None:
-            return self._stub_result(task, "K8s runtime not available — stage skipped (will run inline)")
-
         agent_name = str(self.config.get("agent", self._stage_name))
         # Single round-trip to aregistry: pick the image AND capture the
         # full profile so we can pass it through the Job env. Avoids the
         # previous pattern where the dispatcher resolved the image and
         # the runner did a second lookup that it then threw away.
         agent_profile = self._fetch_agent_profile(agent_name)
+
+        # kagent fast-path: an agent the controller manages as a long-lived
+        # Deployment (label `devai.io/runtime=kagent`) is reached over A2A
+        # instead of spawning an ephemeral Job. kagent is its own control
+        # plane, so this is checked BEFORE the Job runtime gate. Opt-in (needs
+        # `kagent_url`) and degrades to the Job path on any failure, so kagent
+        # is never a single point of failure.
+        kagent_result = await self._maybe_dispatch_kagent(task, agent_name, agent_profile)
+        if kagent_result is not None:
+            return kagent_result
+
+        runtime = self._runtime()
+        watcher = self._watcher()
+
+        if runtime is None or watcher is None:
+            return self._stub_result(task, "K8s runtime not available — stage skipped (will run inline)")
+
         image = self._resolve_image(runtime, agent_name, agent_profile)
         blueprint = task.blueprint or ""
 
@@ -263,7 +274,146 @@ class JobRunnerStage(PipelineStage):
             "skills": list(getattr(agent_meta, "skills", []) or []),
             "prompts": list(getattr(agent_meta, "prompts", []) or []),
             "mcp_servers": list(getattr(agent_meta, "mcp_servers", []) or []),
+            # Registry labels, incl. `devai.io/runtime` — drives kagent routing.
+            "labels": dict(getattr(agent_meta, "labels", {}) or {}),
         }
+
+    # ── kagent A2A dispatch (opt-in, long-lived agents) ──────────────
+
+    def _kagent_target(self, agent_name: str, profile: dict[str, Any] | None) -> str | None:
+        """Return the kagent agent name to dispatch to, or None for the Job path.
+
+        An agent is kagent-managed when its registry record carries
+        ``devai.io/runtime=kagent`` — the same label the kagent-agent-sync
+        reconciler selects on. The kagent CR is named after the registry
+        record (DNS-1123); we normalise underscores so a stage/agent key like
+        ``senior_developer`` maps to the ``senior-developer`` CR.
+        """
+        from devai.agentic.kagent_client import RUNTIME_KAGENT, RUNTIME_LABEL
+
+        if not profile:
+            return None
+        labels = profile.get("labels") or {}
+        if str(labels.get(RUNTIME_LABEL, "")).strip().lower() != RUNTIME_KAGENT:
+            return None
+        name = str(profile.get("name") or agent_name).strip().replace("_", "-").lower()
+        return name or None
+
+    async def _maybe_dispatch_kagent(
+        self,
+        task: DevAITask,
+        agent_name: str,
+        profile: dict[str, Any] | None,
+    ) -> StageResult | None:
+        """Dispatch to a kagent-managed agent over A2A, or None to use a Job.
+
+        Returns a StageResult only on a clean kagent dispatch. Any miss —
+        kagent not configured, agent not kagent-managed, invalid name, or a
+        transport/JSON-RPC error — returns None so ``execute`` falls through to
+        the Job path. kagent is additive; it must never be the reason a run
+        fails when a Job would have worked.
+        """
+        from devai.agentic.kagent_client import (
+            KagentError,
+            create_kagent_client,
+            extract_a2a_text,
+        )
+
+        # Cheap label check FIRST — the 99% Job path pays no settings cost.
+        target = self._kagent_target(agent_name, profile)
+        if target is None:
+            return None
+
+        # Only now resolve the per-principal Settings overlay, so the kagent
+        # switch (and a user/tenant's own controller URL) is honoured DYNAMICALLY
+        # — a Settings change lands on the next run with no restart.
+        settings = await self._kagent_settings(task)
+        if not bool(getattr(settings, "kagent_enabled", True)):
+            logger.info(
+                "stage %s: agent %s is kagent-labelled but kagent is switched off in Settings — using Job path",
+                self._stage_name,
+                agent_name,
+            )
+            return None
+
+        client = create_kagent_client(settings)
+        if client is None:
+            # Labelled + enabled but no kagent_url wired — fall back to a Job.
+            logger.info(
+                "stage %s: agent %s is kagent-managed but kagent_url is unset — using Job path",
+                self._stage_name,
+                agent_name,
+            )
+            return None
+
+        namespace = str(getattr(settings, "kagent_default_namespace", "") or "") or None
+        message = self._kagent_message(task)
+        try:
+            result = await client.dispatch(
+                target,
+                message,
+                namespace=namespace,
+                triggered_by=task.triggered_by or "",
+                trace_id=task.trace_id or "",
+                request_id=f"{task.id}:{self._stage_name}",
+                message_id=f"{task.id}:{self._stage_name}",
+            )
+        except KagentError:
+            logger.warning(
+                "stage %s: kagent dispatch to %s failed — falling back to Job path",
+                self._stage_name,
+                target,
+                exc_info=True,
+            )
+            return None
+
+        text = extract_a2a_text(result)
+        logger.info(
+            "stage %s: dispatched to kagent agent %s (ns=%s)",
+            self._stage_name,
+            target,
+            namespace or "kagent-system",
+        )
+        return StageResult(
+            next_state=self._next_state(),
+            message=f"{self._stage_name}: kagent agent {target} completed",
+            data={f"{self._stage_name}_output": {"runtime": "kagent", "text": text, "a2a_result": result}},
+        )
+
+    async def _kagent_settings(self, task: DevAITask) -> Any:
+        """Resolve the effective kagent settings for this run's principal.
+
+        Returns the per-principal Settings overlay (so the kagent on/off switch
+        and a user/tenant's own controller URL/namespace apply), falling back to
+        the base config. The full Principal is reconstructed from the task so
+        scope resolution covers global → tenant → org → team → user. Never
+        raises — degrades to base config.
+        """
+        principal = None
+        try:
+            from devai.identity import Principal
+
+            principal = Principal.from_dict(task.principal)
+            if principal is None and task.triggered_by and "@" in task.triggered_by:
+                principal = Principal(email=task.triggered_by)
+        except Exception:  # noqa: BLE001
+            principal = None
+        if principal is None:
+            return self.deps.config
+        return await self.deps.settings_overlay(principal)
+
+    def _kagent_message(self, task: DevAITask) -> str:
+        """Compose the A2A message text handed to the kagent agent.
+
+        The agent already carries its own prompt/tools from its CR; this just
+        states the task. Repo + stage give it the context the Job env would
+        otherwise have provided.
+        """
+        lines = [task.intent or f"Run stage {self._stage_name}"]
+        if task.repo:
+            lines.append(f"Repo: {task.repo}")
+        lines.append(f"Stage: {self._stage_name}")
+        return "\n".join(lines)
 
     def _resolve_image(
         self,
