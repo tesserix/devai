@@ -9,6 +9,7 @@ import {
   type McpMarketplaceEntry,
   type SettingsCatalog,
   type KagentCatalog,
+  type KagentModelState,
   type SettingsConnector,
   type SettingsConnectorSpec,
   type SharedConnector,
@@ -246,6 +247,7 @@ const kagentProviderLabel = (p: string) => KAGENT_PROVIDER_LABELS[p.toLowerCase(
 
 function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<Record<string, KagentModelState>>({});
   // Group the catalog models by provider so the user sees which provider/model
   // combos kagent can run their agents on (with their own key, via passthrough).
   const byProvider = new Map<string, string[]>();
@@ -255,6 +257,41 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
     byProvider.set(m.provider, list);
   }
   const enabledCount = kagent.enabled_models.length;
+  const allModels = kagent.models.map((m) => m.model);
+  // "Recommended" = the first model of each provider — balanced fallback coverage
+  // across providers without a pod per model.
+  const recommended = (() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const m of kagent.models) {
+      if (!seen.has(m.provider)) {
+        seen.add(m.provider);
+        out.push(m.model);
+      }
+    }
+    return out;
+  })();
+
+  // Poll live per-model pod status while kagent is on, so the user SEES a pod
+  // come up after enabling (there's a ~couple-min provisioning lag). Degrades
+  // silently — soft fetch returns nothing when the controller is unreachable.
+  useEffect(() => {
+    if (!kagent.enabled) {
+      setStatus({});
+      return;
+    }
+    let alive = true;
+    const tick = async () => {
+      const r = await api.kagentRuntimeStatus();
+      if (alive && r) setStatus(r.models);
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 8000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [kagent.enabled, kagent.enabled_models.join(",")]);
   // The on/off switch and the per-model selection both persist per-user via the
   // `kagent` connector (provider on/off + prefs.enabled_models). Enabling a model
   // makes kagent-agent-sync provision that variant's pod automatically (and reap
@@ -282,6 +319,12 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
         ? kagent.enabled_models.filter((m) => m !== model)
         : [...kagent.enabled_models, model],
     );
+  const applyPreset = (models: string[]) => void save(kagent.enabled ? "on" : "off", models);
+  // Effective per-model state: prefer live pod status; else fall back to intent.
+  const stateOf = (model: string): KagentModelState => {
+    if (!kagent.enabled_models.includes(model)) return "off";
+    return status[model] && status[model] !== "off" ? status[model] : "enabled";
+  };
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-3">
@@ -319,6 +362,31 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
         <p className="mt-3 text-xs text-muted-foreground">No kagent models configured.</p>
       ) : (
         <div className="mt-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[11px]">
+            <span className="text-muted-foreground">Quick set:</span>
+            <button
+              onClick={() => applyPreset(recommended)}
+              disabled={busy}
+              title="One model per provider — balanced fallback coverage"
+              className="rounded border border-border px-1.5 py-0.5 text-foreground/80 transition hover:bg-muted disabled:opacity-50"
+            >
+              Recommended
+            </button>
+            <button
+              onClick={() => applyPreset(allModels)}
+              disabled={busy}
+              className="rounded border border-border px-1.5 py-0.5 text-foreground/80 transition hover:bg-muted disabled:opacity-50"
+            >
+              All
+            </button>
+            <button
+              onClick={() => applyPreset([])}
+              disabled={busy || enabledCount === 0}
+              className="rounded border border-border px-1.5 py-0.5 text-foreground/80 transition hover:bg-muted disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
           {!kagent.enabled && (
             <p className="mb-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">
               kagent is <strong>off</strong> — your picks are saved, but no pods run until you switch it{" "}
@@ -335,22 +403,39 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
                     {onCount > 0 && <span className="ml-1 text-[10px] text-emerald-600">{onCount}</span>}
                   </span>
                   {models.map((model) => {
-                    const on = kagent.enabled_models.includes(model);
+                    const st = stateOf(model);
+                    const on = st !== "off";
+                    const tip =
+                      st === "running"
+                        ? "Running — pod is up; click to disable"
+                        : st === "provisioning"
+                          ? "Provisioning — pod spinning up (~couple min); click to disable"
+                          : on
+                            ? "Enabled — click to disable"
+                            : "Click to enable";
                     return (
                       <button
                         key={model}
                         onClick={() => toggleModel(model)}
                         disabled={busy}
-                        title={on ? "Enabled — click to disable" : "Click to enable"}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs transition disabled:opacity-50 ${
-                          on
-                            ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/40 hover:bg-emerald-500/25"
-                            : "bg-muted text-muted-foreground ring-1 ring-transparent hover:bg-muted/70 hover:ring-border"
+                        title={tip}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs transition disabled:opacity-50 ${
+                          st === "provisioning"
+                            ? "bg-amber-500/15 text-amber-600 ring-1 ring-amber-500/40 hover:bg-amber-500/25"
+                            : on
+                              ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/40 hover:bg-emerald-500/25"
+                              : "bg-muted text-muted-foreground ring-1 ring-transparent hover:bg-muted/70 hover:ring-border"
                         }`}
                       >
-                        <span className={on ? "text-emerald-500" : "text-muted-foreground/40"}>
-                          {on ? "✓" : "+"}
-                        </span>
+                        {st === "running" ? (
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        ) : st === "provisioning" ? (
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+                        ) : (
+                          <span className={on ? "text-emerald-500" : "text-muted-foreground/40"}>
+                            {on ? "✓" : "+"}
+                          </span>
+                        )}
                         {model}
                       </button>
                     );
@@ -359,6 +444,19 @@ function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onCh
               );
             })}
           </div>
+          {kagent.enabled && Object.keys(status).length > 0 && (
+            <div className="mt-2 flex items-center gap-3 text-[10px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> running
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" /> provisioning
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="text-emerald-500">✓</span> enabled
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

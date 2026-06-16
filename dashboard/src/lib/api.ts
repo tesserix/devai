@@ -246,6 +246,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // Live per-model kagent status (running / provisioning / off / enabled). soft:
+  // never throws, so the panel degrades to enablement-only when unavailable.
+  kagentRuntimeStatus: () =>
+    apiFetch<KagentRuntimeStatus>("/settings/kagent/runtime-status", { soft: true }),
+
   deleteConnector: (scope: string, scopeId: string, connectorKey: string, instanceId = "default") =>
     apiFetch<{ status: string }>(
       `/settings/connectors/${scope}/${encodeURIComponent(scopeId || "-")}/${connectorKey}?instance_id=${encodeURIComponent(instanceId)}`,
@@ -1147,6 +1152,12 @@ export interface KagentCatalog {
   passthrough: boolean;
   models: { provider: string; model: string; suffix: string }[];
   enabled_models: string[];
+}
+
+export type KagentModelState = "running" | "provisioning" | "off" | "enabled";
+export interface KagentRuntimeStatus {
+  available: boolean; // false → controller unreachable, status is best-effort
+  models: Record<string, KagentModelState>;
 }
 
 export interface SettingsCatalog {

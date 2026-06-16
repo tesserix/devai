@@ -188,6 +188,66 @@ async def kagent_active_variants(request: Request) -> dict[str, Any]:
     }
 
 
+async def _kagent_live_model_status() -> dict[str, str] | None:
+    """Map model id → ``running`` | ``provisioning`` from the kagent controller's
+    ``/api/agents`` (each item carries the model id + a Ready condition). Returns
+    None when the controller is unreachable/unconfigured, so the caller degrades
+    to enablement-only status. Plain HTTP over the path devai already uses for
+    A2A dispatch — no extra RBAC."""
+    from devai.config import settings as base
+
+    url = str(getattr(base, "kagent_url", "") or "").rstrip("/")
+    if not url:
+        return None
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.get(f"{url}/api/agents")
+            resp.raise_for_status()
+            data = resp.json().get("data") or []
+    except Exception:  # noqa: BLE001 — status is best-effort; never break the page
+        logger.debug("kagent live status: controller unreachable", exc_info=True)
+        return None
+
+    out: dict[str, str] = {}
+    for it in data:
+        model = it.get("model")
+        if not model:
+            continue
+        conds = ((it.get("agent") or {}).get("status") or {}).get("conditions") or []
+        ready = bool(it.get("deploymentReady")) or any(
+            str(c.get("type")) == "Ready" and str(c.get("status")) == "True" for c in conds
+        )
+        # 'running' wins if any variant on this model is Ready.
+        if out.get(model) != "running":
+            out[model] = "running" if ready else "provisioning"
+    return out
+
+
+@router.get("/kagent/runtime-status")
+async def kagent_runtime_status(request: Request) -> dict[str, Any]:
+    """Per-model live status for the Settings UI: ``running`` (pod Ready),
+    ``provisioning`` (enabled, pod not up yet), ``off`` (not enabled), or
+    ``enabled`` (enabled but the controller is unreachable so readiness is
+    unknown). Lets the panel show the pod actually coming up after a toggle."""
+    principal = await _require_principal(request)
+    svc = _svc(request)
+    enabled = set(await _kagent_user_enabled_models(principal, svc))
+    live = await _kagent_live_model_status()
+    catalog = _kagent_supported_catalog()
+    models: dict[str, str] = {}
+    for e in catalog:
+        m = e["model"]
+        if m not in enabled:
+            models[m] = "off"
+        elif live is None:
+            models[m] = "enabled"  # controller unknown → fall back to intent
+        else:
+            models[m] = live.get(m, "provisioning")  # enabled but no variant yet
+    return {"available": live is not None, "models": models}
+
+
 @router.get("/catalog")
 async def get_catalog(request: Request) -> dict[str, Any]:
     """The connector catalog (field definitions) + capability flags + the kagent
