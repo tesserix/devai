@@ -167,8 +167,19 @@ def _kagent_default_model(catalog: list[dict[str, str]]) -> str:
 async def kagent_active_variants(request: Request) -> dict[str, Any]:
     """The variants kagent-agent-sync should provision RIGHT NOW: the union of
     every user's enabled models (∩ the supported catalog), for users whose kagent
-    switch is on. Service-token gated. Returns a ready-to-use ``param`` string."""
+    switch is on. Service-token gated. Returns a ready-to-use ``param`` string.
+
+    Operator kill-switch: standing pods are an infra cost the OPERATOR controls,
+    so when the platform ``kagent_enabled`` flag is off (default — the right state
+    on a small cluster) this returns NOTHING regardless of per-user toggles, and
+    the reconciler reaps every variant. Per-user enablement only decides *which*
+    variants stand once the operator has allowed kagent at all."""
     _require_kagent_service(request)
+    from devai.config import settings as base
+
+    if not bool(getattr(base, "kagent_enabled", False)):
+        # kagent disabled platform-wide → no standing pods; reconciler reaps.
+        return {"variants": [], "param": "", "platform_enabled": False}
     svc = _svc(request)
     catalog = _kagent_supported_catalog()
     default_model = _kagent_default_model(catalog)
