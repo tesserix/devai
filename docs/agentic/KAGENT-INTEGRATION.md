@@ -79,10 +79,20 @@ labelling an agent doesn't rediscover them.
 | 2 | controller **nil-panic**, no Deployment | export emitted the **pre-0.9 flat** Agent spec (`modelConfig`/`systemMessage` on `spec`); v0.9 prunes them → `spec.declarative` nil | nest under `spec.declarative` + `spec.type: Declarative` | aregistry `ffef827` |
 | 3 | apply rejected: `.spec.declarative: field not declared in schema` | export stamped `apiVersion: kagent.dev/v1alpha1`, whose schema has no `declarative` (v1alpha2 is the storage version) | emit the Agent as **`kagent.dev/v1alpha2`** | aregistry `c9403a1` |
 | 4 | apply rejected: `.spec.type: field not declared in schema` | `kubectl apply --server-side` mis-negotiates the schema for a **multi-version** CRD (v1alpha1 served + v1alpha2 storage) | **client-side apply** in the agent-sync CronJob | k8s `c86c4a6e` |
+| 5 | agent-sync apply **OOMKilled** (exit 137), never re-renders | client-side apply parses the cluster OpenAPI schema → spikes past the 128Mi limit | **256Mi + `--validate=false`** (skip the OpenAPI parse) | k8s `9640e533` |
+| 6 | LLM call `404 not_found_error: model claude-sonnet-4-20250514` | kagent calls the provider **directly** (no DevAI gateway model-mapping); that id 404s on Anthropic's API | use a **direct-valid** model id (`claude-sonnet-4-5-20250929`) | k8s `c66fbb5b` |
 
 DevAI-side enablement shipped earlier: routing + switch + default-OFF (devai `90fe2b9`,
-`6acc10a`; k8s `9bbebc93`). Verified live: the rendered export is correct v1alpha2,
-the Deployment is `Ready 1/1`, and the A2A endpoint round-trips (HTTP 200).
+`6acc10a`; k8s `9bbebc93`). **Verified end-to-end (2026-06-16):** `document-analyzer-agent`
+on the passthrough ModelConfig, A2A dispatch with a real Anthropic key as Bearer →
+`status: completed` (no 401, no 404) — per-user passthrough works.
+
+**Mitigations against recurrence:** (a) kagent uses **direct provider model ids**, not
+DevAI's gateway aliases — keep the kagent ModelConfig model in sync with what the
+provider's API actually accepts (the `/settings/models/{provider}` endpoint lists
+valid ids per key); (b) the agent-sync always uses **client-side `--validate=false`
+apply** with 256Mi headroom for the multi-version CRDs; (c) the export pins
+**v1alpha2** for Agents.
 
 ---
 
@@ -240,7 +250,56 @@ which A's run forwards B's key.
 3. **Identity forwarding stays gated** by `X-Auth-Bff-Secret` (the receiver drops a
    spoofed `X-Forwarded-User` without it) — unchanged by passthrough.
 
-## 8. File map
+## 8. Multi-provider, multi-model & fallback (roadmap)
+
+**Goal:** a user picks their provider(s) + model(s) in Settings (OpenAI, Vertex,
+Anthropic, …) and kagent uses them, with fallback — just like the Job path.
+
+**What already exists (reuse, don't rebuild):**
+- The LLM connector carries `provider`, per-provider model fields, `enabled_models`
+  (a list), and `fallback_model` (`settings/models.py`, `settings/overlay.py`).
+- `GET /settings/models/{provider}` lists the models a user can use **evaluated
+  against their own key** (`adapter.list_models()`), with `KNOWN_PROVIDERS` =
+  anthropic, openai, vertex_gemini, groq, openrouter, gateway, noop.
+- The **Job path already does** per-user multi-provider + fallback via the role chain
+  (`PrincipalLLMResolver` / `role_llm_or`).
+
+**The kagent constraint that shapes the design:** a kagent Agent references ONE static
+`ModelConfig` (provider + model fixed at reconcile). There is **no per-request
+provider/model** — only the *key* varies per request (passthrough). So per-user
+provider/model means **pre-provisioned ModelConfig variants**, not free-form.
+
+**Design — a bounded ModelConfig catalog + provider/model-aware dispatch + fallback:**
+
+```
+Settings (per user)            kagent (pre-provisioned, passthrough)        DevAI dispatch
+─────────────────────          ──────────────────────────────────          ──────────────
+provider: openai               kagent-anthropic-sonnet-4-5  ┐               1. read user's provider+model
+model: gpt-4.1                 kagent-openai-gpt-4-1        ├ one Agent      +fallback from the overlay
+enabled_models: [...]          kagent-vertex-gemini-2-5     ┘ variant each   2. pick the matching variant
+fallback_model: claude-…                                                    3. forward user key (Bearer)
+                                                                            4. on failure → next (fallback)
+```
+
+- The agent-sync renders **one agent variant per catalog ModelConfig** (e.g.
+  `document-analyzer-agent`, `…-openai`, `…-vertex`), each an `apiKeyPassthrough`
+  ModelConfig for that provider+model. The catalog is **bounded** — the platform's
+  offered models, not per-user — so no explosion.
+- DevAI's `_maybe_dispatch_kagent` resolves the user's `(provider, model)` + fallback
+  from the overlay, dispatches to the matching variant with the user's key, and on a
+  provider/model error **re-dispatches to the fallback** variant.
+- **Settings UI:** surface which providers/models kagent supports (the catalog ∩
+  `/settings/models/{provider}` for the user) so users only enable what they have a
+  key for.
+
+**Phasing:** Phase 1 (done) — single Anthropic passthrough, per-user key. Phase 2 —
+per-**provider** catalog (anthropic/openai/vertex) + provider-aware dispatch + fallback
+across providers (bounded). Phase 3 — per-(provider, model) granularity honoring
+`enabled_models`/`fallback_model`, + the Settings UI catalog. Full *arbitrary* per-user
+model is impractical (ModelConfig/agent explosion) — the bounded catalog is the sweet
+spot.
+
+## 9. File map
 
 | Concern | Where |
 |---|---|
