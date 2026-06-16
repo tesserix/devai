@@ -153,6 +153,35 @@ async def test_passthrough_no_user_key_falls_back_to_job(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_passthrough_skips_non_human_principal(monkeypatch):
+    """Isolation guard: a system/webhook principal never forwards a key, even if
+    a connector resolves for it — passthrough is HUMAN-only; it falls back to Job."""
+
+    class _NoDispatch:
+        async def dispatch(self, *a, **k):
+            raise AssertionError("must not passthrough for a non-human principal")
+
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _NoDispatch())
+    sys_conn = Connector(
+        scope=Scope.USER,
+        scope_id="system:cron",
+        connector_key="llm",
+        provider="anthropic",
+        secret_refs={"anthropic_api_key": "ref-sys"},
+        enabled=True,
+    )
+    svc = _FakeSettingsService([sys_conn], secrets={"ref-sys": "sk-ant-service-key"})
+    deps = _deps(
+        kagent_url="http://kagent:8083",
+        agent_labels={"devai.io/runtime": "kagent"},
+        kagent_passthrough=True,
+        settings_service=svc,
+    )
+    result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="system:cron"))
+    assert result.data.get("review_code_stub") is True
+
+
+@pytest.mark.asyncio
 async def test_falls_back_to_job_when_not_labelled(monkeypatch):
     # A client that would explode if called — it must NOT be.
     def _boom(_settings):

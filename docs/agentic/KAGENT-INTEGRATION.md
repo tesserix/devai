@@ -203,7 +203,44 @@ afterward for per-user.
 
 ---
 
-## 7. File map
+## 7. Isolation & guardrails (passthrough)
+
+Passthrough forwards a real LLM credential, so isolation matters. The model:
+
+**The core property — you can only ever use a key you already hold.** DevAI
+resolves the key from the *triggering principal's own* Settings connector overlay
+(per-principal), so user A's run can only carry user A's key. There is no path by
+which A's run forwards B's key.
+
+**DevAI-side guardrails (enforced in `job_runner.py::_maybe_dispatch_kagent`):**
+
+| Guardrail | Effect |
+|---|---|
+| **Human-principal only** | system/webhook/cron runs never forward a key (they'd resolve a service/global key) → they fall back to the Job path |
+| **Connector-scoped only** | `_kagent_user_key` returns a key only when it came from the principal's connector overlay (`overlaid_attrs`) — **never the platform base key** (`DEVAI_ANTHROPIC_API_KEY`), which is not an overlay override |
+| **Per-principal** | the overlay is built from the run's authenticated `Principal`; no user receives another user's personal key (their connector is keyed to their uid/email) |
+| **Provider-matched** | only the key for `kagent_model_provider` is forwarded — a user on a different provider → no key → Job |
+| **No own key → Job** | a kagent run is never billed to a shared/platform key under passthrough |
+| **Never logged / persisted** | the key rides only the `Authorization` header; it is not logged and not written to task state or the A2A result |
+
+**Trust assumptions / defense-in-depth (infra — recommended):**
+
+1. **The key transits the kagent controller** (DevAI → `/api/a2a/…` → agent → LLM).
+   So the kagent control plane sees the Bearer. Mesh traffic is mTLS-encrypted
+   (Istio); **verify the kagent controller/agent does not log `Authorization`
+   headers** (upstream solo.io component — a trust assumption of passthrough).
+2. **Restrict who can call the A2A endpoint.** The internal `:8083` A2A endpoint is
+   unauthenticated cluster-internal and `allow-mesh-internal` is permissive — any
+   meshed pod can reach it. This does **not** let anyone use another user's key (key
+   possession still governs), but to stop resource abuse / identity-header spoofing,
+   add an Istio `AuthorizationPolicy` in `kagent-system` allowing `/api/a2a/*` only
+   from the **devai-api ServiceAccount**, plus a matching `NetworkPolicy`. (Not yet
+   implemented — recommended next infra step; pattern in
+   `tesserix-k8s/manifests/agentic-istio/authorization-policy.yaml`.)
+3. **Identity forwarding stays gated** by `X-Auth-Bff-Secret` (the receiver drops a
+   spoofed `X-Forwarded-User` without it) — unchanged by passthrough.
+
+## 8. File map
 
 | Concern | Where |
 |---|---|

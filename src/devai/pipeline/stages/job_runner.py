@@ -359,17 +359,26 @@ class JobRunnerStage(PipelineStage):
 
         # Per-user keys: when passthrough is on, forward the triggering user's
         # OWN LLM key as the A2A Bearer token (the kagent ModelConfig is
-        # apiKeyPassthrough, so it has no shared key). A user with no own key
-        # for the kagent provider falls back to the Job path — we never bill a
-        # kagent run to the platform key under passthrough.
+        # apiKeyPassthrough, so it has no shared key). Isolation guardrails:
+        #   • HUMAN principals only — a real LLM credential is forwarded, so
+        #     system/webhook/cron runs (which would resolve the service/global
+        #     key) never passthrough; they fall back to the Job path.
+        #   • CONNECTOR-scoped keys only — _kagent_user_key returns a key only
+        #     when it came from the principal's Settings connector overlay
+        #     (user/team/org/tenant), never the platform base key. Resolution is
+        #     per-principal, so no user can ever receive another user's key.
+        #   • No own key → Job path (never bill a kagent run to a shared key).
+        # The key is never logged or persisted (only the Authorization header).
         api_key = ""
         if bool(getattr(settings, "kagent_passthrough", False)):
-            api_key = self._kagent_user_key(settings)
+            email = task.triggered_by or ""
+            is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
+            api_key = self._kagent_user_key(settings) if is_human else ""
             if not api_key:
                 logger.info(
-                    "stage %s: %s has no own LLM key for kagent passthrough — using Job path",
+                    "stage %s: no own LLM key for kagent passthrough (principal=%s) — using Job path",
                     self._stage_name,
-                    task.triggered_by or "run",
+                    email or "system",
                 )
                 return None
 
