@@ -173,7 +173,9 @@ export default function SettingsPage() {
         <div className="mt-6 space-y-4">
           <TeamOrgPanel onChanged={() => void load()} />
           <LlmCapabilitiesPanel refreshKey={capsRefresh} />
-          {catalog?.kagent && <KagentRuntimePanel kagent={catalog.kagent} />}
+          {catalog?.kagent && (
+            <KagentRuntimePanel kagent={catalog.kagent} onChanged={() => void load()} />
+          )}
           {catalog?.connectors.map((spec) => {
             const configured = connectors.filter((c) => c.connector_key === spec.key);
             return (
@@ -231,7 +233,8 @@ export default function SettingsPage() {
 /** Team & Org — create a team, tag it with an org, manage members. Once you
  *  have a team/org you admin, connectors gain "Apply to: Team/Org" so you can
  *  share a credential with everyone instead of each person setting their own. */
-function KagentRuntimePanel({ kagent }: { kagent: KagentCatalog }) {
+function KagentRuntimePanel({ kagent, onChanged }: { kagent: KagentCatalog; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
   // Group the catalog models by provider so the user sees which provider/model
   // combos kagent can run their agents on (with their own key, via passthrough).
   const byProvider = new Map<string, string[]>();
@@ -240,17 +243,38 @@ function KagentRuntimePanel({ kagent }: { kagent: KagentCatalog }) {
     list.push(m.model);
     byProvider.set(m.provider, list);
   }
+  // Toggle persists per-user via the `kagent` connector (provider on/off),
+  // resolved per run by the overlay — so it sticks across sessions/restarts.
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await api.saveConnector({
+        scope: "user",
+        scope_id: "",
+        connector_key: "kagent",
+        provider: kagent.enabled ? "off" : "on",
+      });
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">kagent runtime — available models</h3>
-        <span
-          className={`rounded px-2 py-0.5 text-xs ${
-            kagent.enabled ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground"
+        <button
+          onClick={() => void toggle()}
+          disabled={busy}
+          title={kagent.enabled ? "Disable kagent for your runs" : "Enable kagent for your runs"}
+          className={`rounded px-2.5 py-0.5 text-xs font-medium transition disabled:opacity-50 ${
+            kagent.enabled
+              ? "bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25"
+              : "bg-muted text-muted-foreground hover:bg-muted/70"
           }`}
         >
-          {kagent.enabled ? "enabled" : "off"}
-        </span>
+          {busy ? "saving…" : kagent.enabled ? "enabled — click to disable" : "off — click to enable"}
+        </button>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         When you enable kagent (connector below) and configure one of these providers, your long-lived

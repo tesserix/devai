@@ -80,15 +80,19 @@ def _scope_default(principal: Principal) -> tuple[Scope, str]:
 # ── catalog ───────────────────────────────────────────────────────────────
 
 
-def _kagent_catalog_public() -> dict[str, Any]:
+async def _kagent_catalog_public(principal: Principal, svc: Any) -> dict[str, Any]:
     """The kagent runtime model catalog for the Settings UI: which (provider,
     model) variants kagent can run a user's agent on (passthrough = the user's
-    own key). The UI cross-references this with /settings/models/{provider} to
-    show only what the user has a key for."""
+    own key). ``enabled`` reflects THIS user's effective setting (their kagent
+    connector overlay), not just the platform default — so the toggle is
+    accurate. The UI cross-references the models with /settings/models/{provider}
+    to show only what the user has a key for."""
     import json as _json
 
     from devai.config import settings as base
+    from devai.settings.overlay import build_overlay
 
+    overlay = await build_overlay(base, principal, svc)
     models: list[dict[str, str]] = []
     try:
         for it in _json.loads(str(getattr(base, "kagent_catalog", "") or "[]")):
@@ -99,7 +103,7 @@ def _kagent_catalog_public() -> dict[str, Any]:
     except (ValueError, TypeError):
         models = []
     return {
-        "enabled": bool(getattr(base, "kagent_enabled", False)),
+        "enabled": bool(getattr(overlay, "kagent_enabled", False)),
         "passthrough": bool(getattr(base, "kagent_passthrough", False)),
         "models": models,
     }
@@ -108,14 +112,14 @@ def _kagent_catalog_public() -> dict[str, Any]:
 @router.get("/catalog")
 async def get_catalog(request: Request) -> dict[str, Any]:
     """The connector catalog (field definitions) + capability flags + the kagent
-    runtime model catalog."""
-    await _require_principal(request)
+    runtime model catalog (enabled = this user's effective setting)."""
+    principal = await _require_principal(request)
     svc = _svc(request)
     return {
         "connectors": catalog_public(),
         "secrets_writable": await svc.secrets_writable(),
         "has_db": svc.has_db,
-        "kagent": _kagent_catalog_public(),
+        "kagent": await _kagent_catalog_public(principal, svc),
     }
 
 
