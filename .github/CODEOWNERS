@@ -1,0 +1,4 @@
+# Sole maintainer — every change requires review/approval from @Sam123ben.
+# Branch protection enforces code-owner review, so this gates all merges.
+
+* @Sam123ben
