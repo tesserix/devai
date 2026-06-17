@@ -164,3 +164,113 @@ Already proven: a rendered SandboxAgent **passes the live CRD** (server dry-run)
 - Active: **1** `e2-standard-4` sandbox node while agents run; the WorkerPool
   multiplexes all Actors onto it. Substrate controller (~1 small pod) on the
   existing pool.
+
+---
+
+## Decision log (why it's shaped this way)
+
+| Question | Decision | Why |
+|---|---|---|
+| Run agents always-warm (classic kagent) or on-demand? | **On-demand Jobs by default** | A classic kagent Agent = one standing Deployment per agent × model variant → ~160 pods at our scale → doesn't fit 3 nodes. The default `JobRunnerStage` spins an ephemeral Job per run; per-user keys + fallback already work there. |
+| Is kagent dead, then? | **No — dormant, behind `DEVAI_KAGENT_ENABLED` (off)** | Kept for genuinely hot agents once there's headroom. The operator flag is the real off-switch (provisioning is operator-controlled; per-user toggles only pick *which* variants). |
+| Why revisit kagent at all? | **Agent Substrate** | WorkerPool + Actor model = low overhead + fast cold start + gVisor isolation per agent → fits the budget *and* lets *users* run *their own* agent code safely. |
+| Separate cluster for Substrate? | **No — a node pool** | Substrate needs gVisor *nodes*, i.e. a GKE-Sandbox node pool in the same cluster. Separate cluster = later hardening for full tenant blast-radius isolation, not a requirement. |
+| How to keep 3-node baseline? | **Sandbox pool autoscale 0→1** | 0 nodes when idle (baseline = 3), 1 sandbox node on demand. The WorkerPool multiplexes Actors onto it — not a node-per-agent. |
+| How do we know our render is correct before deploying? | **Server-side dry-run + a validate API** | `kubectl apply --dry-run=server` validates against the live CRD + admission with **no persist**; `GET /v0/agents/{n}/export/kagent?validate=true` returns `{ok,issues}` for authoring. |
+
+## Gotchas & lessons learned (the hard-won ones)
+
+**Schema / rendering (agentic-registry `adapters/kagent`)**
+1. **systemMessage must be non-empty** or the controller rejects the CR. 39/40 DevAI
+   agents keep their prompt in a referenced `Prompt` (not inline) → the export must
+   resolve `spec.promptRef` → `Prompt.spec.systemPrompt` (`resolveSystemPrompt`).
+2. **`spec.substrate.workerPoolRef` is an OBJECT `{name[,apiGroup,kind]}`, not a
+   string.** A string is rejected (`must be of type object`). Caught by server dry-run.
+3. **Nest under `spec.declarative` + `spec.type: Declarative`.** A flat/pre-0.9 spec
+   makes the controller nil-panic (declarative pruned to nil).
+4. **Emit `kagent.dev/v1alpha2`.** The declarative shape only exists there; v1alpha1
+   converts-and-drops the model/prompt on storage.
+5. **Separate multi-doc YAML with `---`.** Concatenated docs parse as ONE (last wins),
+   so only the final agent/variant applies.
+6. **Model ids must be DIRECT-provider-valid.** kagent calls the provider directly
+   (no DevAI gateway), so a gateway-alias model 404s; validate 200/429 vs 404.
+
+**Apply / reconcile (`kagent-agent-sync`)**
+7. **Client-side apply, not `--server-side`.** SSA mis-negotiates the multi-version
+   CRD and rejects `spec.type`/`spec.declarative` ("field not declared in schema").
+8. **`--validate=false` + 256Mi.** Client-side apply downloads/parses the cluster
+   OpenAPI → OOMKill (exit 137) at 128Mi.
+9. **The registry `/v0/apply` MERGES `metadata.labels`.** Removing a label from a seed
+   + reseeding does NOT drop it on the registry object → the agent still exports. The
+   reliable off-switch is the **active-variants kill-switch** (operator `kagent_enabled`),
+   not unlabelling.
+10. **Reap on a *successful empty* export, not keep-last.** Otherwise unlabelling the
+    last agent orphans its pods forever.
+
+**Cluster / mesh / runtime**
+11. **gVisor needs a GKE-Sandbox node pool.** The `gvisor` RuntimeClass *existing* is
+    NOT enough — a pod with `runtimeClassName: gvisor` only schedules on a
+    `--sandbox type=gvisor` node pool. No such pool → Pending forever.
+12. **Cross-namespace on ambient mesh = THREE layers.** kagent-system → devai-api needed
+    a NetworkPolicy **ingress** + an **egress** allow + an **Istio AuthorizationPolicy**
+    SPIFFE principal — ztunnel L4-resets by identity *before* the L7 token check, so the
+    authz was the real unlock. A NetworkPolicy alone isn't enough.
+13. **Substrate namespace is `ate-system`; worker image is `ateom-gvisor`.** ("ate" =
+    the substrate runtime; not "substrate-system".)
+
+**Process / git**
+14. **`connect-local` / `connect-prod` first; verify `kubectl config current-context`.**
+    The default context may be prod. Read-only inspection on prod is fine; deploys go
+    through ArgoCD (never manual `kubectl apply`).
+15. **A pre-existing unpushed local commit can hide under `main`.** When pushing
+    tesserix-k8s, a stray local commit (e.g. `d025be3f` HomeChef NATS, not ours) caused a
+    rebase conflict. **Cherry-pick your own commit onto `origin/main`** and push that —
+    don't rebase-and-lose someone else's WIP.
+16. **`dashboard/next-env.d.ts` + `tsconfig.json` are Next.js auto-reformats.** They show
+    as modified from session start; do NOT commit them with feature changes.
+
+## Verify / reproduce cheatsheet
+
+```bash
+# 0. context (NEVER assume)
+kubectl config current-context
+
+# 1. Substrate readiness
+kubectl get crd | grep -iE 'sandboxagent|workerpool'         # SandboxAgent yes, WorkerPool = installed?
+kubectl get runtimeclass gvisor                              # RuntimeClass present?
+kubectl get nodes -l sandbox.gke.io/runtime=gvisor           # a sandbox NODE? (empty = blocker)
+kubectl -n ate-system get pods                               # substrate controller up?
+
+# 2. cross-validate a render WITHOUT deploying (the ultimate check)
+cat <<'Y' | kubectl apply --dry-run=server -f -
+apiVersion: kagent.dev/v1alpha2
+kind: SandboxAgent
+metadata: {name: probe, namespace: kagent-system}
+spec:
+  type: Declarative
+  platform: substrate
+  substrate: {workerPoolRef: {name: kagent-default}}   # OBJECT, not string
+  declarative: {runtime: go, modelConfig: default-model-config, systemMessage: "hi"}
+Y
+# "created (server dry run)" = passes the live CRD + admission, nothing persisted.
+
+# 3. cross-validate from DevAI / the registry (returns {ok, issues})
+curl -s ".../v0/agents/<name>/export/kagent?namespace=devai&workerPool=kagent-default&validate=true"
+# or in Python: RegistryClient(...).kagent_validate("<name>")
+
+# 4. render a SandboxAgent (no deploy)
+curl -s ".../v0/agents/<name>/export/kagent?namespace=devai&workerPool=kagent-default&modelConfig=default-model-config"
+```
+
+## Where everything lives
+
+| Piece | Path |
+|---|---|
+| This runbook | `devai/docs/agentic/SUBSTRATE-SETUP.md` |
+| Jobs-vs-kagent decision + re-enable | `devai/docs/agentic/KAGENT-INTEGRATION.md` §0 / §0a |
+| Render + validate + SandboxAgent | `agentic-registry/adapters/kagent/kagent.go`, `internal/api/export.go`, `resolve.go` |
+| DevAI validate client | `devai/src/devai/registry/client.py::kagent_validate` |
+| Reconciler (renders + applies) | `tesserix-k8s/charts/apps/kagent-agent-sync/` |
+| Staged Substrate ArgoCD apps | `tesserix-k8s/argocd/prod/apps/substrate/` (manual sync, not wired) |
+| kagent controller app | `tesserix-k8s/argocd/prod/infrastructure/kagent.yaml` |
+| Tracking | tesserix/devai epic **#69**, subs **#70–#78** |

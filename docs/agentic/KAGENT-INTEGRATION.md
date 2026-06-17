@@ -7,6 +7,11 @@
 > today and **everything runs on-demand as Jobs** (see §0). The code + the dynamic
 > Settings UI stay in place (default-off) for a future genuinely-hot agent once
 > there's node headroom — see [§0a](#0a-re-enabling-kagent) to switch it back on.
+>
+> **Going further — Agent Substrate:** the path to re-enable kagent in a way that
+> *fits* (Actors multiplexed in a gVisor WorkerPool, not a pod per agent) is the
+> **Agent Substrate**. Full prod setup runbook + decision log + the hard-won
+> gotchas: **[`SUBSTRATE-SETUP.md`](./SUBSTRATE-SETUP.md)**. Tracking: devai #69–#78.
 
 ---
 
