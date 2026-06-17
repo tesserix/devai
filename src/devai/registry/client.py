@@ -259,6 +259,33 @@ class RegistryClient:
             path += f"?namespace={ns}"
         return self._get(path)
 
+    def kagent_validate(self, name: str, *, namespace: str = "", model_config: str = "") -> dict[str, Any]:
+        """Cross-validate an agent against the **kagent Agent CRD contract**.
+
+        Renders the agent the way the controller would (resolving promptRef →
+        systemMessage) and reports whether the result is a CR kagent ACCEPTS.
+        Returns ``{"ok": bool, "issues": [{severity, field, message}, ...]}`` —
+        ``ok=false`` means a publish/deploy to kagent (or the Substrate) would be
+        rejected at reconcile (e.g. empty systemMessage, missing ModelConfig).
+        DevAI authoring/publish calls this so schema drift is caught up front
+        instead of as a silent controller rejection. Defensive — never raises;
+        a registry/transport miss returns ``{"ok": True, "issues": []}`` so it
+        can't block authoring when the registry is down.
+        """
+        path = f"/v0/agents/{name}/export/kagent?validate=true"
+        ns = namespace or self._namespace
+        if ns:
+            path += f"&namespace={ns}"
+        if model_config:
+            path += f"&modelConfig={model_config}"
+        try:
+            res = self._get(path, use_cache=False)
+            if isinstance(res, dict):
+                return res
+        except Exception:  # noqa: BLE001 — validation must never wedge authoring
+            logger.debug("registry.kagent_validate(%s) failed", name, exc_info=True)
+        return {"ok": True, "issues": []}
+
     def get_signing_key(self) -> dict[str, Any]:
         """Fetch the registry's published Ed25519 signing public key.
 
