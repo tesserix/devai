@@ -301,6 +301,37 @@ runbook above. Reproduce in this order.
    clean push** mid-deploy. Always `git pull --rebase origin main` then push; verify
    with `git ls-tree origin/main <path>`. (See the feedback memory.)
 
+## Current state + the OPEN blocker (2026-06-17)
+
+**Deployed & healthy on prod:** the gVisor node pool (`sandbox-gvisor`, idle at 0),
+the Substrate stack (`ate-system`: ate-api, ate-controller, atelet ×3, atenet-router,
+dns, rustfs, valkey), the `kagent-default` WorkerPool, and the kagent controller with
+substrate enabled (talks to ate-api fine). devai is unaffected.
+
+**OPEN — Actor execution blocked (substrate 0.0.6 ↔ GKE Workload Identity):** a
+SandboxAgent reaches `ActorTemplateNotReady`. The ate-controller validates a projected
+SA token against the OIDC issuer, but **GKE mints tokens with the external issuer
+(`container.googleapis.com/…`)** whose discovery doc is served over a **public-CA**
+TLS cert — and the chart **hardcodes** `--client-jwt-ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`
+(the *cluster* CA), so it can't verify Google's cert →
+`x509: certificate signed by unknown authority`. It's not a values knob in 0.0.6.
+
+**Fix options (pick one):**
+1. **mTLS mode** (`auth.mode: mtls`) — substrate uses in-cluster pod-cert auth, no
+   OIDC. Cleanest in principle, BUT kagent 0.9.7's substrate config only exposes the
+   JWT token file (no mTLS client option), so the kagent→ate-api path would also need
+   to speak mTLS — a both-sides change, not values-only. Verify kagent mTLS support first.
+2. **Patch the substrate chart** to make `--client-jwt-ca-cert` configurable (point it
+   at a bundle that includes the public CAs, or at the in-cluster discovery), then
+   keep JWT mode. Raise upstream (kagent-dev/substrate) — the chart already documents
+   the GKE issuer but not the matching CA.
+3. **Workload Identity off / in-cluster issuer** — if the cluster minted tokens with
+   the in-cluster issuer, JWT mode works as-is. Cluster-level, conflicts with WI usage.
+
+Until one lands, leave substrate deployed+dormant (no DevAI agent is labelled for it,
+`DEVAI_KAGENT_ENABLED=false`), so nothing tries to run a broken Actor. The node pool
+is scale-to-zero (no idle cost).
+
 ## Where everything lives
 
 | Piece | Path |
