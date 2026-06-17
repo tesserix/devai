@@ -99,6 +99,37 @@ class Pipeline:
         # reaper can distinguish this owner's live claims from a dead pod's.
         self._owner = f"{os.environ.get('HOSTNAME', 'local')}-{uuid.uuid4().hex[:6]}"
 
+        # Dispatch backend. `nats` swaps the Redis claim guard for a JetStream
+        # WorkQueue (native single-delivery + ack_wait redelivery + max_deliver
+        # dead-letter + lane routing). Requires the event-bus adapter AND the
+        # durable state manager (for run snapshots — the queue carries only the
+        # id). Anything missing → fall back to the proven redis/inproc path, so a
+        # NATS outage can never strand dispatch. Default redis (off).
+        self._wq: Any = None
+        self._nats_subs: list[Any] = []
+        self._dispatch_mode = str(getattr(cfg, "pipeline_dispatch_backend", "redis") or "redis").lower()
+        if self._dispatch_mode == "nats":
+            adapter = getattr(deps, "event_bus_adapter", None)
+            if adapter is not None and self._durable:
+                from devai.pipeline.dispatch import NatsWorkQueueBackend
+
+                self._wq = NatsWorkQueueBackend(
+                    adapter,
+                    stream=str(getattr(cfg, "pipeline_runs_stream", "DEVAI_PIPELINE_RUNS")),
+                    subject_prefix=str(getattr(cfg, "pipeline_run_subject_prefix", "devai.pipeline.run")),
+                    lane=str(getattr(cfg, "pipeline_dispatch_lane", "alm")),
+                    queue_group=str(getattr(cfg, "pipeline_dispatch_queue_group", "devai-pipeline-workers")),
+                    ack_wait_seconds=int(getattr(cfg, "nats_ack_wait", 300) or 300),
+                    max_deliver=int(getattr(cfg, "nats_max_deliver", 3) or 3),
+                )
+            else:
+                logger.warning(
+                    "dispatch backend=nats but event-bus adapter / durable queue unavailable "
+                    "— falling back to %s",
+                    "redis" if self._durable else "inproc",
+                )
+                self._dispatch_mode = "redis" if self._durable else "inproc"
+
         self._executor = BlueprintExecutor(
             self._registry,
             deps,
@@ -163,6 +194,27 @@ class Pipeline:
         """Spin up worker coroutines (+ the reaper in durable mode)."""
         if self._workers:
             return
+        if self._wq is not None:
+            # NATS WorkQueue: one queue-group subscription per pod; the broker
+            # load-balances across every pod + replica on this lane. Intra-pod
+            # concurrency is bounded by the semaphore in the handler; cross-pod
+            # parallelism comes from KEDA scaling on the consumer's backlog. No
+            # poll loop, no reaper — ack_wait redelivery replaces both.
+            try:
+                await self._wq.ensure()
+                self._nats_subs.append(await self._wq.subscribe(self._handle_nats_run))
+            except Exception:  # noqa: BLE001 — never let a bus blip wedge startup
+                logger.exception("pipeline dispatch=nats setup failed — runs will queue once the bus recovers")
+            self._workers.append(asyncio.create_task(self._nats_hold(), name="pipeline-nats-hold"))
+            logger.info(
+                "pipeline dispatch=nats ENABLED (lane=%s, subject=%s, queue=%s, ack_wait=%ds, max_deliver=%d)",
+                self._dispatch_mode,
+                self._wq.subject,
+                self._wq._queue_group,
+                self._wq.ack_wait_seconds,
+                self._wq.max_deliver,
+            )
+            return
         for i in range(self._concurrency):
             self._workers.append(asyncio.create_task(self._worker_loop(i), name=f"pipeline-worker-{i}"))
         if self._durable:
@@ -186,6 +238,12 @@ class Pipeline:
         NOT delete the durable queue; remaining ids persist for the next pod.
         """
         self._stop_event.set()
+        # NATS path: stop pulling new messages. In-flight handlers nack on the
+        # shutdown check so a surviving pod resumes immediately (no orphan wait).
+        for sub in self._nats_subs:
+            with contextlib.suppress(Exception):
+                await sub.unsubscribe()
+        self._nats_subs.clear()
         if not self._durable:
             for _ in self._workers:
                 self._queue.put_nowait("__STOP__")
@@ -209,7 +267,12 @@ class Pipeline:
             task.label = (task.intent[:60] or task.blueprint).strip()
         self._tasks[task.id] = task
         self._task_done[task.id] = asyncio.Event()
-        if self._durable:
+        if self._wq is not None:
+            # Snapshot first (system of record), then publish the id onto the
+            # lane. Nats-Msg-Id dedups a double-enqueue inside the dedup window.
+            await self._persist(task)
+            await self._wq.enqueue(task.id)
+        elif self._durable:
             # Persist the snapshot FIRST so whichever replica claims the id can
             # rebuild the task from Redis, then enqueue durably (idempotent).
             await self._persist(task)
@@ -236,6 +299,14 @@ class Pipeline:
         if task_dict.get("blueprint") not in self._blueprints:
             logger.warning("resubmit %s: unknown blueprint %r — skipped", task_id, task_dict.get("blueprint"))
             return None
+        if self._wq is not None:
+            # NATS path: re-publish onto the lane. Nats-Msg-Id makes a re-enqueue
+            # of a still-queued run a no-op inside the dedup window; outside it,
+            # the consumer's terminal-run + resume-from-snapshot guards keep it
+            # idempotent (it resumes, never double-runs).
+            await self._wq.enqueue(task_id)
+            logger.info("reconcile: re-published orphaned run %s onto lane", task_id)
+            return task_id
         newly = await self.deps.state_manager.enqueue_task(task_id)  # type: ignore[union-attr]
         if newly:
             logger.info("reconcile: re-enqueued orphaned run %s (state=%s)", task_id, task_dict.get("state"))
@@ -307,6 +378,129 @@ class Pipeline:
                     await self._execute_task(task)
                 except Exception:  # noqa: BLE001
                     logger.exception("worker %d: task %s crashed", worker_id, task_id)
+
+    async def _nats_hold(self) -> None:
+        """Keep one task alive so stop() can join cleanly. The actual work runs
+        in the subscription callback (`_handle_nats_run`); this just parks until
+        shutdown."""
+        await self._stop_event.wait()
+
+    async def _handle_nats_run(self, msg: Any) -> None:
+        """Execute one run delivered by the JetStream WorkQueue, then ack / nack /
+        term. Mirrors `_durable_worker_loop` but on native NATS primitives:
+
+          * single-delivery (queue group)        ← replaces claim_next_task
+          * keepalive in_progress() heartbeat     ← replaces _heartbeat
+          * ack on terminal (success OR failure)  ← replaces ack_task
+          * nack on shutdown (graceful hand-off)  ← replaces handoff_task
+          * term + DLQ on the last attempt        ← replaces releases>50 hard-fail
+        Idempotent: a terminal run acks without executing, and the executor skips
+        completed stages, so a redelivery resumes rather than re-runs.
+        """
+        sm = self.deps.state_manager
+        # 1. Parse the id. Malformed payloads can never be processed → term.
+        try:
+            task_id = str(msg.json().get("task_id") or "")
+        except Exception:  # noqa: BLE001
+            with contextlib.suppress(Exception):
+                await msg.term()
+            return
+        if not task_id:
+            with contextlib.suppress(Exception):
+                await msg.term()
+            return
+
+        # 2. Rebuild the task from its snapshot (system of record).
+        task = self._tasks.get(task_id)
+        if task is None:
+            snapshot = await self._load_snapshot(task_id)
+            if snapshot is None:
+                logger.warning("nats worker: no snapshot for %s — terminating delivery", task_id)
+                with contextlib.suppress(Exception):
+                    await msg.term()
+                return
+            task = DevAITask.from_dict(snapshot)
+            self._tasks[task.id] = task
+            self._task_done.setdefault(task.id, asyncio.Event())
+
+        # 3. Wrong-lane safety net (lane routing should make this unreachable):
+        #    a blueprint this service can't run is dead-lettered, not looped.
+        if task.blueprint not in self._blueprints:
+            if self._wq.is_final_attempt(msg):
+                logger.error("nats worker: blueprint %r unrunnable here — dead-lettering %s", task.blueprint, task_id)
+                task.error = f"no service on this lane can run blueprint {task.blueprint!r}"
+                task.transition(TaskState.STAGE_FAILED)
+                await self._persist(task)
+                await self._wq.dead_letter(task_id, task.error, msg.num_delivered)
+                with contextlib.suppress(Exception):
+                    await msg.term()
+            else:
+                with contextlib.suppress(Exception):
+                    await msg.nack()
+            return
+
+        # 4. Already finished elsewhere → ack, don't re-run (idempotent).
+        if task.is_terminal:
+            with contextlib.suppress(Exception):
+                await msg.ack()
+            return
+
+        # 5. Stop-guard at the delivery choke point — a stopped run can never be
+        #    resurrected by a redelivery.
+        try:
+            ctrl = await sm.get_pipeline_control(task_id)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            ctrl = None
+        if ctrl == "stopped":
+            logger.info("nats worker: %s flagged stopped — finalizing cancel", task_id)
+            from devai.blueprint.executor import _finalize_agent_statuses
+
+            task.error = task.error or "stopped by user"
+            task.failed_stage = task.failed_stage or task.current_stage or ""
+            task.current_stage = ""
+            _finalize_agent_statuses(task)
+            if not task.is_terminal:
+                task.transition(TaskState.CANCELLED)
+            await self._persist(task)
+            with contextlib.suppress(Exception):
+                await msg.ack()
+            return
+
+        # 6. Execute, holding the ack deadline open + bounding intra-pod concurrency.
+        interrupted = False
+        try:
+            async with self._wq.keepalive(msg), self._semaphore:
+                await self._execute_task(task)
+        except asyncio.CancelledError:
+            interrupted = True
+            with contextlib.suppress(Exception):
+                await msg.nack()  # graceful shutdown — redeliver to a surviving pod
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("nats worker: task %s crashed", task_id)
+
+        # 7. Decide the delivery's fate.
+        if interrupted:
+            return  # already nacked
+        if task.is_terminal:
+            with contextlib.suppress(Exception):
+                await msg.ack()  # success OR recorded failure — done
+        elif self._stop_event.is_set():
+            with contextlib.suppress(Exception):
+                await msg.nack()  # shutting down mid-run — hand off
+        elif self._wq.is_final_attempt(msg):
+            # Crashed without finalizing, no attempts left → record + dead-letter.
+            task.error = task.error or "dead-lettered after repeated dispatch failures"
+            task.failed_stage = task.failed_stage or task.current_stage or ""
+            with contextlib.suppress(Exception):
+                task.transition(TaskState.STAGE_FAILED)
+            await self._persist(task)
+            await self._wq.dead_letter(task_id, task.error, msg.num_delivered)
+            with contextlib.suppress(Exception):
+                await msg.term()
+        else:
+            with contextlib.suppress(Exception):
+                await msg.nack()  # transient — redeliver after ack_wait
 
     async def _durable_worker_loop(self, worker_id: int) -> None:
         """Claim tasks from the Redis queue and execute them.

@@ -45,12 +45,17 @@ class EventMessage:
     received_at: float = field(default_factory=time.time)
     message_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     provider: str = ""
+    #: 1-based delivery attempt (JetStream num_delivered). 1 on first delivery;
+    #: lets a worker dead-letter in-band on the last allowed attempt. Backends
+    #: without redelivery report 1.
+    num_delivered: int = 1
 
     # Ack callbacks — adapter-bound. Default to no-op so a stage that
     # forgets to ack against a noop adapter doesn't break.
     _ack: Callable[[], Awaitable[None]] | None = None
     _nack: Callable[[], Awaitable[None]] | None = None
     _term: Callable[[], Awaitable[None]] | None = None
+    _in_progress: Callable[[], Awaitable[None]] | None = None
 
     async def ack(self) -> None:
         """Acknowledge — message is processed, don't redeliver."""
@@ -66,6 +71,13 @@ class EventMessage:
         """Terminate — never redeliver (poison-pill handling)."""
         if self._term is not None:
             await self._term()
+
+    async def in_progress(self) -> None:
+        """Tell the broker work is still in flight — extends the ack deadline by
+        another ack_wait. Call periodically during a long handler so a slow run
+        isn't redelivered mid-flight. No-op on backends without ack deadlines."""
+        if self._in_progress is not None:
+            await self._in_progress()
 
     def json(self) -> Any:
         """Decode payload as JSON. Raises if not JSON."""

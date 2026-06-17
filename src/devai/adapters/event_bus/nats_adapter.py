@@ -303,17 +303,20 @@ class NatsEventBusAdapter(EventBusAdapter):
         """Translate a NATS Msg into our EventMessage on dispatch."""
 
         async def _cb(msg: Msg) -> None:  # noqa: F821
+            meta = getattr(msg, "metadata", None)
             envelope = EventMessage(
                 subject=msg.subject,
                 data=msg.data or b"",
                 headers=dict(msg.headers or {}),
-                seq=getattr(getattr(msg, "metadata", None), "sequence", None),
+                seq=getattr(meta, "sequence", None),
+                num_delivered=int(getattr(meta, "num_delivered", 1) or 1),
                 reply_subject=getattr(msg, "reply", None),
                 provider=self.provider_name,
             )
             envelope._ack = msg.ack
             envelope._nack = lambda: msg.nak()  # type: ignore[attr-defined]
             envelope._term = lambda: msg.term()  # type: ignore[attr-defined]
+            envelope._in_progress = lambda: msg.in_progress()  # type: ignore[attr-defined]
             try:
                 await handler(envelope)
             except Exception:

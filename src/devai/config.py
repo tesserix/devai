@@ -358,6 +358,24 @@ class Settings(BaseSettings):
     pipeline_event_ring_size: int = 1000  # SSE replay buffer
     pipeline_task_ttl: int = 86400 * 30  # 30 days — keep parity with redis_result_ttl
 
+    # --- run dispatch backend ---
+    # How runs are distributed to workers:
+    #   redis  → the durable claim queue above (default; battle-tested).
+    #   nats   → a JetStream WorkQueue (native single-delivery + ack_wait
+    #            redelivery + max_deliver dead-letter + lane routing, no manual
+    #            claim guard / release ping-pong). Reuses nats_ack_wait /
+    #            nats_max_deliver. Falls back to redis if the bus can't connect.
+    #   inproc → per-pod in-memory queue (tests / CLI).
+    # See docs/plans/nats-dispatch-workqueue/IMPLEMENTATION-PLAN.md.
+    pipeline_dispatch_backend: str = "redis"  # redis | nats | inproc
+    # This service's lane. Each service publishes to AND consumes from its own
+    # lane subject, so a run never lands where its blueprint can't run (api=alm,
+    # sre sets DEVAI_PIPELINE_DISPATCH_LANE=sre).
+    pipeline_dispatch_lane: str = "alm"
+    pipeline_runs_stream: str = "DEVAI_PIPELINE_RUNS"
+    pipeline_run_subject_prefix: str = "devai.pipeline.run"
+    pipeline_dispatch_queue_group: str = "devai-pipeline-workers"
+
     # --- workflow adapter (durable orchestration backbone) ---
     # Selects HOW blueprints execute. `inproc` (default) runs them in this
     # process via BlueprintExecutor — identical to the pre-adapter behaviour.
