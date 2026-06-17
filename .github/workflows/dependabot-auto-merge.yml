@@ -72,9 +72,12 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr review --approve "$PR_URL"
 
-      - name: Enable auto-merge
+      # Direct squash-merge — the gate above already confirmed every check is
+      # green. (`--auto` would never fire on a repo with no required-check
+      # branch protection, so it would just sit enabled and never merge.)
+      - name: Merge
         if: ${{ steps.gate.outputs.enabled == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.DEPENDABOT_PAT }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: gh pr merge --squash --delete-branch "$PR_URL"
