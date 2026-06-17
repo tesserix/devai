@@ -262,6 +262,45 @@ curl -s ".../v0/agents/<name>/export/kagent?namespace=devai&workerPool=kagent-de
 curl -s ".../v0/agents/<name>/export/kagent?namespace=devai&workerPool=kagent-default&modelConfig=default-model-config"
 ```
 
+## As actually deployed (2026-06-17) — the real steps + fixes hit
+
+This is what *actually* happened bringing it up on prod, beyond the idealized
+runbook above. Reproduce in this order.
+
+1. **Node pool** — `gcloud container node-pools create sandbox-gvisor … --sandbox type=gvisor`
+   (the command at the top). Created fine, scale-to-zero.
+2. **Pin versions** — substrate charts: latest is **0.0.6** (`crane ls ghcr.io/kagent-dev/substrate/helm/substrate`).
+   `helm show/pull` was blocked locally by a missing `docker-credential-osxkeychain`
+   — use **`crane`** to inspect OCI charts instead.
+3. **Wire the apps** — `prod-infrastructure` is **kustomize-based**, so the two
+   Application files (`argocd/prod/infrastructure/substrate-{crds,}.yaml`) must be
+   **added to `argocd/prod/infrastructure/kustomization.yaml` `resources:`** — a
+   standalone file in the dir is otherwise invisible. (Cost me a wrong assumption +
+   a wasted sync.)
+4. **CRDs are `ate.dev`, not `kagent.dev`** — `workerpools.ate.dev`,
+   `actortemplates.ate.dev`. The substrate stack lands in **`ate-system`**:
+   `ate-api-server`, `ate-controller`, `atelet` (×3 worker daemons), `atenet-router`,
+   `dns`, `rustfs` (object store), plus a bundled valkey (the `substrate` app shows a
+   benign valkey StatefulSet `OutOfSync` — Healthy, ignore).
+5. **Enable on kagent (Phase B)** — `controller.substrate.enabled=true` +
+   `substrateWorkerPool.create=true` in the **kagent** app values. The new
+   substrate-enabled controller pod **CrashLoopBackOff**ed:
+   `dial ate-api "dns:///api.ate-system.svc:443": context deadline exceeded`.
+   **Cause:** `kagent-system` egress is default-deny and `ate-system` wasn't allowed.
+   **Fix:** `allow-kagent-to-ate-egress` NetworkPolicy in
+   `manifests/agentic-istio/networkpolicy-consumer-egress.yaml` (same pattern as the
+   registry/devai egress allows). Controller recovered, WorkerPool worker came up.
+6. **SandboxAgent stuck `ActorTemplateNotReady`** — the ate-controller couldn't
+   create the "golden actor": `Unauthenticated: invalid bearer token: unexpected
+   issuer "https://container.googleapis.com/.../tesseract-prod-in-gke"`.
+   **Cause:** **GKE mints SA tokens with the cluster's OIDC issuer**, but the ate-api
+   defaulted `auth.jwt.issuer=https://kubernetes.default.svc.cluster.local`.
+   **Fix:** set `auth.jwt.issuer` (substrate app values) to this cluster's issuer
+   (`kubectl get --raw /.well-known/openid-configuration`).
+7. **git** — `tesserix-k8s` main is force-pushed by other clones and **dropped a
+   clean push** mid-deploy. Always `git pull --rebase origin main` then push; verify
+   with `git ls-tree origin/main <path>`. (See the feedback memory.)
+
 ## Where everything lives
 
 | Piece | Path |
