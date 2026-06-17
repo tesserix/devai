@@ -619,6 +619,12 @@ class PipelineService:
                     "name": bp.name,
                     "description": bp.description,
                     "stage_count": len(bp.stages),
+                    # Full render-ready stage list so the Blueprints catalog can
+                    # show the stage count AND draw the DAG without a second
+                    # per-blueprint fetch. Each entry is StageSpec.to_dict()
+                    # (name/stage/type/depends_on/parallel/lane/agent/gate/…) —
+                    # the same shape the blueprint-graph endpoint builds from.
+                    "stages": [s.to_dict() for s in bp.stages],
                     "metadata": dict(bp.metadata),
                 }
             )

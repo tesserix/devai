@@ -32,6 +32,7 @@ import {
   type PipelineRun,
 } from "@/lib/api";
 import { BlueprintDAG } from "@/components/blueprint-dag";
+import { BlueprintMesh } from "@/components/blueprint-mesh";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { EmptyState } from "@/components/empty-state";
 import { GuidancePanel, HelpPopover } from "@/components/guidance";
@@ -203,6 +204,9 @@ function BlueprintCard({
   const [graph, setGraph] = useState<BlueprintGraph | null>(null);
   const [graphErr, setGraphErr] = useState(false);
   const [runs, setRuns] = useState<PipelineRun[] | null>(null);
+  // Per-card flow view: the lane DAG (default) or the force-directed mesh — the
+  // same two renderers as the run flow view (pipeline-flow.tsx).
+  const [view, setView] = useState<"dag" | "mesh">("dag");
 
   // Lazily fetch the DAG + recent runs for this blueprint.
   useEffect(() => {
@@ -261,10 +265,39 @@ function BlueprintCard({
         </button>
       </div>
 
-      {/* Mini DAG — static (no overlay) "what this blueprint does" preview. */}
+      {/* Mini flow — static (no overlay) "what this blueprint does" preview.
+          Toggle between the lane DAG and the force-directed mesh. */}
       <div className="panel-muted p-2 overflow-hidden">
+        {graph && graph.nodes.length > 0 && (
+          <div className="mb-1.5 flex items-center justify-end gap-1 text-[10px]">
+            <button
+              type="button"
+              aria-pressed={view === "dag"}
+              onClick={() => setView("dag")}
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 transition ${
+                view === "dag" ? "bg-[var(--surface-muted)] text-[var(--ink-strong)]" : "text-[var(--ink-muted)] hover:text-[var(--ink-soft)]"
+              }`}
+            >
+              <GitBranch className="w-3 h-3" /> DAG
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "mesh"}
+              onClick={() => setView("mesh")}
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 transition ${
+                view === "mesh" ? "bg-[var(--surface-muted)] text-[var(--ink-strong)]" : "text-[var(--ink-muted)] hover:text-[var(--ink-soft)]"
+              }`}
+            >
+              <Layers className="w-3 h-3" /> Mesh
+            </button>
+          </div>
+        )}
         {graph ? (
-          <BlueprintDAG graph={graph} dense />
+          view === "mesh" ? (
+            <BlueprintMesh graph={graph} />
+          ) : (
+            <BlueprintDAG graph={graph} dense />
+          )
         ) : graphErr ? (
           <p className="text-[12px] px-1 py-3" style={{ color: "var(--ink-muted)" }}>
             Flow unavailable for <span className="font-mono">{blueprint.name}</span>.
