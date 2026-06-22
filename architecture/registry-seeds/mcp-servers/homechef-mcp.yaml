@@ -1,0 +1,32 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: homechef-mcp
+  namespace: devai
+  visibility: internal
+  labels:
+    devai.io/source: devai
+    devai.io/category: product-support
+    mcp.tesserix.app/tenant: homechef
+spec:
+  name: homechef-mcp
+  displayName: HomeChef (fe3dr) Support MCP
+  description: >-
+    Customer-support tools for HomeChef / fe3dr. Read-only order status, chef
+    availability, delivery tracking and order history, plus
+    create_refund_request — which raises an order ISSUE with the AI's findings
+    for the chef/admin to review. The AI never issues a refund itself; money
+    only moves when a human resolves the issue.
+  endpoint: http://homechef-mcp.homechef.svc.cluster.local:8765/mcp
+  authMode: apikey
+  tools:
+  - get_order_status
+  - get_chef_availability
+  - track_delivery
+  - list_recent_orders
+  - create_refund_request
+  - search_knowledge_base
+  - lookup_conversation
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: homechef-mcp
