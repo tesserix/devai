@@ -1,0 +1,32 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: mark8ly-mcp
+  namespace: devai
+  visibility: internal
+  labels:
+    devai.io/source: devai
+    devai.io/category: product-support
+    mcp.tesserix.app/tenant: mark8ly
+spec:
+  name: mark8ly-mcp
+  displayName: Mark8ly Support MCP
+  description: >-
+    Customer-support tools for the Mark8ly marketplace. Read-only order, return
+    and history lookups, plus create_refund_request — which FILES a return in
+    'requested' state with the AI's findings for the store owner/admin to
+    approve. The AI never issues a refund itself; money only moves when a human
+    approves the request in the admin dashboard.
+  endpoint: http://mark8ly-mcp.mark8ly.svc.cluster.local:8765/mcp
+  authMode: apikey
+  tools:
+  - get_order
+  - list_returns
+  - list_recent_orders
+  - check_payment_status
+  - create_refund_request
+  - search_knowledge_base
+  - lookup_conversation
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: mark8ly-mcp

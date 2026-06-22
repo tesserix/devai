@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: platform-mcp
+  namespace: devai
+  visibility: internal
+  labels:
+    devai.io/source: devai
+    devai.io/category: product-support
+    mcp.tesserix.app/tenant: platform
+spec:
+  name: platform-mcp
+  displayName: Tesserix Home (Company) MCP
+  description: >-
+    Company-site tools for tesserix.app (the tesserix-home / "company" app,
+    which routes its Otto chats to the platform tenant). Answers
+    "what is Tesserix / what can it do / how do I start" via get_platform_overview
+    and the shared knowledge base, and captures sales/contact leads with
+    submit_contact_lead. No per-customer order data.
+  endpoint: http://platform-mcp.tesserix.svc.cluster.local:8765/mcp
+  authMode: apikey
+  tools:
+  - get_platform_overview
+  - submit_contact_lead
+  - search_knowledge_base
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: platform-mcp
