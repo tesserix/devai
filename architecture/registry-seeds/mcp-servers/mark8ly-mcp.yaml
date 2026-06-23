@@ -25,6 +25,7 @@ spec:
   - list_recent_orders
   - check_payment_status
   - create_refund_request
+  - create_support_ticket
   - search_knowledge_base
   - lookup_conversation
   toolSelector:
