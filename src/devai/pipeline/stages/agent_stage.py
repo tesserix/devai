@@ -83,14 +83,10 @@ class AgentStage(PipelineStage):
 
         # Per-principal config/SCM + trial gate (may raise in strict mode) — the
         # exact preamble AgentAdapter ran, now shared.
-        config, scm = await resolve_principal_run(
-            self.deps, task, trial_gate=self._trial_gate, stage_name=self._name
-        )
+        config, scm = await resolve_principal_run(self.deps, task, trial_gate=self._trial_gate, stage_name=self._name)
 
         instruction = self._instruction_builder(task) if self._instruction_builder else ""
-        result = await self._dispatcher.dispatch(
-            self._agent, task, instruction=instruction, config=config, scm=scm
-        )
+        result = await self._dispatcher.dispatch(self._agent, task, instruction=instruction, config=config, scm=scm)
 
         # Stub parity: deps unavailable → a stub StageResult with no validation.
         if result.stub:
@@ -113,9 +109,7 @@ class AgentStage(PipelineStage):
         # Output contract: run AFTER the structural fields are mirrored onto the
         # task (validators read task.pr_number etc.). Raises → executor retries.
         if self._validator:
-            await self._validator(
-                self.deps, task, result.handover, stage_name=self._name, output_key=self.output_key
-            )
+            await self._validator(self.deps, task, result.handover, stage_name=self._name, output_key=self.output_key)
 
         return stage_result
 

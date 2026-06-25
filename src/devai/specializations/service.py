@@ -179,7 +179,9 @@ class SpecializationService:
         from devai.agentruntime import AgentDispatcher, SpecAgent
 
         result = await AgentDispatcher(run_deps).dispatch(SpecAgent(spec), task)
-        patch: dict[str, Any] = dict(result.handover) if isinstance(result.handover, dict) else {"value": result.handover}
+        patch: dict[str, Any] = (
+            dict(result.handover) if isinstance(result.handover, dict) else {"value": result.handover}
+        )
         patch.setdefault("ok", not result.error)
         if result.final_text and f"{spec.name}_text" not in patch:
             patch[f"{spec.name}_text"] = result.final_text

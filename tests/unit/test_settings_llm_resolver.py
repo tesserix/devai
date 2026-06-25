@@ -197,7 +197,9 @@ async def test_require_user_connector_blocks_humans_not_systems():
     assert await deps.llm_for_principal("webhook:tesserix/devai#42") is sentinel
     assert await deps.llm_for_principal("") is sentinel
     # Flag off → platform fallback for everyone.
-    deps2 = StageDeps(config=type("C", (), {"llm_require_user_connector": False})(), llm=sentinel, llm_resolver=_NoneResolver())
+    deps2 = StageDeps(
+        config=type("C", (), {"llm_require_user_connector": False})(), llm=sentinel, llm_resolver=_NoneResolver()
+    )
     assert await deps2.llm_for_principal("human@example.com") is sentinel
 
 

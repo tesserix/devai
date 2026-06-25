@@ -133,7 +133,9 @@ class _CollaborateStage(PipelineStage):
 
     def _skip(self, reason: str) -> StageResult:
         logger.warning("collaborate:%s skipped — %s", self.pattern, reason)
-        return StageResult(message=f"collaborate:{self.pattern} skipped — {reason}", data={f"{self.output_key}_error": reason})
+        return StageResult(
+            message=f"collaborate:{self.pattern} skipped — {reason}", data={f"{self.output_key}_error": reason}
+        )
 
 
 def _int(value: Any, default: int) -> int:

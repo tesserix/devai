@@ -78,9 +78,7 @@ async def test_deliberation_loops_until_critic_approves():
 
 
 async def test_distillation_escalates_to_expert_on_learner_escalate_flag():
-    llm = _ByAgentLLM(
-        {"cheap": '{"answer": "unsure", "escalate": true}', "smart": '{"answer": "definitive"}'}
-    )
+    llm = _ByAgentLLM({"cheap": '{"answer": "unsure", "escalate": true}', "smart": '{"answer": "definitive"}'})
     deps = _deps(llm, _spec("cheap", "answer"), _spec("smart", "answer"))
     stage = collaborate_stage(deps, {"pattern": "distillation", "learner": "cheap", "expert": "smart"})
 

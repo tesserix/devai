@@ -155,9 +155,7 @@ class RunContext:
                 "created by AgentDispatcher, so sub-agents cannot be dispatched"
             )
         merged = {**self.extra_context, **(extra_context or {})}
-        return await self.dispatcher.dispatch(
-            agent, self.task, instruction=instruction, extra_context=merged
-        )
+        return await self.dispatcher.dispatch(agent, self.task, instruction=instruction, extra_context=merged)
 
 
 @dataclass(slots=True)

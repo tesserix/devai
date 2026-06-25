@@ -139,9 +139,7 @@ class AgentDispatcher:
         for agent, res in zip(agents, results, strict=True):
             if isinstance(res, BaseException):
                 logger.exception("AgentDispatcher.dispatch_many: %s failed", getattr(agent, "name", "?"))
-                out.append(
-                    AgentResult(ok=False, error=str(res), message=f"{getattr(agent, 'name', '?')} failed")
-                )
+                out.append(AgentResult(ok=False, error=str(res), message=f"{getattr(agent, 'name', '?')} failed"))
             else:
                 out.append(res)
         return out

@@ -398,8 +398,7 @@ class _DiagnoseTestFailuresStage(PipelineStage):
                 logger.exception("diagnose_test_failures: bug issue creation failed")
 
         return StageResult(
-            message=f"diagnosed {failed} failing test(s)"
-            + (f" — filed bug #{bug_number}" if bug_number else ""),
+            message=f"diagnosed {failed} failing test(s)" + (f" — filed bug #{bug_number}" if bug_number else ""),
             data={
                 "bug_issue_number": bug_number,
                 "bug_issue_url": bug_url,
@@ -411,9 +410,7 @@ class _DiagnoseTestFailuresStage(PipelineStage):
         # One policy: the user's own connector (role-priced) when they have
         # one, the trial-metered platform chain when they don't, None once
         # the trial is exhausted (→ mechanical fallback text below).
-        llm = await self.deps.role_llm_for_principal(
-            getattr(task, "triggered_by", "") or "", "utility"
-        )
+        llm = await self.deps.role_llm_for_principal(getattr(task, "triggered_by", "") or "", "utility")
         if llm is None or getattr(llm, "provider_name", "noop") == "noop":
             return (
                 f"{failed} test(s) failed — see the QA stage output on the run.",

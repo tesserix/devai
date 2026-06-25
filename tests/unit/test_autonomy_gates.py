@@ -185,9 +185,7 @@ async def test_stop_interrupts_a_running_stage():
         sm.control = "stopped"
 
     stopper = asyncio.create_task(stop_soon())
-    await asyncio.wait_for(
-        ex.execute(_bp([StageSpec(name="s1", stage="slow", timeout_seconds=60)]), task), timeout=5
-    )
+    await asyncio.wait_for(ex.execute(_bp([StageSpec(name="s1", stage="slow", timeout_seconds=60)]), task), timeout=5)
     await stopper
 
     assert task.state == TaskState.CANCELLED
@@ -504,9 +502,7 @@ async def test_implement_stage_requires_pull_request():
     deps = StageDeps(config=_Cfg())
     task = DevAITask(intent="x", blueprint="alm-pipeline", repo="o/r")
     with pytest.raises(RuntimeError, match="no pull request"):
-        await _validate_pull_request(
-            deps, task, {"implementation_summary": "I looked around but committed nothing"}
-        )
+        await _validate_pull_request(deps, task, {"implementation_summary": "I looked around but committed nothing"})
 
     # With a PR the contract passes (no SCM wired → labeling skipped).
     await _validate_pull_request(deps, task, {"pr_number": 12})
@@ -540,7 +536,11 @@ async def test_quality_gate_stages_reject_empty_outputs():
     with pytest.raises(RuntimeError, match="no test results"):
         await _validate_run_tests(deps, task, {"summary": "ran around"}, stage_name="run_tests", output_key="qa_tester")
     await _validate_run_tests(
-        deps, task, {"test_total": 5, "test_passed": 5, "test_failed": 0}, stage_name="run_tests", output_key="qa_tester"
+        deps,
+        task,
+        {"test_total": 5, "test_passed": 5, "test_failed": 0},
+        stage_name="run_tests",
+        output_key="qa_tester",
     )
     # Stub path stays silent-tolerant (slim envs): the {output_key}_stub key short-circuits.
     await review(deps, task, {"staff_reviewer_stub": True}, stage_name="review_code", output_key="staff_reviewer")
