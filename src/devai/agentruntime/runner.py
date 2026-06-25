@@ -87,6 +87,8 @@ class AgentRunner:
         *,
         extra_context: dict[str, Any] | None = None,
         instruction: str = "",
+        llm: LLMAdapter | None = None,
+        system_suffix: str = "",
     ) -> AgentRunResult:
         """Run `spec` for `task`. Returns the handover patch + run metadata.
 
@@ -94,8 +96,12 @@ class AgentRunner:
         building the prompt (a crew lead uses this to pass a member its
         subtask). `instruction` overrides the default "do your job" line
         (a crew lead uses this to give a member a specific assignment).
+        `llm` overrides the adapter (SpecAgent passes a role-provider-pinned
+        one); `system_suffix` is appended to the system prompt (SpecAgent
+        passes the skill-profile guidance) — both default to the plain
+        `deps.llm` + bare system prompt for direct callers (e.g. a crew).
         """
-        llm: LLMAdapter | None = self.deps.llm
+        llm = llm if llm is not None else self.deps.llm
         if llm is None:
             logger.info("AgentRunner: no LLM adapter wired — returning stub for %s", spec.name)
             return AgentRunResult(
@@ -112,11 +118,30 @@ class AgentRunner:
         except Exception:  # noqa: BLE001
             logger.debug("AgentRunner: per-principal SCM resolution failed — using platform client", exc_info=True)
         ctx = self._build_tool_context(spec, task, scm=scm)
-        bound = tool_registry.bind(list(spec.allowed_tools), ctx)
-        handlers = {b.spec.name: b.handler for b in bound}
-        tools = [b.spec for b in bound]
+        # One tool execution layer. ToolDispatcher resolves the spec's
+        # allowed_tools against the full catalog — SCM / file / shell / web /
+        # checkpoint / gitops via the central registry (with this rich context),
+        # plus the validation / security / test / memory / SRE families — and
+        # gates mutating tools in a dry run. This is the same layer the YAML
+        # specialization stage uses, so a YAML role behaves identically whether
+        # it runs here or there.
+        # Tests / callers may inject a dispatcher via deps.extra; otherwise
+        # build the real one with this run's rich tool context.
+        dispatcher = (self.deps.extra or {}).get("tool_dispatcher")
+        if dispatcher is None:
+            from devai.tools.dispatch import ToolDispatcher
+
+            dispatcher = ToolDispatcher(
+                scm,
+                dry_run=getattr(task, "dry_run", False),
+                triggered_by=task.triggered_by or "",
+                tool_context=ctx,
+            )
+        tools = dispatcher.build_tool_specs(list(spec.allowed_tools))
 
         system = self._build_system_prompt(spec)
+        if system_suffix:
+            system = f"{system}\n\n{system_suffix}"
         user = self._build_user_prompt(spec, task, extra_context, instruction)
         images = await self._hydrate_images(task)
         messages: list[LLMMessage] = [LLMMessage(role=LLMRole.USER, content=user, images=images)]
@@ -133,6 +158,12 @@ class AgentRunner:
                 model=spec.llm_model or "",
                 max_tokens=spec.max_tokens,
                 temperature=spec.temperature,
+                # Attribution for the usage ledger (cost per agent / user / run).
+                extra={
+                    "agent": spec.name,
+                    "run_id": task.id,
+                    "triggered_by": task.triggered_by or "",
+                },
             )
             try:
                 resp = await llm.generate(req)
@@ -154,15 +185,11 @@ class AgentRunner:
 
             for tc in resp.tool_calls:
                 result.tool_calls += 1
-                handler = handlers.get(tc.name)
-                if handler is None:
-                    output = f"ERROR: tool {tc.name!r} is not available to this agent"
-                else:
-                    try:
-                        output = await handler(dict(tc.arguments))
-                    except Exception as e:  # noqa: BLE001
-                        logger.exception("AgentRunner: tool %s raised", tc.name)
-                        output = f"ERROR: tool {tc.name} failed: {e}"
+                # ToolDispatcher.execute is self-contained: unknown tool →
+                # error string, tool exception → error string, mutating tool in
+                # a dry run → "[dry-run] blocked". It never raises, so a tool
+                # failure is reported to the model instead of killing the loop.
+                output = await dispatcher.execute(tc.name, dict(tc.arguments))
                 messages.append(
                     LLMMessage(
                         role=LLMRole.TOOL,
@@ -268,7 +295,10 @@ class AgentRunner:
         """
         obj = _parse_json_object(final_text)
         if obj is None:
-            return {"summary": final_text.strip()[:4000], "_no_structured_handover": True}
+            # No structured handover — preserve the raw text under `text`. This
+            # deliberately does NOT fake a `summary`, so a handover_schema that
+            # requires one still flags the violation (strict_handover catches it).
+            return {"text": final_text}
 
         from devai.specializations.validator import validate_handover
 

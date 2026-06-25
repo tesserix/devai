@@ -89,6 +89,8 @@ async def test_runner_runs_tool_loop_then_finishes():
 
 
 async def test_runner_falls_back_to_text_when_no_json():
+    # No JSON in the final turn → the raw text is preserved under `text` (it does
+    # NOT fake a `summary`, so a required-summary schema would still be flagged).
     llm = _ScriptedLLM([LLMResponse(text="just prose, no json")])
     stage = run_specialization_stage(_deps(llm), {"specialization": "my_analyst"})
     result = await stage.execute(DevAITask(intent="x"))

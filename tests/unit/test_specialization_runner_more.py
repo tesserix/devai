@@ -99,7 +99,8 @@ async def test_context_keys_are_injected_into_prompt():
     user_msg = llm.last_request.messages[0].content
     assert "do the thing" in user_msg
     assert "PRIOR-STAGE-DATA" in user_msg
-    assert "summary" in user_msg  # output contract hint from handover_schema
+    # The output-contract hint (handover_schema keys) lives in the system prompt.
+    assert "summary" in (llm.last_request.system or "")
 
 
 async def test_unknown_specialization_returns_error():

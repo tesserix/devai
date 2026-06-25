@@ -1,12 +1,14 @@
-"""ALM agent adapter stages.
+"""ALM agent stages.
 
-Each factory in this module wraps one existing class from `devai.agents/*`
-behind the PipelineStage interface. The agents themselves are unchanged —
-this layer just translates DevAITask ↔ ALMState, runs `agent.run()`, and
-stuffs the patch back into the handover bag.
+Each factory wraps one existing class from `devai.agents/*` as an `AgentStage`
+(the generic dispatcher-backed stage) instead of a bespoke `AgentAdapter`
+subclass. The agents themselves are unchanged — `AgentStage` + the SDK's
+`LegacyAgent` translate DevAITask ↔ ALMState, run `agent.run()`, and stuff the
+patch back into the handover bag, with the per-stage output contracts expressed
+as small validator functions.
 
-Long-term these go away in favor of YAML specializations + LLM provider
-dispatch, but for now this is how the blueprint runtime drives the 14
+Long-term these roles become YAML specializations dispatched through the very
+same `AgentStage`; the dotted-path bridge here is the interim that drives the 14
 existing ALM agents.
 """
 
@@ -16,15 +18,11 @@ import logging
 from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
-from devai.pipeline.stages._base import AgentAdapter, _safe_agent
 from devai.pipeline.stages._base import run_correlation_label as _run_label
-from devai.pipeline.types import TaskState
+from devai.pipeline.stages.agent_stage import Validator, legacy_agent_stage
+from devai.pipeline.types import DevAITask, StageResult, TaskState
 
 logger = logging.getLogger(__name__)
-
-
-def _make(klass: Any, deps: StageDeps) -> Any | None:
-    return _safe_agent(klass, deps)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -96,178 +94,14 @@ async def _assert_ci_truth(deps: StageDeps, task: Any, patch: dict[str, Any], *,
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Planning chain — ingest → tech → analyze → epic → stories → plan
+# Output-contract validators — run after a successful agent result. They
+# raise so a no-op 'completed' stage (narration without side effects)
+# fails visibly and the executor's retry kicks in. The stub path returns
+# before validation, so `patch` is never a stub here.
 # ──────────────────────────────────────────────────────────────────────
 
 
-class _IngestDocumentsStage(AgentAdapter):
-    def name(self) -> str:
-        return "ingest_documents"
-
-    def role_key(self) -> str:
-        return "document_analyzer"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.INGESTING
-
-    def _make_agent(self):
-        from devai.agents.document_analyzer import DocumentAnalyzerAgent
-
-        return _make(DocumentAnalyzerAgent, self.deps)
-
-
-def ingest_documents_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _IngestDocumentsStage(deps, config)
-
-
-class _DetectTechStackStage(AgentAdapter):
-    def name(self) -> str:
-        return "detect_tech_stack"
-
-    def role_key(self) -> str:
-        return "tech_detector"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.ANALYZING
-
-    def _make_agent(self):
-        from devai.agents.tech_detector import TechDetectorAgent
-
-        return _make(TechDetectorAgent, self.deps)
-
-
-def detect_tech_stack_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _DetectTechStackStage(deps, config)
-
-
-class _AnalyzeRequirementsStage(AgentAdapter):
-    def name(self) -> str:
-        return "analyze_requirements"
-
-    def role_key(self) -> str:
-        return "requirements_analyst"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.ANALYZING
-
-    def _make_agent(self):
-        from devai.agents.requirements_analyst import RequirementsAnalystAgent
-
-        return _make(RequirementsAnalystAgent, self.deps)
-
-
-def analyze_requirements_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _AnalyzeRequirementsStage(deps, config)
-
-
-class _CreateEpicStage(AgentAdapter):
-    def name(self) -> str:
-        return "create_epic"
-
-    def role_key(self) -> str:
-        return "product_director"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.PLANNING
-
-    def _make_agent(self):
-        from devai.agents.product_director import ProductDirectorAgent
-
-        return _make(ProductDirectorAgent, self.deps)
-
-
-def create_epic_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _CreateEpicStage(deps, config)
-
-
-class _CreateStoriesStage(AgentAdapter):
-    """Runs ProductDirectorAgent.run_stories (stage-aware dispatch routes on
-    the stage name) with the epic context from create_epic's handover — the
-    stories land as GitHub issues linked + tracked on the epic."""
-
-    def name(self) -> str:
-        return "create_stories"
-
-    def role_key(self) -> str:
-        return "story_creator"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.PLANNING
-
-    def _make_agent(self):
-        from devai.agents.product_director import ProductDirectorAgent
-
-        return _make(ProductDirectorAgent, self.deps)
-
-
-def create_stories_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _CreateStoriesStage(deps, config)
-
-
-class _CreatePlanStage(AgentAdapter):
-    def name(self) -> str:
-        return "create_plan"
-
-    def role_key(self) -> str:
-        return "engineering_manager"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.PLANNING
-
-    def _make_agent(self):
-        from devai.agents.engineering_manager import EngineeringManagerAgent
-
-        return _make(EngineeringManagerAgent, self.deps)
-
-
-def create_plan_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _CreatePlanStage(deps, config)
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Implementation chain
-# ──────────────────────────────────────────────────────────────────────
-
-
-class _ImplementCodeStage(AgentAdapter):
-    def name(self) -> str:
-        return "implement_code"
-
-    async def _post_validate(self, task, patch) -> None:
-        await _require_pull_request(self, task, patch)
-
-    def role_key(self) -> str:
-        return "senior_developer"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.IMPLEMENTING
-
-    def _make_agent(self):
-        from devai.agents.senior_developer import SeniorDeveloperAgent
-
-        return _make(SeniorDeveloperAgent, self.deps)
-
-
-def implement_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _ImplementCodeStage(deps, config)
-
-
-async def _require_outputs(stage: AgentAdapter, patch: dict, required: tuple[str, ...]) -> None:
-    """Quality-gate output contract: the agent must produce its verdict
-    fields. A 0.0s 'completed' review/scan/test stage with no decision is a
-    silent no-op, not a success — raise so the retry kicks in and persistent
-    emptiness fails visibly."""
-    if patch.get(f"{stage.role_key()}_stub"):
-        return  # stub path already announces itself
-    missing = [k for k in required if patch.get(k) in (None, "")]
-    if missing:
-        raise RuntimeError(
-            f"{stage.name()} produced no {'/'.join(missing)} — the agent returned "
-            f"narrative output without doing its job (keys present: {sorted(patch.keys())[:8]})"
-        )
-
-
-async def _require_pull_request(stage: AgentAdapter, task, patch) -> None:
+async def _validate_pull_request(deps: StageDeps, task: DevAITask, patch: dict[str, Any], **_: Any) -> None:
     """Implementation stages MUST produce a pull request — narrative output
     with no commits is a failed implementation, not a success."""
     pr = patch.get("pr_number") or task.pr_number
@@ -277,33 +111,161 @@ async def _require_pull_request(stage: AgentAdapter, task, patch) -> None:
             f"summary was: {str(patch.get('implementation_summary') or patch.get('summary') or '')[:200]!r}"
         )
     # Correlate the PR to the fleet run + mark it agent-authored (best-effort).
-    if stage.deps.scm is not None and not task.dry_run:
-        from devai.pipeline.stages._base import run_correlation_label
-
+    if deps.scm is not None and not task.dry_run:
         try:
-            await stage.deps.scm.add_labels(task.repo, pr, ["devai:pr", run_correlation_label(task.id)])
+            await deps.scm.add_labels(task.repo, pr, ["devai:pr", _run_label(task.id)])
         except Exception:  # noqa: BLE001
             logger.debug("PR labeling failed for #%s", pr, exc_info=True)
 
 
-class _DBEngineeringStage(AgentAdapter):
-    def name(self) -> str:
-        return "db_engineering"
+def _require_outputs(required: tuple[str, ...]) -> Validator:
+    """Quality-gate output contract: the agent must produce its verdict fields.
+    A 0.0s 'completed' review/scan stage with no decision is a silent no-op."""
 
-    def role_key(self) -> str:
-        return "db_engineer"
+    async def _validate(
+        deps: StageDeps, task: DevAITask, patch: dict[str, Any], *, stage_name: str, output_key: str, **_: Any
+    ) -> None:
+        if patch.get(f"{output_key}_stub"):
+            return
+        missing = [k for k in required if patch.get(k) in (None, "")]
+        if missing:
+            raise RuntimeError(
+                f"{stage_name} produced no {'/'.join(missing)} — the agent returned "
+                f"narrative output without doing its job (keys present: {sorted(patch.keys())[:8]})"
+            )
 
-    def _next_state(self) -> TaskState:
-        return TaskState.IMPLEMENTING
+    return _validate
 
-    def _make_agent(self):
-        from devai.agents.db_engineer import DBEngineerAgent
 
-        return _make(DBEngineerAgent, self.deps)
+async def _validate_ci_truth(
+    deps: StageDeps, task: DevAITask, patch: dict[str, Any], *, stage_name: str, output_key: str, **_: Any
+) -> None:
+    if patch.get(f"{output_key}_stub"):
+        return
+    # Ground truth over narration: whatever the agent reported, the branch's
+    # actual workflows must be green for this stage to pass.
+    await _assert_ci_truth(deps, task, patch, stage=stage_name)
+
+
+async def _validate_run_tests(
+    deps: StageDeps, task: DevAITask, patch: dict[str, Any], *, stage_name: str, output_key: str, **_: Any
+) -> None:
+    if patch.get(f"{output_key}_stub"):
+        return
+    # The QA agent must REPORT results (counts may legitimately be 0 only
+    # alongside an explicit summary of what it did).
+    if patch.get("test_total") in (None, "") and patch.get("test_passed") in (None, ""):
+        raise RuntimeError(
+            "run_tests produced no test results — the QA agent must write/run "
+            f"tests and report counts (keys present: {sorted(patch.keys())[:8]})"
+        )
+    # Tests execute through the repo's own CI — so the branch's actual workflows
+    # being red means the tests did NOT pass, whatever the narrated counts say.
+    await _assert_ci_truth(deps, task, patch, stage=stage_name)
+
+
+async def _validate_deploy(deps: StageDeps, task: DevAITask, patch: dict[str, Any], **_: Any) -> None:
+    """Output contract: a deploy that FAILED must fail the stage. The agent's
+    own verdict decides the outcome, so failures surface visibly and the
+    recovery agent gets its shot."""
+    status = str(patch.get("deploy_status") or "").lower()
+    if status in ("failed", "failure", "error"):
+        detail = str(patch.get("deploy_error") or patch.get("summary") or "release manager reported failure")[:300]
+        raise RuntimeError(f"deploy_release reported deploy_status={status!r}: {detail}")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Planning chain — ingest → tech → analyze → epic → stories → plan
+# ──────────────────────────────────────────────────────────────────────
+
+
+def ingest_documents_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return legacy_agent_stage(
+        deps,
+        name="ingest_documents",
+        dotted="devai.agents.document_analyzer.DocumentAnalyzerAgent",
+        output_key="document_analyzer",
+        next_state=TaskState.INGESTING,
+    )
+
+
+def detect_tech_stack_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return legacy_agent_stage(
+        deps,
+        name="detect_tech_stack",
+        dotted="devai.agents.tech_detector.TechDetectorAgent",
+        output_key="tech_detector",
+        next_state=TaskState.ANALYZING,
+    )
+
+
+def analyze_requirements_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return legacy_agent_stage(
+        deps,
+        name="analyze_requirements",
+        dotted="devai.agents.requirements_analyst.RequirementsAnalystAgent",
+        output_key="requirements_analyst",
+        next_state=TaskState.ANALYZING,
+    )
+
+
+def create_epic_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return legacy_agent_stage(
+        deps,
+        name="create_epic",
+        dotted="devai.agents.product_director.ProductDirectorAgent",
+        output_key="product_director",
+        next_state=TaskState.PLANNING,
+    )
+
+
+def create_stories_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    """Runs ProductDirectorAgent (stage-aware dispatch routes on the stage name)
+    with the epic context from create_epic's handover — the stories land as
+    GitHub issues linked + tracked on the epic."""
+    return legacy_agent_stage(
+        deps,
+        name="create_stories",
+        dotted="devai.agents.product_director.ProductDirectorAgent",
+        output_key="story_creator",
+        next_state=TaskState.PLANNING,
+    )
+
+
+def create_plan_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return legacy_agent_stage(
+        deps,
+        name="create_plan",
+        dotted="devai.agents.engineering_manager.EngineeringManagerAgent",
+        output_key="engineering_manager",
+        next_state=TaskState.PLANNING,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Implementation chain
+# ──────────────────────────────────────────────────────────────────────
+
+
+def implement_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    return legacy_agent_stage(
+        deps,
+        name="implement_code",
+        dotted="devai.agents.senior_developer.SeniorDeveloperAgent",
+        output_key="senior_developer",
+        next_state=TaskState.IMPLEMENTING,
+        validator=_validate_pull_request,
+    )
 
 
 def db_engineering_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _DBEngineeringStage(deps, config)
+    return legacy_agent_stage(
+        deps,
+        name="db_engineering",
+        dotted="devai.agents.db_engineer.DBEngineerAgent",
+        output_key="db_engineer",
+        next_state=TaskState.IMPLEMENTING,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -311,135 +273,60 @@ def db_engineering_stage(deps: StageDeps, config: dict[str, str]) -> PipelineSta
 # ──────────────────────────────────────────────────────────────────────
 
 
-class _ReviewCodeStage(AgentAdapter):
-    def name(self) -> str:
-        return "review_code"
-
-    async def _post_validate(self, task, patch) -> None:
-        await _require_outputs(self, patch, ("review_decision",))
-
-    def role_key(self) -> str:
-        return "staff_reviewer"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.REVIEWING
-
-    def _make_agent(self):
-        from devai.agents.staff_reviewer import StaffReviewerAgent
-
-        return _make(StaffReviewerAgent, self.deps)
-
-
 def review_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _ReviewCodeStage(deps, config)
-
-
-class _StaffReviewStage(AgentAdapter):
-    """Final review gate — same agent as review_code but distinct stage so
-    a blueprint can run a smoke-review early and a staff review late."""
-
-    def name(self) -> str:
-        return "staff_review"
-
-    def role_key(self) -> str:
-        return "staff_reviewer_final"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.REVIEWING
-
-    def _make_agent(self):
-        from devai.agents.staff_reviewer import StaffReviewerAgent
-
-        return _make(StaffReviewerAgent, self.deps)
+    return legacy_agent_stage(
+        deps,
+        name="review_code",
+        dotted="devai.agents.staff_reviewer.StaffReviewerAgent",
+        output_key="staff_reviewer",
+        next_state=TaskState.REVIEWING,
+        validator=_require_outputs(("review_decision",)),
+    )
 
 
 def staff_review_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _StaffReviewStage(deps, config)
-
-
-class _SecurityScanStage(AgentAdapter):
-    def name(self) -> str:
-        return "security_scan"
-
-    async def _post_validate(self, task, patch) -> None:
-        await _require_outputs(self, patch, ("security_decision",))
-
-    def role_key(self) -> str:
-        return "security_expert"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.SECURITY_SCANNING
-
-    def _make_agent(self):
-        from devai.agents.security_expert import SecurityExpertAgent
-
-        return _make(SecurityExpertAgent, self.deps)
+    """Final review gate — same agent as review_code but a distinct stage so a
+    blueprint can run a smoke-review early and a staff review late."""
+    return legacy_agent_stage(
+        deps,
+        name="staff_review",
+        dotted="devai.agents.staff_reviewer.StaffReviewerAgent",
+        output_key="staff_reviewer_final",
+        next_state=TaskState.REVIEWING,
+    )
 
 
 def security_scan_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _SecurityScanStage(deps, config)
-
-
-class _MonitorBuildStage(AgentAdapter):
-    def name(self) -> str:
-        return "monitor_build"
-
-    def role_key(self) -> str:
-        return "ci_monitor"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.BUILDING
-
-    async def _post_validate(self, task, patch) -> None:
-        # Ground truth over narration: whatever the agent reported, the
-        # branch's actual workflows must be green for this stage to pass.
-        if patch.get(f"{self.role_key()}_stub"):
-            return
-        await _assert_ci_truth(self.deps, task, patch, stage="monitor_build")
-
-    def _make_agent(self):
-        from devai.agents.ci_monitor import CIMonitorAgent
-
-        return _make(CIMonitorAgent, self.deps)
+    return legacy_agent_stage(
+        deps,
+        name="security_scan",
+        dotted="devai.agents.security_expert.SecurityExpertAgent",
+        output_key="security_expert",
+        next_state=TaskState.SECURITY_SCANNING,
+        validator=_require_outputs(("security_decision",)),
+    )
 
 
 def monitor_build_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _MonitorBuildStage(deps, config)
-
-
-class _RunTestsStage(AgentAdapter):
-    def name(self) -> str:
-        return "run_tests"
-
-    async def _post_validate(self, task, patch) -> None:
-        # The QA agent must REPORT results (counts may legitimately be 0
-        # only alongside an explicit summary of what it did).
-        if patch.get(f"{self.role_key()}_stub"):
-            return
-        if patch.get("test_total") in (None, "") and patch.get("test_passed") in (None, ""):
-            raise RuntimeError(
-                "run_tests produced no test results — the QA agent must write/run "
-                f"tests and report counts (keys present: {sorted(patch.keys())[:8]})"
-            )
-        # Tests execute through the repo's own CI — so the branch's actual
-        # workflows being red means the tests did NOT pass, whatever the
-        # narrated counts say.
-        await _assert_ci_truth(self.deps, task, patch, stage="run_tests")
-
-    def role_key(self) -> str:
-        return "qa_tester"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.TESTING
-
-    def _make_agent(self):
-        from devai.agents.qa_tester import QATesterAgent
-
-        return _make(QATesterAgent, self.deps)
+    return legacy_agent_stage(
+        deps,
+        name="monitor_build",
+        dotted="devai.agents.ci_monitor.CIMonitorAgent",
+        output_key="ci_monitor",
+        next_state=TaskState.BUILDING,
+        validator=_validate_ci_truth,
+    )
 
 
 def run_tests_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _RunTestsStage(deps, config)
+    return legacy_agent_stage(
+        deps,
+        name="run_tests",
+        dotted="devai.agents.qa_tester.QATesterAgent",
+        output_key="qa_tester",
+        next_state=TaskState.TESTING,
+        validator=_validate_run_tests,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -472,8 +359,6 @@ class _DiagnoseTestFailuresStage(PipelineStage):
         return "diagnose_test_failures"
 
     async def execute(self, task):  # type: ignore[override]
-        from devai.pipeline.types import StageResult
-
         failed = int(task.agent_context.get("test_failed") or 0)
         if failed <= 0:
             return StageResult(message="no test failures to diagnose", data={"diagnosis_skipped": True})
@@ -569,37 +454,33 @@ def diagnose_test_failures_stage(deps: StageDeps, config: dict[str, str]) -> Pip
     return _DiagnoseTestFailuresStage(deps, config)
 
 
-class _FixTestFailuresStage(_ImplementCodeStage):
-    """Senior developer applies the diagnosed fix on the existing PR branch."""
-
-    def name(self) -> str:
-        return "fix_test_failures"
-
-    def _build_state(self, task) -> dict[str, Any]:  # type: ignore[override]
-        state = super()._build_state(task)
-        bug = task.agent_context.get("bug_issue_number")
-        brief = task.agent_context.get("test_fix_brief") or ""
-        state["requirements"] = (
-            "Tests are failing on the existing pull request"
-            + (f" (bug #{bug})" if bug else "")
-            + ". Apply the SMALLEST fix that makes them pass — do not redesign or "
-            "re-implement features.\n\n"
-            f"## Diagnosis\n{brief}\n\n"
-            "Work on the EXISTING branch/PR; commit the fix and note what changed."
-        )
-        return state
-
-    def _build_result(self, task, patch):  # type: ignore[override]
-        result = super()._build_result(task, patch)
-        result.data["test_fix_applied"] = True
-        return result
-
-    def _next_state(self) -> TaskState:
-        return TaskState.IMPLEMENTING
+def _fix_test_failures_instruction(task: DevAITask) -> str:
+    """The fix brief that overrides task.intent for the fix stage — the senior
+    developer applies the diagnosed fix on the EXISTING PR branch."""
+    bug = task.agent_context.get("bug_issue_number")
+    brief = task.agent_context.get("test_fix_brief") or ""
+    return (
+        "Tests are failing on the existing pull request"
+        + (f" (bug #{bug})" if bug else "")
+        + ". Apply the SMALLEST fix that makes them pass — do not redesign or "
+        "re-implement features.\n\n"
+        f"## Diagnosis\n{brief}\n\n"
+        "Work on the EXISTING branch/PR; commit the fix and note what changed."
+    )
 
 
 def fix_test_failures_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _FixTestFailuresStage(deps, config)
+    """Senior developer applies the diagnosed fix on the existing PR branch."""
+    return legacy_agent_stage(
+        deps,
+        name="fix_test_failures",
+        dotted="devai.agents.senior_developer.SeniorDeveloperAgent",
+        output_key="senior_developer",
+        next_state=TaskState.IMPLEMENTING,
+        validator=_validate_pull_request,
+        instruction_builder=_fix_test_failures_instruction,
+        extra_data={"test_fix_applied": True},
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -607,64 +488,28 @@ def fix_test_failures_stage(deps: StageDeps, config: dict[str, str]) -> Pipeline
 # ──────────────────────────────────────────────────────────────────────
 
 
-class _ProvisionInfraStage(AgentAdapter):
-    def name(self) -> str:
-        return "provision_infra"
-
-    def role_key(self) -> str:
-        return "infra_provisioner"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.PROVISIONING
-
-    def _make_agent(self):
-        from devai.agents.infra_provisioner import InfraProvisionerAgent
-
-        return _make(InfraProvisionerAgent, self.deps)
-
-
 def provision_infra_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _ProvisionInfraStage(deps, config)
-
-
-class _DeployReleaseStage(AgentAdapter):
-    def name(self) -> str:
-        return "deploy_release"
-
-    def role_key(self) -> str:
-        return "release_manager"
-
-    def _next_state(self) -> TaskState:
-        return TaskState.DEPLOYING
-
-    def _make_agent(self):
-        from devai.agents.release_manager import ReleaseManagerAgent
-
-        return _make(ReleaseManagerAgent, self.deps)
-
-    async def _post_validate(self, task, patch) -> None:
-        """Output contract: a deploy that FAILED must fail the stage.
-
-        A live run 'completed' deploy-release in 5.1s with
-        deploy_status='failed' — the milestone comment said ✅ and the run
-        finished green. The same truth rule as review/security/tests: the
-        agent's own verdict decides the stage outcome, so failures surface
-        visibly and the recovery agent gets its shot."""
-        status = str(patch.get("deploy_status") or "").lower()
-        if status in ("failed", "failure", "error"):
-            detail = str(
-                patch.get("deploy_error") or patch.get("summary") or "release manager reported failure"
-            )[:300]
-            raise RuntimeError(f"deploy_release reported deploy_status={status!r}: {detail}")
+    return legacy_agent_stage(
+        deps,
+        name="provision_infra",
+        dotted="devai.agents.infra_provisioner.InfraProvisionerAgent",
+        output_key="infra_provisioner",
+        next_state=TaskState.PROVISIONING,
+    )
 
 
 def deploy_release_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return _DeployReleaseStage(deps, config)
+    return legacy_agent_stage(
+        deps,
+        name="deploy_release",
+        dotted="devai.agents.release_manager.ReleaseManagerAgent",
+        output_key="release_manager",
+        next_state=TaskState.DEPLOYING,
+        validator=_validate_deploy,
+    )
 
 
 __all__ = [
-    "diagnose_test_failures_stage",
-    "fix_test_failures_stage",
     "analyze_requirements_stage",
     "create_epic_stage",
     "create_plan_stage",
@@ -672,6 +517,8 @@ __all__ = [
     "db_engineering_stage",
     "deploy_release_stage",
     "detect_tech_stack_stage",
+    "diagnose_test_failures_stage",
+    "fix_test_failures_stage",
     "implement_code_stage",
     "ingest_documents_stage",
     "monitor_build_stage",

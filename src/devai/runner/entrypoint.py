@@ -237,16 +237,16 @@ async def _run_agent(
 
     try:
         patch = await service.invoke(agent_name, state_slice)
-    except AttributeError:
-        # SpecializationService.invoke may not exist in this build. Fall
-        # back to the legacy agent path.
-        patch = await _invoke_legacy(agent_name, state_slice, config)
     except Exception as e:  # noqa: BLE001
         return {
             "ok": False,
             "error": f"agent {agent_name} failed: {e}",
             "stage": stage,
         }
+    if patch is None:
+        # invoke() runs YAML specs via the Agent SDK; it returns None for an
+        # unknown agent or a legacy Python class. Construct that class directly.
+        patch = await _invoke_legacy(agent_name, state_slice, config)
 
     if not isinstance(patch, dict):
         patch = {"value": patch}

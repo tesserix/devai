@@ -573,22 +573,12 @@ async def test_gates_not_pending_before_run_reaches_them():
     assert by_name["staff-review"]["summary"] == "review ok"
 
 
-def test_agent_adapter_build_result_surfaces_a2a():
-    from devai.pipeline.interfaces import StageDeps
-    from devai.pipeline.stages._base import AgentAdapter
+def test_agent_result_to_stage_result_surfaces_a2a():
+    # The a2a surfacing that AgentAdapter._build_result did now lives in the SDK:
+    # alm_patch_to_result(patch).to_stage_result() re-surfaces a2a into the bag.
+    from devai.agentruntime import alm_patch_to_result
 
-    class _Adapter(AgentAdapter):
-        def name(self):
-            return "x"
-
-        def role_key(self):
-            return "senior_developer"
-
-        def _make_agent(self):
-            return None
-
-    adapter = _Adapter(StageDeps(config=_Cfg()), {})
-    task = _task()
     msgs = [{"id": "1", "from_agent": "senior_developer", "to_agent": "qa", "message_type": "request"}]
-    result = adapter._build_result(task, {"summary": "ok", "a2a_messages": msgs})
-    assert result.data["a2a_messages"] == msgs
+    result = alm_patch_to_result({"summary": "ok", "a2a_messages": msgs}, output_key="senior_developer_output")
+    stage_result = result.to_stage_result()
+    assert stage_result.data["a2a_messages"] == msgs

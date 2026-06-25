@@ -466,46 +466,50 @@ async def test_product_director_dispatches_epic_vs_stories_by_stage():
 
 def test_create_stories_stage_constructs_real_agent():
     """create_stories was a stub (_make_agent -> None) — it must run the
-    ProductDirector so run_stories executes with the epic handover."""
-    import inspect
+    ProductDirector so run_stories executes with the epic handover. Now an
+    AgentStage whose legacy bridge targets the real ProductDirectorAgent."""
+    from devai.pipeline.stages.agent_stage import AgentStage
+    from devai.pipeline.stages.alm import create_stories_stage
 
-    from devai.pipeline.stages.alm import _CreateStoriesStage
-
-    src = inspect.getsource(_CreateStoriesStage._make_agent)
-    assert "ProductDirectorAgent" in src
-    assert "return None" not in src
+    stage = create_stories_stage(StageDeps(config=_Cfg()), {})
+    assert isinstance(stage, AgentStage)
+    assert stage.output_key == "story_creator"
+    assert "ProductDirectorAgent" in stage._agent._dotted
 
 
 def test_fix_stage_briefs_developer_and_marks_fix_applied():
-    from devai.pipeline.stages.alm import fix_test_failures_stage
+    from devai.pipeline.stages.alm import _fix_test_failures_instruction, fix_test_failures_stage
 
-    stage = fix_test_failures_stage(StageDeps(config=_Cfg()), {})
     task = DevAITask(intent="petstore", blueprint="alm-pipeline", repo="o/r")
     task.agent_context["bug_issue_number"] = 100
     task.agent_context["test_fix_brief"] = "Multiply unit price by quantity."
 
-    state = stage._build_state(task)
-    assert "bug #100" in state["requirements"]
-    assert "Multiply unit price by quantity." in state["requirements"]
-    assert "SMALLEST fix" in state["requirements"]
+    # The fix brief overrides task.intent (build_alm_state puts instruction →
+    # requirements) and the stage marks the handover as a fix.
+    brief = _fix_test_failures_instruction(task)
+    assert "bug #100" in brief
+    assert "Multiply unit price by quantity." in brief
+    assert "SMALLEST fix" in brief
 
-    result = stage._build_result(task, {"summary": "fixed"})
-    assert result.data["test_fix_applied"] is True
+    stage = fix_test_failures_stage(StageDeps(config=_Cfg()), {})
+    assert stage._extra_data == {"test_fix_applied": True}
 
 
 @pytest.mark.asyncio
 async def test_implement_stage_requires_pull_request():
     """Implementation that produces no PR (no commits) must FAIL, not flow
     downstream as narrative-only success (the 51-minute empty run)."""
-    from devai.pipeline.stages.alm import _ImplementCodeStage
+    from devai.pipeline.stages.alm import _validate_pull_request
 
-    stage = _ImplementCodeStage(StageDeps(config=_Cfg()), {})
+    deps = StageDeps(config=_Cfg())
     task = DevAITask(intent="x", blueprint="alm-pipeline", repo="o/r")
     with pytest.raises(RuntimeError, match="no pull request"):
-        await stage._post_validate(task, {"implementation_summary": "I looked around but committed nothing"})
+        await _validate_pull_request(
+            deps, task, {"implementation_summary": "I looked around but committed nothing"}
+        )
 
     # With a PR the contract passes (no SCM wired → labeling skipped).
-    await stage._post_validate(task, {"pr_number": 12})
+    await _validate_pull_request(deps, task, {"pr_number": 12})
 
 
 def test_run_correlation_label_format():
@@ -518,21 +522,25 @@ def test_run_correlation_label_format():
 async def test_quality_gate_stages_reject_empty_outputs():
     """0.0s 'completed' reviews/scans/tests with no verdict are silent no-ops
     — every quality-gate agent must produce its decision fields."""
-    from devai.pipeline.stages.alm import _ReviewCodeStage, _RunTestsStage, _SecurityScanStage
+    from devai.pipeline.stages.alm import _require_outputs, _validate_run_tests
 
     deps = StageDeps(config=_Cfg())
     task = DevAITask(intent="x", blueprint="alm-pipeline", repo="o/r")
+    review = _require_outputs(("review_decision",))
+    security = _require_outputs(("security_decision",))
 
     with pytest.raises(RuntimeError, match="review_decision"):
-        await _ReviewCodeStage(deps, {})._post_validate(task, {"summary": "looks fine"})
-    await _ReviewCodeStage(deps, {})._post_validate(task, {"review_decision": "approved"})
+        await review(deps, task, {"summary": "looks fine"}, stage_name="review_code", output_key="staff_reviewer")
+    await review(deps, task, {"review_decision": "approved"}, stage_name="review_code", output_key="staff_reviewer")
 
     with pytest.raises(RuntimeError, match="security_decision"):
-        await _SecurityScanStage(deps, {})._post_validate(task, {})
-    await _SecurityScanStage(deps, {})._post_validate(task, {"security_decision": "pass"})
+        await security(deps, task, {}, stage_name="security_scan", output_key="security_expert")
+    await security(deps, task, {"security_decision": "pass"}, stage_name="security_scan", output_key="security_expert")
 
     with pytest.raises(RuntimeError, match="no test results"):
-        await _RunTestsStage(deps, {})._post_validate(task, {"summary": "ran around"})
-    await _RunTestsStage(deps, {})._post_validate(task, {"test_total": 5, "test_passed": 5, "test_failed": 0})
-    # Stub path stays silent-tolerant (slim envs).
-    await _ReviewCodeStage(deps, {})._post_validate(task, {"staff_reviewer_stub": True})
+        await _validate_run_tests(deps, task, {"summary": "ran around"}, stage_name="run_tests", output_key="qa_tester")
+    await _validate_run_tests(
+        deps, task, {"test_total": 5, "test_passed": 5, "test_failed": 0}, stage_name="run_tests", output_key="qa_tester"
+    )
+    # Stub path stays silent-tolerant (slim envs): the {output_key}_stub key short-circuits.
+    await review(deps, task, {"staff_reviewer_stub": True}, stage_name="review_code", output_key="staff_reviewer")

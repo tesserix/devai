@@ -1,17 +1,18 @@
 """`run_specialization` stage — runs a YAML specialization.
 
-Two modes:
+Two modes, both routed through the Agent SDK (`devai.agentruntime`):
 
-1. **Legacy bridge** — the spec has `legacy_python_class:` set. The stage
-   imports the class, constructs it, calls `agent.run(state)`, validates
-   the handover dict against `spec.handover_schema`, and writes the
-   result under `spec.output_key`. This is how every existing DevAI
-   agent gets plugged in without rewriting Python code.
+1. **Legacy bridge** — the spec has `legacy_python_class:` set. The stage runs
+   that class via `LegacyAgent` (the one shim that replaced the reflection that
+   used to live here), validates the handover dict against `spec.handover_schema`,
+   and writes the result under `spec.output_key`. This is how every existing
+   DevAI agent plugs in without rewriting Python code.
 
-2. **YAML-only** — the spec has no `legacy_python_class`. The stage
-   would dispatch directly to the LLM provider. The Runner that does
-   this is the next slice of work; for now YAML-only specs return a
-   stub result and log a clear "not implemented yet" message.
+2. **YAML-only** — the spec has no `legacy_python_class`. The stage runs it via
+   `SpecAgent` → `AgentRunner`: the bounded tool-calling loop with per-role
+   provider pinning + skill-profile guidance, the same path a crew member or a
+   Job-dispatched agent takes. The stage adds handover validation + the
+   output-key / `<name>_text` writes.
 
 Usage from a blueprint:
 
@@ -25,7 +26,6 @@ Usage from a blueprint:
 
 from __future__ import annotations
 
-import importlib
 import logging
 from typing import Any
 
@@ -76,35 +76,22 @@ class _RunSpecializationStage(PipelineStage):
         if spec.legacy_python_class:
             return await self._run_legacy_bridge(spec, task)
 
-        return await self._run_yaml_runner(spec, task)
+        return await self._run_yaml_spec(spec, task)
 
     # ── Legacy bridge ────────────────────────────────────────────────
 
     async def _run_legacy_bridge(self, spec: Specialization, task: DevAITask) -> StageResult:
-        """Construct the Python class declared in spec.legacy_python_class
-        and call its run() method.
+        """Run the Python class declared in spec.legacy_python_class via the
+        Agent SDK's ``LegacyAgent`` — the one shim that replaces the reflection
+        that used to live here (and in the orchestrator + Job entrypoint).
 
-        This mirrors what AgentAdapter does in stages/_base.py — kept
-        separate so the specialization layer can evolve without touching
-        the original adapter. Once every adapter is replaced by spec
-        invocations, the old adapter goes away.
+        Behavior-identical to the previous reflection bridge: the agent is
+        constructed against the platform ``deps.config``/``deps.scm`` (passed as
+        explicit dispatcher overrides, so no per-principal resolution changes
+        the construction). The handover validation + output-key write + scalar
+        mirroring below are unchanged.
         """
-        try:
-            module_path, class_name = spec.legacy_python_class.rsplit(".", 1)
-            module = importlib.import_module(module_path)
-            klass = getattr(module, class_name)
-        except (ImportError, AttributeError, ValueError) as e:
-            logger.warning(
-                "specialization %s: cannot import %s (%s) — returning stub",
-                spec.name,
-                spec.legacy_python_class,
-                e,
-            )
-            return StageResult(
-                next_state=self._next_state(spec),
-                message=f"{spec.name} skipped — class unavailable: {e}",
-                data={spec.output_key: {f"{spec.name}_stub": True, "reason": str(e)}},
-            )
+        from devai.agentruntime import AgentDispatcher, LegacyAgent
 
         if self.deps.scm is None or self.deps.state_manager is None:
             return StageResult(
@@ -113,27 +100,19 @@ class _RunSpecializationStage(PipelineStage):
                 data={spec.output_key: {f"{spec.name}_stub": True}},
             )
 
-        try:
-            agent = klass(
-                self.deps.scm,
-                self.deps.state_manager,
-                self.deps.config,
-                self.deps.event_bus,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.exception("specialization %s: agent construction failed", spec.name)
+        agent = LegacyAgent.from_dotted(spec.legacy_python_class, name=spec.name, output_key=spec.output_key)
+        dispatcher = AgentDispatcher(self.deps)
+        result = await dispatcher.dispatch(agent, task, config=self.deps.config, scm=self.deps.scm)
+
+        # Import/construction failure → the SDK degrades to a stub result.
+        if result.stub:
             return StageResult(
-                message=f"{spec.name} skipped — construction failed: {e}",
-                data={spec.output_key: {f"{spec.name}_stub": True, "reason": str(e)}},
+                next_state=self._next_state(spec),
+                message=f"{spec.name} skipped — class unavailable",
+                data={spec.output_key: {f"{spec.name}_stub": True, "reason": result.error or "unavailable"}},
             )
 
-        state = self._build_alm_state(spec, task)
-        try:
-            patch = await agent.run(state)
-        except Exception:
-            logger.exception("specialization %s: agent.run raised", spec.name)
-            raise
-
+        patch = result.handover
         violations = validate_handover(spec, patch)
         if violations:
             msg = "; ".join(str(v) for v in violations)
@@ -172,273 +151,44 @@ class _RunSpecializationStage(PipelineStage):
             data=data,
         )
 
-    # ── LLM selection ─────────────────────────────────────────────────
-
-    async def _select_llm(self, spec: Specialization, task: DevAITask) -> Any:
-        """Resolve the adapter this spec runs on (see _run_yaml_runner docs).
-
-        Never raises; any resolution failure falls back to the layer below
-        (spec provider → user adapter → platform default → None/stub).
-        """
-        base = await self.deps.llm_for_principal(task.triggered_by or "")
-
-        wanted = getattr(spec, "llm_provider", None)
-        name = getattr(wanted, "value", "") or (str(wanted) if wanted else "")
-        try:
-            from devai.adapters.llm.factory import create_llm_adapter, resolve_spec_provider
-
-            provider = resolve_spec_provider(name)
-            if provider is None or base is None:
-                return base
-            if getattr(base, "provider_name", "") == provider:
-                return base  # already on the requested backend
-
-            # Build from the user's overlay when present so their keys
-            # apply even on a role-pinned provider.
-            src = self.deps.config
-            if self.deps.llm_resolver is not None and task.triggered_by:
-                src = await self.deps.llm_resolver.settings_for_email(task.triggered_by)
-
-            cache: dict[str, Any] = self.__dict__.setdefault("_spec_llm_cache", {})
-            # The user's identity MUST key the cache: two tenants overlaying
-            # the same attr names carry different key VALUES — colliding on
-            # attr names alone would serve one tenant's adapter (and API key)
-            # to the other.
-            who = (task.triggered_by or "").lower() if src is not self.deps.config else ""
-            key = f"{provider}|{who}|{','.join(getattr(src, 'overlaid_attrs', []) or [])}"
-            adapter = cache.get(key)
-            if adapter is None:
-                adapter = create_llm_adapter(src, provider=provider)
-                if adapter.provider_name == "noop":
-                    # Spec asked for a backend that isn't configured here —
-                    # run on the default rather than answering canned text.
-                    logger.warning(
-                        "specialization %s: llm_provider=%s is not configured — using default adapter",
-                        spec.name,
-                        name,
-                    )
-                    return base
-                if len(cache) > 32:
-                    cache.clear()
-                cache[key] = adapter
-            # Resilience: chain the run's default adapter behind the
-            # spec-pinned provider so a provider outage degrades the role
-            # to the default backend instead of failing the workflow.
-            from devai.adapters.llm.fallback import FallbackLLMAdapter
-
-            chained = FallbackLLMAdapter(adapter, base)
-            # Trial users stay metered even when the spec pins a provider —
-            # otherwise a YAML role would be a free side door to the shared
-            # platform keys.
-            from devai.settings.trial import TrialLLMAdapter, get_trial_meter
-
-            if isinstance(base, TrialLLMAdapter) and task.triggered_by:
-                return TrialLLMAdapter(chained, get_trial_meter(self.deps.config), task.triggered_by)
-            return chained
-        except Exception:  # noqa: BLE001
-            logger.warning("specialization %s: provider selection failed — using default", spec.name, exc_info=True)
-            return base
-
     # ── YAML runner (no legacy class) ─────────────────────────────────
 
-    async def _run_yaml_runner(self, spec: Specialization, task: DevAITask) -> StageResult:
-        """Execute a pure-YAML specialization against the LLM adapter.
+    async def _run_yaml_spec(self, spec: Specialization, task: DevAITask) -> StageResult:
+        """Execute a pure-YAML specialization via the unified ``SpecAgent``.
 
-        Runs a tool-calling loop: the spec's ``system_prompt`` drives the
-        model, ``allowed_tools`` are offered as callable tools (resolved
-        from the built-in catalog), and the loop runs until the model
-        stops calling tools or ``max_turns`` is hit. The final text is
-        parsed for a handover object, validated against
-        ``handover_schema``, and written under ``output_key``.
-
-        Degrades to a clear stub when no LLM adapter is wired (e.g. unit
-        tests or a noop deployment) so the pipeline never hard-fails.
+        The whole tool-calling loop — per-role provider pinning, skill-profile
+        guidance, the bounded LLM + tool loop (on the one ``ToolDispatcher``
+        execution layer), and handover extraction — now lives in the Agent SDK
+        (``SpecAgent`` → ``AgentRunner``), the same path a crew member or a
+        Job-dispatched agent takes. This stage only adds what is stage-specific:
+        handover-schema validation (with ``strict_handover``) and the
+        output-key / ``<name>_text`` writes into the handover bag.
         """
-        # LLM selection, three layers:
-        #   1. per-tenant: the triggering user's own connector (Settings
-        #      overlay — their keys/provider) beats the platform default;
-        #   2. per-role: the spec's `llm_provider:` pins this agent to a
-        #      specific backend (claude→anthropic, gemini→vertex_gemini, …),
-        #      built from the SAME settings source so user keys still apply;
-        #   3. per-request: `llm_model:`/`temperature`/`max_tokens` from the
-        #      YAML ride on every LLMRequest below.
-        llm = await self._select_llm(spec, task)
-        if llm is None:
-            logger.info("specialization %s: no LLM adapter wired — returning stub", spec.name)
-            return StageResult(
-                next_state=self._next_state(spec),
-                message=f"{spec.name}: no LLM adapter configured",
-                data={spec.output_key: {"stub": True, "reason": "no_llm_adapter", "spec_name": spec.name}},
-            )
+        from devai.agentruntime import AgentDispatcher, SpecAgent
 
-        from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+        result = await AgentDispatcher(self.deps).dispatch(SpecAgent(spec), task)
+        patch = result.handover
 
-        # Allow tests to inject a fake dispatcher; otherwise build the real one.
-        dispatcher = (self.deps.extra or {}).get("tool_dispatcher")
-        if dispatcher is None:
-            from devai.tools.dispatch import ToolDispatcher
+        # A degraded (no-LLM) run returns a stub patch — don't validate it.
+        if not result.stub:
+            violations = validate_handover(spec, patch)
+            if violations:
+                msg = "; ".join(str(v) for v in violations)
+                if self.strict_handover:
+                    from devai.specializations.validator import HandoverValidationError
 
-            triggered_by = getattr(task, "triggered_by", "") or ""
-            # Per-principal SCM: the agent's git tools use the TRIGGERING user's
-            # own PAT / GitHub App (Settings → Source Control), not the platform
-            # App. Falls back to deps.scm when the user configured nothing.
-            scm = self.deps.scm
-            try:
-                scm = await self.deps.scm_for_principal(triggered_by) or self.deps.scm
-            except Exception:  # noqa: BLE001
-                pass
-            # In a dry run, mutating tools (PR/issue creation, kubectl/argocd
-            # writes, paging) are offered to the model but short-circuited.
-            dispatcher = ToolDispatcher(
-                scm,
-                dry_run=getattr(task, "dry_run", False),
-                triggered_by=triggered_by,
-            )
-
-        tool_specs = dispatcher.build_tool_specs(spec.allowed_tools)
-        messages = [LLMMessage(role=LLMRole.USER, content=self._build_user_prompt(spec, task))]
-
-        # Skill-profile parity with the bridged Python agents: YAML-only
-        # roles previously ran on spec.system_prompt alone — none of the
-        # stack guidance (directory layout, test framework, conventions)
-        # ever reached them, silently degrading their output quality.
-        # The renderer is picked per role (a coding spec gets developer
-        # guidance, a release spec gets release guidance, …) instead of
-        # the one-size-fits-all planner view.
-        system_prompt = spec.system_prompt
-        try:
-            from devai.agents.skills import get_skill_profile
-
-            profile = get_skill_profile(task.agent_context.get("skill_profile_name"))
-            guidance = self._render_skill_guidance(spec, profile)
-            if guidance:
-                system_prompt = f"{system_prompt}\n\n{guidance}"
-        except Exception:  # noqa: BLE001 — guidance is an enhancer, never a blocker
-            logger.debug("skill profile injection failed for %s", spec.name, exc_info=True)
-
-        final_text = ""
-        turns = max(1, spec.max_turns or 8)
-        for _ in range(turns):
-            request = LLMRequest(
-                system=system_prompt,
-                messages=messages,
-                tools=tool_specs,
-                model=spec.llm_model or "",
-                max_tokens=spec.max_tokens,
-                temperature=spec.temperature,
-                # Attribution for telemetry + the usage ledger (cost per agent,
-                # per user, per run).
-                extra={
-                    "agent": spec.name,
-                    "run_id": task.id,
-                    "triggered_by": task.triggered_by or "",
-                },
-            )
-            resp = await llm.generate(request)
-            if resp.tool_calls:
-                messages.append(LLMMessage(role=LLMRole.ASSISTANT, content=resp.text or ""))
-                for call in resp.tool_calls:
-                    result = await dispatcher.execute(call.name, call.arguments)
-                    messages.append(LLMMessage(role=LLMRole.TOOL, content=result, name=call.name, tool_call_id=call.id))
-                continue
-            final_text = resp.text or ""
-            break
-
-        patch = self._parse_handover(final_text)
-        violations = validate_handover(spec, patch)
-        if violations:
-            msg = "; ".join(str(v) for v in violations)
-            if self.strict_handover:
-                from devai.specializations.validator import HandoverValidationError
-
-                raise HandoverValidationError(spec.name, violations)
-            logger.warning("specialization %s: handover violations: %s", spec.name, msg)
+                    raise HandoverValidationError(spec.name, violations)
+                logger.warning("specialization %s: handover violations: %s", spec.name, msg)
 
         data: dict[str, Any] = {spec.output_key: patch}
-        if f"{spec.name}_text" not in data:
-            data[f"{spec.name}_text"] = final_text
+        if result.final_text and f"{spec.name}_text" not in data:
+            data[f"{spec.name}_text"] = result.final_text
+        provider = spec.llm_provider.value if hasattr(spec.llm_provider, "value") else spec.llm_provider
         return StageResult(
-            next_state=self._next_state(spec),
-            message=f"{spec.name} ran via LLM ({spec.llm_provider.value if hasattr(spec.llm_provider, 'value') else spec.llm_provider})",
+            next_state=result.next_state or self._next_state(spec),
+            message=f"{spec.name} ran via LLM ({provider})",
             data=data,
         )
-
-    @staticmethod
-    def _render_skill_guidance(spec: Specialization, profile: Any) -> str:
-        """Pick the render_for_* view that matches this role.
-
-        Mirrors how the bridged Python agents choose their renderer
-        (senior_developer → developer, qa_tester → qa, …). Name hints win
-        over the category so e.g. an orchestration-category release role
-        still gets release guidance. Falls back to the planner view.
-        """
-        name = (spec.name or "").lower()
-        category = (spec.category or "").lower()
-        by_hint = (
-            (("qa", "test"), "render_for_qa"),
-            (("security",), "render_for_security"),
-            (("release", "deploy", "promot"), "render_for_release"),
-            (("db_", "database"), "render_for_db_engineer"),
-            (("infra", "provision"), "render_for_infra"),
-            (("review",), "render_for_reviewer"),
-        )
-        method = ""
-        for hints, renderer in by_hint:
-            if any(h in name for h in hints):
-                method = renderer
-                break
-        if not method:
-            method = {
-                "coding": "render_for_developer",
-                "review": "render_for_reviewer",
-            }.get(category, "render_for_planner")
-        render = getattr(profile, method, None) or profile.render_for_planner
-        return render() or ""
-
-    def _build_user_prompt(self, spec: Specialization, task: DevAITask) -> str:
-        """Compose the user turn from the task intent plus any context keys
-        prior stages handed over (so the role sees its declared inputs)."""
-        parts = [f"# Task\n\n{task.intent}"]
-        for key in spec.context_keys:
-            val = task.agent_context.get(key)
-            if val:
-                parts.append(f"\n## {key}\n\n{val}")
-        if spec.handover_schema:
-            fields = ", ".join(sorted(spec.handover_schema.keys()))
-            parts.append(
-                "\n## Output\n\nReturn a single JSON object with these keys: "
-                f"{fields}. Wrap it in a ```json fenced block."
-            )
-        return "\n".join(parts)
-
-    @staticmethod
-    def _parse_handover(text: str) -> dict[str, Any]:
-        """Best-effort extraction of the handover JSON object from model text.
-
-        Looks for a ```json fenced block first, then the first balanced
-        ``{...}``. Falls back to ``{"text": <raw>}`` so downstream stages
-        always get a dict.
-        """
-        import json
-        import re
-
-        if not text:
-            return {"text": ""}
-        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        candidate = fence.group(1) if fence else None
-        if candidate is None:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end > start:
-                candidate = text[start : end + 1]
-        if candidate:
-            try:
-                parsed = json.loads(candidate)
-                if isinstance(parsed, dict):
-                    return parsed
-            except (ValueError, TypeError):
-                pass
-        return {"text": text}
 
     # ── Helpers ───────────────────────────────────────────────────────
 
@@ -481,21 +231,6 @@ class _RunSpecializationStage(PipelineStage):
         if spec.risk_level == RiskLevel.HIGH:
             return TaskState.AWAITING_APPROVAL
         return None  # let the executor hold current state
-
-    def _build_alm_state(self, spec: Specialization, task: DevAITask) -> dict[str, Any]:
-        return {
-            "run_id": task.id,
-            "repo_full_name": task.repo,
-            "requirements": task.intent,
-            "stage": task.current_stage or self.name(),
-            "branch_name": task.branch_name,
-            "pr_number": task.pr_number,
-            "epic_issue_number": task.epic_issue_number,
-            "story_issue_numbers": list(task.story_issue_numbers),
-            "trigger_type": task.trigger_type,
-            # All handover bag entries from prior stages
-            **task.agent_context,
-        }
 
 
 def run_specialization_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
