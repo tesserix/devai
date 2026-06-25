@@ -86,6 +86,7 @@ def _a2a_failed(result: dict[str, Any] | None) -> bool:
     meta = result.get("metadata")
     return bool(isinstance(meta, dict) and meta.get("kagent_error_code"))
 
+
 # Stage handlers that genuinely cannot run as a Job (touch state.redis,
 # call SCM mid-flight, etc.) can declare `runner: inline` in their YAML.
 # This handler honours that hint by returning a stub immediately so the
@@ -452,11 +453,15 @@ class JobRunnerStage(PipelineStage):
     def _kagent_result(self, agent: str, result: dict[str, Any], namespace: str | None) -> StageResult:
         from devai.agentic.kagent_client import extract_a2a_text
 
-        logger.info("stage %s: dispatched to kagent agent %s (ns=%s)", self._stage_name, agent, namespace or "kagent-system")
+        logger.info(
+            "stage %s: dispatched to kagent agent %s (ns=%s)", self._stage_name, agent, namespace or "kagent-system"
+        )
         return StageResult(
             next_state=self._next_state(),
             message=f"{self._stage_name}: kagent agent {agent} completed",
-            data={f"{self._stage_name}_output": {"runtime": "kagent", "agent": agent, "text": extract_a2a_text(result)}},
+            data={
+                f"{self._stage_name}_output": {"runtime": "kagent", "agent": agent, "text": extract_a2a_text(result)}
+            },
         )
 
     def _kagent_catalog(self) -> list[dict[str, str]]:
@@ -552,7 +557,9 @@ class JobRunnerStage(PipelineStage):
         the user has no connector for ``provider``, the matched attr isn't in
         their overrides → "" → that provider is skipped.
         """
-        provider = (provider or str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic")).lower()
+        provider = (
+            provider or str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic")
+        ).lower()
         attr = _KAGENT_PROVIDER_KEY_ATTR.get(provider, "anthropic_api_key")
         overlaid = set(getattr(settings, "overlaid_attrs", []) or [])
         if attr not in overlaid:

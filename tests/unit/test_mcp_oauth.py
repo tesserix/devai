@@ -25,8 +25,18 @@ def test_pkce_pair_is_valid_s256():
 
 
 def test_authorize_url_has_pkce_and_resource():
-    ep = OAuthEndpoints(authorization_endpoint="https://as.example.com/authorize", token_endpoint="https://as.example.com/token")
-    url = authorize_url(ep, client_id="cid", redirect_uri="https://devai/cb", state="st", code_challenge="ch", scopes=["a", "b"], resource="https://mcp.example.com/")
+    ep = OAuthEndpoints(
+        authorization_endpoint="https://as.example.com/authorize", token_endpoint="https://as.example.com/token"
+    )
+    url = authorize_url(
+        ep,
+        client_id="cid",
+        redirect_uri="https://devai/cb",
+        state="st",
+        code_challenge="ch",
+        scopes=["a", "b"],
+        resource="https://mcp.example.com/",
+    )
     assert url.startswith("https://as.example.com/authorize?")
     assert "code_challenge=ch" in url and "code_challenge_method=S256" in url
     assert "resource=" in url and "scope=a+b" in url
@@ -100,7 +110,15 @@ async def test_exchange_and_refresh():
     sink: list = []
     routes = {"/token": _Resp(200, {"access_token": "AT", "refresh_token": "RT", "expires_in": 3600})}
     client = _Client(routes, sink)
-    ts = await exchange_code(client, "https://as/token", code="c", redirect_uri="https://devai/cb", client_id="cid", code_verifier="v", now=0.0)
+    ts = await exchange_code(
+        client,
+        "https://as/token",
+        code="c",
+        redirect_uri="https://devai/cb",
+        client_id="cid",
+        code_verifier="v",
+        now=0.0,
+    )
     assert ts.access_token == "AT" and ts.refresh_token == "RT"
     # the exchange posted the PKCE verifier + code
     posted = sink[-1][2]
@@ -138,7 +156,9 @@ async def test_access_token_cache_and_refresh(monkeypatch):
     assert t1 == "AT1" and t2 == "AT1"  # cached, one refresh
     assert calls["n"] == 1
     # past expiry → refreshes again
-    t3 = await mcp_oauth.access_token(refresh_token="R", token_endpoint="https://as/token", client_id="c", now=1000.0 + 4000)
+    t3 = await mcp_oauth.access_token(
+        refresh_token="R", token_endpoint="https://as/token", client_id="c", now=1000.0 + 4000
+    )
     assert t3 == "AT2" and calls["n"] == 2
 
 

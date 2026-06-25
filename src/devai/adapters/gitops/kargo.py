@@ -137,7 +137,14 @@ class KargoGitOpsAdapter(GitOpsAdapter):
         if not project:
             return [err("kargo: a project (namespace) is required to list freight")]
         try:
-            result = await kubectl_json("get", f"freights.{_GROUP}", "-n", project, "--sort-by=.metadata.creationTimestamp", cluster=self._cluster)
+            result = await kubectl_json(
+                "get",
+                f"freights.{_GROUP}",
+                "-n",
+                project,
+                "--sort-by=.metadata.creationTimestamp",
+                cluster=self._cluster,
+            )
         except Exception as e:  # noqa: BLE001
             return [err(f"kargo: cannot list freight in {project!r}: {e}")]
         items = result.get("items", [])

@@ -154,10 +154,21 @@ class SeniorDeveloperAgent(BaseAgent):
     subscribe_subject = "devai.pipeline.plan_ready"
     publish_subject = "devai.pipeline.code_ready"
 
-
     _UI_HINTS = (
-        "ui", "ux", "frontend", "component", "page", "layout", "design", "css",
-        "tailwind", "responsive", "storefront", "navigation", "form", "modal",
+        "ui",
+        "ux",
+        "frontend",
+        "component",
+        "page",
+        "layout",
+        "design",
+        "css",
+        "tailwind",
+        "responsive",
+        "storefront",
+        "navigation",
+        "form",
+        "modal",
     )
 
     def _model_for_story(self, state: ALMState) -> str | None:
@@ -263,12 +274,8 @@ class SeniorDeveloperAgent(BaseAgent):
         committed_paths: list[str] = []
         if run_id_for_branch and redis is not None:
             try:
-                prior_workbranch = str(
-                    await redis.get(f"devai:run:{run_id_for_branch}:workbranch") or ""
-                )
-                raw_events = await redis.lrange(
-                    f"devai:run:{run_id_for_branch}:repo_events", -300, -1
-                )
+                prior_workbranch = str(await redis.get(f"devai:run:{run_id_for_branch}:workbranch") or "")
+                raw_events = await redis.lrange(f"devai:run:{run_id_for_branch}:repo_events", -300, -1)
                 seen: set[str] = set()
                 for entry in raw_events:
                     try:
@@ -293,9 +300,7 @@ class SeniorDeveloperAgent(BaseAgent):
         # with the actual branch on every real commit.)
         if run_id_for_branch and redis is not None:
             try:
-                await redis.set(
-                    f"devai:run:{run_id_for_branch}:workbranch", branch_name, ex=86400 * 7
-                )
+                await redis.set(f"devai:run:{run_id_for_branch}:workbranch", branch_name, ex=86400 * 7)
             except Exception:  # noqa: BLE001 — visibility aid, never fail the stage
                 logger.debug("workbranch record failed", exc_info=True)
 

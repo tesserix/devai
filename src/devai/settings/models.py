@@ -436,8 +436,7 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         providers=("api", "kubectl"),
         multi=True,
         description=(
-            "Connect external Kargo control planes (promotion pipelines in your own clusters) "
-            "by API endpoint + token."
+            "Connect external Kargo control planes (promotion pipelines in your own clusters) by API endpoint + token."
         ),
         fields=(
             _f("kargo_name", "Name", "kargo_name", required=True, placeholder="prod-kargo"),

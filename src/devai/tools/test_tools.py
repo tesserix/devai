@@ -228,9 +228,7 @@ class TestToolExecutor:
             elif concl in ("failure", "timed_out", "cancelled"):
                 failed += 1
                 failed_steps = [
-                    s.get("name", "")
-                    for s in (job.get("steps") or [])
-                    if str(s.get("conclusion")) == "failure"
+                    s.get("name", "") for s in (job.get("steps") or []) if str(s.get("conclusion")) == "failure"
                 ]
                 failures.append(
                     {

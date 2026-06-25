@@ -121,9 +121,7 @@ async def repo_has_workflows(scm: Any, repo: str, branch: str = "") -> bool:
     if req is None:
         return False
     try:
-        resp = await req(
-            "GET", f"/repos/{repo}/contents/.github/workflows", params={"ref": branch} if branch else None
-        )
+        resp = await req("GET", f"/repos/{repo}/contents/.github/workflows", params={"ref": branch} if branch else None)
         return resp.status_code == 200 and bool(resp.json())
     except Exception:  # noqa: BLE001
         return False

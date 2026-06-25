@@ -41,10 +41,7 @@ def _list_accounts_factory(ctx: ToolContext) -> Handler:
 
         conns = await user_connections(email, "cloud")
         return _dump(
-            [
-                {"name": c.get("cloud_name") or c.get("instance_id"), "provider": c.get("provider", "")}
-                for c in conns
-            ]
+            [{"name": c.get("cloud_name") or c.get("instance_id"), "provider": c.get("provider", "")} for c in conns]
         )
 
     return handler

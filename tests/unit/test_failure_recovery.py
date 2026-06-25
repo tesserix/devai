@@ -106,16 +106,12 @@ def _executor(llm=None, sm=None, stage_factory=None, autonomy="auto"):
 
 
 def _bp(**spec_kw):
-    return Blueprint(
-        name="t", description="", stages=[StageSpec(name="build", stage="work", **spec_kw)]
-    )
+    return Blueprint(name="t", description="", stages=[StageSpec(name="build", stage="work", **spec_kw)])
 
 
 @pytest.mark.asyncio
 async def test_retry_decision_reruns_stage_with_guidance():
-    llm = _FakeLLM(
-        {"diagnosis": "LLM wrapped JSON in fences", "action": "retry", "guidance": "strip markdown fences"}
-    )
+    llm = _FakeLLM({"diagnosis": "LLM wrapped JSON in fences", "action": "retry", "guidance": "strip markdown fences"})
     stage = _FlakyStage("heal:build")
     ex = _executor(llm=llm, stage_factory=lambda deps, cfg: stage)
     task = DevAITask(intent="ship", blueprint="t", repo="o/r")
@@ -216,9 +212,7 @@ async def test_ask_user_raises_dynamic_gate_and_approval_reruns():
 
 @pytest.mark.asyncio
 async def test_ask_user_rejection_lets_failure_stand():
-    llm = _FakeLLM(
-        {"diagnosis": "d", "action": "ask_user", "guidance": "g", "user_message": "ok?"}
-    )
+    llm = _FakeLLM({"diagnosis": "d", "action": "ask_user", "guidance": "g", "user_message": "ok?"})
     sm = _SM()
     ex = _executor(llm=llm, sm=sm)
     task = DevAITask(intent="ship", blueprint="t", repo="o/r")
@@ -295,9 +289,7 @@ async def test_active_stage_outlives_its_timeout():
     ex._CONTROL_POLL_SECONDS = 0.2
     task = DevAITask(intent="ship", blueprint="t", repo="o/r")
     sm.redis.data[f"devai:run:{task.id}:activity"] = str(_time.time())
-    bp = Blueprint(
-        name="t", description="", stages=[StageSpec(name="build", stage="work", timeout_seconds=0.1)]
-    )
+    bp = Blueprint(name="t", description="", stages=[StageSpec(name="build", stage="work", timeout_seconds=0.1)])
     await ex.execute(bp, task)
 
     assert task.state == TaskState.COMPLETED
@@ -321,9 +313,7 @@ async def test_stalled_stage_still_dies_at_timeout():
     ex = _executor(llm=None, sm=sm, stage_factory=lambda deps, cfg: _Stalled())
     ex._CONTROL_POLL_SECONDS = 0.2
     task = DevAITask(intent="ship", blueprint="t", repo="o/r")
-    bp = Blueprint(
-        name="t", description="", stages=[StageSpec(name="build", stage="work", timeout_seconds=0.1)]
-    )
+    bp = Blueprint(name="t", description="", stages=[StageSpec(name="build", stage="work", timeout_seconds=0.1)])
     await ex.execute(bp, task)
 
     assert task.state == TaskState.AGENT_TIMEOUT

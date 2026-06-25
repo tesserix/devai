@@ -177,7 +177,13 @@ class FluxGitOpsAdapter(GitOpsAdapter):
         detail = await self.get_target(name, scope)
         if detail.get("ok", True) is False:
             return [detail]
-        return [{"revision": detail.get("revision", ""), "ready": detail.get("ready", ""), "note": "Flux keeps only the last applied/attempted revision; full history lives in Git."}]
+        return [
+            {
+                "revision": detail.get("revision", ""),
+                "ready": detail.get("ready", ""),
+                "note": "Flux keeps only the last applied/attempted revision; full history lives in Git.",
+            }
+        ]
 
     async def rollback(self, name: str, revision: str = "", scope: str = "") -> dict[str, Any]:
         return err(

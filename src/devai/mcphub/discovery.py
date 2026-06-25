@@ -319,9 +319,7 @@ def _gcp_adc_token() -> tuple[str, str]:
         if creds is None:
             import google.auth  # noqa: PLC0415
 
-            creds, adc_project = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
+            creds, adc_project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
             _ADC_STATE["creds"] = creds
             _ADC_STATE["project"] = adc_project or ""
         if not creds.valid:

@@ -80,7 +80,9 @@ class ArgoCDApiAdapter(GitOpsAdapter):
         out = self._summary(app)
         conds = app.get("status", {}).get("conditions", []) or []
         if conds:
-            out["conditions"] = [{"type": c.get("type", ""), "message": (c.get("message") or "")[:300]} for c in conds[:5]]
+            out["conditions"] = [
+                {"type": c.get("type", ""), "message": (c.get("message") or "")[:300]} for c in conds[:5]
+            ]
         return out
 
     async def sync(self, name: str, scope: str = "") -> dict[str, Any]:

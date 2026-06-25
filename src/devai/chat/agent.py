@@ -96,8 +96,16 @@ class _ChatUsageCallback:
 
             day = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
             coro = ledger.record(
-                day=day, provider="anthropic", model=model, tokens_in=tok_in, tokens_out=tok_out,
-                cost_usd=cost, duration_ms=0.0, triggered_by=email, agent="chat", status="ok",
+                day=day,
+                provider="anthropic",
+                model=model,
+                tokens_in=tok_in,
+                tokens_out=tok_out,
+                cost_usd=cost,
+                duration_ms=0.0,
+                triggered_by=email,
+                agent="chat",
+                status="ok",
             )
             asyncio.get_running_loop().create_task(coro)
         except Exception:  # noqa: BLE001

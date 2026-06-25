@@ -76,7 +76,9 @@ def _specs_from_records(records: Any) -> dict[str, LaunchSpec]:
     return out
 
 
-async def load_catalog_specs_resilient(settings: Any, *, attempts: int = 12, delay: float = 6.0) -> dict[str, LaunchSpec]:
+async def load_catalog_specs_resilient(
+    settings: Any, *, attempts: int = 12, delay: float = 6.0
+) -> dict[str, LaunchSpec]:
     """Catalog specs with a bounded startup retry on registry unavailability.
 
     The bridge mounts its servers ONCE at boot. If the registry is briefly

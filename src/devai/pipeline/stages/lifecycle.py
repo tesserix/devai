@@ -83,9 +83,7 @@ class _CreateIssueStage(PipelineStage):
                 task.repo,
                 title=title,
                 body=body,
-                labels=(
-                    [self.deps.config.pipeline_label] if hasattr(self.deps.config, "pipeline_label") else []
-                )
+                labels=([self.deps.config.pipeline_label] if hasattr(self.deps.config, "pipeline_label") else [])
                 + [run_correlation_label(task.id)],
             )
         except Exception as e:  # noqa: BLE001
@@ -469,9 +467,7 @@ class _PlanApprovalStage(PipelineStage):
                 await self._clear_decision(task)
                 await self._extra_debate_round(task)
                 continue  # re-present the updated decision
-            task.error = (
-                "plan rejected at approval" if decision == "rejected" else "plan approval timed out"
-            )
+            task.error = "plan rejected at approval" if decision == "rejected" else "plan approval timed out"
             task.failed_stage = self.name()
             return StageResult(
                 next_state=TaskState.CANCELLED,
@@ -533,9 +529,9 @@ class _PlanApprovalStage(PipelineStage):
                 "make up to 4 CONCRETE PROPOSALS the user can simply confirm — "
                 "fill the gaps with your recommended choices, one per line, no "
                 "numbering, phrased like: \"We'll build this with Next.js 16 + "
-                "FastAPI + PostgreSQL — confirm or name your preferred stack\" or "
-                "\"Cart + checkout will be guest-only with mock payments — confirm "
-                "or specify auth/payments\". The user should be able to approve "
+                'FastAPI + PostgreSQL — confirm or name your preferred stack" or '
+                '"Cart + checkout will be guest-only with mock payments — confirm '
+                'or specify auth/payments". The user should be able to approve '
                 "everything with one click."
             )
             response = await llm.generate(
@@ -555,9 +551,7 @@ class _PlanApprovalStage(PipelineStage):
             if text.upper().startswith("CLEAR"):
                 return "clear", []
             questions = [
-                line.strip().lstrip("-•* ").strip()
-                for line in text.splitlines()[1:]
-                if len(line.strip()) > 8
+                line.strip().lstrip("-•* ").strip() for line in text.splitlines()[1:] if len(line.strip()) > 8
             ][:4]
             return "ambiguous", questions
         except Exception:  # noqa: BLE001 — assessment failure must not block the run

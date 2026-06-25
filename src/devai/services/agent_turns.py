@@ -36,9 +36,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # {run_id, agent, stage} — set per stage execution by the executor.
-_turn_ctx: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
-    "devai_turn_ctx", default=None
-)
+_turn_ctx: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar("devai_turn_ctx", default=None)
 
 # async def sink(run_id: str, envelope: dict) -> None
 _sink: Callable[..., Any] | None = None

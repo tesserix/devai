@@ -128,9 +128,7 @@ def _build_embedder(settings: Any) -> Any | None:
                 "embedding_provider=openai but DEVAI_OPENAI_API_KEY is unset — semantic search degrades to keyword recall"
             )
         else:
-            logger.info(
-                "embedding_provider=auto with no OpenAI key — semantic search degrades to keyword recall"
-            )
+            logger.info("embedding_provider=auto with no OpenAI key — semantic search degrades to keyword recall")
         return None
 
     try:

@@ -110,7 +110,11 @@ async def test_load_catalog_specs_resilient_retries_then_succeeds(monkeypatch):
             return [
                 SimpleNamespace(
                     name="catalog-drawio-mcp",
-                    raw={"catalog": True, "endpoint": "http://b/bridge/drawio", "stdio": {"command": "npx", "args": ["-y", "x"]}},
+                    raw={
+                        "catalog": True,
+                        "endpoint": "http://b/bridge/drawio",
+                        "stdio": {"command": "npx", "args": ["-y", "x"]},
+                    },
                 )
             ]
 

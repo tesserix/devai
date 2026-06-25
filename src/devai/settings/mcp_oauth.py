@@ -102,7 +102,9 @@ async def discover_endpoints(client: Any, server_url: str) -> OAuthEndpoints | N
 # ── dynamic client registration (RFC 7591) ───────────────────────────────────
 
 
-async def register_client(client: Any, registration_endpoint: str, redirect_uri: str, name: str = "DevAI") -> dict[str, str]:
+async def register_client(
+    client: Any, registration_endpoint: str, redirect_uri: str, name: str = "DevAI"
+) -> dict[str, str]:
     """Register a public client; returns {client_id, client_secret?}. Raises on
     failure so the caller can fall back to a catalog-provided client."""
     body = {
@@ -259,8 +261,12 @@ async def access_token(
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             ts = await refresh_access(
-                client, token_endpoint, refresh_token=refresh_token,
-                client_id=client_id, client_secret=client_secret, now=now,
+                client,
+                token_endpoint,
+                refresh_token=refresh_token,
+                client_id=client_id,
+                client_secret=client_secret,
+                now=now,
             )
     except Exception:  # noqa: BLE001
         logger.warning("mcp_oauth: token refresh failed for %s", token_endpoint, exc_info=True)

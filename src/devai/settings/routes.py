@@ -415,7 +415,9 @@ async def list_provider_models(provider: str, request: Request) -> dict[str, Any
 
     provider = provider.lower()
     if provider not in KNOWN_PROVIDERS:
-        raise HTTPException(status_code=400, detail=f"unknown provider: {provider} (known: {', '.join(KNOWN_PROVIDERS)})")
+        raise HTTPException(
+            status_code=400, detail=f"unknown provider: {provider} (known: {', '.join(KNOWN_PROVIDERS)})"
+        )
 
     from devai.config import settings as base_settings
     from devai.settings.overlay import PrincipalSettingsOverlay, build_overlay
@@ -449,10 +451,7 @@ async def list_provider_models(provider: str, request: Request) -> dict[str, Any
     # (prefs.enabled_models). No list stored → everything enabled.
     raw_enabled = getattr(overlay, "llm_enabled_models", None) or []
     enabled_list = [str(m).strip() for m in raw_enabled if str(m).strip()]
-    models_out = [
-        {**m, "enabled": (not enabled_list) or m.get("id") in enabled_list}
-        for m in models
-    ]
+    models_out = [{**m, "enabled": (not enabled_list) or m.get("id") in enabled_list} for m in models]
     return {
         "provider": provider,
         "configured": configured,
@@ -516,9 +515,7 @@ async def llm_capabilities(request: Request) -> dict[str, Any]:
     try:
         from devai.settings.llm_resolver import PrincipalLLMResolver
 
-        overlay = await PrincipalLLMResolver(base_settings, svc).settings_for_email(
-            principal.email or principal.uid
-        )
+        overlay = await PrincipalLLMResolver(base_settings, svc).settings_for_email(principal.email or principal.uid)
     except Exception:  # noqa: BLE001 — degrade to platform view, never 500
         logger.warning("llm capabilities: overlay resolution failed — using platform config", exc_info=True)
 
@@ -554,7 +551,9 @@ def _mcp_catalog_entry(rec: Any) -> dict[str, Any]:
         "description": getattr(rec, "description", "") or (raw.get("description", "") if isinstance(raw, dict) else ""),
         "endpoint": str(endpoint),
         "auth_mode": (raw.get("authMode") if isinstance(raw, dict) else "") or "none",
-        "transport": getattr(rec, "type", "") or (raw.get("transport") if isinstance(raw, dict) else "") or "streamable-http",
+        "transport": getattr(rec, "type", "")
+        or (raw.get("transport") if isinstance(raw, dict) else "")
+        or "streamable-http",
         "category": labels.get("devai.io/category", ""),
         "tools": list(tools) if isinstance(tools, list) else [],
         "tool_count": len(tools) if isinstance(tools, list) else 0,
@@ -606,9 +605,7 @@ async def clear_secret(
     sid = "" if scope_id == "-" else scope_id
     await _authorize(request, principal, scope_enum, sid)
     instance_id = request.query_params.get("instance_id", "default")
-    ok = await svc.clear_secret_field(
-        scope_enum, sid, connector_key, field_key, instance_id, actor=principal.email
-    )
+    ok = await svc.clear_secret_field(scope_enum, sid, connector_key, field_key, instance_id, actor=principal.email)
     return {"status": "cleared" if ok else "not_found"}
 
 

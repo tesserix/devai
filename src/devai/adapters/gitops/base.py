@@ -95,9 +95,7 @@ async def kubectl(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(
-        proc.communicate(stdin.encode() if stdin else None), timeout=timeout
-    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(stdin.encode() if stdin else None), timeout=timeout)
     if proc.returncode != 0:
         raise RuntimeError(f"kubectl failed (rc={proc.returncode}): {stderr.decode().strip()[:500]}")
     return stdout.decode().strip()

@@ -65,9 +65,13 @@ def test_overlay_pat_connector_infers_pat_and_overrides_global():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="u@x.com", connector_key="scm", provider="github",
+            scope=Scope.USER,
+            scope_id="u@x.com",
+            connector_key="scm",
+            provider="github",
             prefs={"scm_organization": "my-org"},
-            secret_values={"scm_token": "ghp_USERPAT"}, updated_by="u@x.com",
+            secret_values={"scm_token": "ghp_USERPAT"},
+            updated_by="u@x.com",
         )
         overlay = await build_overlay(_Base(), Principal(uid="", email="u@x.com"), svc)
         assert isinstance(overlay, PrincipalSettingsOverlay)
@@ -86,9 +90,13 @@ def test_overlay_github_app_connector_infers_app():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="u@x.com", connector_key="scm", provider="github",
+            scope=Scope.USER,
+            scope_id="u@x.com",
+            connector_key="scm",
+            provider="github",
             prefs={"github_app_id": "424242", "github_app_installation_id": "77"},
-            secret_values={"github_app_private_key": "USER-APP-KEY"}, updated_by="u@x.com",
+            secret_values={"github_app_private_key": "USER-APP-KEY"},
+            updated_by="u@x.com",
         )
         overlay = await build_overlay(_Base(), Principal(uid="", email="u@x.com"), svc)
         assert overlay.scm_auth_method == "github_app"  # inferred from all-three present
@@ -110,8 +118,12 @@ def test_factory_builds_pat_client_from_overlay():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="u@x.com", connector_key="scm", provider="github",
-            secret_values={"scm_token": "ghp_USERPAT"}, updated_by="u@x.com",
+            scope=Scope.USER,
+            scope_id="u@x.com",
+            connector_key="scm",
+            provider="github",
+            secret_values={"scm_token": "ghp_USERPAT"},
+            updated_by="u@x.com",
         )
         overlay = await build_overlay(_Base(), Principal(uid="", email="u@x.com"), svc)
         client = create_scm_client(overlay)
@@ -130,9 +142,13 @@ def test_factory_app_client_uses_user_app_id():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="u@x.com", connector_key="scm", provider="github",
+            scope=Scope.USER,
+            scope_id="u@x.com",
+            connector_key="scm",
+            provider="github",
             prefs={"github_app_id": "424242", "github_app_installation_id": "77"},
-            secret_values={"github_app_private_key": "USER-APP-KEY"}, updated_by="u@x.com",
+            secret_values={"github_app_private_key": "USER-APP-KEY"},
+            updated_by="u@x.com",
         )
         overlay = await build_overlay(_Base(), Principal(uid="", email="u@x.com"), svc)
         client = create_scm_client(overlay)
@@ -155,8 +171,12 @@ def test_resolver_returns_client_for_user_with_connector():
 
     async def go():
         await svc.upsert_connector(
-            scope=Scope.USER, scope_id="u@x.com", connector_key="scm", provider="github",
-            secret_values={"scm_token": "ghp_USERPAT"}, updated_by="u@x.com",
+            scope=Scope.USER,
+            scope_id="u@x.com",
+            connector_key="scm",
+            provider="github",
+            secret_values={"scm_token": "ghp_USERPAT"},
+            updated_by="u@x.com",
         )
         r = PrincipalSCMResolver(_Base(), svc)
         client = await r.resolve_for_email("u@x.com")
