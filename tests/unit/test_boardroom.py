@@ -1,14 +1,14 @@
 """Boardroom debate stage — scenario coverage.
 
-  - panel routing: core quartet always seated; topic keywords pull in
-    specialists (data → DB engineer, deploy → infra, ...).
-  - consensus: a round with no challenges ends the debate early.
-  - deadlock: persistent challenges run all rounds; dissent survives into
-    the decision document.
-  - flaky panelist: an LLM error skips the seat, the meeting continues.
-  - no LLM: the stage no-ops visibly and never blocks the pipeline.
-  - outputs: technical_plan + boardroom_decision + a2a minutes land in the
-    handover for downstream stages and the Timeline.
+- panel routing: core quartet always seated; topic keywords pull in
+  specialists (data → DB engineer, deploy → infra, ...).
+- consensus: a round with no challenges ends the debate early.
+- deadlock: persistent challenges run all rounds; dissent survives into
+  the decision document.
+- flaky panelist: an LLM error skips the seat, the meeting continues.
+- no LLM: the stage no-ops visibly and never blocks the pipeline.
+- outputs: technical_plan + boardroom_decision + a2a minutes land in the
+  handover for downstream stages and the Timeline.
 """
 
 from __future__ import annotations

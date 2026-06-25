@@ -61,6 +61,7 @@ _claude_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=120, name
 API_CALL_TIMEOUT = 180
 DEFAULT_TOOL_TIMEOUT = 300
 
+
 def _compact_input(tool_input: Any) -> str:
     """One-line summary of a tool call's input for the turn log — the path/
     branch/title style fields humans scan for, never full file contents."""
@@ -146,9 +147,7 @@ class ClaudeProvider:
                         "The work above is already done and committed. Verify with read "
                         "tools if unsure, then complete ONLY the remaining work."
                     )
-                messages: list[dict[str, Any]] = [
-                    {"role": "user", "content": [{"type": "text", "text": seed}]}
-                ]
+                messages: list[dict[str, Any]] = [{"role": "user", "content": [{"type": "text", "text": seed}]}]
 
                 for i in range(session_cap):
                     turns_used += 1
@@ -156,9 +155,7 @@ class ClaudeProvider:
                     assistant_content = response.content
                     messages.append({"role": "assistant", "content": assistant_content})
 
-                    turn_text = "\n".join(
-                        block.text for block in assistant_content if isinstance(block, TextBlock)
-                    )
+                    turn_text = "\n".join(block.text for block in assistant_content if isinstance(block, TextBlock))
                     if turn_text.strip():
                         last_text = turn_text
 
@@ -173,10 +170,7 @@ class ClaudeProvider:
                         usage_out=getattr(usage, "output_tokens", 0) or 0,
                         cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0,
                         text=turn_text.strip()[:400],
-                        tools=[
-                            {"name": tc.name, "input": _compact_input(tc.input)}
-                            for tc in tool_calls
-                        ],
+                        tools=[{"name": tc.name, "input": _compact_input(tc.input)} for tc in tool_calls],
                     )
                     if not tool_calls:
                         logger.info(
@@ -211,9 +205,7 @@ class ClaudeProvider:
                             }
                         )
                         note = await self._call_api(system_prompt, tools, messages)
-                        note_text = "\n".join(
-                            b.text for b in note.content if isinstance(b, TextBlock)
-                        )
+                        note_text = "\n".join(b.text for b in note.content if isinstance(b, TextBlock))
                         if note_text.strip():
                             progress_notes.append(note_text.strip())
                             last_text = note_text
@@ -229,9 +221,7 @@ class ClaudeProvider:
                                     "Claude agent declared completion at session %d boundary",
                                     session_no,
                                 )
-                                await emit_turn(
-                                    "agent_done", reason="remaining_none", turns_used=turns_used
-                                )
+                                await emit_turn("agent_done", reason="remaining_none", turns_used=turns_used)
                                 return note_text
                         break  # next session
 
@@ -283,8 +273,7 @@ class ClaudeProvider:
                 await emit_turn("agent_done", reason="budget_exhausted", turns_used=turns_used)
                 return last_text
             raise RuntimeError(
-                f"Claude agent produced no text in {turns_used} turns across "
-                f"{self.max_sessions} session(s)"
+                f"Claude agent produced no text in {turns_used} turns across {self.max_sessions} session(s)"
             )
 
         return await with_timeout(_run(), self.total_timeout, "claude_agent_loop")
@@ -307,9 +296,7 @@ class ClaudeProvider:
         if not self.prompt_caching:
             return system_prompt, tools
 
-        system_param = [
-            {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}
-        ]
+        system_param = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
         tools_param = tools
         if tools:
             tools_param = [*tools[:-1], {**tools[-1], "cache_control": {"type": "ephemeral"}}]
@@ -353,9 +340,7 @@ class ClaudeProvider:
             estimated_input_tokens = estimate_token_count(messages[-1]) + 2000
         else:
             estimated_input_tokens = (
-                estimate_token_count(system_prompt)
-                + estimate_token_count(tools)
-                + estimate_token_count(messages)
+                estimate_token_count(system_prompt) + estimate_token_count(tools) + estimate_token_count(messages)
             )
         await get_claude_rate_limiter().acquire(estimated_input_tokens)
 

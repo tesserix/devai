@@ -197,7 +197,9 @@ async def test_require_user_connector_blocks_humans_not_systems():
     assert await deps.llm_for_principal("webhook:tesserix/devai#42") is sentinel
     assert await deps.llm_for_principal("") is sentinel
     # Flag off → platform fallback for everyone.
-    deps2 = StageDeps(config=type("C", (), {"llm_require_user_connector": False})(), llm=sentinel, llm_resolver=_NoneResolver())
+    deps2 = StageDeps(
+        config=type("C", (), {"llm_require_user_connector": False})(), llm=sentinel, llm_resolver=_NoneResolver()
+    )
     assert await deps2.llm_for_principal("human@example.com") is sentinel
 
 
@@ -323,11 +325,12 @@ def test_role_chain_cache_is_isolated_per_credentials():
 
 
 @pytest.mark.asyncio
-async def test_agent_adapter_fails_clearly_when_trial_exhausted():
-    """Legacy ALM agents must not silently ride the shared platform keys:
-    a human with no connector and a spent trial budget gets a clear,
-    actionable stage failure instead."""
-    from devai.pipeline.stages._base import AgentAdapter
+async def test_principal_run_fails_clearly_when_trial_exhausted():
+    """Legacy ALM agents (now AgentStage, via the shared resolve_principal_run)
+    must not silently ride the shared platform keys: a human with no connector
+    and a spent trial budget gets a clear, actionable stage failure instead."""
+    from devai.pipeline.interfaces import StageDeps
+    from devai.pipeline.principal import resolve_principal_run
     from devai.pipeline.types import DevAITask
     from devai.settings.trial import get_trial_meter
 
@@ -344,21 +347,13 @@ async def test_agent_adapter_fails_clearly_when_trial_exhausted():
         async def llm_overlay_for_email(self, email):
             return cfg, False
 
-    from devai.pipeline.interfaces import StageDeps
-
     deps = StageDeps(config=cfg, llm_resolver=_Resolver())
-
-    class _Stage(AgentAdapter):
-        def name(self):
-            return "implement-code"
-
-        def _make_agent(self):  # pragma: no cover — must not be reached
-            raise AssertionError("agent must not be built once the trial is spent")
 
     meter = get_trial_meter(cfg)
     await meter.add("spent.user@example.com", 10_000)  # way past the budget
 
     task = DevAITask(intent="x", blueprint="b", repo="o/r")
     task.triggered_by = "spent.user@example.com"
+    # The trial gate fires before any agent is built — a clear stage failure.
     with pytest.raises(RuntimeError, match="Settings"):
-        await _Stage(deps, {}).execute(task)
+        await resolve_principal_run(deps, task, trial_gate=True, stage_name="implement_code")

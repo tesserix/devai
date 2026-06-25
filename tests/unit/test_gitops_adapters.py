@@ -240,12 +240,24 @@ async def test_flux_mutation_gate():
 # ── tools registration + MCP domain ────────────────────────────────────────
 
 EXPECTED_TOOLS = {
-    "argocd_list_apps", "argocd_get_app", "argocd_sync", "argocd_wait_healthy",
-    "argocd_app_history", "argocd_rollback",
-    "kargo_list_projects", "kargo_list_stages", "kargo_get_stage",
-    "kargo_list_freight", "kargo_promote", "kargo_list_promotions",
-    "flux_list_kustomizations", "flux_list_helmreleases", "flux_get_object",
-    "flux_list_sources", "flux_reconcile", "flux_suspend",
+    "argocd_list_apps",
+    "argocd_get_app",
+    "argocd_sync",
+    "argocd_wait_healthy",
+    "argocd_app_history",
+    "argocd_rollback",
+    "kargo_list_projects",
+    "kargo_list_stages",
+    "kargo_get_stage",
+    "kargo_list_freight",
+    "kargo_promote",
+    "kargo_list_promotions",
+    "flux_list_kustomizations",
+    "flux_list_helmreleases",
+    "flux_get_object",
+    "flux_list_sources",
+    "flux_reconcile",
+    "flux_suspend",
 }
 
 

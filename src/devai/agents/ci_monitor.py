@@ -270,9 +270,7 @@ class CIMonitorAgent(BaseAgent):
 
                 # Unfixable by the CI agent (or attempts exhausted) — escalate
                 # to the developer with the focused prompt the CI agent built.
-                escalation_body = (
-                    fix_outcome.get("developer_prompt") if fix_outcome else log_summary
-                ) or log_summary
+                escalation_body = (fix_outcome.get("developer_prompt") if fix_outcome else log_summary) or log_summary
                 a2a.escalate(
                     "senior_developer",
                     "CI Build Failed",
@@ -400,9 +398,7 @@ class CIMonitorAgent(BaseAgent):
         logger.warning("Build timeout after %ds for branch %s", BUILD_TIMEOUT_SECONDS, branch)
         return None
 
-    async def _wait_for_new_build(
-        self, repo: str, branch: str, seen_run_ids: set[int]
-    ) -> dict[str, Any] | None:
+    async def _wait_for_new_build(self, repo: str, branch: str, seen_run_ids: set[int]) -> dict[str, Any] | None:
         """Wait for a workflow run we have NOT evaluated yet (the build the
         CI agent's fix push re-triggered) to complete. Returns None when no
         new run appears/completes inside the budget — the fix-until-green

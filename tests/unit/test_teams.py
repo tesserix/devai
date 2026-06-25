@@ -161,7 +161,9 @@ async def test_is_org_admin_truthy_on_match():
 
 @pytest.mark.asyncio
 async def test_teams_with_role_for_enriches():
-    pool = FakePool(rows=[{"id": "team-1", "name": "Platform", "org_id": "tesserix", "roles": ["admin"], "member_count": 3}])
+    pool = FakePool(
+        rows=[{"id": "team-1", "name": "Platform", "org_id": "tesserix", "roles": ["admin"], "member_count": 3}]
+    )
     svc = TeamService(FakeDB(pool))
     teams = await svc.teams_with_role_for("uid-1")
     assert teams[0]["is_admin"] is True

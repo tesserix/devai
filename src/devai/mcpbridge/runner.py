@@ -63,7 +63,7 @@ class LaunchSpec:
                 if secret:
                     out[key] = secret
             elif tmpl.startswith("{prefs:") and tmpl.endswith("}"):
-                pref_key = tmpl[len("{prefs:"):-1]
+                pref_key = tmpl[len("{prefs:") : -1]
                 if prefs.get(pref_key):
                     out[key] = str(prefs[pref_key])
             else:

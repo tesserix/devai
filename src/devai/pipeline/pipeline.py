@@ -124,8 +124,7 @@ class Pipeline:
                 )
             else:
                 logger.warning(
-                    "dispatch backend=nats but event-bus adapter / durable queue unavailable "
-                    "— falling back to %s",
+                    "dispatch backend=nats but event-bus adapter / durable queue unavailable — falling back to %s",
                     "redis" if self._durable else "inproc",
                 )
                 self._dispatch_mode = "redis" if self._durable else "inproc"
@@ -596,7 +595,9 @@ class Pipeline:
             except Exception:  # noqa: BLE001
                 ctrl = None
             if ctrl == "stopped":
-                logger.info("worker %s: %s is flagged stopped — finalizing cancel instead of executing", worker_name, task_id)
+                logger.info(
+                    "worker %s: %s is flagged stopped — finalizing cancel instead of executing", worker_name, task_id
+                )
                 task.error = task.error or "stopped by user"
                 task.failed_stage = task.failed_stage or task.current_stage or ""
                 task.current_stage = ""

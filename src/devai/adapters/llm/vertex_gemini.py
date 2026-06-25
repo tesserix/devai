@@ -72,9 +72,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
                 else f"{self._location}-aiplatform.googleapis.com"
             )
             origin = f"https://{host}"
-        self._base = (
-            f"{origin}/v1/projects/{project}/locations/{self._location}/publishers/google/models"
-        )
+        self._base = f"{origin}/v1/projects/{project}/locations/{self._location}/publishers/google/models"
 
     # ── auth ──────────────────────────────────────────────────────────
 
@@ -90,9 +88,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
         if self._creds is None:
             import google.auth  # noqa: PLC0415
 
-            self._creds, _ = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
+            self._creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         if not self._creds.valid:
             from google.auth.transport.requests import Request  # noqa: PLC0415
 
@@ -128,10 +124,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
             if msg.content:
                 parts.append({"text": msg.content})
             if msg.role == LLMRole.ASSISTANT and msg.tool_calls:
-                parts.extend(
-                    {"functionCall": {"name": tc.name, "args": dict(tc.arguments)}}
-                    for tc in msg.tool_calls
-                )
+                parts.extend({"functionCall": {"name": tc.name, "args": dict(tc.arguments)}} for tc in msg.tool_calls)
             for img in msg.images:
                 parts.append(
                     {
@@ -143,9 +136,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
                 )
             if not parts:
                 continue
-            contents.append(
-                {"role": "model" if msg.role == LLMRole.ASSISTANT else "user", "parts": parts}
-            )
+            contents.append({"role": "model" if msg.role == LLMRole.ASSISTANT else "user", "parts": parts})
 
         system_texts = [request.system] if request.system else []
         system_texts += [m.content for m in request.messages if m.role == LLMRole.SYSTEM and m.content]
@@ -260,10 +251,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
                 json={"instances": [{"content": t} for t in texts]},
             )
         resp.raise_for_status()
-        return [
-            list(p.get("embeddings", {}).get("values", []))
-            for p in resp.json().get("predictions", [])
-        ]
+        return [list(p.get("embeddings", {}).get("values", [])) for p in resp.json().get("predictions", [])]
 
     async def list_models(self) -> list[dict[str, str]]:
         """Text-generation models from the Vertex publisher catalog.

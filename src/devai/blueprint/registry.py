@@ -64,6 +64,7 @@ def register_defaults(registry: StageRegistry) -> None:
     """
     # Lazy imports so this file stays cheap and circular-import-free.
     from devai.pipeline.stages import alm as _alm
+    from devai.pipeline.stages import collaborate as _collaborate
     from devai.pipeline.stages import crew_runner as _crew_runner
     from devai.pipeline.stages import job_runner as _job_runner
     from devai.pipeline.stages import lifecycle as _lifecycle
@@ -120,6 +121,10 @@ def register_defaults(registry: StageRegistry) -> None:
     # The lead plans, members (each an AgentRunner) execute, via crews/*.yaml
     # seeds or a DB-backed crew assigned to the task (task.crew_id).
     registry.register("run_crew", _crew_runner.crew_runner_stage)
+
+    # ─── Collaboration patterns (sequential/mixture/deliberation/distillation) ─
+    # Compose specs into the RecursiveMAS multi-agent shapes from a blueprint.
+    registry.register("collaborate", _collaborate.collaborate_stage)
 
     # ─── K8s Job runner (default once k8s_runtime_enabled=true) ──────
     # Blueprints declare `stage: run_as_job` + `config.agent: <name>` to

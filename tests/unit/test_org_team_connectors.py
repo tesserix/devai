@@ -50,8 +50,13 @@ class _Base:
 
 def _scm(svc, scope, scope_id, token, **prefs):
     return svc.upsert_connector(
-        scope=scope, scope_id=scope_id, connector_key="scm", provider="github",
-        prefs=prefs, secret_values={"scm_token": token}, updated_by="admin@tesserix.app",
+        scope=scope,
+        scope_id=scope_id,
+        connector_key="scm",
+        provider="github",
+        prefs=prefs,
+        secret_values={"scm_token": token},
+        updated_by="admin@tesserix.app",
     )
 
 

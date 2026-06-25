@@ -5,9 +5,17 @@ from devai.analytics.pricing import estimate_cost, lookup_rate, rate_card
 
 def test_known_models_resolve_exact():
     for model in (
-        "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
-        "gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-pro",
-        "gpt-4.1", "o3", "llama-3.3-70b-versatile",
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5-20251001",
+        "gemini-2.5-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-pro",
+        "gpt-4.1",
+        "o3",
+        "llama-3.3-70b-versatile",
     ):
         _, exact = lookup_rate(model)
         assert exact, f"{model} should resolve to a real rate"

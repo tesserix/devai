@@ -106,10 +106,16 @@ class UsageLedger:
                 pipe.sadd(_USERS, user)
             rec = json.dumps(
                 {
-                    "ts": day, "provider": provider, "model": model_id, "agent": agent,
-                    "run_id": run_id, "user": user,
-                    "tokens_in": int(tokens_in or 0), "tokens_out": int(tokens_out or 0),
-                    "cost_usd": round(cost_usd, 6), "duration_ms": round(duration_ms, 1),
+                    "ts": day,
+                    "provider": provider,
+                    "model": model_id,
+                    "agent": agent,
+                    "run_id": run_id,
+                    "user": user,
+                    "tokens_in": int(tokens_in or 0),
+                    "tokens_out": int(tokens_out or 0),
+                    "cost_usd": round(cost_usd, 6),
+                    "duration_ms": round(duration_ms, 1),
                     "status": status,
                 }
             )

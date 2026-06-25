@@ -28,7 +28,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def user_connections(email: str, connector_key: str, *, svc: SettingsService | None = None) -> list[dict[str, Any]]:
+async def user_connections(
+    email: str, connector_key: str, *, svc: SettingsService | None = None
+) -> list[dict[str, Any]]:
     """Every ``connector_key`` connection the user owns, secrets RESOLVED.
 
     Returns ``[{instance_id, provider, <prefs...>, <secret fields...>}]``,

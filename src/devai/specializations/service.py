@@ -144,5 +144,92 @@ class SpecializationService:
         except SpecializationRegistryError:
             return None
 
+    # ── Execution surface ────────────────────────────────────────────
+
+    async def invoke(
+        self,
+        agent_name: str,
+        state: dict[str, Any],
+        *,
+        deps: Any = None,
+    ) -> dict[str, Any] | None:
+        """Run a YAML specialization through the Agent SDK and return its patch.
+
+        This is the method the Job runner's entrypoint calls. It handles
+        **YAML-only** specs (no ``legacy_python_class``) by dispatching a
+        ``SpecAgent`` — the same unified runner the in-process pipeline uses, so
+        a YAML role behaves identically as a Job or inline. (Before this, a
+        YAML-only role could not run as a Job at all — the entrypoint's only
+        fallback was reflection-loading a ``devai.agents.<name>`` Python class.)
+
+        Returns ``None`` when the agent is unknown or is a legacy Python class,
+        so the caller falls back to constructing that class directly — ``invoke``
+        itself never reflection-loads Python by name.
+
+        ``deps`` is for tests; in production a minimal ``StageDeps`` (LLM + SCM
+        built from ``config``, no Redis) is constructed.
+        """
+        spec = self.get_full(agent_name)
+        if spec is None or spec.legacy_python_class:
+            return None
+
+        run_deps = deps if deps is not None else self._build_runner_deps()
+        task = self._task_from_state(state)
+
+        from devai.agentruntime import AgentDispatcher, SpecAgent
+
+        result = await AgentDispatcher(run_deps).dispatch(SpecAgent(spec), task)
+        patch: dict[str, Any] = (
+            dict(result.handover) if isinstance(result.handover, dict) else {"value": result.handover}
+        )
+        patch.setdefault("ok", not result.error)
+        if result.final_text and f"{spec.name}_text" not in patch:
+            patch[f"{spec.name}_text"] = result.final_text
+        return patch
+
+    def _build_runner_deps(self) -> Any:
+        """A minimal StageDeps for a Job pod: LLM + SCM from config, no Redis.
+
+        Never raises — a backend that fails to build degrades to ``None`` and
+        the spec runs with whatever is available (an absent LLM yields a stub)."""
+        from devai.pipeline.interfaces import StageDeps
+
+        llm = None
+        try:
+            from devai.adapters.llm.factory import create_llm_adapter
+
+            llm = create_llm_adapter(self.config)
+        except Exception:  # noqa: BLE001
+            logger.debug("invoke: LLM adapter construction failed", exc_info=True)
+        scm = None
+        try:
+            from devai.scm import create_scm_client
+
+            scm = create_scm_client(self.config)
+        except Exception:  # noqa: BLE001
+            logger.debug("invoke: SCM client construction failed", exc_info=True)
+        return StageDeps(config=self.config, llm=llm, scm=scm)
+
+    @staticmethod
+    def _task_from_state(state: dict[str, Any]) -> Any:
+        """Project the runner's ALMState-shaped slice onto a DevAITask."""
+        from devai.pipeline.types import DevAITask
+
+        reserved = {"run_id", "requirements", "repo_full_name", "blueprint", "trigger_actor", "trace_id"}
+        task = DevAITask(
+            id=str(state.get("run_id") or ""),
+            intent=str(state.get("requirements") or ""),
+            repo=str(state.get("repo_full_name") or ""),
+            blueprint=str(state.get("blueprint") or ""),
+            triggered_by=str(state.get("trigger_actor") or ""),
+            trace_id=str(state.get("trace_id") or ""),
+        )
+        # Everything else (stage_config, agent_profile, mcp_endpoints, …) becomes
+        # handover context the spec can read via its declared context_keys.
+        for key, value in state.items():
+            if key not in reserved:
+                task.agent_context[key] = value
+        return task
+
 
 __all__ = ["SpecializationService"]

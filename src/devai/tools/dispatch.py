@@ -24,12 +24,15 @@ logger = logging.getLogger(__name__)
 
 # (category, module, TOOLS attribute). Executor class is found by suffix.
 _SOURCES = (
-    ("scm", "devai.tools.scm_tools", "SCM_TOOLS"),
+    # NOTE: scm + file tools are deliberately NOT sourced here. They resolve via
+    # the central registry fallback below, which wires the *rich* SCMToolExecutor
+    # (run_id / redis / triggered_by / trace_id → dashboard repo-events + audit
+    # attribution + secret masking). The bare `cls(scm)` an `_index` entry would
+    # build loses all of that, and file_tools.py ships no executor at all.
     ("validation", "devai.tools.validation_tools", "VALIDATION_TOOLS"),
     ("document", "devai.tools.document_tools", "DOCUMENT_TOOLS"),
     ("security", "devai.tools.security_tools", "SECURITY_TOOLS"),
     ("test", "devai.tools.test_tools", "TEST_TOOLS"),
-    ("file", "devai.tools.file_tools", "FILE_TOOLS"),
     # Agent memory (remember/recall against the process-global adapter) —
     # the reflector role's whole job; previously these tool names existed
     # only in YAML and silently resolved to nothing.
@@ -90,7 +93,14 @@ class ToolDispatcher:
     others are built with no args.
     """
 
-    def __init__(self, scm: Any | None = None, *, dry_run: bool = False, triggered_by: str = "") -> None:
+    def __init__(
+        self,
+        scm: Any | None = None,
+        *,
+        dry_run: bool = False,
+        triggered_by: str = "",
+        tool_context: Any = None,
+    ) -> None:
         self._scm = scm
         # Who triggered this run — threaded into the registry ToolContext so
         # identity-scoped tools (e.g. gitops with cluster=<user's cluster>)
@@ -98,6 +108,11 @@ class ToolDispatcher:
         self._triggered_by = triggered_by
         # When true, MUTATING_TOOLS are blocked at execute() time.
         self._dry_run = dry_run
+        # Optional rich `registry.ToolContext` for registry-backed tools
+        # (shell/checkpoint/web/gitops): when the caller (AgentRunner) supplies
+        # it, the fallback tools get the full context — workdir, web_search,
+        # object_store, redis, llm — instead of the thin scm+triggered_by one.
+        self._tool_context = tool_context
         # name → (schema dict, module path)
         self._index: dict[str, tuple[dict[str, Any], str]] = {}
         # module path → executor instance (lazily constructed, cached)
@@ -171,8 +186,13 @@ class ToolDispatcher:
             entry = registry.get(name)
             if entry is None:
                 return None
+            # Prefer the rich context the caller supplied (workdir/web_search/…);
+            # else the thin scm+triggered_by one (preserves prior behavior).
+            ctx = self._tool_context
+            if ctx is None:
+                ctx = registry.ToolContext(scm=self._scm, triggered_by=self._triggered_by)
             try:
-                handler = entry.factory(registry.ToolContext(scm=self._scm, triggered_by=self._triggered_by))
+                handler = entry.factory(ctx)
             except Exception:  # noqa: BLE001 — a broken factory degrades to "unknown"
                 logger.exception("tool %r registry factory raised", name)
                 return None

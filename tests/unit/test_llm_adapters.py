@@ -412,9 +412,7 @@ def test_pinned_model_defaults_but_never_overrides():
     asyncio.run(pinned.generate(LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")])))
     assert seen["model"] == "claude-haiku-4-5-20251001"
     asyncio.run(
-        pinned.generate(
-            LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8")
-        )
+        pinned.generate(LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8"))
     )
     assert seen["model"] == "claude-opus-4-8"  # explicit request wins
 
@@ -441,9 +439,7 @@ def test_fallback_preserve_model_keeps_id_down_the_chain():
 
     chain = FallbackLLMAdapter(_Dead(), _Vertex(), preserve_model=True)
     asyncio.run(
-        chain.generate(
-            LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8")
-        )
+        chain.generate(LLMRequest(messages=[LLMMessage(role=LLMRole.USER, content="x")], model="claude-opus-4-8"))
     )
     # Same model id served by the Vertex-routing gateway — NOT cleared.
     assert seen["model"] == "claude-opus-4-8"
@@ -474,8 +470,14 @@ def test_dev_model_picker_routes_ui_vs_api():
         llm_model_dev_api = "claude-opus-4-8"
 
     agent.config = _Cfg2()
-    ui_state = {"stories": [{"title": "Storefront layout and navigation", "skills": ["frontend"]}], "active_story_index": 0}
-    api_state = {"stories": [{"title": "Order processing endpoints", "skills": ["api", "database"]}], "active_story_index": 0}
+    ui_state = {
+        "stories": [{"title": "Storefront layout and navigation", "skills": ["frontend"]}],
+        "active_story_index": 0,
+    }
+    api_state = {
+        "stories": [{"title": "Order processing endpoints", "skills": ["api", "database"]}],
+        "active_story_index": 0,
+    }
     assert agent._model_for_story(ui_state) == "claude-sonnet-4-6"
     assert agent._model_for_story(api_state) == "claude-opus-4-8"
 

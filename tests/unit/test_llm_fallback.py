@@ -129,8 +129,7 @@ async def test_model_fallback_retries_other_model_on_error():
         async def generate(self, request: LLMRequest) -> LLMResponse:
             if (request.model or "primary") == "primary":
                 return LLMResponse(text="", finish_reason="error", provider="picky")
-            return LLMResponse(text="ok-on-fallback", finish_reason="stop",
-                               provider="picky", usage=LLMUsage())
+            return LLMResponse(text="ok-on-fallback", finish_reason="stop", provider="picky", usage=LLMUsage())
 
     a = ModelFallbackLLMAdapter(_ModelPicky(), "backup-model")
     resp = await a.generate(LLMRequest(model="primary"))

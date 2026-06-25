@@ -104,7 +104,11 @@ def _spec_for(conn: dict[str, Any]) -> DownstreamSpec | None:
             headers["x-mcp-secret"] = token
         import json as _json
 
-        prefs = {k: v for k, v in conn.items() if k not in ("mcp_url", "mcp_token", "mcp_auth_header", "instance_id", "provider")}
+        prefs = {
+            k: v
+            for k, v in conn.items()
+            if k not in ("mcp_url", "mcp_token", "mcp_auth_header", "instance_id", "provider")
+        }
         if prefs:
             headers["x-mcp-prefs"] = _json.dumps(prefs)
     else:

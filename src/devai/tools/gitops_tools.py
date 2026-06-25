@@ -329,14 +329,23 @@ def register_gitops_tools(*, overwrite: bool = False) -> None:
     register(
         "kargo_list_freight",
         "List freight (promotable artifact sets: images, charts, commits) in a Kargo project, oldest→newest.",
-        _obj({"project": _PROJECT, "limit": {"type": "integer", "description": "Max entries (default 20)"}}, ["project"]),
+        _obj(
+            {"project": _PROJECT, "limit": {"type": "integer", "description": "Max entries (default 20)"}}, ["project"]
+        ),
         _make("kargo", "list_freight"),
         overwrite=overwrite,
     )
     register(
         "kargo_promote",
         "Promote a freight (by name or alias) into a Kargo stage — THE release action. Mutating — gated and audited.",
-        _obj({"project": _PROJECT, "stage": _NAME, "freight": {"type": "string", "description": "Freight name or alias"}}, ["project", "stage", "freight"]),
+        _obj(
+            {
+                "project": _PROJECT,
+                "stage": _NAME,
+                "freight": {"type": "string", "description": "Freight name or alias"},
+            },
+            ["project", "stage", "freight"],
+        ),
         _make("kargo", "promote", mutating=True),
         overwrite=overwrite,
     )

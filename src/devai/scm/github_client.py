@@ -521,8 +521,7 @@ class GitHubSCMClient(SCMClient):
             # raised `list indices must be integers` deep in the tool layer.
             names = ", ".join(str(item.get("name", "")) for item in data[:15])
             raise FileNotFoundError(
-                f"{path!r} is a directory, not a file — it contains: {names}. "
-                "Use scm_list_files to browse it."
+                f"{path!r} is a directory, not a file — it contains: {names}. Use scm_list_files to browse it."
             )
         return base64.b64decode(data["content"]).decode("utf-8")
 
@@ -568,9 +567,7 @@ class GitHubSCMClient(SCMClient):
             # the file truly doesn't exist → 404) we must re-raise the
             # ORIGINAL 422, never a masking secondary error.
             try:
-                lookup = await self._request(
-                    "GET", f"/repos/{repo}/contents/{path}", params={"ref": branch}
-                )
+                lookup = await self._request("GET", f"/repos/{repo}/contents/{path}", params={"ref": branch})
                 body = lookup.json()
                 current_sha = body.get("sha") if isinstance(body, dict) else None
             except Exception:  # noqa: BLE001

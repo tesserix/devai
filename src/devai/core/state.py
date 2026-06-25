@@ -200,9 +200,7 @@ class StateManager:
     PIPELINE_ACTIVE_KEY = "devai:pipeline:active"
     PIPELINE_CLAIM_KEY = "devai:pipeline:claim:{task_id}"
 
-    async def persist_task(
-        self, task_dict: dict[str, Any], *, ttl: int | None = None, force: bool = False
-    ) -> None:
+    async def persist_task(self, task_dict: dict[str, Any], *, ttl: int | None = None, force: bool = False) -> None:
         """Write a DevAITask dict to Redis, last-writer-wins by `updated_at`.
 
         The Pipeline persists after every state mutation, but some of those

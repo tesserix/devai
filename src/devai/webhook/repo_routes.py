@@ -144,9 +144,7 @@ async def _resolve_run(request: Request, run_id: str, branch_override: str = "")
 
 
 @router.get("/{run_id}/repo/tree")
-async def list_repo_tree(
-    request: Request, run_id: str, path: str = "", branch: str = ""
-) -> dict[str, Any]:
+async def list_repo_tree(request: Request, run_id: str, path: str = "", branch: str = "") -> dict[str, Any]:
     """List entries under ``path`` for the run's repo.
 
     Returns ``{repo, branch, path, entries: [{name,type,size,path}]}``.
@@ -200,9 +198,7 @@ async def list_repo_tree(
 
 
 @router.get("/{run_id}/repo/file")
-async def read_repo_file(
-    request: Request, run_id: str, path: str, branch: str = ""
-) -> dict[str, Any]:
+async def read_repo_file(request: Request, run_id: str, path: str, branch: str = "") -> dict[str, Any]:
     """Read a single file's contents.
 
     Read-only — there's no companion PUT. Returns text content directly
