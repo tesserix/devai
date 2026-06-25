@@ -1,0 +1,48 @@
+name: collaborate-demo
+description: >-
+  Demonstrates the Agent SDK's collaboration patterns on a live, runnable path.
+  Hydrates context, runs a `mixture` (several analysis specialists concurrently,
+  then aggregate), and a `deliberation` loop (actor ↔ critic, refine until the
+  critic approves). Shows how a blueprint composes agents into the RecursiveMAS
+  shapes declaratively — no Python, no redeploy. Opt-in: only runs when a trigger
+  sets `blueprint: collaborate-demo`.
+
+metadata:
+  domain: alm
+
+stages:
+  - name: hydrate-context
+    type: context
+    stage: context_hydration
+    timeout: 30s
+
+  # Mixture — fan out independent analyses concurrently, aggregate their handovers.
+  - name: analyze
+    type: agentic
+    stage: collaborate
+    depends_on: [hydrate-context]
+    timeout: 15m
+    config:
+      pattern: mixture
+      agents: requirements_analyst,tech_detector
+      output_key: analysis
+
+  # Deliberation — the planner drafts, a critic reviews; loop until approved.
+  - name: refine-plan
+    type: agentic
+    stage: collaborate
+    depends_on: [analyze]
+    timeout: 15m
+    config:
+      pattern: deliberation
+      actor: requirements_analyst
+      critic: reflector
+      accept_field: approved
+      max_rounds: "2"
+      output_key: refined_plan
+
+  - name: post-report
+    type: deterministic
+    stage: post_report
+    depends_on: [refine-plan]
+    on_failure: continue
