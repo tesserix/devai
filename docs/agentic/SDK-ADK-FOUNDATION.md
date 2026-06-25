@@ -77,7 +77,7 @@ transfers. See the `project_sdk_adk` memory note.)
 | **3c-entrypoint** | **`SpecializationService.invoke()` implemented on the SDK.** The Job runner's primary path now runs YAML specs via `SpecAgent` → `AgentRunner` (so a YAML role behaves identically as a Job or inline — **closes the gap where YAML-only roles couldn't run as Jobs at all**). `invoke()` returns `None` for a legacy/unknown agent → the entrypoint's reflection is now a genuine *last-resort fallback* for legacy Python classes, not the primary path. | **Shipped** — `tests/unit/test_specialization_invoke.py` (4 tests), suite green (924) |
 | **3c-residual** | The two reflection sites that remain are both genuine cold-path fallbacks: `orchestrator._run_node` (LangGraph fallback, rarely hit) and `entrypoint._invoke_legacy` (legacy Python classes in a Job — kept because `LegacyAgent`'s deps-guard requires a `state_manager` the Job pod lacks; the clean removal belongs with enabling the Job runtime so it's testable). | Deferred |
 | **4** | `JobBackend` (reuse `runtime/`); fix the Job path's missing `invoke()` (now `SpecAgent`); inline≡Job equivalence test. | Pending |
-| **5** | Recursion helpers + named collaboration patterns. | Pending |
+| **5** | **Collaboration patterns shipped** (`agentruntime/collaborate.py`): `sequential` / `mixture` / `deliberation` / `distillation` over the one dispatcher (recursion via `ctx.spawn`). Exposed to blueprints via the generic `collaborate` stage (`pipeline/stages/collaborate.py`) + a `collaborate-demo` blueprint — the RecursiveMAS shapes, composed in YAML, no Python. | **Shipped** — `test_agentruntime_collaborate.py` (7) + `test_collaborate_stage.py` (6) |
 
 ## Design rules
 
