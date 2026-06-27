@@ -298,6 +298,14 @@ def build_alm_state(ctx: RunContext) -> dict[str, Any]:
         **task.agent_context,
     }
 
+    # Per-dispatch context wins over the persistent handover bag. ``extra_context``
+    # is the documented way a caller hands THIS run a value without mutating the
+    # shared bag — a crew lead passing a member its subtask (``spawn``), or the
+    # multi-story implement stage passing ``active_story_index`` per story. Folded
+    # after ``agent_context`` so it overrides, mirroring ``spawn``'s own merge.
+    if ctx.extra_context:
+        state.update(ctx.extra_context)
+
     # Recovery guidance: the executor's recovery agent diagnosed a prior failed
     # attempt of THIS stage and injected corrective instructions. Fold them into
     # the requirements so the agent actually changes behavior. The raw failure

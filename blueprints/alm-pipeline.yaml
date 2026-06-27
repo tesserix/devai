@@ -145,7 +145,12 @@ stages:
     timeout: 5m
     on_failure: continue   # docs enrichment must never block delivery (heal runs first)
 
-  # ─── Quality gates ──────────────────────────────────────────────────
+  # ─── Quality gates — review + security now actually GATE ─────────────
+  # review_decision / security_decision used to be strings nothing read, so a
+  # changes-requested review or a security block sailed to deploy. Each gate
+  # now derives a boolean flag and runs a bounded fix→re-check loop (the same
+  # shape as the self-healing test loop); `enforce-quality-gates` blocks
+  # delivery if a verdict is still unresolved afterwards.
   - name: review-code
     type: review
     stage: review_code
@@ -154,13 +159,63 @@ stages:
     depends_on: [implement-code, db-engineering, update-governance]
     timeout: 15m
 
+  - name: fix-review-findings
+    type: agentic
+    stage: fix_review_findings
+    agent: senior_developer
+    lane: build
+    depends_on: [review-code]
+    condition: "output.review_changes_requested"
+    timeout: 45m
+
+  - name: re-review-code
+    type: review
+    stage: re_review_code
+    agent: staff_reviewer
+    lane: review
+    depends_on: [fix-review-findings]
+    condition: "output.review_fix_applied"
+    timeout: 15m
+
   - name: security-scan
     type: review
     stage: security_scan
     agent: security_expert
     lane: review
-    depends_on: [review-code]
+    depends_on: [re-review-code]
     timeout: 10m
+
+  - name: fix-security-findings
+    type: agentic
+    stage: fix_security_findings
+    agent: senior_developer
+    lane: build
+    depends_on: [security-scan]
+    condition: "output.security_blocked"
+    timeout: 45m
+
+  - name: re-security-scan
+    type: review
+    stage: re_security_scan
+    agent: security_expert
+    lane: review
+    depends_on: [fix-security-findings]
+    condition: "output.security_fix_applied"
+    timeout: 10m
+
+  # Hard gate: only RUNS when a verdict is still unresolved (so reaching it
+  # raises → runbook → devai:needs-human). When both gates pass it is skipped
+  # and the run proceeds to CI.
+  - name: enforce-quality-gates
+    type: deterministic
+    stage: enforce_flags
+    lane: review
+    title: Quality Gate
+    depends_on: [re-security-scan]
+    condition: "output.review_changes_requested or output.security_blocked"
+    timeout: 2m
+    config:
+      flags: "review_changes_requested:code review still requests changes;security_blocked:security scan still blocks the PR"
 
   - name: monitor-build
     type: deterministic
@@ -168,7 +223,7 @@ stages:
     agent: ci_monitor
     lane: review
     title: CI Build
-    depends_on: [security-scan]
+    depends_on: [enforce-quality-gates]
     timeout: 20m
 
   - name: run-tests

@@ -115,6 +115,45 @@ async def test_service_dispatch_persists_to_state_manager(settings, state_manage
 
 
 @pytest.mark.asyncio
+async def test_dispatch_guard_dedupes_same_issue(settings):
+    """A second dispatch for the same (repo, trigger_ref) within the window
+    returns the FIRST run's id instead of starting a duplicate — the guard that
+    stops the labeled+opened double-fire from racing two runs on one branch. A
+    different issue is NOT deduped."""
+    fakeredis = pytest.importorskip("fakeredis")
+    sm = _MemoryStateManager()
+    sm.redis = fakeredis.aioredis.FakeRedis(decode_responses=True)  # type: ignore[attr-defined]
+    svc = PipelineService(settings, state_manager=sm)
+    await svc.start()
+    try:
+        first = await svc.dispatch(
+            intent="build",
+            blueprint="pr-review",
+            repo="tesserix/devai",
+            trigger_type="github_issue",
+            agent_context={"trigger_ref": "42"},
+        )
+        dup = await svc.dispatch(
+            intent="build",
+            blueprint="pr-review",
+            repo="tesserix/devai",
+            trigger_type="github_issue",
+            agent_context={"trigger_ref": "42"},
+        )
+        other = await svc.dispatch(
+            intent="build",
+            blueprint="pr-review",
+            repo="tesserix/devai",
+            trigger_type="github_issue",
+            agent_context={"trigger_ref": "99"},
+        )
+        assert dup == first  # same issue → deduped to the first run
+        assert other != first  # different issue → its own run
+    finally:
+        await svc.stop()
+
+
+@pytest.mark.asyncio
 async def test_service_run_once_returns_completed_task(settings, state_manager):
     svc = PipelineService(settings, state_manager=state_manager)
     await svc.start()

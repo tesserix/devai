@@ -66,6 +66,7 @@ def register_defaults(registry: StageRegistry) -> None:
     from devai.pipeline.stages import alm as _alm
     from devai.pipeline.stages import collaborate as _collaborate
     from devai.pipeline.stages import crew_runner as _crew_runner
+    from devai.pipeline.stages import flow as _flow
     from devai.pipeline.stages import job_runner as _job_runner
     from devai.pipeline.stages import lifecycle as _lifecycle
     from devai.pipeline.stages import preview as _preview
@@ -94,9 +95,21 @@ def register_defaults(registry: StageRegistry) -> None:
     registry.register("implement_code", _alm.implement_code_stage)
     registry.register("db_engineering", _alm.db_engineering_stage)
     registry.register("review_code", _alm.review_code_stage)
+    registry.register("fix_review_findings", _alm.fix_review_findings_stage)
+    registry.register("re_review_code", _alm.re_review_code_stage)
     registry.register("security_scan", _alm.security_scan_stage)
+    registry.register("fix_security_findings", _alm.fix_security_findings_stage)
+    registry.register("re_security_scan", _alm.re_security_scan_stage)
     registry.register("monitor_build", _alm.monitor_build_stage)
     registry.register("run_tests", _alm.run_tests_stage)
+
+    # ─── Generic control-flow primitives — ANY blueprint, ANY agent ──
+    # for_each: map an agent over a handover list (multi-story implement is one
+    # use). enforce_flags: block the run when any configured boolean flag is set
+    # (the quality-gate enforcement). Both are config-driven, so a blueprint
+    # composes loops + gates with no bespoke Python.
+    registry.register("for_each", _flow.for_each_stage)
+    registry.register("enforce_flags", _flow.enforce_flags_stage)
     registry.register("diagnose_test_failures", _alm.diagnose_test_failures_stage)
     registry.register("fix_test_failures", _alm.fix_test_failures_stage)
     registry.register("provision_infra", _alm.provision_infra_stage)

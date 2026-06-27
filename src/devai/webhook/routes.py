@@ -56,6 +56,14 @@ def _provider_from_path(path: str) -> str:
     return "scm"
 
 
+def _webhook_redis(request: Request) -> Any:
+    """The shared Redis client (via the pipeline service's state manager), or
+    None when the pipeline is disabled — webhook dedup degrades, never breaks."""
+    svc = getattr(request.app.state, "pipeline_service", None)
+    sm = getattr(svc, "state_manager", None) if svc is not None else None
+    return getattr(sm, "redis", None)
+
+
 @router.post("/webhook/github")
 @router.post("/webhook/gitlab")
 @router.post("/webhook/ado")
@@ -87,6 +95,26 @@ async def scm_webhook(request: Request) -> dict[str, str]:
     elif getattr(config, "require_auth", False):
         logger.warning("Rejecting webhook: DEVAI_REQUIRE_AUTH is on but no webhook secret is configured")
         raise HTTPException(status_code=401, detail="Webhook signature verification not configured")
+
+    # Idempotency: a webhook can be re-delivered (GitHub retries, manual redelivery)
+    # and the issue labeled+opened pair are two deliveries for one issue. Drop a
+    # delivery already accepted so it can't spawn a duplicate run. Best-effort —
+    # no Redis (pipeline disabled) just skips the check.
+    delivery_id = (
+        request.headers.get("X-GitHub-Delivery")  # GitHub
+        or request.headers.get("X-Gitlab-Event-UUID")  # GitLab
+        or request.headers.get("Request-Id")  # ADO
+        or ""
+    )
+    redis = _webhook_redis(request)
+    if delivery_id and redis is not None:
+        try:
+            fresh = await redis.set(f"devai:webhook:delivery:{delivery_id}", "1", nx=True, ex=86400)
+        except Exception:  # noqa: BLE001 — dedup must never break webhook intake
+            fresh = True
+        if not fresh:
+            logger.info("webhook delivery %s already processed — ignoring duplicate", delivery_id)
+            return {"status": "duplicate"}
 
     # Determine event type from headers (provider-specific)
     event_type = (

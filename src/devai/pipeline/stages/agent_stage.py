@@ -43,6 +43,11 @@ logger = logging.getLogger(__name__)
 Validator = Callable[..., Awaitable[None]]
 # Builds the per-run instruction that overrides task.intent (e.g. a fix brief).
 InstructionBuilder = Callable[[DevAITask], str]
+# Derives extra stage-output fields from the agent's handover — e.g. a boolean
+# gate flag (`review_changes_requested`) the blueprint's truthy `condition:`
+# grammar can branch on. Folded into the stage data, so it flows through
+# `merge_handover` into agent_context like any other output.
+Deriver = Callable[[dict], dict]
 
 
 class AgentStage(PipelineStage):
@@ -59,6 +64,7 @@ class AgentStage(PipelineStage):
         validator: Validator | None = None,
         instruction_builder: InstructionBuilder | None = None,
         extra_data: dict | None = None,
+        deriver: Deriver | None = None,
         trial_gate: bool = True,
     ) -> None:
         self.deps = deps
@@ -69,6 +75,7 @@ class AgentStage(PipelineStage):
         self._validator = validator
         self._instruction_builder = instruction_builder
         self._extra_data = extra_data
+        self._deriver = deriver
         self._trial_gate = trial_gate
         self._dispatcher = AgentDispatcher(deps)
 
@@ -105,6 +112,10 @@ class AgentStage(PipelineStage):
         stage_result = result.to_stage_result(task)
         if self._extra_data:
             stage_result.data.update(self._extra_data)
+        # Derived gate flags (e.g. review_changes_requested) computed from the
+        # verdict, so a truthy `condition:` can branch the fix/enforce loop.
+        if self._deriver:
+            stage_result.data.update(self._deriver(result.handover))
 
         # Output contract: run AFTER the structural fields are mirrored onto the
         # task (validators read task.pr_number etc.). Raises → executor retries.
@@ -124,6 +135,7 @@ def legacy_agent_stage(
     validator: Validator | None = None,
     instruction_builder: InstructionBuilder | None = None,
     extra_data: dict | None = None,
+    deriver: Deriver | None = None,
 ) -> AgentStage:
     """Build an ``AgentStage`` that runs an existing ``BaseAgent`` by dotted path.
 
@@ -141,6 +153,7 @@ def legacy_agent_stage(
         validator=validator,
         instruction_builder=instruction_builder,
         extra_data=extra_data,
+        deriver=deriver,
         trial_gate=True,
     )
 

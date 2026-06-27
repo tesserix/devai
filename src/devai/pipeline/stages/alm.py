@@ -17,9 +17,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from devai.agentruntime import LegacyAgent
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.stages._base import run_correlation_label as _run_label
 from devai.pipeline.stages.agent_stage import Validator, legacy_agent_stage
+from devai.pipeline.stages.flow import ForEachStage, register_validator
 from devai.pipeline.types import DevAITask, StageResult, TaskState
 
 logger = logging.getLogger(__name__)
@@ -174,6 +176,15 @@ async def _validate_deploy(deps: StageDeps, task: DevAITask, patch: dict[str, An
         raise RuntimeError(f"deploy_release reported deploy_status={status!r}: {detail}")
 
 
+# Expose the output contracts by name so the generic ``for_each`` stage (and any
+# blueprint) can attach them through ``config: {validator: pull_request}`` without
+# importing this module — the framework stays decoupled from where they live.
+register_validator("pull_request", _validate_pull_request)
+register_validator("ci_truth", _validate_ci_truth)
+register_validator("run_tests", _validate_run_tests)
+register_validator("deploy", _validate_deploy)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Planning chain — ingest → tech → analyze → epic → stories → plan
 # ──────────────────────────────────────────────────────────────────────
@@ -248,11 +259,27 @@ def create_plan_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
 
 
 def implement_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
-    return legacy_agent_stage(
-        deps,
-        name="implement_code",
-        dotted="devai.agents.senior_developer.SeniorDeveloperAgent",
+    """Implement EVERY planned story, not just ``stories[0]``.
+
+    A thin wiring of the generic :class:`~devai.pipeline.stages.flow.ForEachStage`
+    over the ``stories`` list with the senior developer — the per-story loop the
+    blueprint port dropped, now expressed with the reusable fan-out primitive
+    (any blueprint can map any agent the same way via the ``for_each`` stage, or
+    by passing a different agent here). Each story commits onto one shared branch
+    / PR so the single-PR downstream pipeline is unchanged; 0–1 stories → one run.
+    """
+    agent = LegacyAgent.from_dotted(
+        "devai.agents.senior_developer.SeniorDeveloperAgent",
+        name="senior_developer",
         output_key="senior_developer",
+    )
+    return ForEachStage(
+        deps,
+        agent=agent,
+        output_key="senior_developer",
+        name="implement_code",
+        items_key="stories",
+        index_key="active_story_index",
         next_state=TaskState.IMPLEMENTING,
         validator=_validate_pull_request,
     )
@@ -269,8 +296,48 @@ def db_engineering_stage(deps: StageDeps, config: dict[str, str]) -> PipelineSta
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Quality gates
+# Quality gates — review + security now actually GATE.
+#
+# review_decision / security_decision used to be strings nothing read, so a
+# `changes_requested` review or a security `block` sailed to deploy. The
+# blueprint's truthy `condition:` grammar can't compare strings, so each gate
+# stage DERIVES a boolean flag (review_changes_requested / security_blocked).
+# A bounded fix→re-check loop (the same shape as the self-healing test loop)
+# tries to resolve it, and `enforce_quality_gates` blocks delivery if it can't.
 # ──────────────────────────────────────────────────────────────────────
+
+
+def _derive_review_gate(patch: dict[str, Any]) -> dict[str, Any]:
+    return {"review_changes_requested": str(patch.get("review_decision") or "").lower() == "changes_requested"}
+
+
+def _derive_security_gate(patch: dict[str, Any]) -> dict[str, Any]:
+    return {"security_blocked": str(patch.get("security_decision") or "").lower() == "block"}
+
+
+def _fix_review_instruction(task: DevAITask) -> str:
+    """Fix brief that overrides task.intent: address the review on the EXISTING PR."""
+    feedback = task.agent_context.get("review_feedback")
+    body = "\n\n".join(str(f) for f in feedback) if isinstance(feedback, list) and feedback else ""
+    body = body or str(task.agent_context.get("review_summary") or "(see the review comments on the PR)")
+    return (
+        "The code review requested CHANGES on the existing pull request. Address EVERY "
+        "point below on the SAME branch/PR — do not redesign or open a new PR.\n\n"
+        f"## Review feedback\n{body}\n\n"
+        "Commit the fixes and note what changed."
+    )
+
+
+def _fix_security_instruction(task: DevAITask) -> str:
+    """Fix brief that overrides task.intent: clear the security block on the EXISTING PR."""
+    summary = str(task.agent_context.get("security_summary") or "(see the security scan comments on the PR)")
+    return (
+        "The security scan BLOCKED the existing pull request. Fix EVERY blocking finding "
+        "below on the SAME branch/PR — make the smallest change that closes the issue, do "
+        "not add features.\n\n"
+        f"## Security findings\n{summary[:3000]}\n\n"
+        "Commit the fixes and note what changed."
+    )
 
 
 def review_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
@@ -281,6 +348,36 @@ def review_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
         output_key="staff_reviewer",
         next_state=TaskState.REVIEWING,
         validator=_require_outputs(("review_decision",)),
+        deriver=_derive_review_gate,
+    )
+
+
+def fix_review_findings_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    """Senior developer addresses the review's requested changes on the PR branch.
+    Runs only when review_changes_requested (blueprint condition)."""
+    return legacy_agent_stage(
+        deps,
+        name="fix_review_findings",
+        dotted="devai.agents.senior_developer.SeniorDeveloperAgent",
+        output_key="senior_developer",
+        next_state=TaskState.IMPLEMENTING,
+        validator=_validate_pull_request,
+        instruction_builder=_fix_review_instruction,
+        extra_data={"review_fix_applied": True},
+    )
+
+
+def re_review_code_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    """Re-review after a fix pass — re-derives review_changes_requested so the
+    enforce gate sees the LATEST verdict. Runs only when review_fix_applied."""
+    return legacy_agent_stage(
+        deps,
+        name="re_review_code",
+        dotted="devai.agents.staff_reviewer.StaffReviewerAgent",
+        output_key="staff_reviewer",
+        next_state=TaskState.REVIEWING,
+        validator=_require_outputs(("review_decision",)),
+        deriver=_derive_review_gate,
     )
 
 
@@ -304,6 +401,36 @@ def security_scan_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStag
         output_key="security_expert",
         next_state=TaskState.SECURITY_SCANNING,
         validator=_require_outputs(("security_decision",)),
+        deriver=_derive_security_gate,
+    )
+
+
+def fix_security_findings_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    """Senior developer fixes the security block on the PR branch.
+    Runs only when security_blocked (blueprint condition)."""
+    return legacy_agent_stage(
+        deps,
+        name="fix_security_findings",
+        dotted="devai.agents.senior_developer.SeniorDeveloperAgent",
+        output_key="senior_developer",
+        next_state=TaskState.IMPLEMENTING,
+        validator=_validate_pull_request,
+        instruction_builder=_fix_security_instruction,
+        extra_data={"security_fix_applied": True},
+    )
+
+
+def re_security_scan_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    """Re-scan after a security fix — re-derives security_blocked so the enforce
+    gate sees the LATEST verdict. Runs only when security_fix_applied."""
+    return legacy_agent_stage(
+        deps,
+        name="re_security_scan",
+        dotted="devai.agents.security_expert.SecurityExpertAgent",
+        output_key="security_expert",
+        next_state=TaskState.SECURITY_SCANNING,
+        validator=_require_outputs(("security_decision",)),
+        deriver=_derive_security_gate,
     )
 
 
@@ -515,11 +642,15 @@ __all__ = [
     "deploy_release_stage",
     "detect_tech_stack_stage",
     "diagnose_test_failures_stage",
+    "fix_review_findings_stage",
+    "fix_security_findings_stage",
     "fix_test_failures_stage",
     "implement_code_stage",
     "ingest_documents_stage",
     "monitor_build_stage",
     "provision_infra_stage",
+    "re_review_code_stage",
+    "re_security_scan_stage",
     "review_code_stage",
     "run_tests_stage",
     "security_scan_stage",
