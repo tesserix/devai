@@ -388,6 +388,34 @@ def create_app(
 
             memory_maintenance_task = asyncio.create_task(_memory_maintenance_loop(maintenance_hours))
 
+        # Autonomous backlog watcher — polls every ONBOARDED repo's open issues
+        # and dispatches a pipeline run for each new one (DEVAI_ISSUE_WATCH_ENABLED,
+        # off by default). Reactive webhooks still work; this adds the unprompted
+        # "connect + monitor + auto-detect" path the platform was missing.
+        issue_watch_task = None
+        if (
+            getattr(config, "issue_watch_enabled", False)
+            and app.state.onboarding_service is not None
+            and app.state.pipeline_service is not None
+        ):
+            from devai.onboarding.watcher import IssueWatcher
+            from devai.scm import create_scm_client
+
+            _watch_redis = getattr(getattr(app.state.pipeline_service, "state_manager", None), "redis", None)
+            issue_watcher = IssueWatcher(
+                onboarding=app.state.onboarding_service,
+                scm=create_scm_client(config),
+                pipeline=app.state.pipeline_service,
+                redis=_watch_redis,
+                config=config,
+            )
+            issue_watch_task = asyncio.create_task(issue_watcher.run_forever())
+            logger.info(
+                "Issue watcher enabled (interval=%ss, max/repo=%s)",
+                getattr(config, "issue_watch_interval_seconds", 300),
+                getattr(config, "issue_watch_max_per_repo", 3),
+            )
+
         # Per-domain downstream MCP servers (/mcp/scm, /mcp/sample) the MCP Hub
         # federates. Mounted BEFORE the messaging /mcp mount: Starlette is
         # first-match-wins and Mount("/mcp") greedily matches "/mcp/scm" as a
@@ -468,6 +496,10 @@ def create_app(
                 memory_maintenance_task.cancel()
                 with suppress(asyncio.CancelledError, Exception):
                     await memory_maintenance_task
+            if issue_watch_task is not None:
+                issue_watch_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await issue_watch_task
             if onboarding_db is not None:
                 try:
                     await onboarding_db.close()

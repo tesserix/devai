@@ -148,6 +148,23 @@ class Settings(BaseSettings):
     # (boot reconcile still runs once when onboarding_reconcile_on_boot=True).
     onboarding_reconcile_interval_seconds: int = 300
 
+    # --- issue watcher (autonomous backlog monitoring) ---
+    # When true, a periodic loop polls every ONBOARDED repo's open issues and
+    # dispatches a pipeline run for each NEW one carrying the watch label — so
+    # DevAI acts on a backlog without a webhook or a human trigger. Off by
+    # default (opt-in): the platform stays reactive until this is turned on.
+    issue_watch_enabled: bool = False
+    # Poll interval (seconds) for the backlog watcher. 0 disables the loop.
+    issue_watch_interval_seconds: int = 300
+    # Max NEW issues dispatched per repo per poll, so a large backlog discovered
+    # on the first pass doesn't stampede the queue (oldest-first; the rest are
+    # picked up on subsequent polls).
+    issue_watch_max_per_repo: int = 3
+    # Comma-separated labels an open issue must carry to be auto-picked-up.
+    # Empty → falls back to pipeline_label (devai:automate), so only explicitly
+    # opted-in issues are built. Set to "*" to watch ALL open issues.
+    issue_watch_labels: str = ""
+
     # --- A2A (Agent2Agent) consumer security ---
     # When true (default), before the orchestrator calls a peer agent it
     # verifies the agent card's registry Ed25519 signature (over the artifact
