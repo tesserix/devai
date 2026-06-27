@@ -97,6 +97,7 @@ class EngineeringManagerAgent(BaseAgent):
         requirements = state.get("requirements", "")
         analyzed_reqs = state.get("analyzed_requirements", [])
         boardroom = str(state.get("boardroom_decision") or "")
+        memory_context = str(state.get("memory_context") or "")
 
         # Build story references
         story_details = []
@@ -126,6 +127,9 @@ class EngineeringManagerAgent(BaseAgent):
             if boardroom
             else ""
         )
+        # Memory: what was learned planning THIS repo before — so the EM reuses
+        # conventions / avoids past mistakes instead of re-deciding each run.
+        memory_block = f"\n## Relevant Memory From Past Runs\n{memory_context[:2000]}\n" if memory_context else ""
 
         # Check for A2A messages
         inbox_context = a2a.format_inbox_context()
@@ -138,7 +142,7 @@ class EngineeringManagerAgent(BaseAgent):
 ## Original Requirements
 {requirements[:2000]}
 {req_context}
-{boardroom_context}
+{boardroom_context}{memory_block}
 
 {inbox_context}
 

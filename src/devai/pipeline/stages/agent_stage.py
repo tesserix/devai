@@ -93,7 +93,13 @@ class AgentStage(PipelineStage):
         config, scm = await resolve_principal_run(self.deps, task, trial_gate=self._trial_gate, stage_name=self._name)
 
         instruction = self._instruction_builder(task) if self._instruction_builder else ""
-        result = await self._dispatcher.dispatch(self._agent, task, instruction=instruction, config=config, scm=scm)
+        # Per-agent memory recall: what THIS agent learned on THIS repo, so the
+        # decision-makers (tech detection, schema, planning) get role-relevant
+        # memory — not just the run-level injection that reached mostly reviewers.
+        extra_context = await self._recall_agent_memory(task)
+        result = await self._dispatcher.dispatch(
+            self._agent, task, instruction=instruction, extra_context=extra_context, config=config, scm=scm
+        )
 
         # Stub parity: deps unavailable → a stub StageResult with no validation.
         if result.stub:
@@ -123,6 +129,26 @@ class AgentStage(PipelineStage):
             await self._validator(self.deps, task, result.handover, stage_name=self._name, output_key=self.output_key)
 
         return stage_result
+
+    async def _recall_agent_memory(self, task: DevAITask) -> dict | None:
+        """Recall what THIS agent learned on THIS repo, merged on top of the
+        run-level memory_context — so the agents that make the learnable mistakes
+        get role-relevant memory. Best-effort: no adapter / a failure leaves the
+        run-level context untouched (returns None → no override)."""
+        mem = getattr(self.deps, "memory", None)
+        if mem is None:
+            return None
+        try:
+            records = await mem.semantic_search(
+                query=task.intent or task.repo or "", k=5, agent=self.output_key, repo=task.repo or None
+            )
+        except Exception:  # noqa: BLE001 — recall never blocks the stage
+            return None
+        agent_mem = "\n".join(f"- {r.content}" for r in records[:5]) if records else ""
+        if not agent_mem:
+            return None
+        run_mem = str(task.agent_context.get("memory_context") or "")
+        return {"memory_context": f"{agent_mem}\n{run_mem}".strip() if run_mem else agent_mem}
 
 
 def legacy_agent_stage(
