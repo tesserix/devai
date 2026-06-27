@@ -110,6 +110,7 @@ def register_defaults(registry: StageRegistry) -> None:
     # composes loops + gates with no bespoke Python.
     registry.register("for_each", _flow.for_each_stage)
     registry.register("enforce_flags", _flow.enforce_flags_stage)
+    registry.register("clarification_gate", _flow.clarification_gate_stage)
     registry.register("diagnose_test_failures", _alm.diagnose_test_failures_stage)
     registry.register("fix_test_failures", _alm.fix_test_failures_stage)
     registry.register("provision_infra", _alm.provision_infra_stage)
