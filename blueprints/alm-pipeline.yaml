@@ -64,36 +64,39 @@ stages:
     depends_on: [detect-tech-stack]
     timeout: 10m
 
-  - name: create-epic
-    type: agentic
-    stage: create_epic
-    agent: product_director_epic
-    lane: plan
-    depends_on: [analyze-requirements]
-    timeout: 10m
-
-  # ─── Optional boardroom (trigger's "Brainstorm first" toggle) ────────
-  # Runs ONLY when the dispatch sets agent_context.brainstorm — the panel
-  # debates the approach and its agreed decision lands in technical_plan /
-  # plan_summary, which stories, the plan, and the approval gate all read.
+  # ─── Boardroom (debate the approach) — BEFORE epic + stories ─────────
+  # Auto-fires when the trigger sets agent_context.brainstorm OR the analyst
+  # judged the work LARGE (scope_large). Runs BEFORE the epic + stories so its
+  # agreed decision (boardroom_decision, surfaced) SHAPES them: the epic is built
+  # to realize the agreement, the stories inherit it, and the engineering manager
+  # + developer all follow ONE coordinated decision. So a proper boardroom
+  # discussion makes the epic + all related stories robust — not just the code.
   - name: boardroom-debate
     type: review
     stage: boardroom_debate
     agent: supervisor
     lane: plan
     title: Boardroom Debate
-    depends_on: [create-epic]
-    condition: "output.brainstorm"
+    depends_on: [analyze-requirements]
+    condition: "output.brainstorm or output.scope_large"
     timeout: 30m
     config:
       rounds: "2"
+
+  - name: create-epic
+    type: agentic
+    stage: create_epic
+    agent: product_director_epic
+    lane: plan
+    depends_on: [boardroom-debate]
+    timeout: 10m
 
   - name: create-stories
     type: agentic
     stage: create_stories
     agent: product_director_stories
     lane: plan
-    depends_on: [boardroom-debate]
+    depends_on: [create-epic]
     timeout: 5m
 
   - name: create-plan

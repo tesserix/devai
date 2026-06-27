@@ -65,6 +65,14 @@ DEFAULT_SURFACE_KEYS: tuple[str, ...] = (
     "stories",
     "technical_plan",
     "analyzed_requirements",
+    # The boardroom's agreed approach. Surfaced so it can't be silently dropped
+    # between the debate and the planner/implementer that must build "per the
+    # agreement" (the engineering_manager + senior_developer read it).
+    "boardroom_decision",
+    # Scope signal from analysis — sizes decomposition and gates whether the
+    # boardroom fires automatically (condition: output.scope_large).
+    "scope_size",
+    "scope_large",
 )
 
 

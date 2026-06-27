@@ -210,6 +210,19 @@ def detect_tech_stack_stage(deps: StageDeps, config: dict[str, str]) -> Pipeline
     )
 
 
+def _derive_scope(patch: dict[str, Any]) -> dict[str, Any]:
+    """Size the work from the analyst's output so decomposition + the boardroom
+    gate can be scope-aware (more requirements / open gaps → larger scope). Rides
+    the generic AgentStage deriver, like the review/security gate flags."""
+    reqs = patch.get("analyzed_requirements")
+    gaps = patch.get("gaps")
+    n = len(reqs) if isinstance(reqs, list) else 0
+    g = len(gaps) if isinstance(gaps, list) else 0
+    score = n + (g // 2)
+    size = "large" if score >= 6 else "medium" if score >= 3 else "small"
+    return {"scope_size": size, "scope_large": size == "large"}
+
+
 def analyze_requirements_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
     return legacy_agent_stage(
         deps,
@@ -217,6 +230,7 @@ def analyze_requirements_stage(deps: StageDeps, config: dict[str, str]) -> Pipel
         dotted="devai.agents.requirements_analyst.RequirementsAnalystAgent",
         output_key="requirements_analyst",
         next_state=TaskState.ANALYZING,
+        deriver=_derive_scope,
     )
 
 
