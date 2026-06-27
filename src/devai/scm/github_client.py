@@ -591,12 +591,27 @@ class GitHubSCMClient(SCMClient):
     ) -> dict[str, Any]:
         if base is None:
             base = await self.get_default_branch(repo)
-        resp = await self._request(
-            "POST",
-            f"/repos/{repo}/pulls",
-            json={"title": title, "body": body, "head": head, "base": base, "draft": draft},
-        )
-        return resp.json()
+        try:
+            resp = await self._request(
+                "POST",
+                f"/repos/{repo}/pulls",
+                json={"title": title, "body": body, "head": head, "base": base, "draft": draft},
+            )
+            return resp.json()
+        except Exception as e:  # noqa: BLE001
+            # 422 "A pull request already exists for <head>" — a multi-story run
+            # commits every story onto ONE branch, so each story after the first
+            # finds the PR already open. Adopt it instead of failing, the same
+            # idempotency create_branch / create_issue above already provide.
+            if "422" not in str(e):
+                raise
+            owner = repo.split("/", 1)[0]
+            head_ref = head if ":" in head else f"{owner}:{head}"
+            existing = await self._request("GET", f"/repos/{repo}/pulls", params={"head": head_ref, "state": "open"})
+            prs = existing.json()
+            if isinstance(prs, list) and prs:
+                return prs[0]
+            raise
 
     async def mark_pull_request_ready(self, repo: str, pr_id: int) -> dict[str, Any]:
         """Promote a draft PR to ready-for-review.

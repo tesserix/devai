@@ -528,6 +528,30 @@ class PipelineService:
         # DEVAI_PIPELINE_DEFAULT_AUTONOMY.
         if autonomy in ("full", "gated"):
             task.agent_context["autonomy"] = autonomy
+
+        # Per-issue dispatch guard (generic — every trigger path): if a run for
+        # this (repo, trigger_ref) was started very recently, don't start a
+        # duplicate. Catches the GitHub labeled+opened double-fire and rapid
+        # re-triggers; any concurrent run that still slips through gets a
+        # run-unique branch (senior_developer) so the two can't corrupt each
+        # other. Best-effort — a Redis blip never blocks a real run.
+        guard_ref = str((agent_context or {}).get("trigger_ref") or "").strip()
+        if repo and guard_ref and self.state_manager is not None:
+            guard_key = f"devai:dispatch:guard:{repo}:{guard_ref}"
+            try:
+                claimed = await self.state_manager.redis.set(guard_key, task.id, nx=True, ex=600)
+            except Exception:  # noqa: BLE001 — dedup is best-effort
+                claimed = True
+            if not claimed:
+                try:
+                    existing = str(await self.state_manager.redis.get(guard_key) or "")
+                except Exception:  # noqa: BLE001
+                    existing = ""
+                logger.info(
+                    "dispatch deduped: a run for %s#%s is already active (%s)", repo, guard_ref, existing or "?"
+                )
+                return existing or task.id
+
         await self._pipeline.submit(task)
         await self._publish_task_event("created", task)
         return task.id

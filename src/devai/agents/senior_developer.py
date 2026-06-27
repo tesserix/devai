@@ -252,11 +252,19 @@ class SeniorDeveloperAgent(BaseAgent):
         # ValueError → the whole run FAILED even though scaffolding succeeded.
         # Fall back to a ref-safe, story-less branch in that case.
         slug = self._slugify(story_title)
+        # Run-scoped suffix so two CONCURRENT runs on the SAME story/issue get
+        # DIFFERENT branches instead of interleaving commits on one (the live
+        # corruption mode + duplicate-PR attempts). The same run resuming keeps
+        # its suffix (run_id is stable), and within a run later stories reuse the
+        # first story's branch via state["branch_name"] below — so the suffix
+        # individuates RUNS, not stories.
+        run_suffix = str(state.get("run_id", ""))[-6:].strip("-")
         if story_number:
-            branch_name = f"story/{story_number}-{slug}"
+            branch_name = f"story/{story_number}-{slug}-{run_suffix}" if run_suffix else f"story/{story_number}-{slug}"
+        elif slug:
+            branch_name = f"devai/{slug}-{run_suffix}" if run_suffix else f"devai/{slug}"
         else:
-            run_suffix = str(state.get("run_id", ""))[-8:].strip("-")
-            branch_name = f"devai/{slug}" if slug else f"devai/scaffold-{run_suffix or 'app'}"
+            branch_name = f"devai/scaffold-{run_suffix or 'app'}"
 
         # Check for existing branch (revision iteration)
         existing_branch = state.get("branch_name")
