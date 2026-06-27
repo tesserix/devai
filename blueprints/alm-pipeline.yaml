@@ -329,11 +329,23 @@ stages:
     timeout: 20m
 
   # ─── Reporting + learning + cleanup ─────────────────────────────────
+  # Evaluation engine — score the run on objective outcome metrics (delivered,
+  # gates clean, completion) and persist to agent_evals (the analytics quality
+  # view), so quality is measured over time. Never blocks delivery.
+  - name: evaluate
+    type: deterministic
+    stage: evaluate
+    lane: deploy
+    title: Evaluate Run
+    depends_on: [deploy-release]
+    on_failure: continue
+    timeout: 2m
+
   - name: post-report
     type: deterministic
     stage: post_report
     lane: deploy
-    depends_on: [deploy-release]
+    depends_on: [evaluate]
     on_failure: continue
     config:
       title: "DevAI ALM Pipeline Report"

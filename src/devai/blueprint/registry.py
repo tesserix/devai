@@ -66,6 +66,7 @@ def register_defaults(registry: StageRegistry) -> None:
     from devai.pipeline.stages import alm as _alm
     from devai.pipeline.stages import collaborate as _collaborate
     from devai.pipeline.stages import crew_runner as _crew_runner
+    from devai.pipeline.stages import evals as _evals
     from devai.pipeline.stages import flow as _flow
     from devai.pipeline.stages import job_runner as _job_runner
     from devai.pipeline.stages import lifecycle as _lifecycle
@@ -111,6 +112,7 @@ def register_defaults(registry: StageRegistry) -> None:
     registry.register("for_each", _flow.for_each_stage)
     registry.register("enforce_flags", _flow.enforce_flags_stage)
     registry.register("clarification_gate", _flow.clarification_gate_stage)
+    registry.register("evaluate", _evals.evaluate_stage)
     registry.register("diagnose_test_failures", _alm.diagnose_test_failures_stage)
     registry.register("fix_test_failures", _alm.fix_test_failures_stage)
     registry.register("provision_infra", _alm.provision_infra_stage)
