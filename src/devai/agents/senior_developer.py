@@ -233,6 +233,15 @@ class SeniorDeveloperAgent(BaseAgent):
         requirements = state.get("requirements", "")
         tech_stack = state.get("detected_tech_stack", "")
         memory_context = state.get("memory_context", "")
+        # The boardroom's agreed approach (when a debate happened) — the
+        # implementation must be CONSISTENT with it, so "per the agreement"
+        # actually constrains the code instead of being a string nothing reads.
+        boardroom = str(state.get("boardroom_decision") or "")
+        boardroom_section = (
+            f"\n## Agreed Approach — Boardroom Decision (implement consistent with THIS)\n{boardroom[:2500]}\n"
+            if boardroom
+            else ""
+        )
 
         # Get the active story context
         active_idx = state.get("active_story_index", 0)
@@ -354,7 +363,7 @@ Run ID: {state.get("run_id", "")}
 
 ## Technical Plan for This Story
 {plan}
-
+{boardroom_section}
 ## Detected Tech Stack
 {tech_stack or "Not detected"}
 

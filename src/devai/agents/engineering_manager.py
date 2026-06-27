@@ -96,6 +96,7 @@ class EngineeringManagerAgent(BaseAgent):
         stories = state.get("stories", [])
         requirements = state.get("requirements", "")
         analyzed_reqs = state.get("analyzed_requirements", [])
+        boardroom = str(state.get("boardroom_decision") or "")
 
         # Build story references
         story_details = []
@@ -117,6 +118,15 @@ class EngineeringManagerAgent(BaseAgent):
                 f"- [{r.get('category', 'functional')}] {r.get('title', '')}" for r in analyzed_reqs[:10]
             )
 
+        # The boardroom's agreed approach is authoritative: the per-story plans
+        # must REALIZE it, not re-decide the architecture. Injected so the EM
+        # plans "per the agreement" when a debate happened.
+        boardroom_context = (
+            f"\n## Agreed Approach — Boardroom Decision (plan to realize THIS)\n{boardroom[:3000]}\n"
+            if boardroom
+            else ""
+        )
+
         # Check for A2A messages
         inbox_context = a2a.format_inbox_context()
 
@@ -128,6 +138,7 @@ class EngineeringManagerAgent(BaseAgent):
 ## Original Requirements
 {requirements[:2000]}
 {req_context}
+{boardroom_context}
 
 {inbox_context}
 

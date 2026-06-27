@@ -68,6 +68,25 @@ Guidelines:
 - Use "As a [user], I want [goal], so that [benefit]" format"""
 
 
+def _scope_story_guidance(scope_size: str) -> str:
+    """Size the decomposition to the effort the analyst judged, so a large
+    multi-feature ask is split thoroughly instead of getting the same shallow
+    handful of stories as a one-line tweak (the scope-aware-decomposition fix)."""
+    s = (scope_size or "").lower()
+    if s == "large":
+        return (
+            "\n\nSCOPE: This is a LARGE, multi-feature effort — decompose THOROUGHLY "
+            "(roughly 6-12 stories) so each feature area, the cross-cutting concerns "
+            "(auth, data model, API, UI, tests, infra), and the important edge cases "
+            "each get their own story. Do NOT collapse distinct features into one story."
+        )
+    if s == "medium":
+        return "\n\nSCOPE: This is a MEDIUM effort — roughly 3-6 stories covering the distinct pieces."
+    if s == "small":
+        return "\n\nSCOPE: This is a SMALL effort — 1-3 focused stories; don't over-split."
+    return ""
+
+
 def _parse_llm_json(text: str):
     """Parse LLM JSON tolerating markdown code fences — models routinely wrap
     valid JSON in ```json fences even when asked not to (the create-stories
@@ -107,6 +126,16 @@ class ProductDirectorAgent(BaseAgent):
         repo = state.get("repo_full_name", "")
         requirements = state.get("requirements", "")
         analyzed = state.get("analyzed_requirements", [])
+        # The boardroom's agreed approach (when a debate happened, now BEFORE the
+        # epic) makes the epic robust: it is built to REALIZE the agreed design,
+        # and its stories inherit that — so every engineer downstream follows one
+        # coordinated agreement instead of re-deciding.
+        boardroom = str(state.get("boardroom_decision") or "")
+        boardroom_context = (
+            f"\n## Agreed Approach — Boardroom Decision (build the epic to REALIZE this)\n{boardroom[:3000]}\n"
+            if boardroom
+            else ""
+        )
 
         # Check for handoffs from Requirements Analyst
         inbox_context = a2a.format_inbox_context()
@@ -135,7 +164,7 @@ class ProductDirectorAgent(BaseAgent):
 
 ## Raw Requirements
 {requirements[:2000]}
-
+{boardroom_context}
 {inbox_context}
 
 Create a GitHub Epic that encompasses all these requirements. The epic
@@ -255,6 +284,13 @@ should reflect the planning guidance above for this stack."""
         from devai.agents.skills import get_skill_profile
 
         profile = get_skill_profile(state.get("skill_profile_name"))
+        scope_guidance = _scope_story_guidance(str(state.get("scope_size") or ""))
+        boardroom = str(state.get("boardroom_decision") or "")
+        boardroom_context = (
+            f"\n## Agreed Approach — Boardroom Decision (the stories must REALIZE this)\n{boardroom[:3000]}\n"
+            if boardroom
+            else ""
+        )
 
         prompt = f"""Repository: {repo}
 
@@ -263,11 +299,11 @@ should reflect the planning guidance above for this stack."""
 ## Requirements
 {req_summary}
 {epic_context}
-
+{boardroom_context}
 Break these requirements into user stories following the stack's
 planning guidance above. Each story should be independently shippable
 and small enough for one developer's day. Consider the repository
-context and ensure stories are actionable for developers."""
+context and ensure stories are actionable for developers.{scope_guidance}"""
 
         response = await openai.generate(
             prompt=prompt,
