@@ -225,6 +225,35 @@ class EnforceFlagsStage(PipelineStage):
         )
 
 
+class ClarificationGateStage(PipelineStage):
+    """Surface an agent/stage's ambiguity question so a human can clarify.
+
+    Paired with ``gate: true`` + a ``condition:`` (e.g. ``output.needs_clarification``),
+    the executor pauses for approval AFTER this stage — so the run ASKS a human to
+    clarify instead of an agent guessing/building the wrong thing. Generic: any
+    blueprint supplies the question via a handover key. In FULL autonomy the gate
+    self-approves (the run proceeds with the ambiguity surfaced), honoring the
+    autonomy setting; in gated mode it pauses for the answer.
+    """
+
+    def __init__(
+        self, deps: StageDeps, *, question_key: str = "clarification_question", name: str = "clarification_gate"
+    ) -> None:
+        self.deps = deps
+        self._question_key = question_key
+        self._name = name
+
+    def name(self) -> str:
+        return self._name
+
+    async def execute(self, task: DevAITask) -> StageResult:
+        question = str(task.agent_context.get(self._question_key) or "Clarification needed before building.")
+        return StageResult(
+            message=f"Clarification requested — {question[:160]}",
+            data={"clarification_question": question, "awaiting_clarification": True},
+        )
+
+
 # ── Config-driven factories (the generic registry keys) ──────────────────────
 
 
@@ -277,10 +306,26 @@ def enforce_flags_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStag
     )
 
 
+def clarification_gate_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
+    """Generic ``clarification_gate`` built from blueprint config.
+
+    config:
+      question_key — handover key holding the question (default clarification_question).
+    Use with ``gate: true`` + a ``condition:`` so it only pauses when needed.
+    """
+    return ClarificationGateStage(
+        deps,
+        question_key=config.get("question_key", "clarification_question"),
+        name=config.get("name", "clarification_gate"),
+    )
+
+
 __all__ = [
     "NAMED_VALIDATORS",
+    "ClarificationGateStage",
     "EnforceFlagsStage",
     "ForEachStage",
+    "clarification_gate_stage",
     "enforce_flags_stage",
     "flag_deriver",
     "for_each_stage",

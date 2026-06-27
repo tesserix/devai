@@ -73,6 +73,12 @@ DEFAULT_SURFACE_KEYS: tuple[str, ...] = (
     # boardroom fires automatically (condition: output.scope_large).
     "scope_size",
     "scope_large",
+    # Clarification — when analysis is too ambiguous, the run can pause for a
+    # human (clarification gate) instead of building the wrong thing.
+    "needs_clarification",
+    "clarification_question",
+    # Residual test-failure flag the no-CI test gate reads.
+    "test_fix_applied",
 )
 
 

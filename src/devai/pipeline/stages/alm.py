@@ -211,16 +211,26 @@ def detect_tech_stack_stage(deps: StageDeps, config: dict[str, str]) -> Pipeline
 
 
 def _derive_scope(patch: dict[str, Any]) -> dict[str, Any]:
-    """Size the work from the analyst's output so decomposition + the boardroom
-    gate can be scope-aware (more requirements / open gaps → larger scope). Rides
+    """Size the work AND flag ambiguity from the analyst's output, so
+    decomposition + the boardroom gate are scope-aware and the run can pause for
+    clarification when the requirements are too open (instead of guessing). Rides
     the generic AgentStage deriver, like the review/security gate flags."""
     reqs = patch.get("analyzed_requirements")
-    gaps = patch.get("gaps")
+    gaps = patch.get("requirement_gaps") or patch.get("gaps")  # the analyst returns requirement_gaps
     n = len(reqs) if isinstance(reqs, list) else 0
-    g = len(gaps) if isinstance(gaps, list) else 0
+    glist = gaps if isinstance(gaps, list) else []
+    g = len(glist)
     score = n + (g // 2)
     size = "large" if score >= 6 else "medium" if score >= 3 else "small"
-    return {"scope_size": size, "scope_large": size == "large"}
+    out: dict[str, Any] = {"scope_size": size, "scope_large": size == "large"}
+    if g >= 3:
+        # Genuinely ambiguous: surface the open questions so the clarification
+        # gate can pause for a human (in gated mode) before building the wrong thing.
+        out["needs_clarification"] = True
+        out["clarification_question"] = "Open questions to resolve before building:\n" + "\n".join(
+            f"- {x}" for x in glist[:8]
+        )
+    return out
 
 
 def analyze_requirements_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:

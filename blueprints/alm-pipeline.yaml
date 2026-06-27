@@ -64,6 +64,21 @@ stages:
     depends_on: [detect-tech-stack]
     timeout: 10m
 
+  # ─── Clarification gate — ASK a human when requirements are too open ──
+  # When the analyst flags significant open questions (needs_clarification), a
+  # human is asked to clarify BEFORE the platform commits to building, instead of
+  # agents guessing. gate: true → pauses in gated mode; self-approves under full
+  # autonomy (the open questions are still surfaced on the run).
+  - name: clarify-requirements
+    type: review
+    stage: clarification_gate
+    lane: plan
+    title: Clarify Requirements
+    gate: true
+    depends_on: [analyze-requirements]
+    condition: "output.needs_clarification"
+    timeout: 24h
+
   # ─── Boardroom (debate the approach) — BEFORE epic + stories ─────────
   # Auto-fires when the trigger sets agent_context.brainstorm OR the analyst
   # judged the work LARGE (scope_large). Runs BEFORE the epic + stories so its
@@ -77,7 +92,7 @@ stages:
     agent: supervisor
     lane: plan
     title: Boardroom Debate
-    depends_on: [analyze-requirements]
+    depends_on: [clarify-requirements]
     condition: "output.brainstorm or output.scope_large"
     timeout: 30m
     config:
@@ -270,6 +285,22 @@ stages:
     condition: "output.test_fix_applied"
     timeout: 20m
 
+  # Hard gate: if tests are STILL failing after the bounded fix loop, block
+  # delivery instead of shipping. The CI-truth validator already fails the stage
+  # for CI-backed repos; this closes the NO-CI regime where test_failed flows
+  # through as a "success" and nothing downstream reads it. Only RUNS (and
+  # raises → runbook → devai:needs-human) when test_failed is still set.
+  - name: enforce-tests
+    type: deterministic
+    stage: enforce_flags
+    lane: review
+    title: Tests Gate
+    depends_on: [rerun-tests]
+    condition: "output.test_failed"
+    timeout: 2m
+    config:
+      flags: "test_failed:tests still failing after the diagnose-and-fix loop"
+
   # ─── Final review + deploy ──────────────────────────────────────────
   - name: staff-review
     type: review
@@ -277,7 +308,7 @@ stages:
     agent: staff_reviewer
     lane: review
     gate: true
-    depends_on: [rerun-tests]
+    depends_on: [enforce-tests]
     timeout: 15m
 
   - name: provision-infra
