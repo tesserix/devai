@@ -138,9 +138,11 @@ class AgentStage(PipelineStage):
         mem = getattr(self.deps, "memory", None)
         if mem is None:
             return None
+        from devai.pipeline.stages.memory_scope import tenant_scoped_repo
+
         try:
             records = await mem.semantic_search(
-                query=task.intent or task.repo or "", k=5, agent=self.output_key, repo=task.repo or None
+                query=task.intent or task.repo or "", k=5, agent=self.output_key, repo=tenant_scoped_repo(task)
             )
         except Exception:  # noqa: BLE001 — recall never blocks the stage
             return None

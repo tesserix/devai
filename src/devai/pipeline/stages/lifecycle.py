@@ -17,6 +17,7 @@ from typing import Any
 
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.stages._base import run_correlation_label
+from devai.pipeline.stages.memory_scope import tenant_scoped_repo
 from devai.pipeline.types import DevAITask, StageResult, TaskState
 
 logger = logging.getLogger(__name__)
@@ -335,7 +336,7 @@ class _MemoryInjectionStage(PipelineStage):
                 records = await self.deps.memory.semantic_search(
                     query=task.intent or task.label or task.repo,
                     k=self.k,
-                    repo=task.repo or None,
+                    repo=tenant_scoped_repo(task),
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("memory adapter semantic_search failed")
@@ -713,7 +714,7 @@ class _AlmLearnStage(PipelineStage):
             await self.deps.memory.remember(
                 content=summary,
                 agent="alm",
-                repo=task.repo or "global",
+                repo=tenant_scoped_repo(task),
                 memory_type="episodic",
                 tags=["alm", "run", task.blueprint, outcome],
                 metadata=meta,
@@ -729,7 +730,7 @@ class _AlmLearnStage(PipelineStage):
                         f"iteration or manual attention on this repo."
                     ),
                     agent="alm",
-                    repo=task.repo or "global",
+                    repo=tenant_scoped_repo(task),
                     memory_type="procedural",
                     tags=["alm", "flaky-stages", task.blueprint],
                     metadata={"task_id": task.id, "failed_stages": failed},
@@ -817,7 +818,7 @@ class _AlmLearnStage(PipelineStage):
                 await self.deps.memory.remember(
                     fact,
                     agent="alm",
-                    repo=task.repo or "global",
+                    repo=tenant_scoped_repo(task),
                     memory_type="semantic",
                     tags=["alm", "distilled", task.blueprint],
                     metadata={"task_id": task.id, "source": "alm_learn_distill"},
