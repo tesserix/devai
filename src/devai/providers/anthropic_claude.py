@@ -117,6 +117,12 @@ class ClaudeProvider:
         instead of raising. Only a loop that produced literally no text
         raises.
         """
+        # ADK security: prepend the standing trusted/untrusted directive to every
+        # acting agent's system prompt — the model-facing half of the injection
+        # defense (the enforcement half is the tool-policy + output validation).
+        from devai.services.prompt_guard import SECURITY_DIRECTIVE
+
+        system_prompt = f"{SECURITY_DIRECTIVE}\n\n{system_prompt}"
 
         async def _run() -> str:
             total_cap = max_iterations or self.max_iterations

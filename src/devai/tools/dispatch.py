@@ -119,6 +119,10 @@ class ToolDispatcher:
         self._executors: dict[str, Any] = {}
         # registry-backed tools: name → bound handler (lazily bound, cached)
         self._registry_handlers: dict[str, Any] = {}
+        # The allowlist of tools this agent may execute (set by build_tool_specs
+        # from the offered names). None = unset → allow all (legacy callers); a
+        # set → enforce at execute() time, outside the model.
+        self._allowed: set[str] | None = None
         self._build_index()
 
     def _build_index(self) -> None:
@@ -144,6 +148,10 @@ class ToolDispatcher:
         warning rather than failing the run — a typo'd tool just won't be
         offered to the model.
         """
+        # Record the offered set so execute() enforces it — these same names are
+        # the model's allowlist, so a call to anything else is rejected outside
+        # the model (defense-in-depth against a manipulated/injected tool call).
+        self._allowed = set(names)
         specs: list[ToolSpec] = []
         for name in names:
             entry = self._index.get(name)
@@ -205,6 +213,14 @@ class ToolDispatcher:
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> str:
         """Run a tool call, returning a string the model can read."""
+        # ADK security: audit every call (arg KEYS only — values may carry
+        # secrets) and enforce the agent's allowlist outside the model, so a
+        # manipulated/injected call to a tool the agent wasn't granted is denied.
+        arg_keys = sorted((arguments or {}).keys())
+        if self._allowed is not None and name not in self._allowed:
+            logger.warning("tool DENIED (not in agent allowlist): %s keys=%s", name, arg_keys)
+            return f"error: tool {name!r} is not permitted for this agent"
+        logger.info("tool call: %s keys=%s", name, arg_keys)
         if self._dry_run and name in MUTATING_TOOLS:
             logger.info("[dry-run] blocked mutating tool %s", name)
             return (
