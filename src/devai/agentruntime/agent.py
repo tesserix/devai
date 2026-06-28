@@ -340,6 +340,17 @@ def build_alm_state(ctx: RunContext) -> dict[str, Any]:
             f"Diagnosis: {heal.get('diagnosis', '')}\n"
             f"Corrective instructions (follow these): {heal['guidance']}"
         )
+
+    # ADK security: treat retrieved memory as hostile (RAG-as-untrusted) — fence
+    # it so the agent reads it as data, not instructions, so a poisoned memory
+    # can't redirect the run. The system-prompt directive states the rule; this
+    # marks the content the rule applies to.
+    mem = state.get("memory_context")
+    if mem:
+        from devai.services.prompt_guard import wrap_untrusted
+
+        state["memory_context"] = wrap_untrusted(str(mem), "retrieved memory", limit=2500)
+
     return state
 
 
