@@ -227,14 +227,23 @@ class AgentResult:
           (``pr_number``/``branch_name``/…) onto it — the side effect
           ``AgentAdapter._build_result`` performs today.
         """
+        # ADK security: mask secrets in the agent's text output at the seam, so a
+        # leaked token is redacted uniformly (spec + legacy agents) before it
+        # reaches the dashboard / report / downstream — defense beyond the egress
+        # (SCM-post / chat) masks. redact_secrets only touches secret patterns,
+        # so it's safe to run over every string value.
+        from devai.services.redact import redact_secrets
+
+        handover = {k: (redact_secrets(v) if isinstance(v, str) else v) for k, v in self.handover.items()}
+
         data: dict[str, Any] = {}
         if self.output_key:
-            data[self.output_key] = self.handover
+            data[self.output_key] = handover
         else:
-            data.update(self.handover)
+            data.update(handover)
 
         for key in surface_keys:
-            value = self.handover.get(key)
+            value = handover.get(key)
             if value is not None:
                 data[key] = value
 
@@ -244,7 +253,7 @@ class AgentResult:
         if task is not None:
             self._mirror_structural_fields(task)
 
-        return StageResult(next_state=self.next_state, message=self.message, data=data)
+        return StageResult(next_state=self.next_state, message=redact_secrets(self.message), data=data)
 
     def _mirror_structural_fields(self, task: DevAITask) -> None:
         """Copy the handover's structural scalars onto the task object."""

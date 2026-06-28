@@ -70,3 +70,17 @@ async def test_no_allowlist_allows_all() -> None:
     d = ToolDispatcher()  # build_tool_specs never called → _allowed is None
     out = await d.execute("anything", {})
     assert "not permitted" not in out  # unset allowlist → allow (legacy callers)
+
+
+# ─── #3: output secret-redaction at the ADK seam (all agents, uniformly) ─────
+
+
+def test_to_stage_result_redacts_secrets_in_output() -> None:
+    from devai.agentruntime.agent import AgentResult
+
+    leaky = "clone https://bot:supersecretpw@github.com/x"
+    r = AgentResult(handover={"note": leaky}, output_key="senior_developer", message=leaky)
+    sr = r.to_stage_result()
+    assert "supersecretpw" not in str(sr.data)  # masked in the handover at the ADK seam
+    assert "supersecretpw" not in sr.message  # and in the surfaced message
+    assert "github.com/x" in str(sr.data)  # non-secret content preserved
