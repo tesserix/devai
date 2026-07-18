@@ -1,4 +1,5 @@
-# Sole maintainer — every change requires review/approval from @Sam123ben.
-# Branch protection enforces code-owner review, so this gates all merges.
+# Code owners — auto-requested for review on every pull request.
+# The main-branch ruleset requires code-owner approval before merging;
+# only the owners below may bypass the PR requirement and push directly.
 
-* @Sam123ben
+* @sam123ben @mahesh-sangawar
