@@ -1,5 +1,5 @@
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
-FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 AS builder
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl && rm -rf /var/lib/apt/lists/*
@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir .
 RUN pip install --no-cache-dir bandit pip-audit
 
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
-FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git && rm -rf /var/lib/apt/lists/*
