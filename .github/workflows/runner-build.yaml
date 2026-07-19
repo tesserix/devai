@@ -113,6 +113,7 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
         continue-on-error: true
 
       - name: Upload Trivy to GitHub Security

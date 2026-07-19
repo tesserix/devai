@@ -1,7 +1,7 @@
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
-FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 AS builder
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     git curl && rm -rf /var/lib/apt/lists/*
 
 # CHART-11: pin kubectl and verify its SHA256 (same pattern as Dockerfile.sre).
@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # deploys) and adapters/gitops (argocd/kargo/flux tools + /mcp/gitops) all
 # talk to the cluster through kubectl + CRD RBAC. Lands in the runtime stage
 # via the existing COPY --from=builder /usr/local/bin.
-ARG KUBECTL_VERSION=v1.31.4
-ARG KUBECTL_SHA256=298e19e9c6c17199011404278f0ff8168a7eca4217edad9097af577023a5620f
+ARG KUBECTL_VERSION=v1.34.9
+ARG KUBECTL_SHA256=73bb6f5063caadae1e73a39de018d8ad21755984bea35358484db817859e7634
 RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
         -o /usr/local/bin/kubectl \
     && echo "${KUBECTL_SHA256}  /usr/local/bin/kubectl" | sha256sum -c - \
@@ -26,9 +26,9 @@ RUN pip install --no-cache-dir .
 RUN pip install --no-cache-dir bandit pip-audit
 
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
-FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     git && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

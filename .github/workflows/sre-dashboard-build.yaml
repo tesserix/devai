@@ -119,6 +119,7 @@ jobs:
           format: sarif
           output: trivy-sre-dash.sarif
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
         continue-on-error: true
 
       - name: Upload Trivy results

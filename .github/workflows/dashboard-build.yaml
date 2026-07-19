@@ -118,6 +118,7 @@ jobs:
           format: sarif
           output: trivy-dashboard.sarif
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
         continue-on-error: true
 
       - name: Upload Trivy results

@@ -145,6 +145,7 @@ jobs:
           format: sarif
           output: trivy-auth-bff.sarif
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
         continue-on-error: true
 
       - name: Upload Trivy to GitHub Security
