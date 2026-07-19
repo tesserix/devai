@@ -46,7 +46,7 @@ dependencies = [
     "google-cloud-resource-manager==1.17.0",
     "google-auth==2.38.0",
     "google-api-core[grpc]==2.24.2",
-    "grpcio==1.68.1",
+    "grpcio==1.75.1",
     "grpcio-status==1.68.1",
     "proto-plus==1.27.2",
     "protobuf==5.29.6",
