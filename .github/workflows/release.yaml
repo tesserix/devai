@@ -49,7 +49,7 @@ jobs:
           fi
 
       - name: Build & push ALM image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -60,7 +60,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository }}/devai:latest
 
       - name: Build & push SRE image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.sre
@@ -95,7 +95,7 @@ jobs:
           fi
 
       - name: Build & push ALM Dashboard
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./dashboard
           file: ./dashboard/Dockerfile
@@ -106,7 +106,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository }}/devai-dashboard:latest
 
       - name: Build & push SRE Dashboard
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./sre-dashboard
           file: ./sre-dashboard/Dockerfile
