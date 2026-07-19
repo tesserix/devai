@@ -50,7 +50,7 @@ dependencies = [
     "grpcio-status==1.68.1",
     "proto-plus==1.27.2",
     "protobuf==5.29.6",
-    "googleapis-common-protos==1.74.0",
+    "googleapis-common-protos==1.75.0",
     # LangGraph / LangChain / LangSmith
     "langgraph>=0.2",
     "langchain-core>=0.3",
