@@ -3,6 +3,7 @@
 
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
 FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS builder
+RUN python -m pip install --no-cache-dir --upgrade pip
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     git && rm -rf /var/lib/apt/lists/*
@@ -13,12 +14,14 @@ COPY src/ src/
 RUN pip install --no-cache-dir .
 
 FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+RUN python -m pip install --no-cache-dir --upgrade pip
 
 # Node.js 22 (provides npx) for the stdio MCP servers. NodeSource keeps the
 # image lean vs. bundling a full toolchain.
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends curl ca-certificates \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g npm@11 \
     && apt-get purge -y curl && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 

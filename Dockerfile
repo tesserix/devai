@@ -1,5 +1,6 @@
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
 FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS builder
+RUN python -m pip install --no-cache-dir --upgrade pip
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     git curl && rm -rf /var/lib/apt/lists/*
@@ -9,8 +10,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 # deploys) and adapters/gitops (argocd/kargo/flux tools + /mcp/gitops) all
 # talk to the cluster through kubectl + CRD RBAC. Lands in the runtime stage
 # via the existing COPY --from=builder /usr/local/bin.
-ARG KUBECTL_VERSION=v1.34.9
-ARG KUBECTL_SHA256=73bb6f5063caadae1e73a39de018d8ad21755984bea35358484db817859e7634
+ARG KUBECTL_VERSION=v1.35.6
+ARG KUBECTL_SHA256=5d11e2ba01ea68ffd053f56e27738e2b4330013ee67f7e46c6da6c585d3c9926
 RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
         -o /usr/local/bin/kubectl \
     && echo "${KUBECTL_SHA256}  /usr/local/bin/kubectl" | sha256sum -c - \
@@ -27,6 +28,7 @@ RUN pip install --no-cache-dir bandit pip-audit
 
 # CHART-11: pin python:3.12-slim by digest for reproducible builds.
 FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+RUN python -m pip install --no-cache-dir --upgrade pip
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     git && rm -rf /var/lib/apt/lists/*
