@@ -100,7 +100,7 @@ dev = [
     "ruff==0.15.19",
     "mypy>=1.13.0",
     "pytest-cov>=6.0.0",
-    "respx>=0.22.0",
+    "respx>=0.23.1",
     "fakeredis>=2.26.0",
 ]
 [project.scripts]
