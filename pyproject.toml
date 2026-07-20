@@ -76,7 +76,7 @@ dependencies = [
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
     # provisions per-user/per-tenant secrets into Google Secret Manager.
     # Imported lazily inside the gcp_sm adapter only.
-    "google-cloud-secret-manager>=2.20.0",
+    "google-cloud-secret-manager>=2.30.0",
     # GCS object-store backend (adapters/object_store/gcs.py) — composer
     # attachments + the log-archive listing on the dashboard /logs page.
     # Imported lazily inside the gcs adapter only.
