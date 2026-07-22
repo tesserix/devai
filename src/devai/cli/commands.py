@@ -305,7 +305,7 @@ async def _serve(host: str, port: int) -> None:
         ack_wait=settings.nats_ack_wait,
     )
     try:
-        await event_bus.connect(settings.nats_url)
+        await event_bus.connect(settings.nats_url, getattr(settings, "nats_creds", "") or None)
     except Exception as e:
         console.print(f"[yellow]Warning:[/yellow] legacy EventBus connect failed: {e}")
 
