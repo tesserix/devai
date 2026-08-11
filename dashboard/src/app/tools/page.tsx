@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, Wrench } from "lucide-react";
 
 import { api, type RegistryItem } from "@/lib/api";
+import { GuidancePanel } from "@/components/guidance";
 
 /**
  * Tools — custom MCP servers registered in the shared registry. Each is a
@@ -56,6 +57,8 @@ export default function ToolsPage() {
           </Link>
         </div>
       </header>
+
+      <GuidancePanel id="tools" />
 
       {error && (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">

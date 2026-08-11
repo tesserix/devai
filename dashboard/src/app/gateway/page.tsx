@@ -10,6 +10,7 @@ import {
   ShieldHalf,
   XCircle,
 } from "lucide-react";
+import { GuidancePanel } from "@/components/guidance";
 
 /**
  * Gateway panel — single-page status board for the agentic control
@@ -109,6 +110,8 @@ export default function GatewayPage() {
           </button>
         </div>
       </header>
+
+      <GuidancePanel id="gateway" />
 
       {error && (
         <div

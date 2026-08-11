@@ -17,6 +17,7 @@ import {
   type TeamSummary,
   type WritableScope,
 } from "@/lib/api";
+import { GuidancePanel } from "@/components/guidance";
 
 /**
  * Settings — per-user / per-tenant connectors + secrets.
@@ -97,6 +98,8 @@ export default function SettingsPage() {
         Connect your own LLM, source control, memory, Slack and MCP servers. Your credentials drive
         both your conversations and your pipeline runs.
       </p>
+
+      <GuidancePanel id="settings" className="mt-5" />
 
       {trial?.applicable && trial.exhausted && (
         <div className="panel mt-5 p-4 text-sm flex items-start gap-3 border border-red-500/40">

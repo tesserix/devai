@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { PackageOpen, RefreshCw } from "lucide-react";
+import { GuidancePanel } from "@/components/guidance";
 
 type Counts = { skills: number; prompts: number; mcp_servers: number; agents: number };
 type LocalCounts = { tools: number; blueprints: number; specializations: number; stages: number };
@@ -153,6 +154,8 @@ export default function RegistryPage() {
           <RefreshCw className="w-3.5 h-3.5" /> Refresh
         </button>
       </header>
+
+      <GuidancePanel id="registry" />
 
       {/* Two strips of count cards: one for the upstream registry, one
           for locally-declared catalogs. Visually separated by a faint

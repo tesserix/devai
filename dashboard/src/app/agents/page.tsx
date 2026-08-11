@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, Plus, Users } from "lucide-react";
 import { aregistryUrl } from "@/lib/aregistry";
+import { GuidancePanel } from "@/components/guidance";
 
 type Agent = {
   name: string;
@@ -65,6 +66,8 @@ export default function AgentsPage() {
           </Link>
         </div>
       </header>
+
+      <GuidancePanel id="agents" />
 
       {error && (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">

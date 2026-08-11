@@ -30,6 +30,7 @@ import {
 } from "@/lib/api";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Donut, HBarChart, LineChart } from "@/components/charts";
+import { GuidancePanel } from "@/components/guidance";
 
 const DAY_OPTIONS = [7, 30, 90];
 
@@ -161,6 +162,8 @@ export default function AnalyticsPage() {
           </button>
         </div>
       </header>
+
+      <GuidancePanel id="analytics" />
 
       {/* Tab bar — one concern per view */}
       <div className="seg" role="tablist" aria-label="Analytics sections" style={{ width: "fit-content" }}>
