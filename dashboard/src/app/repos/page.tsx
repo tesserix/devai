@@ -17,6 +17,7 @@ import {
   type RepoCatalogPage,
 } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { GuidancePanel } from "@/components/guidance";
 
 type Tab = "all" | "onboarded" | "available";
 
@@ -267,6 +268,8 @@ export default function ReposPage() {
           </button>
         </div>
       </header>
+
+      <GuidancePanel id="repos" />
 
       {/* Tabs */}
       <div className="flex items-center gap-1">

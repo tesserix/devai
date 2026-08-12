@@ -49,6 +49,138 @@ export interface HelpTerm {
 // ─────────────────────────────────────────────────────────────────────────
 
 export const GUIDANCE: Record<string, GuidanceEntry> = {
+  home: {
+    id: "home",
+    title: "New here? Three steps to your first run",
+    body: [
+      "1. Connect a repository under Repositories — DevAI can only work on repos you have onboarded. 2. Open Workflows and pick one, or use Compose to describe the job in plain English. 3. Come back here to watch it run step by step.",
+      "This page shows one run at a time. Pick a run on the left and the stages, agents and messages for it fill in on the right, live.",
+    ],
+    links: [
+      { label: "Connect a repository", href: "/repos" },
+      { label: "Pick a workflow", href: "/workflows" },
+      { label: "Describe a task instead", href: "/compose" },
+    ],
+  },
+
+  compose: {
+    id: "compose",
+    title: "Compose: describe the job in plain English",
+    body: [
+      "Type what you want done, pick the repository and the workflow to run it with, and DevAI assigns a crew and starts. Use @ to point at specific files or teammates, and attach files for extra context.",
+      "The terminal streams what the crew is doing as it happens, and the timeline below records the git checkpoints you can roll back to.",
+    ],
+    links: [
+      { label: "Prefer picking a ready-made workflow?", href: "/workflows" },
+      { label: "See past runs", href: "/runs" },
+    ],
+  },
+
+  repos: {
+    id: "repos",
+    title: "Repositories: start here",
+    body: [
+      "DevAI only works on repositories you have onboarded. Onboarding opens a pull request that adds a small .platform/devai.yaml marker, and caches the repo's tech stack so runs start faster.",
+      "Select one or more repos and choose Onboard. Once the PR is merged the repo shows as Onboarded and becomes selectable everywhere else in the app.",
+    ],
+    links: [{ label: "Then run a workflow", href: "/workflows" }],
+  },
+
+  agents: {
+    id: "agents",
+    title: "Agents: the workers you can assign",
+    body: [
+      "An agent is a role — senior developer, QA tester, security expert — with its own skills, tools and language model. Workflow stages hand work to agents.",
+      "The ones shipped by default cover the whole lifecycle, so you usually do not need to create any. Build your own only when you need a role that does not exist yet.",
+    ],
+    links: [
+      { label: "Skills an agent can use", href: "/skills" },
+      { label: "Tools an agent can call", href: "/tools" },
+    ],
+  },
+
+  skills: {
+    id: "skills",
+    title: "Skills: reusable know-how",
+    body: [
+      "A skill is a piece of capability you can attach to more than one agent, so you describe it once instead of repeating it in every agent.",
+      "Skills do nothing on their own. Attach them to an agent, then use that agent in a workflow stage.",
+    ],
+    links: [{ label: "Attach one to an agent", href: "/agents" }],
+  },
+
+  tools: {
+    id: "tools",
+    title: "Tools: what agents can actually call",
+    body: [
+      "A tool is an external capability an agent can invoke — a custom MCP server exposing things like a database query or an internal API. Registering one makes it reachable to agents at /mcp/<name>.",
+      "Like skills, tools do nothing by themselves. Give one to an agent, then use that agent in a workflow.",
+    ],
+    links: [{ label: "Give a tool to an agent", href: "/agents" }],
+  },
+
+  prompts: {
+    id: "prompts",
+    title: "Prompts: shared wording",
+    body: [
+      "Prompts are reusable instruction templates that agents pull in, so the same wording is not copy-pasted into several agents and left to drift.",
+    ],
+    links: [{ label: "Used by agents", href: "/agents" }],
+  },
+
+  registry: {
+    id: "registry",
+    title: "Browse everything in one place",
+    body: [
+      "The catalog lists every agent, skill, tool, prompt and blueprint available to this workspace. It is the search-everything view — the dedicated pages in the sidebar are the same content, filtered by kind.",
+    ],
+  },
+
+  gateway: {
+    id: "gateway",
+    title: "Service health: is the platform itself up?",
+    body: [
+      "This page checks the plumbing DevAI depends on — the registry, the agent gateway, and the language-model proxy — and reports whether each one is reachable right now.",
+      "Come here when runs fail for no obvious reason. If something shows as unreachable the problem is the platform, not your workflow.",
+    ],
+    links: [{ label: "Check recent runs", href: "/runs" }],
+  },
+
+  analytics: {
+    id: "analytics",
+    title: "Analytics: how the platform is performing",
+    body: [
+      "Run and stage success rates, how busy each agent is, and what the language models are costing you in tokens and money.",
+      "Each section loads on its own. If one is empty its data source has nothing yet or is unreachable — the rest of the page is still accurate.",
+    ],
+  },
+
+  logs: {
+    id: "logs",
+    title: "Logs: live output, reliability, and history",
+    body: [
+      "Live logs is a rolling window of what the API is doing right now — a 'now' view, not searchable history. SLOs tracks availability, latency and error rates against their targets. Archive is the long-term copy kept in cloud storage.",
+      "Debugging a run that just failed? Start with Live logs. Looking for something from last week? Use Archive.",
+    ],
+  },
+
+  "sre-studio": {
+    id: "sre-studio",
+    title: "SRE Studio: monitoring rules",
+    body: [
+      "Author and publish the configuration the SRE agents use to watch your clusters. You can dry-run a change here to see what it would do before publishing it.",
+      "This is separate from the ALM workflows in the rest of the app — it governs production monitoring, not code delivery.",
+    ],
+  },
+
+  settings: {
+    id: "settings",
+    title: "Settings",
+    body: [
+      "Workspace-wide configuration. Changes here affect every future run, not the ones already in flight.",
+    ],
+  },
+
   workflows: {
     id: "workflows",
     title: "Workflows: define → run → observe",
@@ -99,7 +231,9 @@ export const GUIDANCE: Record<string, GuidanceEntry> = {
     links: [{ label: "Run a new workflow", href: "/workflows" }],
   },
 
-  runDetail: {
+  // Keyed by the id the page passes to <GuidancePanel>, not camelCase — the
+  // lookup is a plain record access, so a mismatched key silently renders nothing.
+  "run-detail": {
     id: "run-detail",
     title: "Reading a run",
     body: [

@@ -35,6 +35,7 @@ import {
   type SLOReport,
 } from "@/lib/api";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { GuidancePanel } from "@/components/guidance";
 
 type Tab = "live" | "slo" | "archive";
 
@@ -97,6 +98,8 @@ export default function LogsPage() {
           </button>
         </div>
       </header>
+
+      <GuidancePanel id="logs" />
 
       {tab === "live" && <LiveLogs />}
       {tab === "slo" && <SLOView />}

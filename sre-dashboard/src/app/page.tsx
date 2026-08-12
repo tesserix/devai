@@ -483,9 +483,24 @@ function SREDashboardInner() {
                 </>
               )}
 
-              {tab === "blueprints" && <RuntimePanel mode="blueprints" />}
-              {tab === "schedules" && <RuntimePanel mode="schedules" />}
-              {tab === "sources" && <RuntimePanel mode="sources" />}
+              {tab === "blueprints" && (
+                <div className="space-y-4">
+                  <Explainer id="blueprints" />
+                  <RuntimePanel mode="blueprints" />
+                </div>
+              )}
+              {tab === "schedules" && (
+                <div className="space-y-4">
+                  <Explainer id="schedules" />
+                  <RuntimePanel mode="schedules" />
+                </div>
+              )}
+              {tab === "sources" && (
+                <div className="space-y-4">
+                  <Explainer id="sources" />
+                  <RuntimePanel mode="sources" />
+                </div>
+              )}
 
               {tab === "chat" && <SREChatPanel />}
             </>

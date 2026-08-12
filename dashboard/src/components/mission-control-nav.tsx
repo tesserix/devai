@@ -40,33 +40,8 @@ import {
  * Tailwind grayscale utility — the same component renders cleanly
  * in both dark and light modes without conditional rendering.
  *
- * Visual map (matches the screenshot we anchored on):
- *
- *   logo + "Mission control" eyebrow
- *   ┌──────────────────────────┐
- *   │  🔍 Jump to…       ⌘K    │  command palette trigger
- *   └──────────────────────────┘
- *   ROLE
- *   • Administrator           ▾
- *
- *   FLEET
- *   ▣ Fleet                [1]
- *   ‖ Workflows
- *   ▢ Blueprint
- *   ⛨ Agents
- *   ⌽ Memory
- *
- *   PLATFORM
- *   ▤ Registry
- *   ▦ Catalog
- *   ⇆ Control
- *   ⥤ Analytics
- *   ⚒ Tools
- *
- *   ⚙ Settings
- *   ☾ Dark   (toggle)
- *   ─────────────────────────
- *   [   + New task   ]   primary CTA, pinned bottom
+ * Sections read top-to-bottom as a journey: Get started → Your work →
+ * Building blocks → Monitoring. See the per-section comments below.
  */
 
 type NavItem = {
@@ -77,42 +52,42 @@ type NavItem = {
   badge?: string;
 };
 
-// FLEET — the lifecycle workspace. After disambiguation (DASH-5):
-//   * Workflows  → the lifecycle home: browse blueprints, run, recent runs.
-//   * Runs       → every execution of a blueprint, filterable.
-//   * Board      → the GitHub-issue Kanban (was confusingly under "Workflows").
-const TOP: NavItem[] = [
-  { href: "/compose", label: "Compose", Icon: Sparkles, description: "Cursor-style agent composer" },
-  { href: "/", label: "Fleet", Icon: Boxes, description: "Active pipeline runs" },
-  { href: "/workflows", label: "Workflows", Icon: Workflow, description: "Browse blueprints → run → observe" },
-  { href: "/runs", label: "Runs", Icon: ListChecks, description: "Every blueprint execution" },
-  { href: "/board", label: "Board", Icon: FolderKanban, description: "GitHub issue Kanban" },
+// Sections are ordered by what a user is trying to DO, not by which backend
+// owns the page, and every label is the plain-English name for the thing —
+// users consistently could not tell what "Fleet", "Registry" or "Gateway" were.
+// Hrefs are unchanged, so bookmarks and deep links still resolve.
+
+// 1. GET STARTED — the happy path for a first run, in order.
+const START: NavItem[] = [
+  { href: "/repos", label: "Repositories", Icon: FolderGit2, description: "Step 1 — connect the repos DevAI may work on" },
+  { href: "/workflows", label: "Workflows", Icon: Workflow, description: "Step 2 — pick a workflow and run it" },
+  { href: "/compose", label: "Describe a task", Icon: Sparkles, description: "Or just say what you want in plain English" },
 ];
 
-// REGISTRY — every artifact kind in the shared registry, browse + author.
-// Each page reads/writes the registry over the mesh-gated /api/registry +
-// /api/authoring routes (writes are restricted to the devai-api SA).
-const REGISTRY: NavItem[] = [
-  { href: "/agents", label: "Agents", Icon: Users, description: "Compose + publish agents" },
-  { href: "/skills", label: "Skills", Icon: Lightbulb, description: "Reusable capabilities" },
-  { href: "/tools", label: "Tools", Icon: Wrench, description: "Custom MCP tool servers" },
-  { href: "/prompts", label: "Prompts", Icon: MessageSquareText, description: "Reusable prompts" },
-  { href: "/blueprint", label: "Blueprints", Icon: Layers, description: "Build + publish DAGs" },
-  { href: "/registry", label: "Browse", Icon: PackageOpen, description: "Full catalog explorer" },
+// 2. YOUR WORK — where a run in flight is watched and tracked.
+const WORK: NavItem[] = [
+  { href: "/", label: "Live run", Icon: Boxes, description: "Watch the current run, stage by stage" },
+  { href: "/runs", label: "Run history", Icon: ListChecks, description: "Every run, past and present" },
+  { href: "/board", label: "Task board", Icon: FolderKanban, description: "Your GitHub issues as a Kanban" },
 ];
 
-// PLATFORM — onboarding, gateway health, and platform-wide observability.
-// (/control, /catalog, /memory remain retired per DASH-9; /analytics is now a
-// real page backed by /api/analytics/* — run/agent/LLM stats + OTel health.)
-const MID: NavItem[] = [
-  { href: "/repos", label: "Repos", Icon: FolderGit2, description: "Onboard org repositories" },
-  { href: "/gateway", label: "Gateway", Icon: Radio, description: "Agent Gateway + LLM proxy health" },
-  { href: "/analytics", label: "Analytics", Icon: BarChart3, description: "Runs, agents, LLM cost + telemetry" },
-  { href: "/logs", label: "Logs", Icon: ScrollText, description: "Live logs, SLOs + GCS archive" },
+// 3. BUILDING BLOCKS — the shared registry, one page per artifact kind.
+// Optional for most users; the defaults cover the whole lifecycle.
+const BLOCKS: NavItem[] = [
+  { href: "/agents", label: "Agents", Icon: Users, description: "The worker roles a workflow can assign" },
+  { href: "/skills", label: "Skills", Icon: Lightbulb, description: "Know-how you can attach to an agent" },
+  { href: "/tools", label: "Tools", Icon: Wrench, description: "External things an agent can call" },
+  { href: "/prompts", label: "Prompts", Icon: MessageSquareText, description: "Reusable instruction templates" },
+  { href: "/blueprint", label: "Workflow designer", Icon: Layers, description: "Build and publish your own workflows" },
+  { href: "/registry", label: "Browse all", Icon: PackageOpen, description: "Search everything in one catalog" },
 ];
 
-const SRE: NavItem[] = [
-  { href: "/sre-studio", label: "SRE Studio", Icon: ShieldHalf, description: "Author, dry-run + publish SRE configs" },
+// 4. MONITORING — is it working, what did it cost, and production health.
+const MONITOR: NavItem[] = [
+  { href: "/analytics", label: "Analytics", Icon: BarChart3, description: "Success rates, agent load and LLM cost" },
+  { href: "/logs", label: "Logs", Icon: ScrollText, description: "Live output, reliability targets and archive" },
+  { href: "/gateway", label: "Service health", Icon: Radio, description: "Is the DevAI platform itself reachable?" },
+  { href: "/sre-studio", label: "SRE Studio", Icon: ShieldHalf, description: "Rules the SRE agents use to watch production" },
 ];
 
 const BOTTOM: NavItem[] = [
@@ -241,10 +216,10 @@ export function MissionControlNav({
 
       {/* Nav groups */}
       <div className="px-2 mt-4 flex-1 overflow-y-auto">
-        <NavSection items={TOP} pathname={pathname} label="Fleet" />
-        <NavSection items={REGISTRY} pathname={pathname} label="Registry" />
-        <NavSection items={MID} pathname={pathname} label="Platform" />
-        <NavSection items={SRE} pathname={pathname} label="SRE" />
+        <NavSection items={START} pathname={pathname} label="Get started" />
+        <NavSection items={WORK} pathname={pathname} label="Your work" />
+        <NavSection items={BLOCKS} pathname={pathname} label="Building blocks" />
+        <NavSection items={MONITOR} pathname={pathname} label="Monitoring" />
       </div>
 
       {/* Meta + theme toggle + sign out */}
@@ -265,7 +240,7 @@ export function MissionControlNav({
       <div className="px-3 py-3 border-t" style={{ borderColor: "var(--border-subtle)" }}>
         <button type="button" onClick={newTask} className="btn-primary w-full !py-2 !text-sm">
           <Plus className="w-3.5 h-3.5" />
-          New task
+          Start a run
         </button>
       </div>
     </aside>

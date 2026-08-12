@@ -6,6 +6,7 @@ import { ExternalLink, Plus, Sparkles } from "lucide-react";
 
 import { api, type RegistryItem } from "@/lib/api";
 import { aregistryUrl } from "@/lib/aregistry";
+import { GuidancePanel } from "@/components/guidance";
 
 /**
  * Skills — reusable capabilities in the shared registry. Compose them into
@@ -56,6 +57,8 @@ export default function SkillsPage() {
           </Link>
         </div>
       </header>
+
+      <GuidancePanel id="skills" />
 
       {error && (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">
