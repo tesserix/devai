@@ -5,7 +5,7 @@ import { ExternalLink, MessageSquareText } from "lucide-react";
 
 import { api, type RegistryItem } from "@/lib/api";
 import { aregistryUrl } from "@/lib/aregistry";
-import { GuidancePanel } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 /**
  * Prompts — reusable prompt templates in the shared registry. Agents reference
@@ -37,6 +37,7 @@ export default function PromptsPage() {
           <div className="label-eyebrow">Catalog</div>
           <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
             <MessageSquareText className="w-5 h-5 text-indigo-400" /> Prompts
+            <GuidanceInfo id="prompts" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm text-[var(--ink-300)] mt-1">
             Reusable prompt templates in the registry. Compose them into agents from the Create-Agent picker.

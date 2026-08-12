@@ -13,7 +13,7 @@
 // easy to audit. Dismissal is per-id and persisted in localStorage, so the hint
 // stays out of the way once a user has read it.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 export type ExplainerId =
   | "overview"
@@ -111,6 +111,113 @@ export const SRE_EXPLAINERS: Record<ExplainerId, ExplainerCopy> = {
 
 function storageKey(id: ExplainerId) {
   return `devai-sre-explainer-dismissed:${id}`;
+}
+
+/**
+ * The same copy behind a hoverable "i" — so a user who dismissed the inline
+ * explainer can still get it back. Positioned fixed off the trigger's rect,
+ * which keeps it out of the tab strip's overflow.
+ */
+export function ExplainerInfo({ id, className = "" }: { id: ExplainerId; className?: string }) {
+  const copy = SRE_EXPLAINERS[id];
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const panelId = useId();
+
+  const clearTimer = () => {
+    if (timer.current) clearTimeout(timer.current);
+  };
+
+  const show = useCallback((delay: number) => {
+    clearTimer();
+    timer.current = setTimeout(() => {
+      const el = wrapRef.current;
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const left = Math.max(8, Math.min(r.left, window.innerWidth - 296));
+        setPos({ top: r.bottom + 8, left });
+      }
+      setOpen(true);
+    }, delay);
+  }, []);
+
+  const hide = useCallback((delay: number) => {
+    clearTimer();
+    timer.current = setTimeout(() => setOpen(false), delay);
+  }, []);
+
+  useEffect(() => clearTimer, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  if (!copy) return null;
+
+  return (
+    <span
+      ref={wrapRef}
+      className={`relative inline-flex items-center ${className}`}
+      onMouseEnter={() => show(120)}
+      onMouseLeave={() => hide(180)}
+    >
+      <button
+        type="button"
+        onClick={() => (open ? (clearTimer(), setOpen(false)) : show(0))}
+        onFocus={() => show(0)}
+        onBlur={() => hide(180)}
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        aria-label="What this shows"
+        className="flex h-4 w-4 items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-[10px] font-semibold text-gray-500 dark:text-gray-400 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+      >
+        i
+      </button>
+      {open && pos && (
+        <span
+          id={panelId}
+          role="tooltip"
+          style={{ top: pos.top, left: pos.left }}
+          onMouseEnter={clearTimer}
+          onMouseLeave={() => hide(180)}
+          className="fixed z-50 block w-72 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 shadow-lg"
+        >
+          <span className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+            {copy.title}
+          </span>
+          <span className="mt-1 block text-[12.5px] leading-relaxed text-gray-600 dark:text-gray-300">
+            {copy.body}
+          </span>
+          {copy.points && copy.points.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {copy.points.map((pt) => (
+                <li key={pt} className="flex gap-2 text-[11.5px] text-gray-500 dark:text-gray-400">
+                  <span aria-hidden className="text-gray-300 dark:text-gray-600">
+                    •
+                  </span>
+                  <span>{pt}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function Explainer({ id }: { id: ExplainerId }) {
