@@ -362,6 +362,20 @@ export const HELP_TERMS: Record<string, HelpTerm> = {
       "The handover bag is the shared context that flows through a run. Each stage's output is merged in, so downstream stages can read what came before.",
   },
 
+  // Keyed exactly as the page passes it — getHelpTerm is a plain record lookup,
+  // so a missing or mis-keyed entry renders nothing at all.
+  "delegation-plan": {
+    term: "delegation-plan",
+    label: "Supervisor delegation plan",
+    summary:
+      "How the supervisor would split this work across agents, written before the run. It is advisory: the stages that actually execute are the blueprint's fixed DAG, and nothing here adds, removes or reorders them.",
+    points: [
+      "Read it to understand the supervisor's reasoning, not to predict the stage list.",
+      "Assignments name the agent role the supervisor thinks each piece belongs to.",
+      "A tracking issue link appears when the supervisor opened one on the repo.",
+    ],
+  },
+
   dynamic: {
     term: "dynamic",
     label: 'What "dynamic" really means',

@@ -35,7 +35,7 @@ import { BlueprintDAG } from "@/components/blueprint-dag";
 import { BlueprintMesh } from "@/components/blueprint-mesh";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { EmptyState } from "@/components/empty-state";
-import { GuidancePanel, HelpPopover } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 import { RunStateBadge } from "@/components/run-state-badge";
 import { TriggerDialog } from "@/components/trigger-dialog";
 
@@ -113,6 +113,7 @@ function WorkflowsHome() {
           >
             <Layers className="w-5 h-5" style={{ color: "var(--accent)" }} />
             Workflows
+            <GuidanceInfo id="workflows" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1 max-w-2xl" style={{ color: "var(--ink-soft)" }}>
             Pick a blueprint, point it at a repo, and dispatch a run. Each blueprint is a fixed DAG of

@@ -14,7 +14,7 @@ import { TriggerDialog } from "@/components/trigger-dialog";
 import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
 import { useToast } from "@/components/toast";
-import { GuidancePanel, HelpPopover } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 
 type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "events" | "chat" | "config";
 
@@ -323,7 +323,7 @@ export default function DashboardPage() {
               className="border-b px-6 shrink-0"
               style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
             >
-              <div className="flex gap-0 -mb-px">
+              <div className="flex items-center gap-0 -mb-px">
                 {([
                   { key: "overview", label: "Overview" },
                   { key: "hierarchy", label: "Who does what" },
@@ -348,6 +348,7 @@ export default function DashboardPage() {
                     </button>
                   );
                 })}
+                <GuidanceInfo id="home" className="ml-auto mr-1" />
               </div>
             </div>
 

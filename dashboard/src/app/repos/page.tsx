@@ -17,7 +17,7 @@ import {
   type RepoCatalogPage,
 } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { GuidancePanel } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 type Tab = "all" | "onboarded" | "available";
 
@@ -212,6 +212,7 @@ export default function ReposPage() {
             style={{ color: "var(--ink-strong)" }}
           >
             <FolderGit2 className="w-5 h-5" style={{ color: "var(--accent)" }} /> Repos
+            <GuidanceInfo id="repos" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1 flex items-center gap-2" style={{ color: "var(--ink-soft)" }}>
             <span className="font-mono" style={{ color: "var(--ink)" }}>{onboardedCount}</span>

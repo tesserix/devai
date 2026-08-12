@@ -15,7 +15,7 @@ import { ScanHistory } from "@/components/scan-history";
 import { SREChatPanel } from "@/components/sre-chat-panel";
 import { RuntimePanel } from "@/components/runtime-panel";
 import { ToastProvider, useToast } from "@/components/toast";
-import { Explainer } from "@/components/explainer";
+import { Explainer, ExplainerInfo } from "@/components/explainer";
 import { clsx } from "clsx";
 
 type Tab =
@@ -287,6 +287,7 @@ function SREDashboardInner() {
             {tab === "sources" && "Observability Sources"}
             {tab === "costs" && "Cost Analysis"}
             {tab === "chat" && "SRE Assistant"}
+            {tab !== "chat" && <ExplainerInfo id={tab} className="ml-2 align-middle" />}
           </h2>
         </header>
 

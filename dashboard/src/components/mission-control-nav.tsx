@@ -31,6 +31,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { InfoHint } from "@/components/guidance";
 
 /**
  * Fiber-style mission-control left nav.
@@ -93,6 +94,15 @@ const MONITOR: NavItem[] = [
 const BOTTOM: NavItem[] = [
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
+
+// Answers "why are these four things grouped together?" — the question the
+// section names alone can't.
+const SECTION_HINTS: Record<string, string> = {
+  start: "Everything you need before a first run: the repos DevAI may touch, and the two ways to kick off work — pick a ready-made workflow, or describe the task in plain English.",
+  work: "Work that is already underway. Live run follows the current one stage by stage; Run history is the full record; Task board mirrors your GitHub issues.",
+  blocks: "The reusable parts a workflow is assembled from. You can ignore all of it — the built-in defaults already cover the whole lifecycle. Open these only to add your own.",
+  monitor: "How things are going, after the fact. Success rates and cost, raw log output, whether the DevAI platform itself is reachable, and the rules the SRE agents apply to production.",
+};
 
 function isActive(href: string, pathname: string): boolean {
   if (href === "/") return pathname === "/";
@@ -216,10 +226,10 @@ export function MissionControlNav({
 
       {/* Nav groups */}
       <div className="px-2 mt-4 flex-1 overflow-y-auto">
-        <NavSection items={START} pathname={pathname} label="Get started" />
-        <NavSection items={WORK} pathname={pathname} label="Your work" />
-        <NavSection items={BLOCKS} pathname={pathname} label="Building blocks" />
-        <NavSection items={MONITOR} pathname={pathname} label="Monitoring" />
+        <NavSection items={START} pathname={pathname} label="Get started" hint={SECTION_HINTS.start} />
+        <NavSection items={WORK} pathname={pathname} label="Your work" hint={SECTION_HINTS.work} />
+        <NavSection items={BLOCKS} pathname={pathname} label="Building blocks" hint={SECTION_HINTS.blocks} />
+        <NavSection items={MONITOR} pathname={pathname} label="Monitoring" hint={SECTION_HINTS.monitor} />
       </div>
 
       {/* Meta + theme toggle + sign out */}
@@ -251,10 +261,12 @@ function NavSection({
   items,
   pathname,
   label,
+  hint,
 }: {
   items: NavItem[];
   pathname: string;
   label?: string;
+  hint?: string;
 }) {
   // Labelled sections are collapsible; the collapsed state persists per
   // section in localStorage. Unlabelled sections (e.g. the bottom row) are
@@ -280,20 +292,33 @@ function NavSection({
   return (
     <nav className="mb-4">
       {label && (
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={showItems}
-          className="w-full flex items-center gap-1 px-2 mb-1.5 group"
-          style={{ color: "var(--ink-muted)" }}
-          title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
-        >
-          <ChevronRight
-            className="w-3 h-3 shrink-0 transition-transform"
-            style={{ transform: showItems ? "rotate(90deg)" : "rotate(0deg)" }}
-          />
-          <span className="label-eyebrow">{label}</span>
-        </button>
+        // The hint is a sibling of the toggle, not a child — a button inside a
+        // button is invalid and swallows the inner click.
+        <div className="flex items-center gap-1 px-2 mb-1.5 group">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={showItems}
+            className="flex flex-1 items-center gap-1 min-w-0"
+            style={{ color: "var(--ink-muted)" }}
+            title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+          >
+            <ChevronRight
+              className="w-3 h-3 shrink-0 transition-transform"
+              style={{ transform: showItems ? "rotate(90deg)" : "rotate(0deg)" }}
+            />
+            <span className="label-eyebrow">{label}</span>
+          </button>
+          {hint && (
+            <InfoHint
+              title={label}
+              body={[hint]}
+              placement="right"
+              ariaLabel={`About ${label}`}
+              className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 shrink-0"
+            />
+          )}
+        </div>
       )}
       {showItems && (
       <ul className="space-y-0.5">
@@ -303,7 +328,6 @@ function NavSection({
             <li key={href}>
               <Link
                 href={href}
-                title={description}
                 className={clsx(
                   "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors group"
                 )}
@@ -327,6 +351,17 @@ function NavSection({
                   style={{ color: active ? "var(--ink-strong)" : "var(--ink-muted)" }}
                 />
                 <span className="truncate flex-1">{l}</span>
+                {description && (
+                  // Appears on row hover/focus so the rail stays calm, but is
+                  // always in the tab order for keyboard and screen readers.
+                  <InfoHint
+                    title={l}
+                    body={[description]}
+                    placement="right"
+                    ariaLabel={`What is ${l}?`}
+                    className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 shrink-0"
+                  />
+                )}
                 {badge && (
                   <span
                     className="font-mono text-[10px] px-1.5 py-0.5 rounded"

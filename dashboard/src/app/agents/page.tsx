@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, Plus, Users } from "lucide-react";
 import { aregistryUrl } from "@/lib/aregistry";
-import { GuidancePanel } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 type Agent = {
   name: string;
@@ -46,6 +46,7 @@ export default function AgentsPage() {
           <div className="label-eyebrow">Catalog</div>
           <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
             <Users className="w-5 h-5 text-indigo-400" /> Agents
+            <GuidanceInfo id="agents" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm text-[var(--ink-300)] mt-1">
             Agents catalogued in aregistry. Each card shows the model + framework binding the runtime will instantiate.
