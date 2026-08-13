@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from devai.identity import Principal, extract_principal
 from devai.sandbox.models import SandboxRecord, SandboxSpec
 from devai.sandbox.service import SandboxError
+from devai.sandbox.workspace_client import WorkspaceClient
 
 if TYPE_CHECKING:
     from devai.sandbox.service import SandboxService
@@ -119,6 +120,57 @@ async def destroy_sandbox(request: Request, sandbox_id: str) -> dict[str, Any]:
     except SandboxError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return {"destroyed": sandbox_id}
+
+
+async def _workspace_client(request: Request, record: SandboxRecord) -> WorkspaceClient:
+    """Resolve the workspace endpoint + capability token for one sandbox.
+
+    The token is read from the workspace Secret at call time — it is never in
+    the sandbox row, which the dashboard and the audit log both read.
+    """
+    endpoint = (record.detail.get("workspace") or {}).get("endpoint") if record.detail else None
+    if not endpoint:
+        raise HTTPException(status_code=409, detail="this sandbox has no workspace")
+    runtime = getattr(getattr(request.app.state, "pipeline_service", None), "k8s_runtime", None)
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="cluster runtime unavailable")
+    try:
+        token = await runtime.read_secret_key(f"devai-sandbox-ws-{record.id}", "token")
+    except Exception as e:  # noqa: BLE001 — a missing Secret means the workspace is gone
+        raise HTTPException(status_code=409, detail="workspace is not ready") from e
+    return WorkspaceClient(endpoint, token=token)
+
+
+async def _sandbox_or_404(request: Request, sandbox_id: str) -> SandboxRecord:
+    owner, is_admin = await _read_scope(request)
+    record = await _service(request).get(sandbox_id, owner=owner, is_admin=is_admin)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
+    return record
+
+
+@router.post("/{sandbox_id}/shell")
+async def workspace_exec(request: Request, sandbox_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    record = await _sandbox_or_404(request, sandbox_id)
+    client = await _workspace_client(request, record)
+    await _service(request).touch(sandbox_id)
+    return await client.exec(str(body.get("command", "")), timeout=float(body.get("timeout", 120.0)))
+
+
+@router.post("/{sandbox_id}/files/{operation}")
+async def workspace_files(request: Request, sandbox_id: str, operation: str, body: dict[str, Any]) -> dict[str, Any]:
+    record = await _sandbox_or_404(request, sandbox_id)
+    client = await _workspace_client(request, record)
+    await _service(request).touch(sandbox_id)
+    if operation == "read":
+        return {"content": await client.read(str(body.get("path", "")))}
+    if operation == "write":
+        return await client.write(str(body.get("path", "")), str(body.get("content", "")))
+    if operation == "list":
+        return {"entries": await client.list(str(body.get("path", ".")))}
+    if operation == "search":
+        return {"hits": await client.search(str(body.get("needle", "")), str(body.get("path", ".")))}
+    raise HTTPException(status_code=404, detail=f"unknown file operation {operation!r}")
 
 
 __all__ = ["router"]

@@ -7,10 +7,12 @@ later by the normal runner path with `apply_sandbox_boundary` on top.
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import TYPE_CHECKING, Any, Protocol
 
 from devai.sandbox.isolation import build_isolation_manifests
 from devai.sandbox.models import SandboxStatus
+from devai.sandbox.workspace import build_workspace_manifests, workspace_service_host
 
 if TYPE_CHECKING:
     from devai.sandbox.models import SandboxRecord
@@ -34,15 +36,30 @@ class SandboxProvisioner:
             await self._runtime.connect()
             for manifest in build_isolation_manifests(record, namespace=namespace):
                 await self._runtime.apply_manifest(manifest)
+            detail = await self._provision_workspace(record, namespace)
         except Exception as e:  # noqa: BLE001 — a cluster failure is a sandbox outcome, not a crash
             logger.warning("sandbox %s: provisioning failed", record.id, exc_info=True)
             return await self._set(record, SandboxStatus.FAILED, {"error": str(e)})
-        return await self._set(record, SandboxStatus.READY)
+        return await self._set(record, SandboxStatus.READY, detail)
+
+    async def _provision_workspace(self, record: SandboxRecord, namespace: str) -> dict[str, Any] | None:
+        if not record.spec.workspace:
+            return None
+        # The token lives in the Secret and nowhere else — not in the sandbox row,
+        # which is read by the dashboard and the audit log.
+        token = secrets.token_urlsafe(32)
+        for manifest in build_workspace_manifests(record, namespace=namespace, token=token):
+            await self._runtime.apply_manifest(manifest)
+        return {"workspace": {"endpoint": workspace_service_host(record.id, namespace=namespace)}}
 
     async def teardown(self, record: SandboxRecord) -> SandboxRecord:
         await self._set(record, SandboxStatus.DESTROYING)
         namespace = getattr(getattr(self._runtime, "config", None), "namespace", "devai")
-        for manifest in build_isolation_manifests(record, namespace=namespace):
+        manifests = build_isolation_manifests(record, namespace=namespace)
+        if record.spec.workspace:
+            # Deleting needs the kinds and names only, so no token is minted here.
+            manifests += build_workspace_manifests(record, namespace=namespace, token="-")
+        for manifest in manifests:
             try:
                 await self._runtime.delete_manifest(manifest["kind"], manifest["metadata"]["name"], namespace)
             except Exception:  # noqa: BLE001 — already gone is the desired end state
