@@ -28,7 +28,7 @@ dependencies = [
     # in the image so turning telemetry on is one env var, no custom build. The
     # adapter lazy-imports it and degrades to Noop if it's ever absent.
     "opentelemetry-exporter-otlp-proto-http>=1.29.0",
-    "python-ulid>=3.2.0",
+    "python-ulid>=4.0.1",
     "rich>=15.0.0",
     "playwright>=1.49.0",
     "cryptography>=50.0.0",
