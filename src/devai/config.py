@@ -56,6 +56,11 @@ class Settings(BaseSettings):
 
     # --- NATS ---
     nats_url: str = "nats://localhost:4222"
+    # Path to a NATS account credentials (.creds) file for operator/JWT auth.
+    # Empty (default) → connect anonymously, behaviour unchanged. When set (the
+    # chart mounts the DevAI account creds at /etc/nats-creds/nats.creds and
+    # exports DEVAI_NATS_CREDS), it is passed to nats.connect(user_credentials=).
+    nats_creds: str = ""
     nats_stream: str = "DEVAI"
     nats_max_deliver: int = 3
     nats_ack_wait: int = 300  # seconds

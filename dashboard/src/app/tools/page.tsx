@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, Wrench } from "lucide-react";
 
 import { api, type RegistryItem } from "@/lib/api";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 /**
  * Tools — custom MCP servers registered in the shared registry. Each is a
@@ -36,6 +37,7 @@ export default function ToolsPage() {
           <div className="label-eyebrow">Catalog</div>
           <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
             <Wrench className="w-5 h-5 text-indigo-400" /> Tools
+            <GuidanceInfo id="tools" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm text-[var(--ink-300)] mt-1">
             Custom tools registered as MCP servers. Compose them into agents from the Create-Agent picker.
@@ -56,6 +58,8 @@ export default function ToolsPage() {
           </Link>
         </div>
       </header>
+
+      <GuidancePanel id="tools" />
 
       {error && (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">

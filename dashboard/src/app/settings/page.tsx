@@ -17,6 +17,7 @@ import {
   type TeamSummary,
   type WritableScope,
 } from "@/lib/api";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 /**
  * Settings — per-user / per-tenant connectors + secrets.
@@ -92,11 +93,15 @@ export default function SettingsPage() {
   return (
     <div className="p-7 w-full">
       <div className="label-eyebrow">Mission control</div>
-      <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1">Settings</h1>
+      <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1">Settings
+        <GuidanceInfo id="settings" className="ml-0.5 align-middle" />
+      </h1>
       <p className="text-sm text-[var(--ink-300)] mt-1">
         Connect your own LLM, source control, memory, Slack and MCP servers. Your credentials drive
         both your conversations and your pipeline runs.
       </p>
+
+      <GuidancePanel id="settings" className="mt-5" />
 
       {trial?.applicable && trial.exhausted && (
         <div className="panel mt-5 p-4 text-sm flex items-start gap-3 border border-red-500/40">
