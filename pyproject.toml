@@ -71,7 +71,7 @@ dependencies = [
     # (FastMCP, Streamable HTTP) exposes DevAI at /mcp; slack_sdk backs the
     # Slack Events API channel. Both are imported lazily inside their channels,
     # so a deployment with those channels disabled never loads them.
-    "mcp>=1.9,<2",
+    "mcp>=1.28.1,<2",
     "slack-sdk>=3.42.0,<4",
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
     # provisions per-user/per-tenant secrets into Google Secret Manager.
