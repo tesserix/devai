@@ -67,9 +67,7 @@ async def status(request: Request) -> dict[str, Any]:
         kagent_url=os.environ.get("DEVAI_KAGENT_CONTROLLER_URL", "")
         or _default("http://kagent-controller.kagent-system.svc.cluster.local:8083"),
     )
-    snapshot.sandboxes = await probe_sandbox_storage(
-        getattr(request.app.state, "sandbox_service", None)
-    )
+    snapshot.sandboxes = await probe_sandbox_storage(getattr(request.app.state, "sandbox_service", None))
     return to_dict(snapshot)
 
 
