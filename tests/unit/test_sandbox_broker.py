@@ -15,8 +15,10 @@ from devai.sandbox.broker import MAX_GRANT_TTL_S, BrokerError, CredentialBroker
 from devai.sandbox.models import AgentRef, ModelRef, SandboxRecord, SandboxSpec, SandboxStatus
 
 
-def _record(sandbox_id: str = "sb1", *, ttl_seconds: int = 3600) -> SandboxRecord:
+def _record(sandbox_id: str = "sb1", *, ttl_seconds: int = 3600, scopes: list[str] | None = None) -> SandboxRecord:
     now = datetime.now(UTC)
+    if scopes is None:
+        scopes = ["tesserix/devai", "r", "a", "b"]
     return SandboxRecord(
         id=sandbox_id,
         owner="dev@example.com",
@@ -24,6 +26,7 @@ def _record(sandbox_id: str = "sb1", *, ttl_seconds: int = 3600) -> SandboxRecor
             agent=AgentRef(name="reviewer", version="1"),
             model=ModelRef(provider="anthropic", model="claude-sonnet-5"),
             ttl_seconds=ttl_seconds,
+            allow_scopes=scopes,
         ),
         status=SandboxStatus.READY,
         created_at=now,
@@ -312,3 +315,22 @@ async def test_destroying_a_sandbox_revokes_its_credentials():
     await SandboxProvisioner(_FakeRuntime(), _FakeStore(), broker=broker).teardown(_record("sb1"))
 
     assert broker.grants("sb1") == []
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_cannot_ask_for_a_scope_it_was_not_created_with():
+    """The agent chooses the arguments, so the scope has to be bounded by the spec."""
+    source = _FakeSource()
+    record = _record()
+    with pytest.raises(BrokerError, match="attacker/exfil"):
+        await _broker(source).grant(record, kind="scm", scope="attacker/exfil")
+    assert source.minted == []
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_with_no_declared_scope_can_obtain_nothing():
+    source = _FakeSource()
+    record = _record(scopes=[])
+    with pytest.raises(BrokerError):
+        await _broker(source).grant(record, kind="scm", scope="tesserix/devai")
+    assert source.minted == []

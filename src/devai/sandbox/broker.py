@@ -82,6 +82,11 @@ class CredentialBroker:
         scope: str,
         ttl_seconds: int = MAX_GRANT_TTL_S,
     ) -> tuple[Grant, str]:
+        if scope not in record.spec.allow_scopes:
+            raise BrokerError(
+                f"sandbox {record.id} was not created with access to {scope!r}; "
+                "a run can only be granted a scope its spec declares"
+            )
         source = self._sources.get(kind)
         if source is None:
             raise BrokerError(f"no credential source for {kind!r}; this sandbox has no {kind} credential")
