@@ -12,7 +12,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import ValidationError
 
 from devai.identity import Principal, extract_principal
@@ -202,6 +202,39 @@ async def _sandbox_or_404(request: Request, sandbox_id: str) -> SandboxRecord:
     if record is None:
         raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
     return record
+
+
+# Previewed markup is written by the agent, and it is served from the API's own
+# origin — `sandbox` drops it into an opaque origin so it cannot script the
+# dashboard or read its session.
+_PREVIEW_HEADERS = {
+    "Content-Security-Policy": "sandbox allow-forms allow-popups; default-src 'self' 'unsafe-inline' data:",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Cache-Control": "no-store",
+}
+
+
+@router.get("/{sandbox_id}/preview")
+async def preview_ports(request: Request, sandbox_id: str) -> dict[str, Any]:
+    record = await _sandbox_or_404(request, sandbox_id)
+    client = await _workspace_client(request, record)
+    return {"ports": await client.preview_ports()}
+
+
+@router.get("/{sandbox_id}/preview/{port}/{path:path}")
+async def preview(request: Request, sandbox_id: str, port: int, path: str = "") -> Response:
+    """Serve what the run is hosting, through the same ownership check as its files."""
+    record = await _sandbox_or_404(request, sandbox_id)
+    client = await _workspace_client(request, record)
+    await _service(request).touch(sandbox_id)
+    result = await client.preview_fetch(port, path)
+    return Response(
+        content=str(result.get("body", "")),
+        status_code=int(result.get("status", 200)),
+        media_type=str(result.get("content_type") or "text/plain"),
+        headers=_PREVIEW_HEADERS,
+    )
 
 
 @router.post("/{sandbox_id}/shell")
