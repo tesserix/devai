@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -129,6 +130,9 @@ class AgentRunner:
         # build the real one with this run's rich tool context.
         dispatcher = (self.deps.extra or {}).get("tool_dispatcher")
         if dispatcher is None:
+            # In a sandbox pod the env carries the pinned tool modes; outside
+            # one `from_env` returns None and dispatch is unchanged.
+            from devai.sandbox.gateway import ToolGateway
             from devai.tools.dispatch import ToolDispatcher
 
             dispatcher = ToolDispatcher(
@@ -136,6 +140,7 @@ class AgentRunner:
                 dry_run=getattr(task, "dry_run", False),
                 triggered_by=task.triggered_by or "",
                 tool_context=ctx,
+                gateway=ToolGateway.from_env(os.environ),
             )
         tools = dispatcher.build_tool_specs(list(spec.allowed_tools))
 

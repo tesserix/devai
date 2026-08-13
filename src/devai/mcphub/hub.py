@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
@@ -36,6 +37,7 @@ from devai.mcphub.model import (
 )
 from devai.mcphub.personal import PersonalLegs
 from devai.mcphub.profile import BudgetResult, ToolProfile, select
+from devai.sandbox.gateway import ToolGateway, guard_mcp_call
 
 if TYPE_CHECKING:
     from devai.registry.client import RegistryClient
@@ -78,6 +80,9 @@ class MCPHub:
         # Reverse path: set by the server to emit a single tools/list_changed to
         # clients when the aggregate changes (registry/cache change, leg drop).
         self.on_changed: Callable[[], Awaitable[None]] | None = None
+
+        # None outside a sandbox — the hub then behaves exactly as before.
+        self._gateway = ToolGateway.from_env(os.environ)
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -276,6 +281,13 @@ class MCPHub:
         return list(self._resources.values())
 
     async def call_tool(self, name: str, arguments: dict[str, Any], *, email: str = "") -> Any:
+        # In a sandbox every MCP tool obeys the same policy as a built-in one:
+        # an unclassified downstream tool may well be `refund_customer`.
+        return await guard_mcp_call(
+            self._gateway, name, arguments or {}, lambda: self._call_downstream(name, arguments, email=email)
+        )
+
+    async def _call_downstream(self, name: str, arguments: dict[str, Any], *, email: str = "") -> Any:
         # A personal-leg tool (usr-…__…) routes to the caller's OWN server —
         # only ever resolvable with the caller's email, so isolation holds.
         if self.personal.owns(name):
