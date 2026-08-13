@@ -37,6 +37,7 @@ from devai.mcphub.model import (
 )
 from devai.mcphub.personal import PersonalLegs
 from devai.mcphub.profile import BudgetResult, ToolProfile, select
+from devai.mcphub.sandbox_leg import WorkspaceLeg
 from devai.sandbox.gateway import ToolGateway, guard_mcp_call
 
 if TYPE_CHECKING:
@@ -84,6 +85,11 @@ class MCPHub:
         # None outside a sandbox — the hub then behaves exactly as before.
         self._gateway = ToolGateway.from_env(os.environ)
 
+        # The workspace of the sandbox this process runs in, federated like any
+        # other leg. Resolved from the pod's own env, so a sandbox's tools are
+        # never reachable from outside it.
+        self.sandbox = WorkspaceLeg.from_env(os.environ)
+
     # -- lifecycle ----------------------------------------------------------
 
     async def refresh(self) -> None:
@@ -111,6 +117,9 @@ class MCPHub:
 
             catalog = self._registry_tool_catalog()
             await self._rebuild_aggregate(catalog)
+            if self.sandbox is not None:
+                # A reaped sandbox must leave no stale tools in the aggregate.
+                await self.sandbox.probe()
 
         if self.on_changed is not None:
             with suppress(Exception):
@@ -242,7 +251,10 @@ class MCPHub:
 
     def list_tools(self, profile: ToolProfile | None = None) -> BudgetResult:
         """Return the caller's budgeted, namespaced tool surface (§6.5)."""
-        return select(list(self._tools.values()), profile or ToolProfile.default())
+        surface = list(self._tools.values())
+        if self.sandbox is not None:
+            surface += self.sandbox.tools()
+        return select(surface, profile or ToolProfile.default())
 
     async def list_tools_for(self, email: str, profile: ToolProfile | None = None) -> BudgetResult:
         """The shared budgeted surface PLUS the caller's own MCP servers' tools.
@@ -290,6 +302,8 @@ class MCPHub:
     async def _call_downstream(self, name: str, arguments: dict[str, Any], *, email: str = "") -> Any:
         # A personal-leg tool (usr-…__…) routes to the caller's OWN server —
         # only ever resolvable with the caller's email, so isolation holds.
+        if self.sandbox is not None and self.sandbox.owns(name):
+            return await self.sandbox.call(name, arguments or {})
         if self.personal.owns(name):
             if not email:
                 raise DownstreamError(f"mcphub: {name!r} is a personal MCP tool but the call carries no identity")

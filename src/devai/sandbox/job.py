@@ -130,6 +130,28 @@ def _rescope_secrets(env: list[dict[str, Any]], sandbox_id: str) -> list[dict[st
     return out
 
 
+def _workspace_env(record: SandboxRecord) -> list[dict[str, Any]]:
+    """Where this sandbox's own workspace is, for the MCP leg to federate.
+
+    Absent for a sandbox without a workspace, so the leg resolves to nothing
+    rather than to tools that fail on first call.
+    """
+    import os
+
+    from devai.sandbox.workspace import workspace_service_host
+
+    if not record.spec.workspace:
+        return []
+    namespace = os.environ.get("DEVAI_NAMESPACE") or "devai"
+    return [
+        {"name": "DEVAI_SANDBOX_WORKSPACE", "value": workspace_service_host(record.id, namespace=namespace)},
+        {
+            "name": "DEVAI_SANDBOX_WORKSPACE_TOKEN",
+            "valueFrom": {"secretKeyRef": {"name": f"devai-sandbox-ws-{record.id}", "key": "token"}},
+        },
+    ]
+
+
 def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
     """The spec, flattened into env so the pod cannot resolve it differently."""
     from devai.sandbox.egress import proxy_env  # local: egress reads SANDBOX_LABEL from here
@@ -165,6 +187,7 @@ def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
             },
         }
     )
+    env.extend(_workspace_env(record))
     return env
 
 
