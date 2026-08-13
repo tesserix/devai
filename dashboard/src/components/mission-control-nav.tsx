@@ -70,6 +70,7 @@ const WORK: NavItem[] = [
   { href: "/", label: "Live run", Icon: Boxes, description: "Watch the current run, stage by stage" },
   { href: "/runs", label: "Run history", Icon: ListChecks, description: "Every run, past and present" },
   { href: "/board", label: "Task board", Icon: FolderKanban, description: "Your GitHub issues as a Kanban" },
+  { href: "/sandboxes", label: "Sandboxes", Icon: PackageOpen, description: "The workspace a run happened in — its diff and what it built" },
 ];
 
 // 3. BUILDING BLOCKS — the shared registry, one page per artifact kind.

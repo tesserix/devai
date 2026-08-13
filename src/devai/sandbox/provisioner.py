@@ -75,9 +75,26 @@ class SandboxProvisioner:
         # The token lives in the Secret and nowhere else — not in the sandbox row,
         # which is read by the dashboard and the audit log.
         token = secrets.token_urlsafe(32)
+        git_token = await self._clone_token(record)
         for manifest in build_workspace_manifests(record, namespace=namespace, token=token):
+            if git_token and manifest["kind"] == "Secret":
+                manifest["stringData"]["git_token"] = git_token
             await self._runtime.apply_manifest(manifest)
         return {"workspace": {"endpoint": workspace_service_host(record.id, namespace=namespace)}}
+
+    async def _clone_token(self, record: SandboxRecord) -> str:
+        """The seed's credential, minted through the broker like any other.
+
+        A repo the sandbox may not reach raises, which fails provisioning —
+        starting from an empty tree would silently measure something else.
+        """
+        repo = record.spec.repo
+        if repo is None:
+            return ""
+        if self._broker is None:
+            raise RuntimeError(f"sandbox {record.id} pins a repo but no credential broker is configured")
+        _, secret = await self._broker.grant(record, kind="scm", scope=repo.scope)
+        return str(secret)
 
     async def teardown(self, record: SandboxRecord) -> SandboxRecord:
         await self._set(record, SandboxStatus.DESTROYING)
