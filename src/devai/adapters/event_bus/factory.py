@@ -46,6 +46,7 @@ def _build_nats(settings: Any) -> EventBusAdapter:
         raise AdapterNotConfigured("nats event-bus adapter requires DEVAI_NATS_URL")
     return NatsEventBusAdapter(
         url=url,
+        creds=getattr(settings, "nats_creds", "") or "",
         default_stream=getattr(settings, "nats_stream", "DEVAI"),
         default_max_deliver=getattr(settings, "nats_max_deliver", 3),
         default_ack_wait_seconds=getattr(settings, "nats_ack_wait", 300),

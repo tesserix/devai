@@ -27,11 +27,11 @@ dependencies = [
     # (adapters/telemetry/otel.py) when DEVAI_TELEMETRY_PROVIDER=otel. Shipped
     # in the image so turning telemetry on is one env var, no custom build. The
     # adapter lazy-imports it and degrades to Noop if it's ever absent.
-    "opentelemetry-exporter-otlp-proto-http>=1.29.0",
-    "python-ulid>=3.2.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "python-ulid>=4.0.1",
     "rich>=15.0.0",
     "playwright>=1.49.0",
-    "cryptography>=49.0.0",
+    "cryptography>=50.0.0",
     "PyJWT>=2.10.0",
     # PostgreSQL
     "asyncpg>=0.30.0",
@@ -90,7 +90,7 @@ dependencies = [
 
 [project.optional-dependencies]
 docs = [
-    "pypdf>=5.0.0",
+    "pypdf>=6.15.0",
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0",
 ]

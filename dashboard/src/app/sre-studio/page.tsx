@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type SREDraft, type SREDryRunPreview } from "@/lib/api";
 import { useConfirm } from "@/components/confirm-dialog";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 const BLUEPRINT_TEMPLATE = `name: my-sre-sweep
 description: >-
@@ -348,7 +349,8 @@ export default function SREStudioPage() {
             </header>
 
             <div className="border-b px-6 shrink-0" style={{ borderColor: "var(--border-subtle)" }}>
-              <div className="flex gap-0 -mb-px">
+              <div className="flex items-center gap-0 -mb-px">
+                <GuidanceInfo id="sre-studio" className="order-last ml-auto mr-1" />
                 {([
                   { key: "editor", label: "Editor" },
                   { key: "dryrun", label: "Dry-run results" },
@@ -368,7 +370,8 @@ export default function SREStudioPage() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <GuidancePanel id="sre-studio" />
               {tab === "editor" ? (
                 <textarea
                   value={yamlText}

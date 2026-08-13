@@ -30,6 +30,7 @@ import {
 } from "@/lib/api";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Donut, HBarChart, LineChart } from "@/components/charts";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 const DAY_OPTIONS = [7, 30, 90];
 
@@ -142,6 +143,7 @@ export default function AnalyticsPage() {
             style={{ color: "var(--ink-strong)" }}
           >
             <BarChart3 className="w-5 h-5" style={{ color: "var(--accent)" }} /> Analytics
+            <GuidanceInfo id="analytics" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
             Pipeline runs, per-agent and LLM token/cost rollups, and live telemetry health. Run stats come from the
@@ -161,6 +163,8 @@ export default function AnalyticsPage() {
           </button>
         </div>
       </header>
+
+      <GuidancePanel id="analytics" />
 
       {/* Tab bar — one concern per view */}
       <div className="seg" role="tablist" aria-label="Analytics sections" style={{ width: "fit-content" }}>
