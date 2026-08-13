@@ -7,7 +7,7 @@ import { AlertTriangle, Check, GitBranch, Loader2, Play, Plus, Trash2, Users } f
 
 import { api, type RegistryItem } from "@/lib/api";
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { GuidancePanel, HelpPopover } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 import {
   blueprintFromGraph,
   validateConditionKeys,
@@ -166,6 +166,7 @@ export default function NewWorkflowPage() {
           style={{ color: "var(--ink-strong)" }}
         >
           <GitBranch className="w-5 h-5" style={{ color: "var(--accent)" }} /> Build blueprint
+          <GuidanceInfo id="builder" className="ml-0.5 align-middle" />
         </h1>
         <p className="text-sm mt-1 max-w-2xl" style={{ color: "var(--ink-soft)" }}>
           Compose a DAG of stages, wire their dependencies, and publish. Agentic stages run a single
