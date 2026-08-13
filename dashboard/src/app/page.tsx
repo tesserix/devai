@@ -14,7 +14,7 @@ import { TriggerDialog } from "@/components/trigger-dialog";
 import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
 import { useToast } from "@/components/toast";
-import { HelpPopover } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 
 type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "events" | "chat" | "config";
 
@@ -216,10 +216,10 @@ export default function DashboardPage() {
           ) : runs.length === 0 ? (
             <div className="text-center py-12 px-3">
               <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
-                No pipeline runs yet
+                No runs yet
               </p>
               <p className="text-xs mt-1" style={{ color: "var(--ink-muted)" }}>
-                Trigger a run from the CLI or webhook
+                Use the button above to start your first one.
               </p>
             </div>
           ) : (
@@ -323,14 +323,14 @@ export default function DashboardPage() {
               className="border-b px-6 shrink-0"
               style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
             >
-              <div className="flex gap-0 -mb-px">
+              <div className="flex items-center gap-0 -mb-px">
                 {([
                   { key: "overview", label: "Overview" },
-                  { key: "hierarchy", label: "Agent Hierarchy" },
+                  { key: "hierarchy", label: "Who does what" },
                   { key: "agents", label: "Agents" },
-                  { key: "a2a", label: "A2A Messages" },
-                  { key: "events", label: "Events" },
-                  { key: "chat", label: "Chat" },
+                  { key: "a2a", label: "Agent messages" },
+                  { key: "events", label: "Timeline" },
+                  { key: "chat", label: "Ask DevAI" },
                   { key: "config", label: "Config" },
                 ] as const).map((t) => {
                   const isActive = tab === t.key;
@@ -348,10 +348,12 @@ export default function DashboardPage() {
                     </button>
                   );
                 })}
+                <GuidanceInfo id="home" className="ml-auto mr-1" />
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6" style={{ background: "var(--canvas)" }}>
+            <div className="flex-1 overflow-y-auto p-6 space-y-6" style={{ background: "var(--canvas)" }}>
+              <GuidancePanel id="home" />
               {tab === "overview" && (
                 <OverviewTab
                   run={{ ...selectedRun, agents: displayAgents }}
@@ -374,45 +376,50 @@ export default function DashboardPage() {
             </div>
           </>
         ) : (
-          // Empty state — shown when no run is selected. Editorial
-          // treatment: paper-backed icon well, serif headline, sober
-          // ink primary button. Aligns with the mark8ly admin look —
-          // an admin tool that doesn't shout.
-          <div className="flex-1 flex items-center justify-center" style={{ background: "var(--canvas)" }}>
-            <div className="text-center max-w-md px-6">
-              <div
-                className="w-14 h-14 rounded-lg flex items-center justify-center mx-auto mb-5"
-                style={{
-                  background: "var(--surface)",
-                  border: "1px solid var(--border-subtle)",
-                  boxShadow: "var(--shadow-card)",
-                }}
-              >
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ color: "var(--ink-strong)" }}
-                >
-                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                  <path d="M2 17l10 5 10-5" />
-                  <path d="M2 12l10 5 10-5" />
-                </svg>
-              </div>
-              <h2 className="font-serif text-xl font-medium tracking-tight" style={{ color: "var(--ink-strong)" }}>
-                DevAI Multi-Agent Platform
+          // Empty state — the first thing a new user sees, so it teaches the
+          // happy path rather than naming internal components. The old copy
+          // ("Supervisor → Orchestrator → Specialist Agents") meant nothing to
+          // anyone who had not read the architecture docs.
+          <div className="flex-1 overflow-y-auto flex items-center justify-center p-6" style={{ background: "var(--canvas)" }}>
+            <div className="max-w-lg w-full">
+              <h2 className="font-serif text-xl font-medium tracking-tight text-center" style={{ color: "var(--ink-strong)" }}>
+                Let&rsquo;s get your first run going
               </h2>
-              <p className="text-sm mt-2 leading-relaxed" style={{ color: "var(--ink-soft)" }}>
-                Supervisor &rarr; Orchestrator &rarr; Specialist Agents. AI-powered Application Lifecycle Management.
+              <p className="text-sm mt-2 leading-relaxed text-center" style={{ color: "var(--ink-soft)" }}>
+                DevAI takes a task you describe and does the work in your repository — writing the
+                code, reviewing it, testing it and opening the pull request.
               </p>
-              <button onClick={() => setTriggerOpen(true)} className="btn-primary mt-6">
-                Start new pipeline
-              </button>
+
+              <ol className="mt-7 space-y-3">
+                <GettingStartedStep
+                  n={1}
+                  title="Connect a repository"
+                  body="DevAI can only work on repos you've onboarded. This opens a small pull request against the repo."
+                  href="/repos"
+                  cta="Go to Repositories"
+                />
+                <GettingStartedStep
+                  n={2}
+                  title="Choose what should happen"
+                  body="Pick a ready-made workflow — build a feature, review a PR, run a security scan — or describe the job in your own words."
+                  href="/workflows"
+                  cta="Browse workflows"
+                />
+                <GettingStartedStep
+                  n={3}
+                  title="Watch it work"
+                  body="Come back to this page. You'll see each step light up as it runs, and you can step in whenever a decision needs you."
+                />
+              </ol>
+
+              <div className="mt-7 flex items-center justify-center gap-3">
+                <button onClick={() => setTriggerOpen(true)} className="btn-primary">
+                  Start a run now
+                </button>
+                <Link href="/compose" className="btn-secondary">
+                  Describe a task instead
+                </Link>
+              </div>
             </div>
           </div>
         )}
@@ -424,6 +431,52 @@ export default function DashboardPage() {
         onTrigger={handleTrigger}
       />
     </div>
+  );
+}
+
+function GettingStartedStep({
+  n,
+  title,
+  body,
+  href,
+  cta,
+}: {
+  n: number;
+  title: string;
+  body: string;
+  href?: string;
+  cta?: string;
+}) {
+  return (
+    <li
+      className="panel p-4 flex gap-3.5 items-start"
+      style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
+    >
+      <span
+        className="w-6 h-6 shrink-0 rounded-full inline-flex items-center justify-center text-[11px] font-semibold"
+        style={{ background: "var(--surface-muted)", color: "var(--ink-strong)" }}
+        aria-hidden
+      >
+        {n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <h3 className="text-sm font-medium" style={{ color: "var(--ink-strong)" }}>
+          {title}
+        </h3>
+        <p className="text-[13px] mt-1 leading-relaxed" style={{ color: "var(--ink-soft)" }}>
+          {body}
+        </p>
+        {href && cta && (
+          <Link
+            href={href}
+            className="inline-block mt-2 text-[12px] font-medium underline-offset-2 hover:underline"
+            style={{ color: "var(--accent)" }}
+          >
+            {cta} &rarr;
+          </Link>
+        )}
+      </div>
+    </li>
   );
 }
 
