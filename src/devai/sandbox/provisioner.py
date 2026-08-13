@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from devai.sandbox.egress import build_proxy_manifests, proxy_service_host
 from devai.sandbox.isolation import build_isolation_manifests
+from devai.sandbox.job import build_sandbox_secret
 from devai.sandbox.models import SandboxStatus
 from devai.sandbox.workspace import build_workspace_manifests, workspace_service_host
 
@@ -26,9 +27,10 @@ class _StatusStore(Protocol):
 
 
 class SandboxProvisioner:
-    def __init__(self, runtime: Any, store: _StatusStore) -> None:
+    def __init__(self, runtime: Any, store: _StatusStore, *, broker: Any = None) -> None:
         self._runtime = runtime
         self._store = store
+        self._broker = broker
 
     async def provision(self, record: SandboxRecord) -> SandboxRecord:
         await self._set(record, SandboxStatus.PROVISIONING)
@@ -37,12 +39,22 @@ class SandboxProvisioner:
             await self._runtime.connect()
             for manifest in build_isolation_manifests(record, namespace=namespace):
                 await self._runtime.apply_manifest(manifest)
+            await self._provision_identity(record, namespace)
             detail = await self._provision_egress(record, namespace)
             detail.update(await self._provision_workspace(record, namespace) or {})
         except Exception as e:  # noqa: BLE001 — a cluster failure is a sandbox outcome, not a crash
             logger.warning("sandbox %s: provisioning failed", record.id, exc_info=True)
             return await self._set(record, SandboxStatus.FAILED, {"error": str(e)})
         return await self._set(record, SandboxStatus.READY, detail)
+
+    async def _provision_identity(self, record: SandboxRecord, namespace: str) -> None:
+        """The sandbox's own Secret: how it proves to the broker that it is itself.
+
+        This is the same Secret every rescoped ``secretKeyRef`` points at, so a
+        sandbox that is given a credential and one that is given none differ
+        only in the Secret's contents.
+        """
+        await self._runtime.apply_manifest(build_sandbox_secret(record, namespace=namespace))
 
     async def _provision_egress(self, record: SandboxRecord, namespace: str) -> dict[str, Any]:
         """Every sandbox gets one — the NetworkPolicy leaves no other way out."""
@@ -68,7 +80,10 @@ class SandboxProvisioner:
     async def teardown(self, record: SandboxRecord) -> SandboxRecord:
         await self._set(record, SandboxStatus.DESTROYING)
         namespace = getattr(getattr(self._runtime, "config", None), "namespace", "devai")
+        if self._broker is not None:
+            await self._broker.revoke_all(record.id)
         manifests = build_isolation_manifests(record, namespace=namespace)
+        manifests += [build_sandbox_secret(record, namespace=namespace, token="-")]
         manifests += build_proxy_manifests(record, namespace=namespace)
         if record.spec.workspace:
             # Deleting needs the kinds and names only, so no token is minted here.

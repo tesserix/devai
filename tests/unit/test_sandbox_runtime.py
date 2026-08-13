@@ -322,8 +322,9 @@ async def test_provisioning_walks_pending_to_ready() -> None:
 
     assert store.statuses == ["provisioning", "ready"]
     assert record.status is SandboxStatus.READY
-    # quota, limits, egress policy, then the proxy's configmap/pod/service
-    assert len(runtime.created) == 6
+    # quota, limits, egress policy, the sandbox's own Secret, then the proxy's
+    # configmap/pod/service
+    assert len(runtime.created) == 7
 
 
 @pytest.mark.asyncio
@@ -352,6 +353,7 @@ async def test_teardown_removes_every_isolation_object() -> None:
         "ConfigMap",
         "Pod",
         "Service",
+        "Secret",
     }
     assert store.statuses[-1] == "destroyed"
 

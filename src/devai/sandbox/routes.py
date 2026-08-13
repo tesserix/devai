@@ -7,14 +7,17 @@ anonymous sandboxes never cross-read one another.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import ValidationError
 
 from devai.identity import Principal, extract_principal
+from devai.sandbox.broker import BrokerError, CredentialBroker
+from devai.sandbox.job import sandbox_secret_name
 from devai.sandbox.models import SandboxRecord, SandboxSpec
 from devai.sandbox.service import SandboxError
 from devai.sandbox.workspace_client import WorkspaceClient
@@ -120,6 +123,58 @@ async def destroy_sandbox(request: Request, sandbox_id: str) -> dict[str, Any]:
     except SandboxError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return {"destroyed": sandbox_id}
+
+
+SANDBOX_TOKEN_HEADER = "X-DevAI-Sandbox-Token"
+
+
+async def _authorize_sandbox_token(runtime: Any, sandbox_id: str, supplied: str | None) -> None:
+    """Let a sandbox speak for itself, using the token only it can read."""
+    try:
+        expected = await runtime.read_secret_key(sandbox_secret_name(sandbox_id), "capability_token")
+    except Exception as e:  # noqa: BLE001 — no Secret means nothing can authenticate as this sandbox
+        raise HTTPException(status_code=401, detail="sandbox token not recognised") from e
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="sandbox token not recognised")
+
+
+def _broker(request: Request) -> CredentialBroker:
+    broker: CredentialBroker | None = getattr(request.app.state, "credential_broker", None)
+    if broker is None:
+        raise HTTPException(status_code=503, detail="no credential broker configured")
+    return broker
+
+
+@router.post("/{sandbox_id}/credentials")
+async def mint_credential(
+    request: Request,
+    sandbox_id: str,
+    body: dict[str, Any],
+    x_devai_sandbox_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Hand a sandbox the narrowest credential that satisfies its request."""
+    runtime = getattr(getattr(request.app.state, "pipeline_service", None), "k8s_runtime", None)
+    if x_devai_sandbox_token and runtime is not None:
+        await _authorize_sandbox_token(runtime, sandbox_id, x_devai_sandbox_token)
+        record = await _service(request).get(sandbox_id, owner="", is_admin=True)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
+    else:
+        record = await _sandbox_or_404(request, sandbox_id)
+
+    try:
+        grant, secret = await _broker(request).grant(
+            record, kind=str(body.get("kind", "scm")), scope=str(body.get("scope", ""))
+        )
+    except BrokerError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"grant": grant.model_dump(mode="json"), "value": secret}
+
+
+@router.get("/{sandbox_id}/credentials")
+async def list_grants(request: Request, sandbox_id: str) -> list[dict[str, Any]]:
+    await _sandbox_or_404(request, sandbox_id)
+    return [g.model_dump(mode="json") for g in _broker(request).grants(sandbox_id)]
 
 
 async def _workspace_client(request: Request, record: SandboxRecord) -> WorkspaceClient:
