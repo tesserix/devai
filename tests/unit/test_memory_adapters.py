@@ -1032,7 +1032,9 @@ class _FakeQdrant:
             hits = [p for p in self.points.values() if _matches(p["payload"], body.get("filter"))]
             return httpx.Response(
                 200,
-                json={"result": [{"id": p["id"], "score": 0.9, "payload": p["payload"]} for p in hits][: body["limit"]]},
+                json={
+                    "result": [{"id": p["id"], "score": 0.9, "payload": p["payload"]} for p in hits][: body["limit"]]
+                },
             )
         if path == f"/collections/{name}/points/delete":
             for pid in body["points"]:
