@@ -154,6 +154,11 @@ const nextConfig: NextConfig = {
         source: "/api/runs/:path*",
         destination: `${API_INTERNAL_URL}/api/runs/:path*`,
       },
+      // Sandboxes — workspace files, preview and the takeover editor proxy.
+      {
+        source: "/api/sandboxes/:path*",
+        destination: `${API_INTERNAL_URL}/api/sandboxes/:path*`,
+      },
       // Legacy catch-all — original dashboard endpoints sit under
       // /dashboard/api/* on devai-api. Keep this last so it doesn't
       // shadow the more-specific rewrites above.

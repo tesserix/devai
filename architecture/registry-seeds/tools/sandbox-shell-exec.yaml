@@ -1,0 +1,33 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-shell-exec
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: high
+  annotations:
+    mcp.devai.io/wire-name: shell_exec
+spec:
+  displayName: Shell Exec
+  description: Run a shell command in the sandbox workspace and return its output
+    and exit code.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      command:
+        type: string
+      timeout:
+        type: number
+    required:
+    - command
+  tags:
+  - sandbox
+  - mcp-tool
+  - workspace

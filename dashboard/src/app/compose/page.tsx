@@ -18,7 +18,7 @@ import { TerminalPanel } from "@/components/terminal-panel";
 import { CheckpointTimeline, type Checkpoint } from "@/components/checkpoint-timeline";
 import { BlueprintPicker } from "@/components/blueprint-picker";
 import { RepoPicker } from "@/components/repo-picker";
-import { HelpPopover } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 import { RunStateBadge, normalizeRunState, type RunState } from "@/components/run-state-badge";
 
 /**
@@ -300,11 +300,14 @@ function ComposeInner() {
         >
           Compose
           <HelpPopover term="run" />
+          <GuidanceInfo id="compose" className="ml-0.5 align-middle" />
         </h1>
         <p className="text-sm" style={{ color: "var(--ink-muted)" }}>
           Point a crew at a task — @-mention files, pick a blueprint, watch it build.
         </p>
       </header>
+
+      <GuidancePanel id="compose" />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
         {/* Composer card */}
