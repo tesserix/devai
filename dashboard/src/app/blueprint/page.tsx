@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { GuidancePanel } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 type Blueprint = {
   name: string;
@@ -87,6 +87,7 @@ export default function BlueprintPage() {
           >
             <Layers className="w-5 h-5" style={{ color: "var(--accent)" }} />
             Blueprints
+            <GuidanceInfo id="blueprints" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1 max-w-2xl" style={{ color: "var(--ink-soft)" }}>
             The read-only catalog of runnable DAGs — each blueprint composes deterministic and agentic
