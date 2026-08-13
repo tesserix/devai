@@ -1,0 +1,31 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-file-search
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: file_search
+spec:
+  displayName: File Search
+  description: Search the sandbox workspace for a literal string.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      needle: &id001
+        type: string
+      path: *id001
+    required:
+    - needle
+  tags:
+  - sandbox
+  - mcp-tool
+  - workspace
