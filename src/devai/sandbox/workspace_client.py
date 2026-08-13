@@ -46,6 +46,16 @@ class WorkspaceClient:
         ]
         return hits
 
+    async def preview_ports(self) -> builtins.list[int]:
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            resp = await http.get(f"{self._base}/preview/ports", headers={TOKEN_HEADER: self._token})
+        resp.raise_for_status()
+        ports: builtins.list[int] = resp.json()["ports"]
+        return ports
+
+    async def preview_fetch(self, port: int, path: str) -> dict[str, Any]:
+        return await self._post("/preview/fetch", {"port": port, "path": path})
+
     async def exec(self, command: str, *, timeout: float = 120.0) -> dict[str, Any]:
         return await self._post("/shell/exec", {"command": command, "timeout": timeout})
 

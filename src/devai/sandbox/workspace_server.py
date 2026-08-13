@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from devai.sandbox.preview import detect_ports
 from devai.sandbox.workspace import WORKSPACE_PORT, WORKSPACE_ROOT, WorkspaceError, WorkspaceFiles, run_shell
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,11 @@ class _Replace(BaseModel):
 class _Search(BaseModel):
     needle: str
     path: str = "."
+
+
+class _Fetch(BaseModel):
+    port: int
+    path: str = ""
 
 
 class _Command(BaseModel):
@@ -106,6 +112,28 @@ def create_workspace_app(*, root: Path | str = WORKSPACE_ROOT, token: str) -> Fa
         authorize(x_devai_workspace_token)
         guard(lambda: files.delete(body.path))
         return {"path": body.path, "deleted": True}
+
+    @app.get("/preview/ports")
+    async def preview_ports(x_devai_workspace_token: str | None = Header(default=None)) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        return {"ports": detect_ports()}
+
+    @app.post("/preview/fetch")
+    async def preview_fetch(body: _Fetch, x_devai_workspace_token: str | None = Header(default=None)) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        import httpx
+
+        url = f"http://127.0.0.1:{body.port}/{body.path.lstrip('/')}"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                resp = await http.get(url)
+        except Exception as e:  # noqa: BLE001 — an app that isn't up yet is a preview state, not a 500
+            raise HTTPException(status_code=502, detail=f"nothing answered on port {body.port}: {e}") from e
+        return {
+            "status": resp.status_code,
+            "body": resp.text,
+            "content_type": resp.headers.get("content-type", "text/plain"),
+        }
 
     @app.post("/shell/exec")
     async def shell_exec(body: _Command, x_devai_workspace_token: str | None = Header(default=None)) -> dict[str, Any]:
