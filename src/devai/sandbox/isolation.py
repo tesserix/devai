@@ -83,7 +83,7 @@ def build_isolation_manifests(record: SandboxRecord, *, namespace: str) -> list[
             "podSelector": _selector(sid),
             "policyTypes": ["Egress", "Ingress"],
             "egress": _egress_rules(namespace),
-            "ingress": _ingress_rules(),
+            "ingress": _ingress_rules(sid),
         },
     }
     return [quota, limits, policy]
@@ -104,13 +104,22 @@ def _egress_rules(namespace: str) -> list[dict[str, Any]]:
     ]
 
 
-def _ingress_rules() -> list[dict[str, Any]]:
-    """Only the control plane may reach a sandbox's pods.
+def _ingress_rules(sandbox_id: str) -> list[dict[str, Any]]:
+    """The control plane, and this sandbox's own pods. Nothing else.
 
     Sandboxes share a namespace, so without this one sandbox could talk to
     another's workspace — including its IDE, which trusts whoever reaches it.
+    The second rule is what keeps a run's own runner able to reach the
+    workspace it was given.
     """
-    return [{"from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}}}]}]
+    return [
+        {
+            "from": [
+                {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}}},
+                {"podSelector": {"matchLabels": {SANDBOX_LABEL: sandbox_id}}},
+            ]
+        }
+    ]
 
 
 __all__ = ["build_isolation_manifests"]

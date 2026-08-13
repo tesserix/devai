@@ -73,8 +73,12 @@ def test_no_other_sandbox_can_reach_this_one() -> None:
 
     assert "Ingress" in policy["spec"]["policyTypes"]
     allowed = policy["spec"]["ingress"][0]["from"]
+
     assert {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}}} in allowed
-    assert all(SANDBOX_LABEL not in str(rule) for rule in allowed)
+    # This sandbox's own pods still reach its workspace; every rule that names
+    # a sandbox names *this* one, so another sandbox matches nothing.
+    assert {"podSelector": {"matchLabels": {SANDBOX_LABEL: "sb-1"}}} in allowed
+    assert all(rule["podSelector"]["matchLabels"].get(SANDBOX_LABEL, "sb-1") == "sb-1" for rule in allowed)
 
 
 # ── the API in front of it ────────────────────────────────────────────
