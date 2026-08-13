@@ -35,6 +35,7 @@ import {
   type SLOReport,
 } from "@/lib/api";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 type Tab = "live" | "slo" | "archive";
 
@@ -79,6 +80,7 @@ export default function LogsPage() {
             style={{ color: "var(--ink-strong)" }}
           >
             <ScrollText className="w-5 h-5" style={{ color: "var(--accent)" }} /> Logging &amp; SLOs
+            <GuidanceInfo id="logs" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
             Live service logs, SLA/SLO scorecards against configured targets, and the GCS log archive with its
@@ -97,6 +99,8 @@ export default function LogsPage() {
           </button>
         </div>
       </header>
+
+      <GuidancePanel id="logs" />
 
       {tab === "live" && <LiveLogs />}
       {tab === "slo" && <SLOView />}
