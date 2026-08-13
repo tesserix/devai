@@ -11,12 +11,14 @@ import hmac
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSocket
 from pydantic import ValidationError
 
 from devai.identity import Principal, extract_principal
 from devai.sandbox.broker import BrokerError, CredentialBroker
+from devai.sandbox.ide_proxy import proxy_ide_request, proxy_ide_socket
 from devai.sandbox.job import sandbox_secret_name
 from devai.sandbox.models import SandboxRecord, SandboxSpec
 from devai.sandbox.service import SandboxError
@@ -202,6 +204,90 @@ async def _sandbox_or_404(request: Request, sandbox_id: str) -> SandboxRecord:
     if record is None:
         raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
     return record
+
+
+# Previewed markup is written by the agent, and it is served from the API's own
+# origin — `sandbox` drops it into an opaque origin so it cannot script the
+# dashboard or read its session.
+_PREVIEW_HEADERS = {
+    "Content-Security-Policy": "sandbox allow-forms allow-popups; default-src 'self' 'unsafe-inline' data:",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Cache-Control": "no-store",
+}
+
+
+@router.get("/{sandbox_id}/preview")
+async def preview_ports(request: Request, sandbox_id: str) -> dict[str, Any]:
+    record = await _sandbox_or_404(request, sandbox_id)
+    client = await _workspace_client(request, record)
+    return {"ports": await client.preview_ports()}
+
+
+@router.get("/{sandbox_id}/preview/{port}/{path:path}")
+async def preview(request: Request, sandbox_id: str, port: int, path: str = "") -> Response:
+    """Serve what the run is hosting, through the same ownership check as its files."""
+    record = await _sandbox_or_404(request, sandbox_id)
+    client = await _workspace_client(request, record)
+    await _service(request).touch(sandbox_id)
+    result = await client.preview_fetch(port, path)
+    return Response(
+        content=str(result.get("body", "")),
+        status_code=int(result.get("status", 200)),
+        media_type=str(result.get("content_type") or "text/plain"),
+        headers=_PREVIEW_HEADERS,
+    )
+
+
+def _ide_endpoint(record: SandboxRecord) -> str:
+    if not record.spec.ide:
+        raise HTTPException(status_code=409, detail="this sandbox was not created with an editor")
+    endpoint = (record.detail.get("workspace") or {}).get("endpoint") if record.detail else None
+    if not endpoint:
+        raise HTTPException(status_code=409, detail="this sandbox has no workspace")
+    return str(endpoint)
+
+
+@router.api_route("/{sandbox_id}/ide/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+async def ide(request: Request, sandbox_id: str, path: str = "") -> Response:
+    """Take over the workspace in an editor, behind the sandbox's own ownership check."""
+    record = await _sandbox_or_404(request, sandbox_id)
+    endpoint = _ide_endpoint(record)
+    await _service(request).touch(sandbox_id)
+    return await proxy_ide_request(request, endpoint, path)
+
+
+def _same_origin(websocket: WebSocket) -> bool:
+    """A socket handshake carries the session cookie and no CORS check guards
+    it, so a foreign Origin is another site driving this workspace. An absent
+    Origin is a non-browser client, which has no ambient session to borrow."""
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True
+    host = websocket.headers.get("host", "")
+    return urlsplit(origin).netloc == host
+
+
+@router.websocket("/{sandbox_id}/ide/{path:path}")
+async def ide_ws(websocket: WebSocket, sandbox_id: str, path: str = "") -> None:
+    """The editor's own socket — without it code-server renders and then hangs.
+
+    Ownership is resolved the same way as on the HTTP side; a caller who cannot
+    read the sandbox gets the socket closed rather than a 404 body.
+    """
+    if not _same_origin(websocket):
+        await websocket.close(code=1008)
+        return
+    owner, is_admin = await _read_scope(websocket)  # type: ignore[arg-type]
+    record = await _service(websocket).get(sandbox_id, owner=owner, is_admin=is_admin)  # type: ignore[arg-type]
+    if record is None or not record.spec.ide:
+        await websocket.close(code=1008)
+        return
+    endpoint = (record.detail.get("workspace") or {}).get("endpoint") if record.detail else None
+    if not endpoint:
+        await websocket.close(code=1008)
+        return
+    await proxy_ide_socket(websocket, str(endpoint), path)
 
 
 @router.post("/{sandbox_id}/shell")

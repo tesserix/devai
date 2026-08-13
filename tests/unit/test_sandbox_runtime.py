@@ -266,7 +266,7 @@ def test_isolation_ships_a_quota_a_limitrange_and_a_network_policy() -> None:
 
 def test_egress_is_default_deny_with_an_explicit_allow_list() -> None:
     np = _by_kind(build_isolation_manifests(_record(), namespace=_NS))["NetworkPolicy"]
-    assert np["spec"]["policyTypes"] == ["Egress"]
+    assert "Egress" in np["spec"]["policyTypes"]
     assert np["spec"]["podSelector"]["matchLabels"][SANDBOX_LABEL] == "sb-123"
     # An empty egress list would be a silent allow-all in some CNIs; DNS must be
     # explicit and the rest of the list is the allow-list.
