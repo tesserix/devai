@@ -92,6 +92,9 @@ class SandboxSpec(_Pinned):
     # Hosts this run may reach on top of the platform allowlist, e.g. a private
     # package index. Additions are recorded so "what could it reach" is answerable.
     allow_domains: list[str] = Field(default_factory=list)
+    # Credential scopes (e.g. ``owner/repo``) this run may be granted. The agent
+    # picks its own arguments at runtime, so the bound has to be declared here.
+    allow_scopes: list[str] = Field(default_factory=list)
 
     # `model` shadows pydantic's protected namespace; the field name is part of
     # the published contract, so silence the warning rather than rename it.

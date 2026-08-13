@@ -299,7 +299,8 @@ async def test_the_capability_token_is_never_written_to_the_sandbox_record() -> 
     store = _FakeStore()
     result = await SandboxProvisioner(rt, store).provision(_with_workspace())
 
-    token = next(m for m in rt.applied if m["kind"] == "Secret")["stringData"]["token"]
+    ws = next(m for m in rt.applied if m["metadata"]["name"].startswith("devai-sandbox-ws-") and m["kind"] == "Secret")
+    token = ws["stringData"]["token"]
     assert token not in str(result.detail)
     assert token not in str(store.calls)
 

@@ -80,6 +80,27 @@ def apply_sandbox_boundary(job: dict[str, Any], record: SandboxRecord) -> dict[s
     return job
 
 
+def sandbox_secret_name(sandbox_id: str) -> str:
+    return f"devai-sandbox-{sandbox_id}"
+
+
+def build_sandbox_secret(record: SandboxRecord, *, namespace: str, token: str = "") -> dict[str, Any]:
+    """The sandbox's own Secret — its capability token, and nothing standing."""
+    import secrets as _secrets
+
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": sandbox_secret_name(record.id),
+            "namespace": namespace,
+            "labels": {"app.kubernetes.io/managed-by": "devai", SANDBOX_LABEL: record.id},
+        },
+        "type": "Opaque",
+        "stringData": {"capability_token": token or _secrets.token_urlsafe(32)},
+    }
+
+
 def _rescope_secrets(env: list[dict[str, Any]], sandbox_id: str) -> list[dict[str, Any]]:
     """Repoint every secret reference at the sandbox's own Secret.
 
@@ -99,7 +120,7 @@ def _rescope_secrets(env: list[dict[str, Any]], sandbox_id: str) -> list[dict[st
                 "name": entry["name"],
                 "valueFrom": {
                     "secretKeyRef": {
-                        "name": f"devai-sandbox-{sandbox_id}",
+                        "name": sandbox_secret_name(sandbox_id),
                         "key": ref["key"],
                         "optional": True,
                     }
@@ -136,6 +157,14 @@ def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
     # The only route out: the NetworkPolicy denies the internet, so a tool that
     # ignores these variables fails closed rather than escaping the allowlist.
     env.extend(proxy_env(record.id))
+    env.append(
+        {
+            "name": "DEVAI_SANDBOX_TOKEN",
+            "valueFrom": {
+                "secretKeyRef": {"name": sandbox_secret_name(record.id), "key": "capability_token", "optional": True}
+            },
+        }
+    )
     return env
 
 
@@ -144,5 +173,7 @@ __all__ = [
     "SANDBOX_LABEL",
     "SANDBOX_SERVICE_ACCOUNT",
     "apply_sandbox_boundary",
+    "build_sandbox_secret",
     "sandbox_from_stage_config",
+    "sandbox_secret_name",
 ]
