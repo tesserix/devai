@@ -64,6 +64,14 @@ class DatasetRef(_Pinned):
     version: str = Field(min_length=1)
 
 
+class RepoRef(_Pinned):
+    """The repo the workspace starts as, at a commit that cannot move."""
+
+    url: str = Field(min_length=1)
+    ref: str = Field(min_length=1)
+    scope: str = Field(min_length=1)
+
+
 class ToolPolicy(_Pinned):
     default_mode: ToolMode = ToolMode.MOCK
     overrides: dict[str, ToolMode] = Field(default_factory=dict)
@@ -89,6 +97,8 @@ class SandboxSpec(_Pinned):
     # A place to work — volume, shell and file service. Off by default: an eval
     # run that only needs an answer should not carry a PVC.
     workspace: bool = False
+    # What the workspace starts as. Absent means an empty tree.
+    repo: RepoRef | None = None
     # Hosts this run may reach on top of the platform allowlist, e.g. a private
     # package index. Additions are recorded so "what could it reach" is answerable.
     allow_domains: list[str] = Field(default_factory=list)
@@ -119,6 +129,7 @@ __all__ = [
     "DatasetRef",
     "ModelRef",
     "PromptRef",
+    "RepoRef",
     "SandboxLimits",
     "SandboxRecord",
     "SandboxSpec",

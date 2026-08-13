@@ -201,6 +201,9 @@ def build_workspace_manifests(
             "volumes": [{"name": "workspace", "persistentVolumeClaim": {"claimName": name}}],
         },
     }
+    seed = _seed_container(record, secret_name=name, image=image or _default_image())
+    if seed is not None:
+        pod["spec"]["initContainers"] = [seed]
     service = {
         "apiVersion": "v1",
         "kind": "Service",
@@ -212,6 +215,40 @@ def build_workspace_manifests(
         },
     }
     return [pvc, secret, pod, service]
+
+
+def _seed_container(record: SandboxRecord, *, secret_name: str, image: str) -> dict[str, Any] | None:
+    """Put the repo in the workspace at its pinned ref, leaving no credential behind.
+
+    The token is passed as a per-command header rather than in the remote URL:
+    the agent can read every file under the workspace root, and a URL-embedded
+    token would be sitting in ``.git/config`` for it to find.
+    """
+    repo = record.spec.repo
+    if repo is None:
+        return None
+    script = (
+        'auth="Authorization: Basic $(printf "x-access-token:%s" "$DEVAI_GIT_TOKEN" | base64 | tr -d "\\n")"; '
+        f'git -c http.extraheader="$auth" clone --no-checkout "{repo.url}" "{WORKSPACE_ROOT}/repo" && '
+        f'cd "{WORKSPACE_ROOT}/repo" && '
+        f'git -c http.extraheader="$auth" fetch --depth 1 origin "{repo.ref}" && '
+        "git checkout FETCH_HEAD"
+    )
+    return {
+        "name": "seed",
+        "image": image,
+        "command": ["sh", "-ec"],
+        "args": [script],
+        "env": [
+            {"name": "DEVAI_GIT_TOKEN", "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "git_token"}}},
+        ],
+        "volumeMounts": [{"name": "workspace", "mountPath": WORKSPACE_ROOT}],
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "readOnlyRootFilesystem": False,
+            "capabilities": {"drop": ["ALL"]},
+        },
+    }
 
 
 def _default_image() -> str:
