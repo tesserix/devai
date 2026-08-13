@@ -1,5 +1,5 @@
-# CHART-11: pin python:3.12-slim by digest for reproducible builds.
-FROM python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36 AS builder
+# CHART-11: pin python:3.14-slim by digest for reproducible builds.
+FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS builder
 RUN python -m pip install --no-cache-dir --upgrade pip
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
@@ -26,8 +26,8 @@ RUN pip install --no-cache-dir .
 # silently returned zero findings (a false "clean" verdict).
 RUN pip install --no-cache-dir bandit pip-audit
 
-# CHART-11: pin python:3.12-slim by digest for reproducible builds.
-FROM python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+# CHART-11: pin python:3.14-slim by digest for reproducible builds.
+FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
 RUN python -m pip install --no-cache-dir --upgrade pip
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
