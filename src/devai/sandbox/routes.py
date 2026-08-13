@@ -204,6 +204,17 @@ async def _sandbox_or_404(request: Request, sandbox_id: str) -> SandboxRecord:
     return record
 
 
+# Previewed markup is written by the agent, and it is served from the API's own
+# origin — `sandbox` drops it into an opaque origin so it cannot script the
+# dashboard or read its session.
+_PREVIEW_HEADERS = {
+    "Content-Security-Policy": "sandbox allow-forms allow-popups; default-src 'self' 'unsafe-inline' data:",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Cache-Control": "no-store",
+}
+
+
 @router.get("/{sandbox_id}/preview")
 async def preview_ports(request: Request, sandbox_id: str) -> dict[str, Any]:
     record = await _sandbox_or_404(request, sandbox_id)
@@ -222,6 +233,7 @@ async def preview(request: Request, sandbox_id: str, port: int, path: str = "") 
         content=str(result.get("body", "")),
         status_code=int(result.get("status", 200)),
         media_type=str(result.get("content_type") or "text/plain"),
+        headers=_PREVIEW_HEADERS,
     )
 
 

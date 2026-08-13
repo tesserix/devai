@@ -144,6 +144,15 @@ def test_a_preview_serves_the_app_the_agent_just_built(api: tuple[TestClient, _S
     assert stub.fetched == [(3000, "index.html")]
 
 
+def test_previewed_markup_cannot_act_as_the_dashboard(api: tuple[TestClient, _StubWorkspaceClient]) -> None:
+    """The agent writes this HTML, so it must not run on the API's own origin."""
+    client, _ = api
+    resp = client.get("/api/sandboxes/sb-1/preview/3000/index.html")
+
+    assert "sandbox" in resp.headers["content-security-policy"]
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
 def test_a_preview_of_a_sandbox_you_do_not_own_is_not_found(api: tuple[TestClient, _StubWorkspaceClient]) -> None:
     client, _ = api
     assert client.get("/api/sandboxes/sb-other/preview").status_code == 404
