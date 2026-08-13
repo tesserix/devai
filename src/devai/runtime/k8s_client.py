@@ -274,9 +274,7 @@ class K8sJobRuntime:
 
     async def delete_manifest(self, kind: str, name: str, namespace: str | None = None) -> None:
         api, suffix = self._manifest_api(kind)
-        await getattr(api, f"delete_namespaced_{suffix}")(
-            name=name, namespace=namespace or self._config.namespace
-        )
+        await getattr(api, f"delete_namespaced_{suffix}")(name=name, namespace=namespace or self._config.namespace)
 
     async def get_job(self, name: str) -> Any:
         """Read a Job's current state."""

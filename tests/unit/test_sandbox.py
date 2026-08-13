@@ -249,9 +249,7 @@ async def test_create_rejects_an_agent_that_is_not_published() -> None:
             return False
 
     with pytest.raises(SandboxError, match="code-remediator-agent"):
-        await _service(registry=_Registry()).create(
-            SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com"
-        )
+        await _service(registry=_Registry()).create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
 
 
 @pytest.mark.asyncio
@@ -260,9 +258,7 @@ async def test_unknown_registry_answer_does_not_block_creation() -> None:
         def artifact_exists(self, plural: str, name: str) -> None:
             return None  # registry unreachable — degrade, don't block
 
-    rec = await _service(registry=_Registry()).create(
-        SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com"
-    )
+    rec = await _service(registry=_Registry()).create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
     assert rec.status is SandboxStatus.PENDING
 
 
