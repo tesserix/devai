@@ -244,6 +244,38 @@ class K8sJobRuntime:
         except Exception:  # noqa: BLE001
             logger.exception("k8s runtime: delete_job failed for %s", name)
 
+    # ── Sandbox isolation objects ───────────────────────────────────
+    #
+    # ResourceQuota / LimitRange / NetworkPolicy, created per sandbox and
+    # deleted with it. Nothing else in the app applies these kinds, so the
+    # dispatch table stays small on purpose.
+
+    def _manifest_api(self, kind: str) -> tuple[Any, str]:
+        table = {
+            "ResourceQuota": (self._core_v1, "resource_quota"),
+            "LimitRange": (self._core_v1, "limit_range"),
+            "NetworkPolicy": (self._networking_v1, "network_policy"),
+        }
+        if kind not in table:
+            raise ValueError(f"unsupported manifest kind: {kind}")
+        return table[kind]
+
+    async def apply_manifest(self, manifest: dict[str, Any]) -> None:
+        """Create the object, or patch it if a previous sandbox left one behind."""
+        api, suffix = self._manifest_api(manifest["kind"])
+        ns = manifest["metadata"].get("namespace") or self._config.namespace
+        name = manifest["metadata"]["name"]
+        try:
+            await getattr(api, f"create_namespaced_{suffix}")(namespace=ns, body=manifest)
+        except Exception as e:  # noqa: BLE001
+            if getattr(e, "status", None) != 409:
+                raise
+            await getattr(api, f"patch_namespaced_{suffix}")(name=name, namespace=ns, body=manifest)
+
+    async def delete_manifest(self, kind: str, name: str, namespace: str | None = None) -> None:
+        api, suffix = self._manifest_api(kind)
+        await getattr(api, f"delete_namespaced_{suffix}")(name=name, namespace=namespace or self._config.namespace)
+
     async def get_job(self, name: str) -> Any:
         """Read a Job's current state."""
         return await self._batch_v1.read_namespaced_job(name=name, namespace=self._config.namespace)

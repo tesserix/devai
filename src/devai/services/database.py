@@ -1096,11 +1096,12 @@ class Database:
             rows = await self.pool.fetch("SELECT * FROM sandboxes ORDER BY created_at DESC LIMIT $1", limit)
         return [dict(r) for r in rows]
 
-    async def set_sandbox_status(self, sandbox_id: str, status: str) -> None:
+    async def set_sandbox_status(self, sandbox_id: str, status: str, detail: dict[str, Any] | None = None) -> None:
         await self.pool.execute(
-            "UPDATE sandboxes SET status = $2, updated_at = NOW() WHERE id = $1",
+            "UPDATE sandboxes SET status = $2, detail = COALESCE($3::jsonb, detail), updated_at = NOW() WHERE id = $1",
             sandbox_id,
             status,
+            json.dumps(detail) if detail else None,
         )
 
     async def touch_sandbox(self, sandbox_id: str) -> None:

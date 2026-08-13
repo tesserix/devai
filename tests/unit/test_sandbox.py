@@ -42,9 +42,11 @@ class _FakeDB:
             rows = [r for r in rows if r["owner"] == owner]
         return rows[:limit]
 
-    async def set_sandbox_status(self, sandbox_id: str, status: str) -> None:
+    async def set_sandbox_status(self, sandbox_id: str, status: str, detail: dict[str, Any] | None = None) -> None:
         if sandbox_id in self.rows:
             self.rows[sandbox_id]["status"] = status
+            if detail:
+                self.rows[sandbox_id]["detail"] = detail
 
     async def touch_sandbox(self, sandbox_id: str) -> None:
         self.rows[sandbox_id]["last_access_at"] = datetime.now(UTC)
@@ -175,6 +177,68 @@ async def test_expired_sandboxes_are_reaped() -> None:
     assert await svc.reap_expired() == 0  # already destroyed — not reaped twice
 
 
+# ── provisioning ──────────────────────────────────────────────────────
+
+
+class _FakeProvisioner:
+    def __init__(self) -> None:
+        self.provisioned: list[str] = []
+        self.torn_down: list[str] = []
+
+    async def provision(self, record: Any) -> Any:
+        self.provisioned.append(record.id)
+        return record.model_copy(update={"status": SandboxStatus.READY})
+
+    async def teardown(self, record: Any) -> Any:
+        self.torn_down.append(record.id)
+        return record.model_copy(update={"status": SandboxStatus.DESTROYED})
+
+
+@pytest.mark.asyncio
+async def test_create_provisions_and_returns_a_ready_sandbox() -> None:
+    prov = _FakeProvisioner()
+
+    rec = await _service(provisioner=prov).create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
+
+    assert prov.provisioned == [rec.id]
+    assert rec.status is SandboxStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_destroy_tears_down_the_cluster_objects() -> None:
+    prov = _FakeProvisioner()
+    svc = _service(provisioner=prov)
+    rec = await svc.create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
+
+    await svc.destroy(rec.id, owner="sam@example.com")
+
+    assert prov.torn_down == [rec.id]
+
+
+@pytest.mark.asyncio
+async def test_reaping_tears_down_too_so_nothing_lingers() -> None:
+    db, prov = _FakeDB(), _FakeProvisioner()
+    svc = _service(db, provisioner=prov)
+    rec = await svc.create(SandboxSpec.model_validate({**_MIN_SPEC, "ttl_seconds": 60}), owner="sam@example.com")
+    db.rows[rec.id]["expires_at"] = datetime.now(UTC) - timedelta(seconds=1)
+
+    assert await svc.reap_expired() == 1
+    assert prov.torn_down == [rec.id]
+
+
+@pytest.mark.asyncio
+async def test_a_provisioning_failure_leaves_the_sandbox_readable() -> None:
+    class _Broken:
+        async def provision(self, record: Any) -> Any:
+            raise RuntimeError("cluster unavailable")
+
+    svc = _service(provisioner=_Broken())
+    rec = await svc.create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
+
+    assert rec.status is SandboxStatus.FAILED
+    assert (await svc.get(rec.id, owner="sam@example.com")) is not None
+
+
 # ── reference validation ──────────────────────────────────────────────
 
 
@@ -185,9 +249,7 @@ async def test_create_rejects_an_agent_that_is_not_published() -> None:
             return False
 
     with pytest.raises(SandboxError, match="code-remediator-agent"):
-        await _service(registry=_Registry()).create(
-            SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com"
-        )
+        await _service(registry=_Registry()).create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
 
 
 @pytest.mark.asyncio
@@ -196,9 +258,7 @@ async def test_unknown_registry_answer_does_not_block_creation() -> None:
         def artifact_exists(self, plural: str, name: str) -> None:
             return None  # registry unreachable — degrade, don't block
 
-    rec = await _service(registry=_Registry()).create(
-        SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com"
-    )
+    rec = await _service(registry=_Registry()).create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
     assert rec.status is SandboxStatus.PENDING
 
 

@@ -272,13 +272,21 @@ def create_app(
         # Agent sandboxes — pinned, TTL-bounded agent configurations (#179).
         app.state.sandbox_service = None
         try:
-            from devai.sandbox import SandboxService
+            from devai.sandbox import SandboxProvisioner, SandboxService
 
             if app.state.sre_studio_db is not None:
+                # Reuses the pipeline's connected K8s runtime; without it a
+                # sandbox is still recorded, just never fenced in the cluster.
+                sandbox_runtime = getattr(app.state.pipeline_service, "k8s_runtime", None)
                 app.state.sandbox_service = SandboxService(
                     app.state.sre_studio_db,
                     registry=getattr(app.state, "registry_client", None),
                     settings=config,
+                    provisioner=(
+                        SandboxProvisioner(sandbox_runtime, app.state.sre_studio_db)
+                        if sandbox_runtime is not None
+                        else None
+                    ),
                 )
                 app.state.sandbox_service.start_reaper()
                 logger.info("Sandbox service ready (TTL reaper started)")

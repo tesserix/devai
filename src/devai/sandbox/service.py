@@ -29,10 +29,18 @@ class SandboxError(ValueError):
 
 
 class SandboxService:
-    def __init__(self, db: Database | Any, *, registry: Any | None = None, settings: Any | None = None) -> None:
+    def __init__(
+        self,
+        db: Database | Any,
+        *,
+        registry: Any | None = None,
+        settings: Any | None = None,
+        provisioner: Any | None = None,
+    ) -> None:
         self._db = db
         self._registry = registry
         self._settings = settings
+        self._provisioner = provisioner
         self._reaper_task: asyncio.Task[None] | None = None
 
     async def create(self, spec: SandboxSpec, *, owner: str) -> SandboxRecord:
@@ -60,7 +68,27 @@ class SandboxService:
             last_access_at=record.last_access_at,
         )
         logger.info("sandbox %s created for %s (agent=%s@%s)", record.id, owner, spec.agent.name, spec.agent.version)
-        return record
+        return await self._provision(record)
+
+    async def _provision(self, record: SandboxRecord) -> SandboxRecord:
+        """Bring the sandbox up. A cluster failure yields a FAILED sandbox the
+        owner can read the reason from, never a lost record."""
+        if self._provisioner is None:
+            return record
+        try:
+            provisioned: SandboxRecord = await self._provisioner.provision(record)
+            return provisioned
+        except Exception as e:  # noqa: BLE001
+            logger.warning("sandbox %s: provisioning raised", record.id, exc_info=True)
+            with contextlib.suppress(Exception):
+                await self._db.set_sandbox_status(record.id, SandboxStatus.FAILED.value, {"error": str(e)})
+            return record.model_copy(update={"status": SandboxStatus.FAILED, "detail": {"error": str(e)}})
+
+    async def _teardown(self, record: SandboxRecord) -> None:
+        if self._provisioner is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._provisioner.teardown(record)
 
     async def get(self, sandbox_id: str, *, owner: str, is_admin: bool = False) -> SandboxRecord | None:
         row = await self._db.get_sandbox(sandbox_id)
@@ -79,6 +107,7 @@ class SandboxService:
         record = await self.get(sandbox_id, owner=owner, is_admin=is_admin)
         if record is None:
             raise SandboxError(f"sandbox {sandbox_id} not found")
+        await self._teardown(record)
         await self._db.set_sandbox_status(sandbox_id, SandboxStatus.DESTROYED.value)
 
     async def touch(self, sandbox_id: str) -> None:
@@ -88,6 +117,7 @@ class SandboxService:
     async def reap_expired(self) -> int:
         rows = await self._db.expired_sandboxes(datetime.now(UTC))
         for row in rows:
+            await self._teardown(_to_record(row))
             await self._db.set_sandbox_status(row["id"], SandboxStatus.DESTROYED.value)
         return len(rows)
 
