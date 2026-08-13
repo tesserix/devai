@@ -9,12 +9,12 @@ description = "AI-powered development lifecycle automation platform"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
-    "anthropic>=0.52.0",
-    "openai>=2.41.0",
+    "anthropic>=0.117.0",
+    "openai>=2.46.0",
     "nats-py>=2.9.0",
     "redis[hiredis]>=8.0.0",
     "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
+    "uvicorn[standard]>=0.51.0",
     "typer[all]>=0.27.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
@@ -27,25 +27,25 @@ dependencies = [
     # (adapters/telemetry/otel.py) when DEVAI_TELEMETRY_PROVIDER=otel. Shipped
     # in the image so turning telemetry on is one env var, no custom build. The
     # adapter lazy-imports it and degrades to Noop if it's ever absent.
-    "opentelemetry-exporter-otlp-proto-http>=1.29.0",
-    "python-ulid>=3.2.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "python-ulid>=4.0.1",
     "rich>=15.0.0",
     "playwright>=1.49.0",
-    "cryptography>=49.0.0",
+    "cryptography>=50.0.0",
     "PyJWT>=2.10.0",
     # PostgreSQL
     "asyncpg>=0.30.0",
     # Groq (fallback)
     "groq>=0.12.0",
     # Google Gemini
-    "google-generativeai>=0.8.0",
+    "google-generativeai>=0.8.6",
     # GCP monitoring and management (exact pins to avoid resolution-too-deep)
     "google-cloud-monitoring==2.31.0",
     "google-cloud-logging==3.11.4",
     "google-cloud-recommender==2.22.0",
     "google-cloud-resource-manager==1.17.0",
     "google-auth==2.38.0",
-    "google-api-core[grpc]==2.24.2",
+    "google-api-core[grpc]==2.33.0",
     "grpcio==1.75.1",
     "grpcio-status==1.68.1",
     "proto-plus==1.27.2",
@@ -71,7 +71,7 @@ dependencies = [
     # (FastMCP, Streamable HTTP) exposes DevAI at /mcp; slack_sdk backs the
     # Slack Events API channel. Both are imported lazily inside their channels,
     # so a deployment with those channels disabled never loads them.
-    "mcp>=1.9,<2",
+    "mcp>=1.28.1,<2",
     "slack-sdk>=3.42.0,<4",
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
     # provisions per-user/per-tenant secrets into Google Secret Manager.
@@ -80,7 +80,7 @@ dependencies = [
     # GCS object-store backend (adapters/object_store/gcs.py) — composer
     # attachments + the log-archive listing on the dashboard /logs page.
     # Imported lazily inside the gcs adapter only.
-    "google-cloud-storage>=2.18.0",
+    "google-cloud-storage>=3.13.0",
     # Password hashing for the local_db identity backend (LOCAL/sandbox only).
     # Imported lazily inside src/devai/adapters/identity/local_db.py, so a
     # prod deployment (auth terminated at the auth-bff, noop backend) never
@@ -90,7 +90,7 @@ dependencies = [
 
 [project.optional-dependencies]
 docs = [
-    "pypdf>=5.0.0",
+    "pypdf>=6.15.0",
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0",
 ]
