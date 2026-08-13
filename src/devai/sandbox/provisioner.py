@@ -10,6 +10,7 @@ import logging
 import secrets
 from typing import TYPE_CHECKING, Any, Protocol
 
+from devai.sandbox.egress import build_proxy_manifests, proxy_service_host
 from devai.sandbox.isolation import build_isolation_manifests
 from devai.sandbox.models import SandboxStatus
 from devai.sandbox.workspace import build_workspace_manifests, workspace_service_host
@@ -36,11 +37,23 @@ class SandboxProvisioner:
             await self._runtime.connect()
             for manifest in build_isolation_manifests(record, namespace=namespace):
                 await self._runtime.apply_manifest(manifest)
-            detail = await self._provision_workspace(record, namespace)
+            detail = await self._provision_egress(record, namespace)
+            detail.update(await self._provision_workspace(record, namespace) or {})
         except Exception as e:  # noqa: BLE001 — a cluster failure is a sandbox outcome, not a crash
             logger.warning("sandbox %s: provisioning failed", record.id, exc_info=True)
             return await self._set(record, SandboxStatus.FAILED, {"error": str(e)})
         return await self._set(record, SandboxStatus.READY, detail)
+
+    async def _provision_egress(self, record: SandboxRecord, namespace: str) -> dict[str, Any]:
+        """Every sandbox gets one — the NetworkPolicy leaves no other way out."""
+        for manifest in build_proxy_manifests(record, namespace=namespace):
+            await self._runtime.apply_manifest(manifest)
+        return {
+            "egress": {
+                "proxy": proxy_service_host(record.id, namespace=namespace),
+                "added_domains": list(record.spec.allow_domains),
+            }
+        }
 
     async def _provision_workspace(self, record: SandboxRecord, namespace: str) -> dict[str, Any] | None:
         if not record.spec.workspace:
@@ -56,6 +69,7 @@ class SandboxProvisioner:
         await self._set(record, SandboxStatus.DESTROYING)
         namespace = getattr(getattr(self._runtime, "config", None), "namespace", "devai")
         manifests = build_isolation_manifests(record, namespace=namespace)
+        manifests += build_proxy_manifests(record, namespace=namespace)
         if record.spec.workspace:
             # Deleting needs the kinds and names only, so no token is minted here.
             manifests += build_workspace_manifests(record, namespace=namespace, token="-")

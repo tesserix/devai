@@ -322,7 +322,8 @@ async def test_provisioning_walks_pending_to_ready() -> None:
 
     assert store.statuses == ["provisioning", "ready"]
     assert record.status is SandboxStatus.READY
-    assert len(runtime.created) == 3
+    # quota, limits, egress policy, then the proxy's configmap/pod/service
+    assert len(runtime.created) == 6
 
 
 @pytest.mark.asyncio
@@ -344,7 +345,14 @@ async def test_teardown_removes_every_isolation_object() -> None:
 
     await provisioner.teardown(_record())
 
-    assert {kind for kind, _ in runtime.deleted} == {"ResourceQuota", "LimitRange", "NetworkPolicy"}
+    assert {kind for kind, _ in runtime.deleted} == {
+        "ResourceQuota",
+        "LimitRange",
+        "NetworkPolicy",
+        "ConfigMap",
+        "Pod",
+        "Service",
+    }
     assert store.statuses[-1] == "destroyed"
 
 

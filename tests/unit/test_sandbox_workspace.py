@@ -259,13 +259,15 @@ def _with_workspace(sandbox_id: str = "sb-1") -> SandboxRecord:
 
 
 @pytest.mark.asyncio
-async def test_a_sandbox_without_a_workspace_provisions_only_the_isolation_objects() -> None:
+async def test_a_sandbox_without_a_workspace_gets_no_volume_and_no_workspace_pod() -> None:
     from devai.sandbox.provisioner import SandboxProvisioner
 
     rt = _FakeRuntime()
     await SandboxProvisioner(rt, _FakeStore()).provision(_record())
 
-    assert not [m for m in rt.applied if m["kind"] in {"Pod", "PersistentVolumeClaim"}]
+    # The egress proxy pod is provisioned for every sandbox; the workspace is not.
+    assert not [m for m in rt.applied if m["kind"] == "PersistentVolumeClaim"]
+    assert not [m for m in rt.applied if m["metadata"]["name"].startswith("devai-sandbox-ws-")]
 
 
 @pytest.mark.asyncio

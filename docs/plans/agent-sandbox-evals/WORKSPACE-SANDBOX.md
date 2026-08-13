@@ -80,6 +80,14 @@ outbound request is attributable and logged; and a blocked request returns a
 legible 403 instead of a mysterious hang. The friction of adding a domain is a
 feature, not a defect — it is what stops an allowlist eroding into allow-all.
 
+**Shipped shape** (`src/devai/sandbox/egress.py`, `egress_proxy.py`): one proxy
+pod per sandbox rather than one shared proxy, so a per-sandbox `allow_domains`
+addition is genuinely per-sandbox and the access log needs no demultiplexing
+before it joins that run's trace. The proxy is provisioned for every sandbox,
+its allowlist arrives as a ConfigMap, and `HTTP(S)_PROXY`/`NO_PROXY` are pinned
+into the sandboxed Job's env. A tool that ignores those variables does not
+escape the allowlist — it fails closed against the NetworkPolicy.
+
 Note the honest limit, which that guide states and we should record: domain
 allowlisting cannot tell a `git clone` from a `git push` to an attacker's repo.
 Exfiltration through an allowed domain is bounded by the credential broker

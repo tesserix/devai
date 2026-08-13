@@ -111,6 +111,8 @@ def _rescope_secrets(env: list[dict[str, Any]], sandbox_id: str) -> list[dict[st
 
 def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
     """The spec, flattened into env so the pod cannot resolve it differently."""
+    from devai.sandbox.egress import proxy_env  # local: egress reads SANDBOX_LABEL from here
+
     spec = record.spec
     env: list[dict[str, Any]] = [
         {"name": "DEVAI_SANDBOX_ID", "value": record.id},
@@ -131,6 +133,9 @@ def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
         env.append({"name": "DEVAI_SANDBOX_PROMPT", "value": f"{spec.prompt.ref}@{spec.prompt.version}"})
     if spec.dataset is not None:
         env.append({"name": "DEVAI_SANDBOX_DATASET", "value": f"{spec.dataset.ref}@{spec.dataset.version}"})
+    # The only route out: the NetworkPolicy denies the internet, so a tool that
+    # ignores these variables fails closed rather than escaping the allowlist.
+    env.extend(proxy_env(record.id))
     return env
 
 
