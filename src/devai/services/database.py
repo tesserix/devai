@@ -1050,6 +1050,70 @@ class Database:
             status,
         )
 
+    # =========================================================================
+    # Agent sandboxes — one row per pinned agent configuration (#179)
+    #
+    # DDL lives in tesserix-k8s db-schema-bootstrap (sandboxes). The spec is
+    # stored whole as JSONB because it is immutable once created: the row is the
+    # record of what an eval ran against.
+    # =========================================================================
+
+    async def create_sandbox(
+        self,
+        sandbox_id: str,
+        owner: str,
+        spec: dict[str, Any],
+        status: str,
+        created_at: datetime,
+        expires_at: datetime,
+        last_access_at: datetime | None = None,
+    ) -> None:
+        await self.pool.execute(
+            """INSERT INTO sandboxes
+                 (id, owner, spec, status, created_at, expires_at, last_access_at)
+               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)""",
+            sandbox_id,
+            owner,
+            json.dumps(spec),
+            status,
+            created_at,
+            expires_at,
+            last_access_at or created_at,
+        )
+
+    async def get_sandbox(self, sandbox_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow("SELECT * FROM sandboxes WHERE id = $1", sandbox_id)
+        return dict(row) if row else None
+
+    async def list_sandboxes(self, owner: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        if owner:
+            rows = await self.pool.fetch(
+                "SELECT * FROM sandboxes WHERE owner = $1 ORDER BY created_at DESC LIMIT $2",
+                owner,
+                limit,
+            )
+        else:
+            rows = await self.pool.fetch("SELECT * FROM sandboxes ORDER BY created_at DESC LIMIT $1", limit)
+        return [dict(r) for r in rows]
+
+    async def set_sandbox_status(self, sandbox_id: str, status: str) -> None:
+        await self.pool.execute(
+            "UPDATE sandboxes SET status = $2, updated_at = NOW() WHERE id = $1",
+            sandbox_id,
+            status,
+        )
+
+    async def touch_sandbox(self, sandbox_id: str) -> None:
+        await self.pool.execute("UPDATE sandboxes SET last_access_at = NOW() WHERE id = $1", sandbox_id)
+
+    async def expired_sandboxes(self, now: datetime, limit: int = 100) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            "SELECT * FROM sandboxes WHERE status <> 'destroyed' AND expires_at <= $1 LIMIT $2",
+            now,
+            limit,
+        )
+        return [dict(r) for r in rows]
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Process-global analytics writer

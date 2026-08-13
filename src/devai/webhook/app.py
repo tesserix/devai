@@ -269,6 +269,23 @@ def create_app(
             logger.exception("Preview service failed to start — preview API will 503")
             app.state.preview_service = None
 
+        # Agent sandboxes — pinned, TTL-bounded agent configurations (#179).
+        app.state.sandbox_service = None
+        try:
+            from devai.sandbox import SandboxService
+
+            if app.state.sre_studio_db is not None:
+                app.state.sandbox_service = SandboxService(
+                    app.state.sre_studio_db,
+                    registry=getattr(app.state, "registry_client", None),
+                    settings=config,
+                )
+                app.state.sandbox_service.start_reaper()
+                logger.info("Sandbox service ready (TTL reaper started)")
+        except Exception:
+            logger.exception("Sandbox service failed to start — sandbox API will 503")
+            app.state.sandbox_service = None
+
         # Repo onboarding service (Repos page). Independent of the
         # pipeline runtime: build an SCM client (reuse the pipeline's if
         # one exists) + a best-effort Postgres pool, and fall back to the
@@ -485,6 +502,10 @@ def create_app(
             if preview_service is not None:
                 with suppress(Exception):
                     await preview_service.stop_reaper()
+            sandbox_service = getattr(app.state, "sandbox_service", None)
+            if sandbox_service is not None:
+                with suppress(Exception):
+                    await sandbox_service.stop_reaper()
             if messaging_service is not None:
                 with suppress(Exception):
                     await messaging_service.stop()
@@ -704,6 +725,12 @@ def create_app(
     from devai.preview.routes import router as preview_router
 
     app.include_router(preview_router)
+
+    # Sandbox routes (/api/sandboxes/*) — pinned, TTL-bounded agent
+    # configurations. 503s until sandbox_service is wired (lifespan).
+    from devai.sandbox.routes import router as sandbox_router
+
+    app.include_router(sandbox_router)
 
     # Teams routes (/api/teams/*) — human teams + the AI crews they own.
     # Always mounted; returns 503 until team_service is wired (lifespan).
