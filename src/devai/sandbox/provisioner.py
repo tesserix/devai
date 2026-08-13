@@ -14,7 +14,9 @@ from devai.sandbox.egress import build_proxy_manifests, proxy_service_host
 from devai.sandbox.isolation import build_isolation_manifests
 from devai.sandbox.job import build_sandbox_secret
 from devai.sandbox.models import SandboxStatus
+from devai.sandbox.snapshot import capture
 from devai.sandbox.workspace import build_workspace_manifests, workspace_service_host
+from devai.sandbox.workspace_client import WorkspaceClient
 
 if TYPE_CHECKING:
     from devai.sandbox.models import SandboxRecord
@@ -85,6 +87,7 @@ class SandboxProvisioner:
         manifests = build_isolation_manifests(record, namespace=namespace)
         manifests += [build_sandbox_secret(record, namespace=namespace, token="-")]
         manifests += build_proxy_manifests(record, namespace=namespace)
+        detail = await self._snapshot(record, namespace)
         if record.spec.workspace:
             # Deleting needs the kinds and names only, so no token is minted here.
             manifests += build_workspace_manifests(record, namespace=namespace, token="-")
@@ -93,7 +96,23 @@ class SandboxProvisioner:
                 await self._runtime.delete_manifest(manifest["kind"], manifest["metadata"]["name"], namespace)
             except Exception:  # noqa: BLE001 — already gone is the desired end state
                 logger.debug("sandbox %s: %s already absent", record.id, manifest["kind"])
-        return await self._set(record, SandboxStatus.DESTROYED)
+        return await self._set(record, SandboxStatus.DESTROYED, detail)
+
+    async def _snapshot(self, record: SandboxRecord, namespace: str) -> dict[str, Any] | None:
+        """What the workspace leaves behind, taken before the objects go.
+
+        A failed capture is recorded, never raised: a sandbox that cannot be
+        read is exactly the one that most needs deleting.
+        """
+        if not record.spec.workspace:
+            return None
+        try:
+            token = await self._runtime.read_secret_key(f"devai-sandbox-ws-{record.id}", "token")
+            client = WorkspaceClient(workspace_service_host(record.id, namespace=namespace), token=token)
+            return {"snapshot": await capture(client)}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("sandbox %s: snapshot failed", record.id, exc_info=True)
+            return {"snapshot": {"errors": {"workspace": str(e)}}}
 
     async def _set(
         self, record: SandboxRecord, status: SandboxStatus, detail: dict[str, Any] | None = None
