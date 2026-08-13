@@ -10,11 +10,11 @@ requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "anthropic>=0.52.0",
-    "openai>=2.41.0",
+    "openai>=2.46.0",
     "nats-py>=2.9.0",
     "redis[hiredis]>=8.0.0",
     "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
+    "uvicorn[standard]>=0.51.0",
     "typer[all]>=0.27.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
@@ -38,7 +38,7 @@ dependencies = [
     # Groq (fallback)
     "groq>=0.12.0",
     # Google Gemini
-    "google-generativeai>=0.8.0",
+    "google-generativeai>=0.8.6",
     # GCP monitoring and management (exact pins to avoid resolution-too-deep)
     "google-cloud-monitoring==2.31.0",
     "google-cloud-logging==3.11.4",
@@ -71,7 +71,7 @@ dependencies = [
     # (FastMCP, Streamable HTTP) exposes DevAI at /mcp; slack_sdk backs the
     # Slack Events API channel. Both are imported lazily inside their channels,
     # so a deployment with those channels disabled never loads them.
-    "mcp>=1.9,<2",
+    "mcp>=1.28.1,<2",
     "slack-sdk>=3.42.0,<4",
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
     # provisions per-user/per-tenant secrets into Google Secret Manager.
