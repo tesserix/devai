@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api, type BlueprintSummary, type PipelineRun, type RunFilters } from "@/lib/api";
 import { RunList } from "@/components/run-list";
-import { GuidancePanel } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { EmptyState } from "@/components/empty-state";
 import { type RunState } from "@/components/run-state-badge";
@@ -109,6 +109,7 @@ export default function RunsIndexPage() {
           <div className="label-eyebrow">Lifecycle</div>
           <h1 className="font-serif text-2xl font-medium mt-1" style={{ color: "var(--ink-strong)" }}>
             Runs
+            <GuidanceInfo id="runs" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1 max-w-2xl" style={{ color: "var(--ink-soft)" }}>
             Every execution of a blueprint against a repo. Filter by blueprint, repo, state or source, and open a run to watch its DAG fill in live.

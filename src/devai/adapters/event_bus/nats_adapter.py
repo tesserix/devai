@@ -51,6 +51,7 @@ class NatsEventBusAdapter(EventBusAdapter):
         self,
         url: str,
         *,
+        creds: str = "",
         default_stream: str = "DEVAI",
         default_subjects: tuple[str, ...] = ("devai.>",),
         default_max_deliver: int = 3,
@@ -67,6 +68,10 @@ class NatsEventBusAdapter(EventBusAdapter):
             raise AdapterNotInstalled("nats-py is not installed (`pip install nats-py`)") from e
 
         self.url = url
+        # Path to a NATS account .creds file for operator/JWT auth. Empty →
+        # anonymous connect (default), so this is inert until the cluster
+        # enforces NATS auth and the chart mounts the creds file.
+        self.creds = creds or ""
         self.default_stream = default_stream
         self.default_subjects = list(default_subjects)
         self.default_max_deliver = default_max_deliver
@@ -94,8 +99,13 @@ class NatsEventBusAdapter(EventBusAdapter):
             return
         import nats
 
+        # Pass user credentials only when a .creds path is configured; otherwise
+        # connect anonymously exactly as before (no behaviour change).
+        connect_kwargs: dict[str, Any] = {}
+        if self.creds:
+            connect_kwargs["user_credentials"] = self.creds
         try:
-            self._nc = await nats.connect(self.url)
+            self._nc = await nats.connect(self.url, **connect_kwargs)
         except Exception as e:
             raise AdapterError(f"NATS connect failed for {self.url}: {e}") from e
         self._js = self._nc.jetstream()

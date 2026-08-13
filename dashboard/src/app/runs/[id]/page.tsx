@@ -39,7 +39,7 @@ import { RunDAG } from "@/components/pipeline-flow";
 import { StageDetailModal, type StageMessage } from "@/components/stage-detail-modal";
 import { CheckpointTimeline, type Checkpoint } from "@/components/checkpoint-timeline";
 import { RunStateBadge, normalizeRunState } from "@/components/run-state-badge";
-import { GuidancePanel, HelpPopover } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { BuildingState, type BuildPhase } from "@/components/building-state";
 import { EmptyState } from "@/components/empty-state";
@@ -321,6 +321,7 @@ export default function RunDetailPage() {
             <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-base font-semibold truncate" style={{ color: "var(--ink-strong)" }}>
                 {run?.repo || "—"}
+                <GuidanceInfo id="run-detail" className="ml-0.5 align-middle" />
               </h1>
               <RunStateBadge state={run?.state || run?.stage || "pending"} />
             </div>

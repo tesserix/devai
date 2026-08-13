@@ -179,6 +179,7 @@ class JobRunnerStage(PipelineStage):
         blueprint = task.blueprint or ""
 
         from devai.runtime import RunnerJobInputs, build_job_spec
+        from devai.sandbox.job import apply_sandbox_boundary, sandbox_from_stage_config
 
         # Agent control-plane URLs are read off settings so deployments
         # can flip them per environment. Empty = "no gateway, talk direct".
@@ -201,6 +202,10 @@ class JobRunnerStage(PipelineStage):
             kagent_url=kagent_url,
         )
         job_spec = build_job_spec(runtime.config, inputs)
+        # Same Job, tightened edges — set when an eval dispatches into a sandbox.
+        sandbox = sandbox_from_stage_config(self.config)
+        if sandbox is not None:
+            job_spec = apply_sandbox_boundary(job_spec, sandbox)
         job_name = job_spec["metadata"]["name"]
 
         # Register interest BEFORE creating the Job so the watcher can't

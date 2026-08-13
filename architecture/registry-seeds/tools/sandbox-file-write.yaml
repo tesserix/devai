@@ -1,0 +1,32 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-file-write
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: file_write
+spec:
+  displayName: File Write
+  description: Write a file in the sandbox workspace.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      path: &id001
+        type: string
+      content: *id001
+    required:
+    - path
+    - content
+  tags:
+  - sandbox
+  - mcp-tool
+  - workspace

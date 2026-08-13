@@ -308,3 +308,71 @@ async def test_nats_adapter_publish_subscribe_roundtrip():
         await sub.unsubscribe()
     finally:
         await adapter.close()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Account credentials — operator/JWT auth on a shared cluster
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _RecordingConnect:
+    """Captures how nats.connect() was called, without a broker."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict = {}
+
+    async def __call__(self, url: str, **kwargs: object) -> object:
+        self.kwargs = dict(kwargs)
+
+        class _JS:
+            async def add_stream(self, **_: object) -> None:
+                return None
+
+            async def stream_info(self, *_: object, **__: object) -> object:
+                return object()
+
+        class _Conn:
+            def jetstream(self) -> object:
+                return _JS()
+
+        return _Conn()
+
+
+@pytest.fixture
+def recording_nats(monkeypatch: pytest.MonkeyPatch) -> _RecordingConnect:
+    nats = pytest.importorskip("nats")
+    recorder = _RecordingConnect()
+    monkeypatch.setattr(nats, "connect", recorder)
+    return recorder
+
+
+@pytest.mark.asyncio
+async def test_a_configured_creds_file_authenticates_the_connection(recording_nats: _RecordingConnect) -> None:
+    from devai.adapters.event_bus.nats_adapter import NatsEventBusAdapter
+
+    adapter = NatsEventBusAdapter(url="nats://broker:4222", creds="/etc/nats-creds/nats.creds")
+    await adapter.connect()
+
+    assert recording_nats.kwargs.get("user_credentials") == "/etc/nats-creds/nats.creds"
+
+
+@pytest.mark.asyncio
+async def test_without_creds_the_connection_stays_anonymous(recording_nats: _RecordingConnect) -> None:
+    """The default has to reach a cluster that does not enforce auth yet."""
+    from devai.adapters.event_bus.nats_adapter import NatsEventBusAdapter
+
+    adapter = NatsEventBusAdapter(url="nats://broker:4222")
+    await adapter.connect()
+
+    assert "user_credentials" not in recording_nats.kwargs
+
+
+def test_the_factory_hands_the_adapter_the_configured_creds() -> None:
+    pytest.importorskip("nats")
+
+    class S(_Settings):
+        event_bus_provider = "nats"
+        nats_creds = "/etc/nats-creds/nats.creds"
+
+    adapter = create_event_bus_adapter(S())
+    assert getattr(adapter, "creds", "") == "/etc/nats-creds/nats.creds"

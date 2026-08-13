@@ -100,8 +100,12 @@ class ToolDispatcher:
         dry_run: bool = False,
         triggered_by: str = "",
         tool_context: Any = None,
+        gateway: Any | None = None,
     ) -> None:
         self._scm = scm
+        # Sandbox tool gateway (real/mock/replay/block). None in production —
+        # dispatch then behaves exactly as it did before sandboxes existed.
+        self._gateway = gateway
         # Who triggered this run — threaded into the registry ToolContext so
         # identity-scoped tools (e.g. gitops with cluster=<user's cluster>)
         # resolve the caller's own connections, not just the platform's.
@@ -221,6 +225,12 @@ class ToolDispatcher:
             logger.warning("tool DENIED (not in agent allowlist): %s keys=%s", name, arg_keys)
             return f"error: tool {name!r} is not permitted for this agent"
         logger.info("tool call: %s keys=%s", name, arg_keys)
+        if self._gateway is not None:
+            guarded: str = await self._gateway.call(name, arguments or {}, lambda: self._execute_real(name, arguments))
+            return guarded
+        return await self._execute_real(name, arguments)
+
+    async def _execute_real(self, name: str, arguments: dict[str, Any]) -> str:
         if self._dry_run and name in MUTATING_TOOLS:
             logger.info("[dry-run] blocked mutating tool %s", name)
             return (
