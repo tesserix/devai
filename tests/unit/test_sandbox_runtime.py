@@ -405,7 +405,7 @@ async def test_an_existing_object_is_patched_not_re_raised() -> None:
 @pytest.mark.asyncio
 async def test_an_unsupported_kind_is_refused() -> None:
     with pytest.raises(ValueError, match="unsupported manifest kind"):
-        await _runtime_with(_FakeApi()).apply_manifest({"kind": "Secret", "metadata": {"name": "x"}})
+        await _runtime_with(_FakeApi()).apply_manifest({"kind": "ClusterRole", "metadata": {"name": "x"}})
 
 
 @pytest.mark.asyncio
@@ -418,3 +418,19 @@ async def test_teardown_is_idempotent_when_the_objects_are_already_gone() -> Non
     await SandboxProvisioner(_GoneRuntime(), store).teardown(_record())
 
     assert store.statuses[-1] == "destroyed"
+
+
+def test_the_workspace_kinds_are_routable_to_a_k8s_api() -> None:
+    from devai.runtime.k8s_client import K8sJobRuntime
+
+    rt = K8sJobRuntime.__new__(K8sJobRuntime)
+    rt._core_v1 = object()  # noqa: SLF001
+    rt._networking_v1 = object()  # noqa: SLF001
+
+    for kind, suffix in (
+        ("PersistentVolumeClaim", "persistent_volume_claim"),
+        ("Secret", "secret"),
+        ("Pod", "pod"),
+        ("Service", "service"),
+    ):
+        assert rt._manifest_api(kind)[1] == suffix  # noqa: SLF001

@@ -86,6 +86,9 @@ class SandboxSpec(_Pinned):
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
     limits: SandboxLimits = Field(default_factory=SandboxLimits)
     ttl_seconds: int = Field(default=DEFAULT_TTL_SECONDS, gt=0, le=MAX_TTL_SECONDS)
+    # A place to work — volume, shell and file service. Off by default: an eval
+    # run that only needs an answer should not carry a PVC.
+    workspace: bool = False
 
     # `model` shadows pydantic's protected namespace; the field name is part of
     # the published contract, so silence the warning rather than rename it.

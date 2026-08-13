@@ -13,6 +13,8 @@ from devai.sandbox.models import (
 )
 from devai.sandbox.provisioner import SandboxProvisioner
 from devai.sandbox.service import SandboxError, SandboxService
+from devai.sandbox.workspace import WorkspaceError, WorkspaceFiles, build_workspace_manifests
+from devai.sandbox.workspace_client import WorkspaceClient
 
 __all__ = [
     "SANDBOX_LABEL",
@@ -27,8 +29,12 @@ __all__ = [
     "ToolGateway",
     "ToolMode",
     "ToolPolicy",
+    "WorkspaceClient",
+    "WorkspaceError",
+    "WorkspaceFiles",
     "apply_sandbox_boundary",
     "build_isolation_manifests",
+    "build_workspace_manifests",
     "guard_mcp_call",
     "is_side_effecting",
 ]

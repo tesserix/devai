@@ -255,6 +255,10 @@ class K8sJobRuntime:
             "ResourceQuota": (self._core_v1, "resource_quota"),
             "LimitRange": (self._core_v1, "limit_range"),
             "NetworkPolicy": (self._networking_v1, "network_policy"),
+            "PersistentVolumeClaim": (self._core_v1, "persistent_volume_claim"),
+            "Secret": (self._core_v1, "secret"),
+            "Pod": (self._core_v1, "pod"),
+            "Service": (self._core_v1, "service"),
         }
         if kind not in table:
             raise ValueError(f"unsupported manifest kind: {kind}")
@@ -275,6 +279,17 @@ class K8sJobRuntime:
     async def delete_manifest(self, kind: str, name: str, namespace: str | None = None) -> None:
         api, suffix = self._manifest_api(kind)
         await getattr(api, f"delete_namespaced_{suffix}")(name=name, namespace=namespace or self._config.namespace)
+
+    async def read_secret_key(self, name: str, key: str, namespace: str | None = None) -> str:
+        """One key out of a Secret — used for per-sandbox capability tokens."""
+        import base64
+
+        secret = await self._core_v1.read_namespaced_secret(name=name, namespace=namespace or self._config.namespace)
+        data = getattr(secret, "data", None) or {}
+        raw = data.get(key)
+        if raw is None:
+            raise KeyError(f"secret {name} has no key {key}")
+        return base64.b64decode(raw).decode()
 
     async def get_job(self, name: str) -> Any:
         """Read a Job's current state."""
