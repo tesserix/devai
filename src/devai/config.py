@@ -844,7 +844,7 @@ class Settings(BaseSettings):
     # Single switch picks the backend; the rest of DevAI talks only to
     # `devai.adapters.memory.MemoryAdapter`. Swap providers with one env var,
     # no code changes. Missing SDKs / config degrade gracefully to "noop".
-    memory_provider: str = "redis"  # noop | redis | pgvector | mem0 | zep | hondo
+    memory_provider: str = "redis"  # noop | redis | pgvector | qdrant | mem0 | zep | hondo
 
     # Embedding provider for memory semantic search (pgvector). `auto` uses
     # OpenAI when DEVAI_OPENAI_API_KEY is set, otherwise disables embeddings
@@ -858,6 +858,13 @@ class Settings(BaseSettings):
     # self-hosted needs DEVAI_MEM0_HOST (and optionally an API key).
     mem0_api_key: str = ""
     mem0_host: str = ""
+
+    # Qdrant — the cluster's shared vector store. Needs a URL and an embedder
+    # (embedding_provider must not be "none"); the collection is created on
+    # first write at the embedder's dimensions.
+    qdrant_url: str = ""
+    qdrant_api_key: str = ""
+    qdrant_collection: str = "devai_memories"
 
     # Zep (always self-hosted or Zep Cloud — both need a URL).
     zep_url: str = ""

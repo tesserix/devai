@@ -6,6 +6,7 @@ one of:
     noop      → NoopMemoryAdapter
     redis     → RedisMemoryAdapter
     pgvector  → PgVectorMemoryAdapter
+    qdrant    → QdrantMemoryAdapter
     mem0      → Mem0MemoryAdapter
     zep       → ZepMemoryAdapter
     hondo     → HondoMemoryAdapter
@@ -43,7 +44,7 @@ from devai.adapters.memory.noop import NoopMemoryAdapter
 
 logger = logging.getLogger(__name__)
 
-KNOWN_PROVIDERS = ("noop", "redis", "pgvector", "mem0", "zep", "hondo")
+KNOWN_PROVIDERS = ("noop", "redis", "pgvector", "qdrant", "mem0", "zep", "hondo")
 
 
 def _build_noop(settings: Any) -> MemoryAdapter:
@@ -74,6 +75,27 @@ def _build_pgvector(settings: Any) -> MemoryAdapter:
     # build one from the LLM adapter family per DEVAI_EMBEDDING_PROVIDER.
     embedder = getattr(settings, "memory_embedder", None) or _build_embedder(settings)
     return PgVectorMemoryAdapter(db, embedder=embedder, owns_database=owns_db)
+
+
+def _build_qdrant(settings: Any) -> MemoryAdapter:
+    from devai.adapters.memory.qdrant_adapter import DEFAULT_COLLECTION, QdrantMemoryAdapter
+
+    url = getattr(settings, "qdrant_url", "") or ""
+    if not url:
+        raise AdapterNotConfigured("qdrant adapter requires DEVAI_QDRANT_URL")
+    embedder = getattr(settings, "memory_embedder", None) or _build_embedder(settings)
+    if embedder is None:
+        raise AdapterNotConfigured(
+            "qdrant adapter requires an embedder — set DEVAI_EMBEDDING_PROVIDER and its key "
+            "(a vector store with no vectors recalls nothing)"
+        )
+    return QdrantMemoryAdapter(
+        url=url,
+        embedder=embedder,
+        api_key=getattr(settings, "qdrant_api_key", "") or "",
+        collection=getattr(settings, "qdrant_collection", "") or DEFAULT_COLLECTION,
+        dimensions=int(getattr(settings, "embedding_dimensions", 1536) or 1536),
+    )
 
 
 def _build_mem0(settings: Any) -> MemoryAdapter:
@@ -156,6 +178,7 @@ memory_registry: AdapterRegistry[MemoryAdapter] = AdapterRegistry("memory")
 memory_registry.register("noop", _build_noop)
 memory_registry.register("redis", _build_redis)
 memory_registry.register("pgvector", _build_pgvector)
+memory_registry.register("qdrant", _build_qdrant)
 memory_registry.register("mem0", _build_mem0)
 memory_registry.register("zep", _build_zep)
 memory_registry.register("hondo", _build_hondo)

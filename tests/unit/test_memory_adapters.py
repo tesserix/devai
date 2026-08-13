@@ -983,3 +983,281 @@ async def test_alm_learn_stage_degrades_without_adapter():
     stage = alm_learn_stage(StageDeps(config=_Cfg()), {})
     result = await stage.execute(DevAITask(intent="x", blueprint="alm-pipeline"))
     assert result.data["learn_done"] is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Qdrant backend — driven through a fake Qdrant REST server
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _FakeQdrant:
+    """Minimal in-memory Qdrant REST server, enough for the adapter contract."""
+
+    def __init__(self, *, collection_exists: bool = False) -> None:
+        self.points: dict[str, dict] = {}
+        self.collections: dict[str, dict] = {"devai_memories": {}} if collection_exists else {}
+        self.requests: list[tuple[str, str, dict]] = []
+        self.fail = False
+
+    def handler(self, request):
+        import json
+
+        import httpx
+
+        body = json.loads(request.content) if request.content else {}
+        path = request.url.path
+        self.requests.append((request.method, path, body))
+        if self.fail:
+            return httpx.Response(500, json={"status": {"error": "boom"}})
+
+        name = path.split("/")[2] if path.startswith("/collections/") else ""
+        if path == f"/collections/{name}" and request.method == "GET":
+            if name not in self.collections:
+                return httpx.Response(404, json={"status": {"error": "not found"}})
+            return httpx.Response(200, json={"result": {"points_count": len(self.points)}})
+        if path == f"/collections/{name}" and request.method == "PUT":
+            self.collections[name] = body
+            return httpx.Response(200, json={"result": True})
+        if path == f"/collections/{name}/points" and request.method == "PUT":
+            for point in body["points"]:
+                self.points[str(point["id"])] = point
+            return httpx.Response(200, json={"result": {"status": "completed"}})
+        if path == f"/collections/{name}/points" and request.method == "POST":
+            found = [self.points[i] for i in (str(x) for x in body["ids"]) if i in self.points]
+            return httpx.Response(200, json={"result": found})
+        if path == f"/collections/{name}/points/scroll":
+            hits = [p for p in self.points.values() if _matches(p["payload"], body.get("filter"))]
+            return httpx.Response(200, json={"result": {"points": hits[: body.get("limit", 10)]}})
+        if path == f"/collections/{name}/points/search":
+            hits = [p for p in self.points.values() if _matches(p["payload"], body.get("filter"))]
+            return httpx.Response(
+                200,
+                json={"result": [{"id": p["id"], "score": 0.9, "payload": p["payload"]} for p in hits][: body["limit"]]},
+            )
+        if path == f"/collections/{name}/points/delete":
+            for pid in body["points"]:
+                self.points.pop(str(pid), None)
+            return httpx.Response(200, json={"result": {"status": "completed"}})
+        if path == f"/collections/{name}/points/payload":
+            for pid in body["points"]:
+                if str(pid) in self.points:
+                    self.points[str(pid)]["payload"].update(body["payload"])
+            return httpx.Response(200, json={"result": {"status": "completed"}})
+        return httpx.Response(404, json={"status": {"error": f"unhandled {path}"}})
+
+
+def _matches(payload: dict, filt: dict | None) -> bool:
+    """Evaluate the subset of Qdrant filter syntax the adapter emits."""
+    if not filt:
+        return True
+    for cond in filt.get("must", []):
+        if "should" in cond:
+            if not any(_matches(payload, {"must": [c]}) for c in cond["should"]):
+                return False
+            continue
+        value = payload.get(cond["key"])
+        match = cond["match"]
+        if "value" in match and value != match["value"]:
+            return False
+        if "any" in match and not set(match["any"]) & set(value or []):
+            return False
+    return True
+
+
+class _StubEmbedder:
+    def __init__(self, dimensions: int = 4) -> None:
+        self.dimensions = dimensions
+        self.embedded: list[str] = []
+
+    async def embed(self, text: str) -> list[float]:
+        self.embedded.append(text)
+        return [float(len(text) % 7)] * self.dimensions
+
+
+def _qdrant(server: _FakeQdrant, embedder=None):
+    import httpx
+
+    from devai.adapters.memory.qdrant_adapter import QdrantMemoryAdapter
+
+    client = httpx.AsyncClient(base_url="http://qdrant:6333", transport=httpx.MockTransport(server.handler))
+    return QdrantMemoryAdapter(
+        url="http://qdrant:6333",
+        embedder=embedder or _StubEmbedder(),
+        collection="devai_memories",
+        dimensions=4,
+        client=client,
+    )
+
+
+@pytest.mark.asyncio
+async def test_qdrant_creates_the_collection_at_the_embedders_width():
+    """A collection made at the wrong width rejects every later write, so the
+    adapter must declare its own dimensions rather than assume a default."""
+    server = _FakeQdrant()
+    adapter = _qdrant(server)
+
+    await adapter.remember("first memory", agent="sr_dev", repo="org/repo")
+
+    assert server.collections["devai_memories"]["vectors"]["size"] == 4
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_remember_recall_roundtrip():
+    server = _FakeQdrant(collection_exists=True)
+    embedder = _StubEmbedder()
+    adapter = _qdrant(server, embedder)
+
+    written = await adapter.remember(
+        "review found a race in the queue",
+        agent="sr_dev",
+        repo="org/repo",
+        memory_type="procedural",
+        tags=["lesson"],
+        metadata={"run": "r-1"},
+    )
+    found = await adapter.recall(agent="sr_dev", repo="org/repo", memory_type="procedural")
+
+    assert embedder.embedded == ["review found a race in the queue"]
+    assert [r.provider_id for r in found] == [written.provider_id]
+    assert found[0].content == "review found a race in the queue"
+    assert found[0].tags == ["lesson"]
+    assert found[0].metadata == {"run": "r-1"}
+    assert found[0].provider == "qdrant"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_recall_filters_by_agent_repo_type_and_tags():
+    server = _FakeQdrant(collection_exists=True)
+    adapter = _qdrant(server)
+
+    await adapter.remember("a", agent="sr_dev", repo="org/repo", memory_type="semantic", tags=["stack"])
+    await adapter.remember("b", agent="qa", repo="org/repo", memory_type="semantic", tags=["stack"])
+    await adapter.remember("c", agent="sr_dev", repo="org/other", memory_type="episodic", tags=["lesson"])
+
+    assert [r.content for r in await adapter.recall(agent="sr_dev", repo="org/repo")] == ["a"]
+    assert sorted(r.content for r in await adapter.recall(memory_type="semantic")) == ["a", "b"]
+    assert [r.content for r in await adapter.recall(tags=["lesson"])] == ["c"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_recall_also_sees_global_memories_of_the_repo():
+    server = _FakeQdrant(collection_exists=True)
+    adapter = _qdrant(server)
+
+    await adapter.remember("repo specific", repo="org/repo")
+    await adapter.remember("applies everywhere", repo="global")
+
+    assert sorted(r.content for r in await adapter.recall(repo="org/repo")) == ["applies everywhere", "repo specific"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_recall_query_narrows_to_matching_content():
+    server = _FakeQdrant(collection_exists=True)
+    adapter = _qdrant(server)
+
+    await adapter.remember("the migration needs a lock timeout")
+    await adapter.remember("unrelated note")
+
+    assert [r.content for r in await adapter.recall(query="LOCK")] == ["the migration needs a lock timeout"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_semantic_search_ranks_by_the_stores_score():
+    server = _FakeQdrant(collection_exists=True)
+    embedder = _StubEmbedder()
+    adapter = _qdrant(server, embedder)
+
+    await adapter.remember("deploys fail when the pool is exhausted", repo="org/repo")
+    hits = await adapter.semantic_search("why do deploys fail", k=3, repo="org/repo")
+
+    assert embedder.embedded[-1] == "why do deploys fail"
+    assert [h.similarity for h in hits] == [0.9]
+    assert hits[0].content == "deploys fail when the pool is exhausted"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_forget_removes_only_an_existing_point():
+    server = _FakeQdrant(collection_exists=True)
+    adapter = _qdrant(server)
+    written = await adapter.remember("forget me")
+
+    assert await adapter.forget(written.provider_id) is True
+    assert await adapter.forget(written.provider_id) is False
+    assert await adapter.recall() == []
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_reinforce_bumps_relevance_up_to_the_cap():
+    server = _FakeQdrant(collection_exists=True)
+    adapter = _qdrant(server)
+    written = await adapter.remember("useful lesson")
+
+    assert await adapter.reinforce([written.provider_id]) == 1
+    assert (await adapter.recall())[0].relevance_score == pytest.approx(1.1)
+
+    for _ in range(20):
+        await adapter.reinforce([written.provider_id])
+    reinforced = (await adapter.recall())[0]
+    assert reinforced.relevance_score == pytest.approx(2.0)
+    assert reinforced.access_count == 21
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_health_check_reports_the_stores_state():
+    server = _FakeQdrant(collection_exists=True)
+    adapter = _qdrant(server)
+
+    assert (await adapter.health_check())["ok"] is True
+
+    server.fail = True
+    assert (await adapter.health_check())["ok"] is False
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_reads_degrade_instead_of_raising_when_the_store_is_down():
+    """Recall feeds prompt context — a dead vector store must cost the run its
+    memory, not the run itself."""
+    server = _FakeQdrant(collection_exists=True)
+    adapter = _qdrant(server)
+    server.fail = True
+
+    assert await adapter.recall(agent="sr_dev") == []
+    assert await adapter.semantic_search("anything") == []
+    await adapter.close()
+
+
+def test_qdrant_is_a_known_provider():
+    assert "qdrant" in KNOWN_PROVIDERS
+
+
+def test_factory_qdrant_without_url_falls_back_to_noop():
+    settings = _Settings()
+    settings.memory_provider = "qdrant"
+    assert create_memory_adapter(settings).provider_name == "noop"
+
+
+def test_factory_qdrant_without_an_embedder_falls_back_to_noop():
+    """Qdrant stores nothing but vectors — with no embedder every write would
+    be a zero vector, which is worse than degrading to Noop visibly."""
+    settings = _Settings()
+    settings.memory_provider = "qdrant"
+    settings.qdrant_url = "http://qdrant:6333"
+    settings.embedding_provider = "none"
+    assert create_memory_adapter(settings).provider_name == "noop"
+
+
+def test_factory_builds_qdrant_from_url_and_embedder():
+    settings = _Settings()
+    settings.memory_provider = "qdrant"
+    settings.qdrant_url = "http://qdrant:6333"
+    settings.memory_embedder = _StubEmbedder()
+    assert create_memory_adapter(settings).provider_name == "qdrant"
