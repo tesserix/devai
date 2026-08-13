@@ -12,6 +12,7 @@ Backends:
     noop       — empty/in-memory; for tests and disabled mode
     redis      — wraps existing devai.services.memory.AgentMemory (backward compat)
     pgvector   — Postgres + pgvector embeddings (production default for DevAI)
+    qdrant     — Qdrant vector store over its REST API (needs an embedder)
     mem0       — mem0ai SDK (cloud or self-hosted)
     zep        — Zep memory store
 
