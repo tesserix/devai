@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from devai.sandbox.isolation import build_isolation_manifests
 from devai.sandbox.job import SANDBOX_LABEL
 from devai.sandbox.models import SandboxRecord, SandboxSpec, SandboxStatus
@@ -129,3 +131,44 @@ def test_the_editor_is_reachable_only_through_the_sandboxs_own_route(monkeypatch
 def test_a_sandbox_without_takeover_has_no_editor_to_open(monkeypatch: Any) -> None:
     client = _api(_ready(), monkeypatch)
     assert client.get("/api/sandboxes/sb-1/ide/").status_code == 409
+
+
+def _socket_api(record: SandboxRecord, monkeypatch: Any) -> Any:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from devai.sandbox import routes
+
+    async def fake_socket(websocket: Any, endpoint: str, path: str) -> None:
+        await websocket.accept()
+        await websocket.send_text(f"ide:{endpoint}:{path}")
+        await websocket.close()
+
+    monkeypatch.setattr(routes, "proxy_ide_socket", fake_socket)
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.state.sandbox_service = _StubService(record)
+    app.state.config = None
+    return TestClient(app)
+
+
+def test_another_site_cannot_open_the_editors_socket(monkeypatch: Any) -> None:
+    """Browsers send session cookies on a cross-origin socket handshake and no
+    CORS preflight guards it, so the editor's own origin is the only one that
+    may open it — otherwise any page the user visits drives their workspace."""
+    from starlette.websockets import WebSocketDisconnect
+
+    client = _socket_api(_ready(ide=True), monkeypatch)
+
+    with (
+        pytest.raises(WebSocketDisconnect),
+        client.websocket_connect("/api/sandboxes/sb-1/ide/socket", headers={"Origin": "https://evil.example"}) as ws,
+    ):
+        ws.receive_text()
+
+
+def test_the_dashboard_can_still_open_the_editors_socket(monkeypatch: Any) -> None:
+    client = _socket_api(_ready(ide=True), monkeypatch)
+
+    with client.websocket_connect("/api/sandboxes/sb-1/ide/socket", headers={"Origin": "http://testserver"}) as ws:
+        assert ws.receive_text().startswith("ide:")

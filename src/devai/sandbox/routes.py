@@ -11,6 +11,7 @@ import hmac
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSocket
 from pydantic import ValidationError
@@ -256,6 +257,17 @@ async def ide(request: Request, sandbox_id: str, path: str = "") -> Response:
     return await proxy_ide_request(request, endpoint, path)
 
 
+def _same_origin(websocket: WebSocket) -> bool:
+    """A socket handshake carries the session cookie and no CORS check guards
+    it, so a foreign Origin is another site driving this workspace. An absent
+    Origin is a non-browser client, which has no ambient session to borrow."""
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True
+    host = websocket.headers.get("host", "")
+    return urlsplit(origin).netloc == host
+
+
 @router.websocket("/{sandbox_id}/ide/{path:path}")
 async def ide_ws(websocket: WebSocket, sandbox_id: str, path: str = "") -> None:
     """The editor's own socket — without it code-server renders and then hangs.
@@ -263,6 +275,9 @@ async def ide_ws(websocket: WebSocket, sandbox_id: str, path: str = "") -> None:
     Ownership is resolved the same way as on the HTTP side; a caller who cannot
     read the sandbox gets the socket closed rather than a 404 body.
     """
+    if not _same_origin(websocket):
+        await websocket.close(code=1008)
+        return
     owner, is_admin = await _read_scope(websocket)  # type: ignore[arg-type]
     record = await _service(websocket).get(sandbox_id, owner=owner, is_admin=is_admin)  # type: ignore[arg-type]
     if record is None or not record.spec.ide:
