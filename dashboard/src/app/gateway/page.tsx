@@ -10,6 +10,7 @@ import {
   ShieldHalf,
   XCircle,
 } from "lucide-react";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 /**
  * Gateway panel — single-page status board for the agentic control
@@ -94,6 +95,7 @@ export default function GatewayPage() {
           <div className="label-eyebrow">Control plane</div>
           <h1 className="font-serif text-2xl font-medium mt-1 flex items-center gap-2" style={{ color: "var(--ink-strong)" }}>
             <ShieldHalf className="w-5 h-5" style={{ color: "var(--accent)" }} /> Agent Gateway
+            <GuidanceInfo id="gateway" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
             Live status of the agentic stack — agentregistry, Solo.io agentgateway, the LLM proxy, and kagent. All
@@ -109,6 +111,8 @@ export default function GatewayPage() {
           </button>
         </div>
       </header>
+
+      <GuidancePanel id="gateway" />
 
       {error && (
         <div

@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { GuidancePanel } from "@/components/guidance";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 import { EmptyState } from "@/components/empty-state";
 
 /**
@@ -187,6 +187,7 @@ export default function BoardPage() {
           <div className="label-eyebrow">Tracking</div>
           <h1 className="font-serif text-2xl font-medium mt-1" style={{ color: "var(--ink-strong)" }}>
             Board
+            <GuidanceInfo id="board" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
             GitHub issues from the selected repository, grouped by lane —{" "}

@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { PackageOpen, RefreshCw } from "lucide-react";
+import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 
 type Counts = { skills: number; prompts: number; mcp_servers: number; agents: number };
 type LocalCounts = { tools: number; blueprints: number; specializations: number; stages: number };
@@ -132,6 +133,7 @@ export default function RegistryPage() {
           <div className="label-eyebrow">Catalog</div>
           <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
             <PackageOpen className="w-5 h-5 text-indigo-400" /> Agent Registry
+            <GuidanceInfo id="registry" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm text-[var(--ink-300)] mt-1">
             Catalogue browser — aregistry-backed plus locally-declared tools, blueprints, specializations, and pipeline stages.
@@ -153,6 +155,8 @@ export default function RegistryPage() {
           <RefreshCw className="w-3.5 h-3.5" /> Refresh
         </button>
       </header>
+
+      <GuidancePanel id="registry" />
 
       {/* Two strips of count cards: one for the upstream registry, one
           for locally-declared catalogs. Visually separated by a faint
