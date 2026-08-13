@@ -65,11 +65,15 @@ class DatasetRef(_Pinned):
 
 
 class RepoRef(_Pinned):
-    """The repo the workspace starts as, at a commit that cannot move."""
+    """The repo the workspace starts as, at a commit that cannot move.
 
-    url: str = Field(min_length=1)
-    ref: str = Field(min_length=1)
-    scope: str = Field(min_length=1)
+    Both fields reach a shell in the seed container, which holds the clone
+    token, so the grammar is narrow rather than merely non-empty.
+    """
+
+    url: str = Field(min_length=1, pattern=r"^https://[A-Za-z0-9.\-]+(:\d+)?/[A-Za-z0-9._\-/]+$")
+    ref: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._\-/]+$")
+    scope: str = Field(min_length=1, pattern=r"^[A-Za-z0-9._\-]+/[A-Za-z0-9._\-]+$")
 
 
 class ToolPolicy(_Pinned):
@@ -99,6 +103,8 @@ class SandboxSpec(_Pinned):
     workspace: bool = False
     # What the workspace starts as. Absent means an empty tree.
     repo: RepoRef | None = None
+    # Run an IDE in the workspace pod so a person can take the run over.
+    ide: bool = False
     # Hosts this run may reach on top of the platform allowlist, e.g. a private
     # package index. Additions are recorded so "what could it reach" is answerable.
     allow_domains: list[str] = Field(default_factory=list)

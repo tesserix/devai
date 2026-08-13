@@ -81,8 +81,9 @@ def build_isolation_manifests(record: SandboxRecord, *, namespace: str) -> list[
         "metadata": _meta(sid, "devai-sandbox-egress", namespace),
         "spec": {
             "podSelector": _selector(sid),
-            "policyTypes": ["Egress"],
+            "policyTypes": ["Egress", "Ingress"],
             "egress": _egress_rules(namespace),
+            "ingress": _ingress_rules(),
         },
     }
     return [quota, limits, policy]
@@ -101,6 +102,15 @@ def _egress_rules(namespace: str) -> list[dict[str, Any]]:
             "to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": namespace}}}],
         },
     ]
+
+
+def _ingress_rules() -> list[dict[str, Any]]:
+    """Only the control plane may reach a sandbox's pods.
+
+    Sandboxes share a namespace, so without this one sandbox could talk to
+    another's workspace — including its IDE, which trusts whoever reaches it.
+    """
+    return [{"from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}}}]}]
 
 
 __all__ = ["build_isolation_manifests"]

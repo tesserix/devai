@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 WORKSPACE_ROOT = "/workspace"
 WORKSPACE_PORT = 8100
+# code-server, for a human taking over the tree the agent left.
+IDE_PORT = 8118
 
 _MAX_READ_BYTES = 2_000_000
 _SEARCH_MAX_HITS = 200
@@ -204,6 +206,8 @@ def build_workspace_manifests(
     seed = _seed_container(record, secret_name=name, image=image or _default_image())
     if seed is not None:
         pod["spec"]["initContainers"] = [seed]
+    if record.spec.ide:
+        pod["spec"]["containers"].append(_ide_container())
     service = {
         "apiVersion": "v1",
         "kind": "Service",
@@ -214,7 +218,33 @@ def build_workspace_manifests(
             "ports": [{"port": WORKSPACE_PORT, "targetPort": WORKSPACE_PORT, "name": "http"}],
         },
     }
+    if record.spec.ide:
+        service["spec"]["ports"].append({"port": IDE_PORT, "targetPort": IDE_PORT, "name": "ide"})
     return [pvc, secret, pod, service]
+
+
+def _ide_container() -> dict[str, Any]:
+    """code-server on the same volume, so a takeover recreates nothing.
+
+    Unauthenticated by design *and* only by containment: the NetworkPolicy lets
+    the control plane in and nothing else, and the API applies the same
+    ownership check as every other workspace route.
+    """
+    import os
+
+    return {
+        "name": "ide",
+        "image": os.getenv("DEVAI_IDE_IMAGE", "codercom/code-server:latest"),
+        "args": ["--auth", "none", "--disable-telemetry", "--bind-addr", f"0.0.0.0:{IDE_PORT}", WORKSPACE_ROOT],
+        "ports": [{"containerPort": IDE_PORT, "name": "ide"}],
+        "volumeMounts": [{"name": "workspace", "mountPath": WORKSPACE_ROOT}],
+        "resources": {"requests": {"cpu": "200m", "memory": "512Mi"}, "limits": {"cpu": "1", "memory": "2Gi"}},
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "readOnlyRootFilesystem": False,
+            "capabilities": {"drop": ["ALL"]},
+        },
+    }
 
 
 def _seed_container(record: SandboxRecord, *, secret_name: str, image: str) -> dict[str, Any] | None:
@@ -259,6 +289,7 @@ def _default_image() -> str:
 
 
 __all__ = [
+    "IDE_PORT",
     "WORKSPACE_PORT",
     "WORKSPACE_ROOT",
     "WorkspaceError",
