@@ -47,9 +47,17 @@ class EventBus:
             raise RuntimeError("EventBus not connected. Call connect() first.")
         return self._js
 
-    async def connect(self, nats_url: str) -> None:
-        """Connect to NATS and ensure the DEVAI stream exists."""
-        self._nc = await nats.connect(nats_url)
+    async def connect(self, nats_url: str, creds: str | None = None) -> None:
+        """Connect to NATS and ensure the DEVAI stream exists.
+
+        `creds` is an optional path to a NATS account .creds file for
+        operator/JWT auth. When falsy (default) the connection is anonymous,
+        so behaviour is unchanged until the cluster enforces NATS auth.
+        """
+        connect_kwargs: dict[str, Any] = {}
+        if creds:
+            connect_kwargs["user_credentials"] = creds
+        self._nc = await nats.connect(nats_url, **connect_kwargs)
         self._js = self._nc.jetstream()
 
         # LIMITS retention, aligned with the event-bus ADAPTER's default. The
