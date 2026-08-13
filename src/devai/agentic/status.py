@@ -86,6 +86,33 @@ class AgenticStatus:
     ai_gateway: ComponentStatus
     kagent: ComponentStatus
     catalog: dict[str, int] = field(default_factory=dict)
+    sandboxes: ComponentStatus | None = None
+
+
+async def probe_sandbox_storage(service: Any | None) -> ComponentStatus:
+    """Sandbox health is storage health — the table either answers or it doesn't.
+
+    Kept out of ``fetch_agentic_status`` because that runs sync in a thread while
+    this leg is an async DB round-trip.
+    """
+    cs = ComponentStatus(
+        name="Sandboxes",
+        role="storage",
+        namespace="devai",
+        url="postgres:devai_db/sandboxes",
+        reachable=False,
+    )
+    if service is None:
+        cs.error = "sandbox service not configured"
+        return cs
+    try:
+        cs.detail = await service.health()
+    except Exception as e:  # noqa: BLE001 — a health probe must not 5xx the board
+        cs.error = f"{type(e).__name__}: {str(e)[:200]}"
+        logger.warning("sandbox storage probe failed: %s", e)
+        return cs
+    cs.reachable = True
+    return cs
 
 
 def fetch_agentic_status(

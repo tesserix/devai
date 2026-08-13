@@ -24,7 +24,7 @@ import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
  */
 type ComponentStatus = {
   name: string;
-  role: "registry" | "gateway" | "controller" | "llm-proxy";
+  role: "registry" | "gateway" | "controller" | "llm-proxy" | "storage";
   namespace: string;
   url: string;
   reachable: boolean;
@@ -38,6 +38,7 @@ type AgenticStatusJson = {
   ai_gateway: ComponentStatus;
   kagent: ComponentStatus;
   catalog: Record<string, number>;
+  sandboxes?: ComponentStatus | null;
 };
 
 type LLMProbe = {
@@ -98,8 +99,8 @@ export default function GatewayPage() {
             <GuidanceInfo id="gateway" className="ml-0.5 align-middle" />
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
-            Live status of the agentic stack — agentregistry, Solo.io agentgateway, the LLM proxy, and kagent. All
-            traffic from DevAI to external LLMs flows via this namespace.
+            Live status of the agentic stack — agentregistry, Solo.io agentgateway, the LLM proxy, kagent, and
+            sandbox storage. All traffic from DevAI to external LLMs flows via this namespace.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -136,6 +137,7 @@ export default function GatewayPage() {
           <ComponentCard component={status.agentgateway} />
           <ComponentCard component={status.ai_gateway} />
           <ComponentCard component={status.kagent} />
+          {status.sandboxes && <ComponentCard component={status.sandboxes} />}
         </section>
       )}
 
@@ -209,6 +211,7 @@ function ComponentCard({ component }: { component: ComponentStatus }) {
     gateway: "Gateway",
     controller: "Controller",
     "llm-proxy": "LLM Proxy",
+    storage: "Storage",
   };
   return (
     <article

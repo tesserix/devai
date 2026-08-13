@@ -99,6 +99,15 @@ class SandboxService:
             return None  # absent, not forbidden — don't leak existence
         return record
 
+    async def health(self) -> dict[str, Any]:
+        """Counts for the Service-health board. Raises if the table is unusable."""
+        by_status = await self._db.sandbox_counts()
+        return {
+            "total": sum(by_status.values()),
+            "live": sum(n for s, n in by_status.items() if s != SandboxStatus.DESTROYED.value),
+            "by_status": by_status,
+        }
+
     async def list(self, *, owner: str, is_admin: bool = False, limit: int = 100) -> list[SandboxRecord]:
         rows = await self._db.list_sandboxes(None if is_admin else owner, limit)
         return [_to_record(r) for r in rows]

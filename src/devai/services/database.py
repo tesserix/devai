@@ -1096,6 +1096,10 @@ class Database:
             rows = await self.pool.fetch("SELECT * FROM sandboxes ORDER BY created_at DESC LIMIT $1", limit)
         return [dict(r) for r in rows]
 
+    async def sandbox_counts(self) -> dict[str, int]:
+        rows = await self.pool.fetch("SELECT status, COUNT(*) AS n FROM sandboxes GROUP BY status")
+        return {r["status"]: r["n"] for r in rows}
+
     async def set_sandbox_status(self, sandbox_id: str, status: str, detail: dict[str, Any] | None = None) -> None:
         await self.pool.execute(
             "UPDATE sandboxes SET status = $2, detail = COALESCE($3::jsonb, detail), updated_at = NOW() WHERE id = $1",

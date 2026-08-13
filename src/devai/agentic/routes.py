@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from devai.agentic.status import fetch_agentic_status, to_dict
+from devai.agentic.status import fetch_agentic_status, probe_sandbox_storage, to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,9 @@ async def status(request: Request) -> dict[str, Any]:
         or _default("http://ai-gateway.agentgateway-system.svc.cluster.local:8080"),
         kagent_url=os.environ.get("DEVAI_KAGENT_CONTROLLER_URL", "")
         or _default("http://kagent-controller.kagent-system.svc.cluster.local:8083"),
+    )
+    snapshot.sandboxes = await probe_sandbox_storage(
+        getattr(request.app.state, "sandbox_service", None)
     )
     return to_dict(snapshot)
 
