@@ -45,7 +45,7 @@ dependencies = [
     "google-cloud-recommender==2.22.0",
     "google-cloud-resource-manager==1.17.0",
     "google-auth==2.38.0",
-    "google-api-core[grpc]==2.24.2",
+    "google-api-core[grpc]==2.33.0",
     "grpcio==1.75.1",
     "grpcio-status==1.68.1",
     "proto-plus==1.27.2",
@@ -80,7 +80,7 @@ dependencies = [
     # GCS object-store backend (adapters/object_store/gcs.py) — composer
     # attachments + the log-archive listing on the dashboard /logs page.
     # Imported lazily inside the gcs adapter only.
-    "google-cloud-storage>=2.18.0",
+    "google-cloud-storage>=3.13.0",
     # Password hashing for the local_db identity backend (LOCAL/sandbox only).
     # Imported lazily inside src/devai/adapters/identity/local_db.py, so a
     # prod deployment (auth terminated at the auth-bff, noop backend) never
