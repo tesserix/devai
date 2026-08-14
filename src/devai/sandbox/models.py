@@ -95,6 +95,9 @@ class SandboxSpec(_Pinned):
     model: ModelRef
     prompt: PromptRef | None = None
     dataset: DatasetRef | None = None
+    # The agent runtime release the run is built on. Unset at creation means the
+    # newest offered one, and the service pins it before the record is stored.
+    adk_version: str | None = None
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
     limits: SandboxLimits = Field(default_factory=SandboxLimits)
     ttl_seconds: int = Field(default=DEFAULT_TTL_SECONDS, gt=0, le=MAX_TTL_SECONDS)

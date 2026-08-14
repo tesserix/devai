@@ -22,6 +22,7 @@ from devai.sandbox.ide_proxy import proxy_ide_request, proxy_ide_socket
 from devai.sandbox.job import sandbox_secret_name
 from devai.sandbox.models import SandboxRecord, SandboxSpec
 from devai.sandbox.service import SandboxError
+from devai.sandbox.trace import TraceStore
 from devai.sandbox.workspace_client import WorkspaceClient
 
 if TYPE_CHECKING:
@@ -312,6 +313,55 @@ async def workspace_files(request: Request, sandbox_id: str, operation: str, bod
     if operation == "search":
         return {"hits": await client.search(str(body.get("needle", "")), str(body.get("path", ".")))}
     raise HTTPException(status_code=404, detail=f"unknown file operation {operation!r}")
+
+
+def _invoker(request: Request) -> Any:
+    inv = getattr(request.app.state, "sandbox_invoker", None)
+    if inv is None:
+        raise HTTPException(status_code=503, detail="sandbox invoker unavailable")
+    return inv
+
+
+def _traces(request: Request) -> TraceStore:
+    store: TraceStore | None = getattr(request.app.state, "sandbox_traces", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="sandbox traces unavailable")
+    return store
+
+
+@router.post("/{sandbox_id}/invoke")
+async def invoke_sandbox(request: Request, sandbox_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """One turn of the pinned agent, answering with the trace it produced."""
+    owner, is_admin = await _read_scope(request)
+    record = await _service(request).get(sandbox_id, owner=owner, is_admin=is_admin)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
+    invoker = _invoker(request)
+    message = str(body.get("message", "")).strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message is required")
+    await _service(request).touch(sandbox_id)
+    try:
+        invocation = await invoker.invoke(record, message=message, triggered_by=owner or record.owner)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return invocation.to_dict()
+
+
+@router.get("/{sandbox_id}/traces")
+async def list_traces(request: Request, sandbox_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    await _sandbox_or_404(request, sandbox_id)
+    found = await _traces(request).list_for_sandbox(sandbox_id, limit=limit)
+    return [inv.to_dict() for inv in found]
+
+
+@router.get("/{sandbox_id}/traces/{invocation_id}")
+async def get_trace(request: Request, sandbox_id: str, invocation_id: str) -> dict[str, Any]:
+    await _sandbox_or_404(request, sandbox_id)
+    invocation = await _traces(request).get(sandbox_id, invocation_id)
+    if invocation is None:
+        raise HTTPException(status_code=404, detail=f"trace {invocation_id!r} not found")
+    return invocation.to_dict()
 
 
 __all__ = ["router"]

@@ -618,6 +618,17 @@ class PipelineService:
         """
         return getattr(self, "_k8s_runtime", None)
 
+    @property
+    def stage_deps(self) -> Any:
+        """The wired StageDeps (or None before start()).
+
+        On-demand callers outside the pipeline — the sandbox invoker — run
+        agents against the same adapters and per-principal resolvers a
+        pipeline stage does, rather than a second, thinner wiring.
+        """
+        bundle = getattr(self, "_runtime_bundle", None)
+        return getattr(bundle, "deps", None)
+
     def register_blueprint(self, bp: Any) -> bool:
         """Hot-register an already-loaded Blueprint so it's immediately
         runnable. Used by the authoring service when a user publishes a

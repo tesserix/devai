@@ -140,6 +140,8 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
+          secrets: |
+            gh_token=${{ secrets.PKG_READ_TOKEN }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}

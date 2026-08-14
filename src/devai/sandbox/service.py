@@ -14,6 +14,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from devai.kit.versions import AdkVersionCatalogue, UnknownAdkVersion
 from devai.sandbox.models import SandboxRecord, SandboxSpec, SandboxStatus
 
 if TYPE_CHECKING:
@@ -36,17 +37,20 @@ class SandboxService:
         registry: Any | None = None,
         settings: Any | None = None,
         provisioner: Any | None = None,
+        adk_catalogue: AdkVersionCatalogue | None = None,
     ) -> None:
         self._db = db
         self._registry = registry
         self._settings = settings
         self._provisioner = provisioner
+        self._adk_catalogue = adk_catalogue
         self._reaper_task: asyncio.Task[None] | None = None
 
     async def create(self, spec: SandboxSpec, *, owner: str) -> SandboxRecord:
         if not owner:
             raise SandboxError("a sandbox needs an owner")
         self._assert_refs_published(spec)
+        spec = await self._pin_adk_version(spec)
 
         now = datetime.now(UTC)
         record = SandboxRecord(
@@ -69,6 +73,17 @@ class SandboxService:
         )
         logger.info("sandbox %s created for %s (agent=%s@%s)", record.id, owner, spec.agent.name, spec.agent.version)
         return await self._provision(record)
+
+    async def _pin_adk_version(self, spec: SandboxSpec) -> SandboxSpec:
+        """Resolve the runtime release now, so the stored spec reproduces the run
+        even after newer releases land."""
+        if self._adk_catalogue is None:
+            return spec
+        try:
+            resolved = await self._adk_catalogue.resolve(spec.adk_version)
+        except UnknownAdkVersion as exc:
+            raise SandboxError(str(exc)) from exc
+        return spec.model_copy(update={"adk_version": resolved})
 
     async def _provision(self, record: SandboxRecord) -> SandboxRecord:
         """Bring the sandbox up. A cluster failure yields a FAILED sandbox the

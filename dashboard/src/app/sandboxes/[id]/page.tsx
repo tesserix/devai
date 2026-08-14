@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
+import { SandboxConsole } from "@/components/sandbox-console";
 
 type Snapshot = {
   captured_at?: string;
@@ -22,6 +23,7 @@ type Sandbox = {
   spec: {
     agent: { name: string; version: string };
     model: { provider: string; model: string };
+    adk_version?: string | null;
     ide?: boolean;
     repo?: { url: string; ref: string } | null;
   };
@@ -73,7 +75,8 @@ export default function SandboxPage({ params }: { params: Promise<{ id: string }
           {sandbox && (
             <p className="text-sm text-[var(--ink-300)] mt-1">
               {sandbox.spec.agent.name}@{sandbox.spec.agent.version} · {sandbox.spec.model.provider}/
-              {sandbox.spec.model.model} · {sandbox.status}
+              {sandbox.spec.model.model}
+              {sandbox.spec.adk_version ? ` · adk ${sandbox.spec.adk_version}` : ""} · {sandbox.status}
             </p>
           )}
         </div>
@@ -94,6 +97,8 @@ export default function SandboxPage({ params }: { params: Promise<{ id: string }
           {error}
         </div>
       )}
+
+      <SandboxConsole sandboxId={id} live={live} />
 
       {ports.length > 0 && (
         <section className="panel p-0 overflow-hidden">

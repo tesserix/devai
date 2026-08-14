@@ -23,6 +23,26 @@ logger = logging.getLogger(__name__)
 _START_TIME = time.time()
 
 
+def _sandbox_stage_deps(app: FastAPI, config: Settings) -> object:
+    """The pipeline's own deps when it is up, so a sandbox run resolves the
+    invoking user's credentials exactly as a pipeline stage does; otherwise a
+    minimal bundle so invoking still works with the pipeline disabled."""
+    deps = getattr(getattr(app.state, "pipeline_service", None), "stage_deps", None)
+    if deps is not None:
+        return deps
+
+    from devai.pipeline.interfaces import StageDeps
+
+    llm = None
+    try:
+        from devai.adapters.llm.factory import create_llm_adapter
+
+        llm = create_llm_adapter(config)
+    except Exception:  # noqa: BLE001
+        logger.debug("sandbox invoker: LLM adapter construction failed", exc_info=True)
+    return StageDeps(config=config, llm=llm)
+
+
 def create_app(
     event_bus: EventBus,
     state: StateManager,
@@ -271,9 +291,12 @@ def create_app(
 
         # Agent sandboxes — pinned, TTL-bounded agent configurations (#179).
         app.state.sandbox_service = None
+        app.state.adk_catalogue = None
         try:
+            from devai.kit.versions import create_adk_catalogue
             from devai.sandbox import SandboxProvisioner, SandboxService
 
+            app.state.adk_catalogue = create_adk_catalogue(config)
             if app.state.sre_studio_db is not None:
                 # Reuses the pipeline's connected K8s runtime; without it a
                 # sandbox is still recorded, just never fenced in the cluster.
@@ -287,12 +310,34 @@ def create_app(
                         if sandbox_runtime is not None
                         else None
                     ),
+                    adk_catalogue=app.state.adk_catalogue,
                 )
                 app.state.sandbox_service.start_reaper()
                 logger.info("Sandbox service ready (TTL reaper started)")
         except Exception:
             logger.exception("Sandbox service failed to start — sandbox API will 503")
             app.state.sandbox_service = None
+
+        # Invoking a sandbox: one turn of the pinned agent, and the trace it
+        # leaves behind (Redis, expiring with the sandbox it belongs to).
+        app.state.sandbox_traces = None
+        app.state.sandbox_invoker = None
+        try:
+            from devai.sandbox.invoke import SandboxInvoker
+            from devai.sandbox.trace import TraceStore
+
+            app.state.sandbox_traces = TraceStore(getattr(state, "redis", None))
+            spec_registry = getattr(spec_service, "registry", None) if spec_service else None
+            if spec_registry is not None:
+                app.state.sandbox_invoker = SandboxInvoker(
+                    specializations=spec_registry,
+                    deps=_sandbox_stage_deps(app, config),
+                    traces=app.state.sandbox_traces,
+                )
+                logger.info("Sandbox invoker ready")
+        except Exception:
+            logger.exception("Sandbox invoker failed to start — invoke API will 503")
+            app.state.sandbox_invoker = None
 
         # Repo onboarding service (Repos page). Independent of the
         # pipeline runtime: build an SCM client (reuse the pipeline's if
@@ -739,6 +784,11 @@ def create_app(
     from devai.sandbox.routes import router as sandbox_router
 
     app.include_router(sandbox_router)
+
+    # Runtime version picker (/api/adk/versions) — what a sandbox may pin to.
+    from devai.kit.routes import router as adk_router
+
+    app.include_router(adk_router)
 
     # Teams routes (/api/teams/*) — human teams + the AI crews they own.
     # Always mounted; returns 503 until team_service is wired (lifespan).

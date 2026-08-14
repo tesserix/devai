@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +62,7 @@ class Adapter(Protocol):
         ...
 
 
-T = TypeVar("T", bound=Adapter)
-
-
-class AdapterRegistry(Generic[T]):
+class AdapterRegistry[T: Adapter]:
     """Name → factory map used by each family's `create_*_adapter`.
 
     Why a class instead of a dict? Two reasons:

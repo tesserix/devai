@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from devai.specializations.base import HandoverField, LLMProvider, RiskLevel, Specialization
+
 API_VERSION = "registry.agentic.dev/v1alpha1"
 
 # Label marking artifacts that devai authored (so the catalog can filter them).
@@ -125,6 +127,86 @@ def spec_to_agent_envelope(
         "metadata": _base_metadata(spec.name, tenant=tenant, created_by=created_by, version=version),
         "spec": agent_spec,
     }
+
+
+def role_name(registry_name: str) -> str:
+    """Registry names are DNS-ish (`release-notes-writer`); role names are
+    snake_case. Converting rather than rejecting is what lets an agent authored
+    in the UI be dispatched by name."""
+    return re.sub(r"[-.]+", "_", (registry_name or "").strip().lower())
+
+
+def _handover_from_envelope(raw: Any) -> dict[str, HandoverField]:
+    if not isinstance(raw, dict):
+        return {}
+    fields: dict[str, HandoverField] = {}
+    for key, value in raw.items():
+        if isinstance(value, HandoverField):
+            fields[key] = value
+        elif isinstance(value, dict):
+            fields[key] = HandoverField(
+                name=key,
+                type=str(value.get("type") or "any"),
+                required=bool(value.get("required", True)),
+                description=str(value.get("description") or ""),
+            )
+    return fields
+
+
+def agent_envelope_to_spec(envelope: dict[str, Any]) -> Specialization:
+    """registry Agent envelope -> devai Specialization. Inverse of
+    ``spec_to_agent_envelope``, so an agent authored in the UI is runnable and
+    not merely listed.
+
+    Accepts both the nested envelope and the flattened record `RegistryClient`
+    hands back, mirroring what ``_unwrap`` already tolerates on the way in.
+    """
+    if isinstance(envelope.get("spec"), dict):
+        meta = envelope.get("metadata") or {}
+        spec = envelope["spec"]
+        registry_name = str(meta.get("name") or "").strip()
+        tag = str(meta.get("tag") or "")
+    else:
+        spec = envelope
+        registry_name = str(envelope.get("name") or "").strip()
+        tag = str(envelope.get("version") or "")
+    if not registry_name:
+        raise ValueError("agent envelope has no metadata.name")
+
+    model = spec.get("model") if isinstance(spec.get("model"), dict) else {}
+    metadata: dict[str, Any] = {
+        "registry_name": registry_name,
+        "registry_tag": tag,
+        "registry_skills": list(spec.get("skills") or []),
+        "registry_tools": list(spec.get("tools") or []),
+        "registry_mcp_servers": list(spec.get("mcpServers") or []),
+        "registry_prompts": list(spec.get("prompts") or []),
+    }
+    if isinstance(spec.get("a2a"), dict) and spec["a2a"]:
+        metadata["a2a"] = dict(spec["a2a"])
+
+    kwargs: dict[str, Any] = {
+        "name": role_name(registry_name),
+        "display_name": str(spec.get("title") or ""),
+        "description": str(spec.get("description") or ""),
+        "system_prompt": str(spec.get("systemPrompt") or ""),
+        "llm_provider": LLMProvider.parse(model.get("provider")),
+        "llm_model": str(model.get("name") or ""),
+        "risk_level": RiskLevel.parse(spec.get("riskLevel")),
+        "allowed_tools": [str(t) for t in (spec.get("builtinTools") or [])],
+        "handover_schema": _handover_from_envelope(spec.get("handoverSchema")),
+        "metadata": metadata,
+    }
+    if spec.get("category"):
+        kwargs["category"] = str(spec["category"])
+    if spec.get("outputKey"):
+        kwargs["output_key"] = str(spec["outputKey"])
+    if model.get("temperature") is not None:
+        kwargs["temperature"] = float(model["temperature"])
+    for src, dst in (("maxTurns", "max_turns"), ("timeout", "timeout_seconds")):
+        if spec.get(src) is not None:
+            kwargs[dst] = int(spec[src])
+    return Specialization(**kwargs)
 
 
 def blueprint_to_blueprint_envelope(

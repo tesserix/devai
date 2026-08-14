@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "devai"
 version = "0.1.0"
 description = "AI-powered development lifecycle automation platform"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     "anthropic>=0.117.0",
@@ -94,6 +94,11 @@ docs = [
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0",
 ]
+# The agent runtime. A direct reference because the kit repo is private and
+# publishes to GitHub releases rather than PyPI, so installing it needs a token.
+kit = [
+    "tesserix-adk @ git+https://github.com/tesserix/agent-development-kit@v0.2.0",
+]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -113,7 +118,7 @@ devai-mcp-hub = "devai.mcphub:create_hub_app"
 packages = ["src/devai"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 src = ["src"]
 
@@ -138,7 +143,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

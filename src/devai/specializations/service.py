@@ -73,26 +73,52 @@ class SpecializationService:
             return local_registry
 
         try:
-            # Build a registry-backed view layered over the local YAML.
-            # Local seeds carry the runtime metadata (tools, handover
-            # schema, context keys) that aregistry's slim schema drops;
-            # aregistry is the authority for "what skills exist". We
-            # use the catalog list to validate + augment but never to
-            # OVERWRITE the runtime metadata.
+            # Layer the registry over the local YAML. Local seeds carry runtime
+            # metadata (tools, handover schema, context keys) that aregistry's
+            # slimmer schema drops, so disk wins wherever both define a role;
+            # the registry contributes the roles disk has never heard of, which
+            # is what makes an agent authored in the UI actually runnable.
             cat_skills = self._registry_client.list_skills()
             cat_agents = self._registry_client.list_agents()
+            adopted = self._adopt_published_agents(local_registry, cat_agents)
             self._source = "registry+local" if (cat_skills or cat_agents) else "local"
             logger.info(
-                "specializations: loaded %d local specs; aregistry advertises %d skills + %d agents (source=%s)",
+                "specializations: loaded %d local specs; aregistry advertises %d skills + %d agents, "
+                "%d adopted as runnable (source=%s)",
                 len(local_registry),
                 len(cat_skills),
                 len(cat_agents),
+                adopted,
                 self._source,
             )
         except Exception:  # noqa: BLE001
             logger.exception("specializations: aregistry consultation failed — falling back to local")
             self._source = "local"
         return local_registry
+
+    def _adopt_published_agents(self, registry: SpecializationRegistry, agents: list[Any]) -> int:
+        """Register published agents that disk does not already define.
+
+        A malformed published agent is skipped, never fatal: one bad artifact in
+        a shared catalog must not take the whole runtime down.
+        """
+        from devai.registry.mapping import agent_envelope_to_spec
+
+        adopted = 0
+        for agent in agents:
+            raw = getattr(agent, "raw", None)
+            if not isinstance(raw, dict) or not raw:
+                continue
+            try:
+                spec = agent_envelope_to_spec(raw)
+            except Exception as exc:  # noqa: BLE001 — one bad artifact, not a bad catalog
+                logger.warning("specializations: skipping published agent %r — %s", getattr(agent, "name", "?"), exc)
+                continue
+            if registry.has(spec.name):
+                continue
+            registry.register(spec)
+            adopted += 1
+        return adopted
 
     @property
     def source(self) -> str:

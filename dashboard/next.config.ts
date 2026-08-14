@@ -159,6 +159,11 @@ const nextConfig: NextConfig = {
         source: "/api/sandboxes/:path*",
         destination: `${API_INTERNAL_URL}/api/sandboxes/:path*`,
       },
+      // Runtime releases a sandbox may pin (the ADK version picker).
+      {
+        source: "/api/adk/:path*",
+        destination: `${API_INTERNAL_URL}/api/adk/:path*`,
+      },
       // Legacy catch-all — original dashboard endpoints sit under
       // /dashboard/api/* on devai-api. Keep this last so it doesn't
       // shadow the more-specific rewrites above.

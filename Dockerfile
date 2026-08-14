@@ -21,6 +21,15 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .
+# The agent runtime, from its private repo. Optional: without a build token the
+# image ships without the kit and runs on the in-tree dispatcher instead. The
+# credential is unset in the same layer, and this stage is discarded regardless.
+RUN --mount=type=secret,id=gh_token \
+    if [ -s /run/secrets/gh_token ]; then \
+        git config --global url."https://$(cat /run/secrets/gh_token)@github.com/".insteadOf "https://github.com/" ; \
+        pip install --no-cache-dir ".[kit]" || echo "kit unavailable — running on the in-tree dispatcher" ; \
+        rm -f /root/.gitconfig ; \
+    fi
 # Security scanners the security_expert agent shells out to. Python-native
 # ones install cheaply here; without them every SAST/dependency scan
 # silently returned zero findings (a false "clean" verdict).

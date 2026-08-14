@@ -172,6 +172,8 @@ def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
         {"name": "DEVAI_SANDBOX_MAX_COST_USD", "value": str(spec.limits.max_cost_usd)},
         {"name": "DEVAI_SANDBOX_MAX_WALL_CLOCK_S", "value": str(spec.limits.max_wall_clock_s)},
     ]
+    if spec.adk_version:
+        env.append({"name": "DEVAI_ADK_VERSION", "value": spec.adk_version})
     if spec.prompt is not None:
         env.append({"name": "DEVAI_SANDBOX_PROMPT", "value": f"{spec.prompt.ref}@{spec.prompt.version}"})
     if spec.dataset is not None:

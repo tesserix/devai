@@ -177,6 +177,11 @@ def test_tool_modes_are_injected_so_the_gateway_can_enforce_them() -> None:
     assert '"read_file": "real"' in env["DEVAI_SANDBOX_TOOL_OVERRIDES"]["value"]
 
 
+def test_the_pinned_runtime_version_is_injected_only_when_set() -> None:
+    assert "DEVAI_ADK_VERSION" not in _env(_job())
+    assert _env(_job(_record(_spec(adk_version="0.1.1"))))["DEVAI_ADK_VERSION"]["value"] == "0.1.1"
+
+
 def test_the_pinned_prompt_is_injected_only_when_set() -> None:
     assert "DEVAI_SANDBOX_PROMPT" not in _env(_job())
     spec = _spec(prompt=PromptRef(ref="impl-prompt", version="v3"))

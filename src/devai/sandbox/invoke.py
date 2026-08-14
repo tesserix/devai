@@ -1,0 +1,165 @@
+"""Run one turn of a pinned agent inside its sandbox and record what happened.
+
+The sandbox already pins *what* runs (agent, model, prompt, tools, limits). This
+is the part that runs it: it resolves the pinned agent to a Specialization,
+forces the pinned model over whatever the role would otherwise choose, routes
+every tool call through the sandbox gateway, and writes the trace.
+
+Nothing here re-implements the agent loop — `SpecAgent`/`AgentRunner` is the one
+loop, the same one a pipeline stage or a dispatched Job takes. A sandbox differs
+only in its boundaries, which is the whole point: what you test is what ships.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from dataclasses import replace
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+from devai.sandbox.gateway import ToolCallRecord, ToolGateway
+from devai.sandbox.models import SandboxRecord, SandboxStatus
+from devai.sandbox.trace import Invocation, TraceStep, TraceStore
+
+if TYPE_CHECKING:
+    from devai.pipeline.interfaces import StageDeps
+    from devai.specializations.base import Specialization
+    from devai.specializations.registry import SpecializationRegistry
+
+logger = logging.getLogger(__name__)
+
+_LIVE = {SandboxStatus.PENDING, SandboxStatus.PROVISIONING, SandboxStatus.READY}
+_MIN_TTL_SECONDS = 300
+
+
+class SandboxInvoker:
+    def __init__(
+        self,
+        *,
+        specializations: SpecializationRegistry,
+        deps: StageDeps,
+        traces: TraceStore,
+    ) -> None:
+        self._specs = specializations
+        self._deps = deps
+        self._traces = traces
+
+    async def invoke(self, record: SandboxRecord, *, message: str, triggered_by: str) -> Invocation:
+        """One turn. Model and tool failures become a failed trace, never a lost one."""
+        if record.status not in _LIVE:
+            raise ValueError(f"sandbox {record.id} is {record.status.value} and cannot be invoked")
+        spec = self._resolve(record)
+
+        steps: list[TraceStep] = [
+            TraceStep(kind="prompt", name="system", output=spec.system_prompt),
+            TraceStep(kind="prompt", name="user", output=message),
+        ]
+        gateway = ToolGateway(policy=record.spec.tools, sink=lambda rec: steps.append(_tool_step(rec)))
+
+        invocation = Invocation(
+            id=f"inv-{uuid.uuid4().hex[:12]}",
+            sandbox_id=record.id,
+            agent=spec.name,
+            message=message,
+            steps=steps,
+        )
+        started = time.perf_counter()
+        try:
+            result = await self._run(spec, record, gateway, message=message, triggered_by=triggered_by)
+            invocation.final_text = result.final_text
+            invocation.ok = result.ok
+            invocation.error = result.error or ""
+            steps.append(
+                TraceStep(
+                    kind="llm",
+                    name=record.spec.model.model,
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    error=result.error or "",
+                )
+            )
+            steps.append(TraceStep(kind="response", name="final", output=result.final_text))
+        except Exception as exc:  # noqa: BLE001 — a broken run is evidence, not an outage
+            logger.warning("sandbox %s: invocation failed", record.id, exc_info=True)
+            invocation.ok = False
+            invocation.error = str(exc)
+            steps.append(
+                TraceStep(
+                    kind="llm",
+                    name=record.spec.model.model,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    error=str(exc),
+                )
+            )
+
+        await self._traces.save(invocation, ttl_seconds=self._ttl(record))
+        return invocation
+
+    def _resolve(self, record: SandboxRecord) -> Specialization:
+        from devai.registry.mapping import role_name
+
+        name = role_name(record.spec.agent.name)
+        if not self._specs.has(name):
+            raise ValueError(f"sandbox {record.id} pins agent {record.spec.agent.name!r}, which is not runnable here")
+        spec = self._specs.resolve(name)
+        # The sandbox's pin beats the role's own preference — that is what makes
+        # a result attributable to a configuration rather than to a default.
+        return replace(
+            spec,
+            llm_model=record.spec.model.model or spec.llm_model,
+            max_turns=min(spec.max_turns, 8),
+        )
+
+    async def _run(
+        self,
+        spec: Specialization,
+        record: SandboxRecord,
+        gateway: ToolGateway,
+        *,
+        message: str,
+        triggered_by: str,
+    ) -> Any:
+        from devai.agentruntime import AgentDispatcher, SpecAgent
+        from devai.pipeline.types import DevAITask
+
+        deps = self._with_gateway(record, gateway, triggered_by=triggered_by)
+        task = DevAITask(intent=message, triggered_by=triggered_by)
+        # Through the dispatcher, so the run uses the invoking user's own
+        # credentials by the same resolution every other execution path uses.
+        return await AgentDispatcher(deps).dispatch(SpecAgent(spec), task, instruction=message)
+
+    def _with_gateway(self, record: SandboxRecord, gateway: ToolGateway, *, triggered_by: str) -> StageDeps:
+        """A copy of the shared deps whose tool dispatch is fenced by this sandbox."""
+        from devai.tools.dispatch import ToolDispatcher
+
+        deps = self._deps
+        extra = dict(deps.extra or {})
+        extra["tool_dispatcher"] = ToolDispatcher(
+            deps.scm,
+            dry_run=True,
+            triggered_by=triggered_by,
+            gateway=gateway,
+        )
+        return replace(deps, extra=extra)
+
+    def _ttl(self, record: SandboxRecord) -> int:
+        remaining = int((record.expires_at - datetime.now(UTC)).total_seconds())
+        return max(remaining, _MIN_TTL_SECONDS)
+
+
+def _tool_step(rec: ToolCallRecord) -> TraceStep:
+    return TraceStep(
+        kind="tool",
+        name=rec.tool,
+        input=rec.arguments,
+        output=rec.response,
+        mode=rec.mode.value,
+        latency_ms=rec.latency_ms,
+        error=rec.error or "",
+    )
+
+
+__all__ = ["SandboxInvoker"]
