@@ -99,9 +99,12 @@ class SandboxInvoker:
         return invocation
 
     async def _resolve(self, record: SandboxRecord) -> Specialization:
-        from devai.registry.mapping import role_name
+        from devai.registry.mapping import agent_envelope_to_spec, role_name
 
-        spec = await self._specs.resolve_runnable(role_name(record.spec.agent.name))
+        if record.spec.draft:
+            spec = agent_envelope_to_spec(record.spec.draft)
+        else:
+            spec = await self._specs.resolve_runnable(role_name(record.spec.agent.name))
         if spec is None:
             raise ValueError(f"sandbox {record.id} pins agent {record.spec.agent.name!r}, which is not runnable here")
         # The sandbox's pin beats the role's own preference — that is what makes

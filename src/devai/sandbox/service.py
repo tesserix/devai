@@ -182,7 +182,8 @@ class SandboxService:
         """
         if self._registry is None:
             return
-        refs = [("agents", spec.agent.name)]
+        # A draft is unpublished by definition — that is what it is being tested for.
+        refs: list[tuple[str, str]] = [] if spec.draft else [("agents", spec.agent.name)]
         if spec.prompt is not None:
             refs.append(("prompts", spec.prompt.ref))
         for plural, name in refs:

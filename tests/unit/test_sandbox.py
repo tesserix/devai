@@ -253,6 +253,20 @@ async def test_create_rejects_an_agent_that_is_not_published() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_draft_agent_is_not_expected_in_the_catalog() -> None:
+    class _Registry:
+        def artifact_exists(self, plural: str, name: str) -> bool:
+            return False
+
+    spec = SandboxSpec.model_validate(
+        {**_MIN_SPEC, "draft": {"kind": "Agent", "metadata": {"name": "draft-x"}, "spec": {"systemPrompt": "hi"}}}
+    )
+
+    rec = await _service(registry=_Registry()).create(spec, owner="sam@example.com")
+    assert rec.status is SandboxStatus.PENDING
+
+
+@pytest.mark.asyncio
 async def test_unknown_registry_answer_does_not_block_creation() -> None:
     class _Registry:
         def artifact_exists(self, plural: str, name: str) -> None:

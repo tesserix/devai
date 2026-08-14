@@ -57,6 +57,7 @@ def _record(**kw) -> SandboxRecord:
         agent=AgentRef(name=kw.get("agent", "release-notes-writer"), version="v1"),
         model=ModelRef(provider="anthropic", model="claude-sonnet-4-20250514"),
         tools=kw.get("tools", ToolPolicy(default_mode=ToolMode.MOCK)),
+        draft=kw.get("draft"),
         adk_version="0.2.0",
     )
     return SandboxRecord(
@@ -202,6 +203,42 @@ async def test_a_model_failure_is_a_failed_trace_not_a_lost_one() -> None:
     assert not inv.ok
     assert "503" in inv.error
     assert (await store.get("sb-1", inv.id)) is not None
+
+
+_DRAFT = {
+    "apiVersion": "registry.agentic.dev/v1alpha1",
+    "kind": "Agent",
+    "metadata": {"name": "draft-notes-writer"},
+    "spec": {
+        "title": "Draft Notes Writer",
+        "systemPrompt": "You write release notes, badly, for now.",
+        "builtinTools": ["scm_list_files"],
+    },
+}
+
+
+async def test_a_draft_agent_runs_without_being_published() -> None:
+    # Trying the definition before it exists in the catalog is the point of the
+    # studio: publishing something untested is what it removes.
+    llm = _ScriptedLLM([LLMResponse(text="draft notes")])
+    inv = _invoker(llm, registry=_Specs(SpecializationRegistry()))
+
+    result = await inv.invoke(
+        _record(agent="draft-notes-writer", draft=_DRAFT), message="go", triggered_by="sam@example.com"
+    )
+
+    assert result.ok
+    assert result.agent == "draft_notes_writer"
+    assert result.steps[0].output == "You write release notes, badly, for now."
+
+
+async def test_a_draft_beats_a_published_agent_of_the_same_name() -> None:
+    llm = _ScriptedLLM([LLMResponse(text="draft notes")])
+    draft = {**_DRAFT, "metadata": {"name": "release-notes-writer"}}
+
+    result = await _invoker(llm).invoke(_record(draft=draft), message="go", triggered_by="sam@example.com")
+
+    assert result.steps[0].output == "You write release notes, badly, for now."
 
 
 async def test_an_agent_published_after_startup_is_invokable(monkeypatch) -> None:

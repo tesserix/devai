@@ -98,6 +98,9 @@ class SandboxSpec(_Pinned):
     # The agent runtime release the run is built on. Unset at creation means the
     # newest offered one, and the service pins it before the record is stored.
     adk_version: str | None = None
+    # An unpublished Agent envelope, tested here before it reaches the catalog.
+    # Same shape a published agent has, so what passes is what ships.
+    draft: dict[str, Any] | None = None
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
     limits: SandboxLimits = Field(default_factory=SandboxLimits)
     ttl_seconds: int = Field(default=DEFAULT_TTL_SECONDS, gt=0, le=MAX_TTL_SECONDS)

@@ -1,0 +1,393 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, ArrowRight, Bot, Check, FlaskConical, Rocket } from "lucide-react";
+
+import { SandboxConsole } from "@/components/sandbox-console";
+import { useToast } from "@/components/toast";
+import { api } from "@/lib/api";
+import { lintManifest } from "@/lib/registry-schemas";
+
+/**
+ * Agent Studio — define an agent, run it in a sandbox, then publish it.
+ *
+ * The middle step is the reason this page exists separately from the manifest
+ * editor: the draft definition is pinned into a sandbox and invoked before it
+ * ever reaches the catalog, so nothing is published untested.
+ */
+
+const STEPS = ["Define", "Test", "Publish"] as const;
+
+const PROVIDERS = ["anthropic", "openai", "vertex", "gemini", "groq"];
+
+const MODEL_DEFAULTS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-20250514",
+  openai: "gpt-4.1",
+  vertex: "claude-sonnet-4@20250514",
+  gemini: "gemini-2.5-pro",
+  groq: "llama-3.3-70b-versatile",
+};
+
+function slug(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 253);
+}
+
+function list(value: string): string[] {
+  return value.split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
+}
+
+export default function AgentStudioPage() {
+  const router = useRouter();
+  const toast = useToast();
+
+  const [step, setStep] = useState(0);
+  const [title, setTitle] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [provider, setProvider] = useState("anthropic");
+  const [model, setModel] = useState(MODEL_DEFAULTS.anthropic);
+  const [tools, setTools] = useState("");
+  const [skills, setSkills] = useState("");
+  const [maxTurns, setMaxTurns] = useState(8);
+
+  const [sandboxId, setSandboxId] = useState("");
+  const [testedDefinition, setTestedDefinition] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [published, setPublished] = useState("");
+
+  const agentName = name || slug(title);
+
+  const manifest = useMemo(
+    () => ({
+      apiVersion: "registry.agentic.dev/v1alpha1",
+      kind: "Agent",
+      metadata: { name: agentName, visibility: "private", labels: {} },
+      spec: {
+        title: title || agentName,
+        description,
+        model: { provider, name: model },
+        systemPrompt,
+        builtinTools: list(tools),
+        skills: list(skills),
+        maxTurns,
+      },
+    }),
+    [agentName, title, description, provider, model, systemPrompt, tools, skills, maxTurns],
+  );
+
+  const issues = lintManifest(manifest, "Agent");
+  const blocking = issues.filter((i) => i.level === "error");
+  const definable = Boolean(agentName && systemPrompt.trim()) && blocking.length === 0;
+  // A sandbox pins the definition it was created with, so an edited draft needs
+  // a fresh one — otherwise the trace answers a question you stopped asking.
+  const stale = Boolean(sandboxId) && testedDefinition !== JSON.stringify(manifest);
+
+  async function startTest() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/sandboxes", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent: { name: agentName, version: "draft" },
+          model: { provider, model },
+          draft: manifest,
+          tools: { default_mode: "mock" },
+          ttl_seconds: 3600,
+        }),
+      });
+      const created = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof created.detail === "string" ? created.detail : `HTTP ${res.status}`);
+      setSandboxId(created.id as string);
+      setTestedDefinition(JSON.stringify(manifest));
+      setStep(1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publish() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.publishArtifact("agents", manifest);
+      setPublished(agentName);
+      toast.success(`Published agent "${agentName}" to the registry.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field =
+    "w-full px-3 py-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] text-sm text-[var(--ink-100)] placeholder-[var(--ink-500)] focus:outline-none focus:border-indigo-500/50";
+
+  return (
+    <div className="p-7 space-y-6 max-w-4xl">
+      <header>
+        <div className="label-eyebrow">Authoring</div>
+        <h1 className="font-serif text-2xl font-medium text-[var(--ink-50)] mt-1 flex items-center gap-2">
+          <Bot className="w-5 h-5 text-indigo-400" /> Agent Studio
+        </h1>
+        <p className="text-sm text-[var(--ink-300)] mt-1">
+          Define an agent, run it in a sandbox with tools mocked, then publish it to the registry. Same
+          runtime at every step — what you test is what ships.{" "}
+          <Link href="/agents/new" className="text-indigo-300 hover:underline">
+            Prefer raw YAML?
+          </Link>
+        </p>
+      </header>
+
+      <ol className="flex items-center gap-2 text-xs">
+        {STEPS.map((label, i) => (
+          <li key={label} className="flex items-center gap-2">
+            <span
+              className={`px-2.5 py-1 rounded-full font-medium ${
+                i === step
+                  ? "bg-indigo-600 text-white"
+                  : i < step
+                    ? "bg-indigo-500/15 text-indigo-300"
+                    : "bg-[var(--surface-2)] text-[var(--ink-500)]"
+              }`}
+            >
+              {i < step ? <Check className="w-3 h-3 inline" /> : i + 1} {label}
+            </span>
+            {i < STEPS.length - 1 && <ArrowRight className="w-3 h-3 text-[var(--ink-500)]" />}
+          </li>
+        ))}
+      </ol>
+
+      {error && (
+        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">
+          {error}
+        </div>
+      )}
+
+      {step === 0 && (
+        <section className="panel p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="ag-title" className="label-eyebrow">
+                Title
+              </label>
+              <input
+                id="ag-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Release Notes Writer"
+                className={field}
+              />
+            </div>
+            <div>
+              <label htmlFor="ag-name" className="label-eyebrow">
+                Registry name
+              </label>
+              <input
+                id="ag-name"
+                value={agentName}
+                onChange={(e) => setName(slug(e.target.value))}
+                placeholder="release-notes-writer"
+                className={`${field} font-mono`}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="ag-desc" className="label-eyebrow">
+              Description
+            </label>
+            <input
+              id="ag-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Turns a merged diff into customer-facing release notes."
+              className={field}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="ag-prompt" className="label-eyebrow">
+              System prompt
+            </label>
+            <textarea
+              id="ag-prompt"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={8}
+              placeholder="You are a release manager. Given a diff, write release notes that…"
+              className={`${field} font-mono text-[13px]`}
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label htmlFor="ag-provider" className="label-eyebrow">
+                Provider
+              </label>
+              <select
+                id="ag-provider"
+                value={provider}
+                onChange={(e) => {
+                  setProvider(e.target.value);
+                  setModel(MODEL_DEFAULTS[e.target.value] ?? "");
+                }}
+                className={field}
+              >
+                {PROVIDERS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="ag-model" className="label-eyebrow">
+                Model
+              </label>
+              <input id="ag-model" value={model} onChange={(e) => setModel(e.target.value)} className={field} />
+            </div>
+            <div>
+              <label htmlFor="ag-turns" className="label-eyebrow">
+                Max turns
+              </label>
+              <input
+                id="ag-turns"
+                type="number"
+                min={1}
+                max={20}
+                value={maxTurns}
+                onChange={(e) => setMaxTurns(Number(e.target.value))}
+                className={field}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="ag-tools" className="label-eyebrow">
+                Tools
+              </label>
+              <input
+                id="ag-tools"
+                value={tools}
+                onChange={(e) => setTools(e.target.value)}
+                placeholder="scm_list_files, scm_read_file"
+                className={`${field} font-mono`}
+              />
+              <p className="text-[11px] text-[var(--ink-500)] mt-1">
+                Built-in tool names the agent may call. Anything outside this list is refused before the
+                sandbox even sees it.
+              </p>
+            </div>
+            <div>
+              <label htmlFor="ag-skills" className="label-eyebrow">
+                Skills
+              </label>
+              <input
+                id="ag-skills"
+                value={skills}
+                onChange={(e) => setSkills(e.target.value)}
+                placeholder="code-review, changelog-writing"
+                className={`${field} font-mono`}
+              />
+              <p className="text-[11px] text-[var(--ink-500)] mt-1">Registry Skills to compose in.</p>
+            </div>
+          </div>
+
+          {blocking.length > 0 && (
+            <ul className="text-xs text-red-300 space-y-1">
+              {blocking.map((i) => (
+                <li key={i.message}>{i.message}</li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex justify-end">
+            <button type="button" onClick={startTest} disabled={!definable || busy} className="btn-primary !py-1.5 !px-3 !text-xs disabled:opacity-50">
+              <FlaskConical className="w-3.5 h-3.5" /> {busy ? "Creating sandbox…" : "Test in sandbox"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 1 && (
+        <section className="space-y-3">
+          <div className="panel px-4 py-3 flex items-center justify-between gap-3">
+            <div className="text-xs text-[var(--ink-300)]">
+              Running <span className="font-mono text-[var(--ink-100)]">{agentName}</span> on{" "}
+              <span className="font-mono text-[var(--ink-100)]">{provider}/{model}</span> with tools mocked.
+              <Link href={`/sandboxes/${sandboxId}`} className="ml-2 text-indigo-300 hover:underline font-mono">
+                {sandboxId.slice(0, 8)}
+              </Link>
+            </div>
+            {stale && (
+              <button type="button" onClick={startTest} disabled={busy} className="btn-secondary !py-1 !px-2 !text-[11px]">
+                Definition changed — new sandbox
+              </button>
+            )}
+          </div>
+
+          {sandboxId && <SandboxConsole sandboxId={sandboxId} live={false} />}
+
+          <div className="flex justify-between">
+            <button type="button" onClick={() => setStep(0)} className="btn-secondary !py-1.5 !px-3 !text-xs">
+              <ArrowLeft className="w-3.5 h-3.5" /> Edit definition
+            </button>
+            <button type="button" onClick={() => setStep(2)} className="btn-primary !py-1.5 !px-3 !text-xs">
+              It behaves — publish <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 2 && (
+        <section className="panel p-5 space-y-4">
+          {published ? (
+            <div className="space-y-3">
+              <p className="text-sm text-[var(--ink-100)]">
+                <span className="font-mono">{published}</span> is in the registry. It is runnable now — no
+                restart, no redeploy.
+              </p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => router.push("/agents")} className="btn-primary !py-1.5 !px-3 !text-xs">
+                  Back to agents
+                </button>
+                <Link href={`/sandboxes/${sandboxId}`} className="btn-secondary !py-1.5 !px-3 !text-xs">
+                  Open the sandbox
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-[var(--ink-300)]">
+                Publishing puts this definition in the catalog under{" "}
+                <span className="font-mono text-[var(--ink-100)]">{agentName}</span>, where pipelines and new
+                sandboxes can pin it.
+              </p>
+              <pre className="text-[11px] font-mono text-[var(--ink-300)] bg-[var(--surface-2)] rounded-md p-3 overflow-x-auto max-h-72">
+                {JSON.stringify(manifest, null, 2)}
+              </pre>
+              <div className="flex justify-between">
+                <button type="button" onClick={() => setStep(1)} className="btn-secondary !py-1.5 !px-3 !text-xs">
+                  <ArrowLeft className="w-3.5 h-3.5" /> Back to testing
+                </button>
+                <button type="button" onClick={publish} disabled={busy} className="btn-primary !py-1.5 !px-3 !text-xs disabled:opacity-50">
+                  <Rocket className="w-3.5 h-3.5" /> {busy ? "Publishing…" : "Publish to registry"}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}

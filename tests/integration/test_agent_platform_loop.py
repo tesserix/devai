@@ -78,6 +78,37 @@ async def platform(tmp_path: Path):
         yield client, catalog
 
 
+async def test_a_draft_agent_is_testable_before_it_is_published(platform) -> None:
+    # The studio's middle step: the catalog is still empty here, and the run works.
+    client, catalog = platform
+
+    created = client.post(
+        "/api/sandboxes",
+        headers=_SAM,
+        json={
+            "agent": {"name": "draft-writer", "version": "draft"},
+            "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+            "draft": {
+                "apiVersion": "registry.agentic.dev/v1alpha1",
+                "kind": "Agent",
+                "metadata": {"name": "draft-writer"},
+                "spec": {"title": "Draft Writer", "systemPrompt": "You write release notes."},
+            },
+            "tools": {"default_mode": "mock"},
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert catalog.agents == []
+
+    answered = client.post(
+        f"/api/sandboxes/{created.json()['id']}/invoke",
+        headers=_SAM,
+        json={"message": "summarise the release"},
+    )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["final_text"] == "v2.1 ships the sandbox console."
+
+
 async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(platform) -> None:
     client, catalog = platform
 

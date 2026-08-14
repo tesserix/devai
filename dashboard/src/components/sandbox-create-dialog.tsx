@@ -279,7 +279,12 @@ export function SandboxCreateDialog({
 
         <div className="space-y-4">
           <div>
-            <span className="label-eyebrow">Agent</span>
+            <div className="flex items-baseline justify-between">
+              <span className="label-eyebrow">Agent</span>
+              <a href="/agents/studio" className="text-[11px] text-indigo-300 hover:underline">
+                Build a new one
+              </a>
+            </div>
             <AgentPicker agents={agents} value={agent} onChange={setAgent} />
           </div>
 
