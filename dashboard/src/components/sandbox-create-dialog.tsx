@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Bot, Check, ChevronDown, Search } from "lucide-react";
 
 type RegistryAgent = {
   name: string;
   version: string;
+  description?: string;
   model_provider: string;
   model_name: string;
 };
@@ -17,6 +19,161 @@ const TOOL_MODES = [
 ];
 
 const PROVIDERS = ["anthropic", "openai", "vertex", "gemini", "groq"];
+
+/** Searchable agent list — a native <select> of 40+ agents is unreadable, and
+ *  hides the descriptions that tell them apart. Same idiom as RepoPicker. */
+function AgentPicker({
+  agents,
+  value,
+  onChange,
+}: {
+  agents: RegistryAgent[];
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter(
+      (a) => a.name.toLowerCase().includes(q) || (a.description?.toLowerCase().includes(q) ?? false),
+    );
+  }, [agents, query]);
+
+  useEffect(() => {
+    if (active >= filtered.length) setActive(0);
+  }, [filtered, active]);
+
+  function select(name: string) {
+    onChange(name);
+    setQuery("");
+    setOpen(false);
+  }
+
+  const selected = agents.find((a) => a.name === value);
+
+  return (
+    <div ref={boxRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm"
+        style={{
+          background: "var(--surface-2)",
+          border: `1px solid ${open ? "var(--accent)" : "var(--surface-border)"}`,
+          color: "var(--ink-100)",
+        }}
+      >
+        <Bot className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />
+        <span className="min-w-0 flex-1 truncate font-mono text-[13px]">
+          {selected ? selected.name : agents.length === 0 ? "No published agents" : "Choose an agent"}
+        </span>
+        {selected?.version && (
+          <span className="pill !text-[9px] shrink-0">{selected.version}</span>
+        )}
+        <ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-30 mt-1 w-full overflow-hidden rounded-md"
+          style={{
+            background: "var(--surface-raised)",
+            border: "1px solid var(--border)",
+            boxShadow: "var(--shadow-raised)",
+          }}
+        >
+          <div className="relative border-b" style={{ borderColor: "var(--border-subtle)" }}>
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
+              style={{ color: "var(--ink-muted)" }}
+            />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setActive(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setActive((i) => Math.min(filtered.length - 1, i + 1));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setActive((i) => Math.max(0, i - 1));
+                } else if (e.key === "Enter" && filtered[active]) {
+                  e.preventDefault();
+                  select(filtered[active].name);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setOpen(false);
+                }
+              }}
+              placeholder="Search agents…"
+              className="w-full bg-transparent py-2 pl-8 pr-2 text-sm outline-none"
+              style={{ color: "var(--ink-strong)" }}
+            />
+          </div>
+          <ul className="max-h-56 overflow-y-auto py-1">
+            {filtered.length === 0 && (
+              <li className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
+                {agents.length === 0 ? "No agents published yet." : `Nothing matches “${query}”.`}
+              </li>
+            )}
+            {filtered.map((a, idx) => {
+              const isActive = idx === active;
+              return (
+                <li key={a.name}>
+                  <button
+                    type="button"
+                    onMouseEnter={() => setActive(idx)}
+                    onClick={() => select(a.name)}
+                    className="w-full px-3 py-1.5 text-left"
+                    style={{
+                      background: isActive ? "var(--accent-soft-bg-2)" : "transparent",
+                      color: isActive ? "var(--accent-soft-ink)" : "var(--ink)",
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      {a.name === value ? (
+                        <Check className="w-3 h-3 shrink-0" style={{ color: "var(--accent)" }} />
+                      ) : (
+                        <span className="w-3 shrink-0" />
+                      )}
+                      <span className="truncate font-mono text-[13px]">{a.name}</span>
+                      {a.version && <span className="pill !text-[9px] shrink-0">{a.version}</span>}
+                    </span>
+                    {a.description && (
+                      <span
+                        className="ml-5 block truncate text-[11px]"
+                        style={{ color: "var(--ink-muted)" }}
+                      >
+                        {a.description}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function SandboxCreateDialog({
   open,
@@ -122,18 +279,8 @@ export function SandboxCreateDialog({
 
         <div className="space-y-4">
           <div>
-            <label htmlFor="sb-agent" className="label-eyebrow">
-              Agent
-            </label>
-            <select id="sb-agent" value={agent} onChange={(e) => setAgent(e.target.value)} className={field}>
-              {agents.length === 0 && <option value="">No published agents</option>}
-              {agents.map((a) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                  {a.version ? `@${a.version}` : ""}
-                </option>
-              ))}
-            </select>
+            <span className="label-eyebrow">Agent</span>
+            <AgentPicker agents={agents} value={agent} onChange={setAgent} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
