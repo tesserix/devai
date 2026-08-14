@@ -194,15 +194,21 @@ makes an agent authored in the UI runnable instead of merely listed.
 Authoring closes the loop on top of it: `SandboxSpec.draft` pins an *unpublished* Agent
 envelope, which `SandboxInvoker` maps with `agent_envelope_to_spec` instead of consulting
 the catalog, so `/agents/studio` runs a definition before publishing it. The manifest
-editor at `/agents/new` stays for people who want to write the CR directly. What is still
-missing is the step other platforms put next: a saved input set with graders, not a
-one-off chat — that is W6, and the studio's "it behaves" button is where it belongs.
+editor at `/agents/new` stays for people who want to write the CR directly.
+
+The grading half landed with it. `sandbox/evals.py` runs a suite of saved inputs against a
+sandbox and grades each one off the trace (text, tools called, token and latency budgets);
+cases live in `spec.evals`, so they publish and version with the agent rather than sitting
+in a side channel. Publishing over an existing name shows the spec diff and offers a new
+version instead of a 409, and the studio can run one suite against two models on the same
+draft. What W6 still owns is persistence beyond the sandbox TTL (Postgres, not Redis) and
+promotion gates that read a suite result.
 
 **W5 — Cassettes (closes Gap 5).** Replace the gateway's in-process `_recording` with a
 kit `Cassette` stored as a versioned artifact; `RecordingProvider`/`ReplayingProvider`
 make an eval suite deterministic across runs.
 
-**W6 — Evals per §4**, then comparison, gates and the four UI tabs.
+**W6 — Durable eval history and gates**, then the four UI tabs.
 
 **W7 — Give back.** DevAI's MCP hub and A2A bus are production-proven and the kit's
 `mcp`/`a2a` are empty. Upstream them rather than letting a second implementation grow.
