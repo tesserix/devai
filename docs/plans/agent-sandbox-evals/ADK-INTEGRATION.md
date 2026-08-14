@@ -191,6 +191,13 @@ Gap 1 closed alongside it: `agent_envelope_to_spec` inverts `spec_to_agent_envel
 where both define a role, a malformed artifact is skipped rather than fatal). That is what
 makes an agent authored in the UI runnable instead of merely listed.
 
+Authoring closes the loop on top of it: `SandboxSpec.draft` pins an *unpublished* Agent
+envelope, which `SandboxInvoker` maps with `agent_envelope_to_spec` instead of consulting
+the catalog, so `/agents/studio` runs a definition before publishing it. The manifest
+editor at `/agents/new` stays for people who want to write the CR directly. What is still
+missing is the step other platforms put next: a saved input set with graders, not a
+one-off chat — that is W6, and the studio's "it behaves" button is where it belongs.
+
 **W5 — Cassettes (closes Gap 5).** Replace the gateway's in-process `_recording` with a
 kit `Cassette` stored as a versioned artifact; `RecordingProvider`/`ReplayingProvider`
 make an eval suite deterministic across runs.
