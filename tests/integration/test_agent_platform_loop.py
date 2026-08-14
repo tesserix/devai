@@ -1,0 +1,123 @@
+"""The loop the agent platform exists for, end to end through the HTTP surface.
+
+Author an agent (it lands in the registry) → create a sandbox pinning it →
+invoke it → read the trace. Every step here is the real component: the
+specialization service, the sandbox service, the invoker and the routes. Only
+the registry itself and the model are stood in for, because they are the two
+things DevAI does not own.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from devai.adapters.llm.base import LLMAdapter, LLMResponse, LLMUsage
+from devai.config import Settings
+from devai.pipeline.interfaces import StageDeps
+from devai.sandbox.invoke import SandboxInvoker
+from devai.sandbox.routes import router
+from devai.sandbox.service import SandboxService
+from devai.sandbox.trace import TraceStore
+from devai.specializations.service import SpecializationService
+from tests.unit.test_sandbox import _FakeDB
+
+_SAM = {"X-Forwarded-Email": "sam@example.com"}
+
+
+class _Catalog:
+    """The registry, as far as DevAI can see it: a list that publishing grows."""
+
+    def __init__(self) -> None:
+        self.agents: list[dict[str, Any]] = []
+
+    def list_skills(self) -> list[Any]:
+        return []
+
+    def list_agents(self) -> list[Any]:
+        return [_Published(a) for a in self.agents]
+
+
+class _Published:
+    def __init__(self, raw: dict[str, Any]) -> None:
+        self.name = raw.get("name", "")
+        self.raw = raw
+
+
+class _ScriptedLLM(LLMAdapter):
+    provider_name = "scripted"
+
+    async def generate(self, request):  # type: ignore[override]
+        return LLMResponse(
+            text="v2.1 ships the sandbox console.",
+            usage=LLMUsage(prompt_tokens=90, completion_tokens=12),
+        )
+
+
+@pytest.fixture
+async def platform(tmp_path: Path):
+    catalog = _Catalog()
+    specs = SpecializationService(Settings(specializations_dir=str(tmp_path)), registry_client=catalog)
+    await specs.start()
+
+    app = FastAPI()
+    app.state.specialization_service = specs
+    app.state.sandbox_service = SandboxService(_FakeDB())
+    app.state.sandbox_traces = TraceStore(None)
+    app.state.sandbox_invoker = SandboxInvoker(
+        specializations=specs,
+        deps=StageDeps(config=Settings(), llm=_ScriptedLLM()),
+        traces=app.state.sandbox_traces,
+    )
+    app.include_router(router)
+    with TestClient(app) as client:
+        yield client, catalog
+
+
+async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(platform) -> None:
+    client, catalog = platform
+
+    # 1. Authoring publishes to the registry.
+    catalog.agents.append(
+        {
+            "name": "release-notes-writer",
+            "displayName": "Release Notes Writer",
+            "systemPrompt": "You write release notes.",
+        }
+    )
+
+    # 2. A sandbox pins that agent, a model and a tool policy.
+    created = client.post(
+        "/api/sandboxes",
+        headers=_SAM,
+        json={
+            "agent": {"name": "release-notes-writer", "version": "v1"},
+            "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+            "tools": {"default_mode": "mock"},
+        },
+    )
+    assert created.status_code == 201, created.text
+    sandbox_id = created.json()["id"]
+
+    # 3. Invoking it answers, and says which trace it left.
+    answered = client.post(
+        f"/api/sandboxes/{sandbox_id}/invoke",
+        headers=_SAM,
+        json={"message": "summarise the release"},
+    )
+    assert answered.status_code == 200, answered.text
+    body = answered.json()
+    assert body["ok"] is True
+    assert body["final_text"] == "v2.1 ships the sandbox console."
+    assert body["totals"]["total_tokens"] == 102
+
+    # 4. The trace is readable afterwards — that is where the metrics come from.
+    listed = client.get(f"/api/sandboxes/{sandbox_id}/traces", headers=_SAM)
+    assert [t["id"] for t in listed.json()] == [body["id"]]
+
+    trace = client.get(f"/api/sandboxes/{sandbox_id}/traces/{body['id']}", headers=_SAM).json()
+    assert [s["kind"] for s in trace["steps"]] == ["prompt", "prompt", "llm", "response"]
