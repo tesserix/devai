@@ -159,6 +159,11 @@ const nextConfig: NextConfig = {
         source: "/api/sandboxes/:path*",
         destination: `${API_INTERNAL_URL}/api/sandboxes/:path*`,
       },
+      // Providers and the models each can serve (the model picker).
+      {
+        source: "/api/models",
+        destination: `${API_INTERNAL_URL}/api/models`,
+      },
       // Runtime releases a sandbox may pin (the ADK version picker).
       {
         source: "/api/adk/:path*",

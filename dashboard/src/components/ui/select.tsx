@@ -32,6 +32,7 @@ export function Select({
   mono = false,
   searchable,
   disabled = false,
+  emptyLabel = "Nothing to choose from.",
   className = "",
   ariaLabel,
   id,
@@ -44,6 +45,7 @@ export function Select({
   mono?: boolean;
   searchable?: boolean;
   disabled?: boolean;
+  emptyLabel?: string;
   className?: string;
   ariaLabel?: string;
   id?: string;
@@ -141,7 +143,7 @@ export function Select({
             boxShadow: "var(--shadow-raised)",
           }}
         >
-          {withSearch && (
+          {withSearch && options.length > 0 && (
             <div className="relative border-b" style={{ borderColor: "var(--border-subtle)" }}>
               <Search
                 className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
@@ -164,7 +166,7 @@ export function Select({
           <ul role="listbox" className="max-h-60 overflow-y-auto py-1">
             {filtered.length === 0 && (
               <li className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
-                Nothing matches “{query}”.
+                {options.length === 0 ? emptyLabel : `Nothing matches “${query}”.`}
               </li>
             )}
             {filtered.map((o, idx) => {

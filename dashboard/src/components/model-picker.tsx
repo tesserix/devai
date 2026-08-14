@@ -127,6 +127,7 @@ export function ModelPicker({
           }}
           options={providerOptions}
           placeholder={providers.length === 0 ? "Loading…" : "Choose a provider"}
+          emptyLabel="No providers — /api/models is unreachable."
           icon={<Plug className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />}
           ariaLabel="Model provider"
         />
@@ -135,7 +136,7 @@ export function ModelPicker({
         <label className="label-eyebrow" htmlFor="mp-model">
           Model
         </label>
-        {custom || (!known && model) ? (
+        {custom || (providers.length > 0 && !known && model) ? (
           <div className="flex gap-2">
             <input
               value={model}
