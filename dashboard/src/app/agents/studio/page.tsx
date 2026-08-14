@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Bot, Check, FlaskConical, Rocket } from "lucide-react";
 
 import { EvalPanel, type EvalCase } from "@/components/eval-panel";
+import { ModelCompare } from "@/components/model-compare";
 import { SandboxConsole } from "@/components/sandbox-console";
 import { useToast } from "@/components/toast";
 import { api } from "@/lib/api";
@@ -78,6 +79,18 @@ function slug(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 253);
 }
 
+/** Which spec fields this version would change, so publishing over an existing
+ *  agent is a decision rather than a surprise. */
+function changedFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): { key: string; before: string; after: string }[] {
+  const show = (v: unknown) => (v === undefined ? "—" : typeof v === "string" ? v : JSON.stringify(v));
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null))
+    .map((k) => ({ key: k, before: show(before[k]), after: show(after[k]) }));
+}
+
 function list(value: string): string[] {
   return value.split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
 }
@@ -103,6 +116,7 @@ export default function AgentStudioPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState("");
+  const [conflict, setConflict] = useState<Record<string, unknown> | null>(null);
 
   const agentName = name || slug(title);
 
@@ -164,11 +178,32 @@ export default function AgentStudioPage() {
     }
   }
 
-  async function publish() {
+  async function publish(overwrite = false) {
     setBusy(true);
     setError(null);
     try {
-      await api.publishArtifact("agents", manifest);
+      const res = await fetch(`/api/registry/agents${overwrite ? "?overwrite=true" : ""}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(manifest),
+      });
+      // A name that already exists is not an error — it is the next version of
+      // an agent, so show what would change instead of a red box.
+      if (res.status === 409) {
+        const current = await fetch(`/api/registry/agents/${encodeURIComponent(agentName)}`, {
+          credentials: "include",
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        setConflict(current?.spec ?? current ?? {});
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
+      }
+      setConflict(null);
       setPublished(agentName);
       toast.success(`Published agent "${agentName}" to the registry.`);
     } catch (e) {
@@ -407,6 +442,16 @@ export default function AgentStudioPage() {
           </div>
 
           {sandboxId && <EvalPanel sandboxId={sandboxId} cases={cases} onCasesChange={setCases} />}
+          {sandboxId && (
+            <ModelCompare
+              sandboxId={sandboxId}
+              agentName={agentName}
+              draft={manifest}
+              cases={cases}
+              provider={provider}
+              model={model}
+            />
+          )}
           {sandboxId && <SandboxConsole sandboxId={sandboxId} live={false} />}
 
           <div className="flex justify-between">
@@ -447,12 +492,37 @@ export default function AgentStudioPage() {
               <pre className="text-[11px] font-mono text-[var(--ink-300)] bg-[var(--surface-2)] rounded-md p-3 overflow-x-auto max-h-72">
                 {JSON.stringify(manifest, null, 2)}
               </pre>
+
+              {conflict && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                  <p className="text-xs text-amber-200">
+                    <span className="font-mono">{agentName}</span> already exists. Publishing again versions
+                    it — this is what would change:
+                  </p>
+                  <dl className="text-[11px] font-mono space-y-1">
+                    {changedFields(conflict, manifest.spec as Record<string, unknown>).map((d) => (
+                      <div key={d.key}>
+                        <dt className="text-[var(--ink-500)]">{d.key}</dt>
+                        <dd className="text-red-300 truncate">− {d.before}</dd>
+                        <dd className="text-emerald-300 truncate">+ {d.after}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
+
               <div className="flex justify-between">
                 <button type="button" onClick={() => setStep(1)} className="btn-secondary !py-1.5 !px-3 !text-xs">
                   <ArrowLeft className="w-3.5 h-3.5" /> Back to testing
                 </button>
-                <button type="button" onClick={publish} disabled={busy} className="btn-primary !py-1.5 !px-3 !text-xs disabled:opacity-50">
-                  <Rocket className="w-3.5 h-3.5" /> {busy ? "Publishing…" : "Publish to registry"}
+                <button
+                  type="button"
+                  onClick={() => publish(Boolean(conflict))}
+                  disabled={busy}
+                  className="btn-primary !py-1.5 !px-3 !text-xs disabled:opacity-50"
+                >
+                  <Rocket className="w-3.5 h-3.5" />{" "}
+                  {busy ? "Publishing…" : conflict ? "Publish as a new version" : "Publish to registry"}
                 </button>
               </div>
             </>
