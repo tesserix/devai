@@ -17,6 +17,7 @@ import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { EmptyState } from "@/components/empty-state";
 import { type RunState } from "@/components/run-state-badge";
+import { Select } from "@/components/ui/select";
 
 const PAGE_SIZE = 25;
 
@@ -136,44 +137,35 @@ export default function RunsIndexPage() {
           />
         </Field>
         <Field label="Blueprint">
-          <select
+          <Select
             value={blueprint}
-            onChange={(e) => resetOffset(setBlueprint)(e.target.value)}
-            className="field w-48"
-          >
-            <option value="">Any blueprint</option>
-            {blueprints.map((b) => (
-              <option key={b.name} value={b.name}>
-                {b.title || b.name}
-              </option>
-            ))}
-          </select>
+            onChange={resetOffset(setBlueprint)}
+            className="w-48"
+            placeholder="Any blueprint"
+            options={[
+              { value: "", label: "Any blueprint" },
+              ...blueprints.map((b) => ({ value: b.name, label: b.title || b.name })),
+            ]}
+            ariaLabel="Blueprint"
+          />
         </Field>
         <Field label="State">
-          <select
+          <Select
             value={state}
-            onChange={(e) => resetOffset<RunState | "">(setState)(e.target.value as RunState | "")}
-            className="field w-44"
-          >
-            {STATE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => resetOffset<RunState | "">(setState)(v as RunState | "")}
+            className="w-44"
+            options={STATE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            ariaLabel="Run state"
+          />
         </Field>
         <Field label="Source">
-          <select
+          <Select
             value={source}
-            onChange={(e) => resetOffset(setSource)(e.target.value)}
-            className="field w-40"
-          >
-            {SOURCE_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s === "" ? "Any source" : s}
-              </option>
-            ))}
-          </select>
+            onChange={resetOffset(setSource)}
+            className="w-40"
+            options={SOURCE_OPTIONS.map((s) => ({ value: s, label: s === "" ? "Any source" : s }))}
+            ariaLabel="Run source"
+          />
         </Field>
         {hasFilters && (
           <button

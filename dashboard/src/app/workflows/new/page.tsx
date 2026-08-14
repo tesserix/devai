@@ -8,6 +8,7 @@ import { AlertTriangle, Check, GitBranch, Loader2, Play, Plus, Trash2, Users } f
 import { api, type RegistryItem } from "@/lib/api";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
+import { Select } from "@/components/ui/select";
 import {
   blueprintFromGraph,
   validateConditionKeys,
@@ -322,22 +323,21 @@ function StageEditor({
           <input value={s.name} onChange={(e) => onPatch({ name: e.target.value })} className="field w-full" />
         </Field>
         <Field label="Type">
-          <select value={s.type} onChange={(e) => onPatch({ type: e.target.value })} className="field w-full">
-            {STAGE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={s.type}
+            onChange={(v) => onPatch({ type: v })}
+            options={STAGE_TYPES.map((t) => ({ value: t, label: t }))}
+            ariaLabel="Stage type"
+          />
         </Field>
         <Field label="Stage">
-          <select value={s.stageKey} onChange={(e) => onPatch({ stageKey: e.target.value })} className="field w-full">
-            {STAGE_KEYS.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={s.stageKey}
+            onChange={(v) => onPatch({ stageKey: v })}
+            options={STAGE_KEYS.map((k) => ({ value: k, label: k }))}
+            mono
+            ariaLabel="Stage"
+          />
         </Field>
       </div>
 

@@ -511,6 +511,10 @@ def test_model_policy_provider_fit():
     # Gateway routes aliases to any backend — never overridden.
     assert provider_serves("gateway", "claude-opus-4-8") is True
     assert coerce_model("gateway", "claude-fable-5") == "claude-opus-4-8"  # still de-fabled
+    # OpenRouter is an alias router too: its ids are `vendor/model`, and blanking
+    # one leaves the user on a default they did not choose.
+    assert provider_serves("openrouter", "deepseek/deepseek-chat") is True
+    assert coerce_model("openrouter", "anthropic/claude-sonnet-4.5") == "anthropic/claude-sonnet-4.5"
     # Fallback-chain provider string: served if ANY link serves.
     assert provider_serves("openai→gateway", "claude-opus-4-8") is True
     # Unknown/custom ids are left alone (no confident mismatch).

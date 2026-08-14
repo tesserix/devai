@@ -797,6 +797,11 @@ def create_app(
 
     app.include_router(adk_router)
 
+    # Model picker (/api/models) — providers and the models each can serve.
+    from devai.catalog.routes import router as catalog_router
+
+    app.include_router(catalog_router)
+
     # Teams routes (/api/teams/*) — human teams + the AI crews they own.
     # Always mounted; returns 503 until team_service is wired (lifespan).
     if not hasattr(app.state, "team_service"):

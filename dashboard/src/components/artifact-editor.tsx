@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { Select } from "@/components/ui/select";
 import { dump as toYAML, parse as parseYAML } from "@/lib/yaml";
 import {
   fieldsFor,
@@ -438,13 +439,13 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
         {f.label} {f.required && <span style={{ color: "var(--error-ink)" }}>*</span>}
       </label>
       {f.type === "select" ? (
-        <select className="field w-full" style={dimmed} disabled={disabled} value={value || f.options?.[0]} onChange={(e) => onChange(e.target.value)}>
-          {f.options?.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={value || f.options?.[0] || ""}
+          onChange={onChange}
+          disabled={disabled}
+          options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
+          ariaLabel={f.label}
+        />
       ) : f.type === "textarea" ? (
         <textarea
           className={`field w-full ${f.mono ? "font-mono text-[12.5px]" : ""}`}

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, ChevronDown, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Bot } from "lucide-react";
+import { ModelPicker } from "@/components/model-picker";
+import { Select } from "@/components/ui/select";
 
 type RegistryAgent = {
   name: string;
@@ -12,168 +14,11 @@ type RegistryAgent = {
 };
 
 const TOOL_MODES = [
-  { value: "mock", label: "Mock — canned responses, nothing outside is touched" },
-  { value: "replay", label: "Replay — recorded responses from a previous run" },
-  { value: "block", label: "Block — refuse every tool call" },
-  { value: "real", label: "Real — calls reach the actual system" },
+  { value: "mock", label: "Mock", description: "Canned responses — nothing outside is touched." },
+  { value: "replay", label: "Replay", description: "Recorded responses from a previous run." },
+  { value: "block", label: "Block", description: "Refuse every tool call." },
+  { value: "real", label: "Real", description: "Calls reach the actual system." },
 ];
-
-const PROVIDERS = ["anthropic", "openai", "vertex", "gemini", "groq"];
-
-/** Searchable agent list — a native <select> of 40+ agents is unreadable, and
- *  hides the descriptions that tell them apart. Same idiom as RepoPicker. */
-function AgentPicker({
-  agents,
-  value,
-  onChange,
-}: {
-  agents: RegistryAgent[];
-  value: string;
-  onChange: (name: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return agents;
-    return agents.filter(
-      (a) => a.name.toLowerCase().includes(q) || (a.description?.toLowerCase().includes(q) ?? false),
-    );
-  }, [agents, query]);
-
-  useEffect(() => {
-    if (active >= filtered.length) setActive(0);
-  }, [filtered, active]);
-
-  function select(name: string) {
-    onChange(name);
-    setQuery("");
-    setOpen(false);
-  }
-
-  const selected = agents.find((a) => a.name === value);
-
-  return (
-    <div ref={boxRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm"
-        style={{
-          background: "var(--surface-2)",
-          border: `1px solid ${open ? "var(--accent)" : "var(--surface-border)"}`,
-          color: "var(--ink-100)",
-        }}
-      >
-        <Bot className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />
-        <span className="min-w-0 flex-1 truncate font-mono text-[13px]">
-          {selected ? selected.name : agents.length === 0 ? "No published agents" : "Choose an agent"}
-        </span>
-        {selected?.version && (
-          <span className="pill !text-[9px] shrink-0">{selected.version}</span>
-        )}
-        <ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />
-      </button>
-
-      {open && (
-        <div
-          className="absolute z-30 mt-1 w-full overflow-hidden rounded-md"
-          style={{
-            background: "var(--surface-raised)",
-            border: "1px solid var(--border)",
-            boxShadow: "var(--shadow-raised)",
-          }}
-        >
-          <div className="relative border-b" style={{ borderColor: "var(--border-subtle)" }}>
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
-              style={{ color: "var(--ink-muted)" }}
-            />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setActive(0);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  setActive((i) => Math.min(filtered.length - 1, i + 1));
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setActive((i) => Math.max(0, i - 1));
-                } else if (e.key === "Enter" && filtered[active]) {
-                  e.preventDefault();
-                  select(filtered[active].name);
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  setOpen(false);
-                }
-              }}
-              placeholder="Search agents…"
-              className="w-full bg-transparent py-2 pl-8 pr-2 text-sm outline-none"
-              style={{ color: "var(--ink-strong)" }}
-            />
-          </div>
-          <ul className="max-h-56 overflow-y-auto py-1">
-            {filtered.length === 0 && (
-              <li className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
-                {agents.length === 0 ? "No agents published yet." : `Nothing matches “${query}”.`}
-              </li>
-            )}
-            {filtered.map((a, idx) => {
-              const isActive = idx === active;
-              return (
-                <li key={a.name}>
-                  <button
-                    type="button"
-                    onMouseEnter={() => setActive(idx)}
-                    onClick={() => select(a.name)}
-                    className="w-full px-3 py-1.5 text-left"
-                    style={{
-                      background: isActive ? "var(--accent-soft-bg-2)" : "transparent",
-                      color: isActive ? "var(--accent-soft-ink)" : "var(--ink)",
-                    }}
-                  >
-                    <span className="flex items-center gap-2">
-                      {a.name === value ? (
-                        <Check className="w-3 h-3 shrink-0" style={{ color: "var(--accent)" }} />
-                      ) : (
-                        <span className="w-3 shrink-0" />
-                      )}
-                      <span className="truncate font-mono text-[13px]">{a.name}</span>
-                      {a.version && <span className="pill !text-[9px] shrink-0">{a.version}</span>}
-                    </span>
-                    {a.description && (
-                      <span
-                        className="ml-5 block truncate text-[11px]"
-                        style={{ color: "var(--ink-muted)" }}
-                      >
-                        {a.description}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export function SandboxCreateDialog({
   open,
@@ -222,6 +67,17 @@ export function SandboxCreateDialog({
     if (chosen.model_provider) setProvider(chosen.model_provider);
     if (chosen.model_name) setModel(chosen.model_name);
   }, [agent, agents]);
+
+  const agentOptions = useMemo(
+    () =>
+      agents.map((a) => ({
+        value: a.name,
+        label: a.name,
+        description: a.description,
+        badge: a.version || undefined,
+      })),
+    [agents],
+  );
 
   if (!open) return null;
 
@@ -285,49 +141,45 @@ export function SandboxCreateDialog({
                 Build a new one
               </a>
             </div>
-            <AgentPicker agents={agents} value={agent} onChange={setAgent} />
+            <Select
+              value={agent}
+              onChange={setAgent}
+              options={agentOptions}
+              mono
+              searchable
+              placeholder={agents.length === 0 ? "No published agents" : "Choose an agent"}
+              icon={<Bot className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />}
+              ariaLabel="Agent"
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="sb-provider" className="label-eyebrow">
-                Provider
-              </label>
-              <select
-                id="sb-provider"
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                className={field}
-              >
-                {PROVIDERS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="sb-model" className="label-eyebrow">
-                Model
-              </label>
-              <input id="sb-model" value={model} onChange={(e) => setModel(e.target.value)} className={field} />
-            </div>
-          </div>
+          <ModelPicker
+            provider={provider}
+            model={model}
+            onChange={(next) => {
+              setProvider(next.provider);
+              setModel(next.model);
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="sb-adk" className="label-eyebrow">
                 Runtime (ADK)
               </label>
-              <select id="sb-adk" value={adkVersion} onChange={(e) => setAdkVersion(e.target.value)} className={field}>
-                {versions.length === 0 && <option value="">default</option>}
-                {versions.map((v, i) => (
-                  <option key={v} value={v}>
-                    {v}
-                    {i === 0 ? " (latest)" : ""}
-                  </option>
-                ))}
-              </select>
+              <Select
+                id="sb-adk"
+                value={adkVersion}
+                onChange={setAdkVersion}
+                mono
+                placeholder="default"
+                options={versions.map((v, i) => ({
+                  value: v,
+                  label: v,
+                  badge: i === 0 ? "latest" : undefined,
+                }))}
+                ariaLabel="Runtime version"
+              />
             </div>
             <div>
               <label htmlFor="sb-ttl" className="label-eyebrow">
@@ -349,13 +201,7 @@ export function SandboxCreateDialog({
             <label htmlFor="sb-tools" className="label-eyebrow">
               Tools
             </label>
-            <select id="sb-tools" value={toolMode} onChange={(e) => setToolMode(e.target.value)} className={field}>
-              {TOOL_MODES.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            <Select id="sb-tools" value={toolMode} onChange={setToolMode} options={TOOL_MODES} ariaLabel="Tool mode" />
           </div>
 
           {error && (

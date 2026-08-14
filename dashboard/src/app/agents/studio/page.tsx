@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, Bot, Check, FlaskConical, Rocket } from "lucide-
 
 import { EvalPanel, type EvalCase } from "@/components/eval-panel";
 import { ModelCompare } from "@/components/model-compare";
+import { ModelPicker } from "@/components/model-picker";
 import { SandboxConsole } from "@/components/sandbox-console";
 import { useToast } from "@/components/toast";
 import { api } from "@/lib/api";
@@ -21,16 +22,6 @@ import { lintManifest } from "@/lib/registry-schemas";
  */
 
 const STEPS = ["Define", "Test", "Publish"] as const;
-
-const PROVIDERS = ["anthropic", "openai", "vertex", "gemini", "groq"];
-
-const MODEL_DEFAULTS: Record<string, string> = {
-  anthropic: "claude-sonnet-4-20250514",
-  openai: "gpt-4.1",
-  vertex: "claude-sonnet-4@20250514",
-  gemini: "gemini-2.5-pro",
-  groq: "llama-3.3-70b-versatile",
-};
 
 /** Starter definitions — a blank system prompt is the slowest way to begin. */
 const TEMPLATES: { label: string; title: string; prompt: string; tools: string; check: EvalCase }[] = [
@@ -105,7 +96,7 @@ export default function AgentStudioPage() {
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [provider, setProvider] = useState("anthropic");
-  const [model, setModel] = useState(MODEL_DEFAULTS.anthropic);
+  const [model, setModel] = useState("claude-sonnet-4-6");
   const [tools, setTools] = useState("");
   const [skills, setSkills] = useState("");
   const [maxTurns, setMaxTurns] = useState(8);
@@ -334,32 +325,15 @@ export default function AgentStudioPage() {
           </div>
 
           <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label htmlFor="ag-provider" className="label-eyebrow">
-                Provider
-              </label>
-              <select
-                id="ag-provider"
-                value={provider}
-                onChange={(e) => {
-                  setProvider(e.target.value);
-                  setModel(MODEL_DEFAULTS[e.target.value] ?? "");
-                }}
-                className={field}
-              >
-                {PROVIDERS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="ag-model" className="label-eyebrow">
-                Model
-              </label>
-              <input id="ag-model" value={model} onChange={(e) => setModel(e.target.value)} className={field} />
-            </div>
+            <ModelPicker
+              provider={provider}
+              model={model}
+              onChange={(next) => {
+                setProvider(next.provider);
+                setModel(next.model);
+              }}
+              className="col-span-2"
+            />
             <div>
               <label htmlFor="ag-turns" className="label-eyebrow">
                 Max turns

@@ -18,6 +18,7 @@ import {
   type WritableScope,
 } from "@/lib/api";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
+import { Select } from "@/components/ui/select";
 
 /**
  * Settings — per-user / per-tenant connectors + secrets.
@@ -731,13 +732,16 @@ function McpMarketplace({ onConnect }: { onConnect: (e: McpMarketplaceEntry) => 
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
-                <select className="field text-sm" value={cat} onChange={(e) => setCat(e.target.value)}>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c === "all" ? "All categories" : c}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  className="w-44"
+                  ariaLabel="Category"
+                  value={cat}
+                  onChange={setCat}
+                  options={categories.map((c) => ({
+                    value: c,
+                    label: c === "all" ? "All categories" : c,
+                  }))}
+                />
               </div>
 
               <div className="label-eyebrow mb-2">Connect your own ({filtered.length})</div>
@@ -1146,40 +1150,35 @@ function ConnectorForm({
   return (
     <div className="mt-4 pt-4 border-t border-[var(--surface-border)] space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <label className="block">
+        <div className="block">
           <span className="text-xs text-[var(--ink-300)]">Apply to</span>
-          <select
-            className="field mt-1 w-full"
+          <Select
+            className="mt-1"
+            ariaLabel="Apply to"
             value={`${scope}:${scopeId}`}
-            onChange={(e) => {
-              const opt = scopeOptions.find((s) => `${s.scope}:${s.scope_id}` === e.target.value);
+            onChange={(v) => {
+              const opt = scopeOptions.find((s) => `${s.scope}:${s.scope_id}` === v);
               if (opt) {
                 setScope(opt.scope);
                 setScopeId(opt.scope_id);
               }
             }}
-          >
-            {scopeOptions.map((s) => (
-              <option key={`${s.scope}:${s.scope_id}`} value={`${s.scope}:${s.scope_id}`}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
+            options={scopeOptions.map((s) => ({
+              value: `${s.scope}:${s.scope_id}`,
+              label: s.label,
+            }))}
+          />
+        </div>
+        <div className="block">
           <span className="text-xs text-[var(--ink-300)]">Provider</span>
-          <select
-            className="field mt-1 w-full"
+          <Select
+            className="mt-1"
+            ariaLabel="Provider"
             value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            {spec.providers.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={setProvider}
+            options={spec.providers.map((p) => ({ value: p, label: p }))}
+          />
+        </div>
         {spec.multi && (
           <label className="block">
             <span className="text-xs text-[var(--ink-300)]">Instance name</span>
@@ -1198,7 +1197,7 @@ function ConnectorForm({
           const isModelField =
             spec.key === "llm" && f.key.endsWith("_model") && modelOptions.length > 0;
           return (
-            <label key={f.key} className="block">
+            <div key={f.key} className="block">
               <span className="text-xs text-[var(--ink-300)] flex items-center gap-1.5">
                 {isModelField ? "Primary Model" : f.label}
                 {f.secret && <KeyRound className="w-3 h-3 text-amber-400" />}
@@ -1207,20 +1206,17 @@ function ConnectorForm({
               {isModelField ? (
                 // Pick from the discovered list — no typing. First enabled
                 // model is the default primary.
-                <select
-                  className="field mt-1 w-full"
+                <Select
+                  className="mt-1"
+                  mono
+                  ariaLabel="Primary model"
+                  placeholder="Select a model…"
                   value={values[f.key] || ""}
-                  onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-                >
-                  <option value="">Select a model…</option>
-                  {modelOptions
+                  onChange={(v) => setValues({ ...values, [f.key]: v })}
+                  options={modelOptions
                     .filter((m) => !disabledModels.has(m))
-                    .map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                </select>
+                    .map((m) => ({ value: m, label: m }))}
+                />
               ) : (
                 <input
                   className="field mt-1 w-full"
@@ -1237,33 +1233,32 @@ function ConnectorForm({
               {f.help && !isModelField && (
                 <span className="text-xs text-[var(--ink-400)] mt-0.5 block">{f.help}</span>
               )}
-            </label>
+            </div>
           );
         })}
 
         {/* Fallback model — picked from the same list; used when the primary
             errors before the chain moves to the next provider. */}
         {spec.key === "llm" && modelOptions.length > 0 && (
-          <label className="block">
+          <div className="block">
             <span className="text-xs text-[var(--ink-300)]">Fallback Model</span>
-            <select
-              className="field mt-1 w-full"
+            <Select
+              className="mt-1"
+              mono
+              ariaLabel="Fallback model"
               value={fallbackModel}
-              onChange={(e) => setFallbackModel(e.target.value)}
-            >
-              <option value="">None — fall through to the next provider</option>
-              {modelOptions
-                .filter((m) => !disabledModels.has(m))
-                .map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-            </select>
+              onChange={setFallbackModel}
+              options={[
+                { value: "", label: "None — fall through to the next provider" },
+                ...modelOptions
+                  .filter((m) => !disabledModels.has(m))
+                  .map((m) => ({ value: m, label: m })),
+              ]}
+            />
             <span className="text-xs text-[var(--ink-400)] mt-0.5 block">
               Tried on the same provider if the primary model fails.
             </span>
-          </label>
+          </div>
         )}
       </div>
 

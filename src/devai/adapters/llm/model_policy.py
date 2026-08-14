@@ -35,7 +35,7 @@ _PROVIDER_FAMILY = {
 
 # Providers that route arbitrary model aliases server-side to any backend —
 # their model ids are gateway-defined, so never override them.
-_ALIAS_ROUTERS = ("gateway",)
+_ALIAS_ROUTERS = ("gateway", "openrouter")
 
 
 def normalize_model(model: str) -> str:

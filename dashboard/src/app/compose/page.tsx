@@ -20,6 +20,7 @@ import { BlueprintPicker } from "@/components/blueprint-picker";
 import { RepoPicker } from "@/components/repo-picker";
 import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 import { RunStateBadge, normalizeRunState, type RunState } from "@/components/run-state-badge";
+import { Select } from "@/components/ui/select";
 
 /**
  * Cursor-style composer. Type an intent, @-mention files/teammates, pick a
@@ -330,26 +331,20 @@ function ComposeInner() {
 
             <label className="flex flex-col text-xs" style={{ color: "var(--ink-muted)" }}>
               Team
-              <select
+              <Select
                 value={teamId}
-                onChange={(e) => {
-                  setTeamId(e.target.value);
+                onChange={(id) => {
+                  setTeamId(id);
                   setCrewId("");
                 }}
-                className="mt-1 w-44 rounded-md border px-2 py-1 text-sm"
-                style={{
-                  background: "var(--surface)",
-                  borderColor: "var(--border-subtle)",
-                  color: "var(--ink-strong)",
-                }}
-              >
-                <option value="">— none —</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+                className="mt-1 w-44"
+                placeholder="Any team"
+                options={[
+                  { value: "", label: "Any team" },
+                  ...teams.map((t) => ({ value: t.id, label: t.name })),
+                ]}
+                ariaLabel="Team"
+              />
             </label>
 
             <label className="flex flex-col text-xs" style={{ color: "var(--ink-muted)" }}>
@@ -357,23 +352,17 @@ function ComposeInner() {
                 Crew
                 <HelpPopover term="crew" />
               </span>
-              <select
+              <Select
                 value={crewId}
-                onChange={(e) => setCrewId(e.target.value)}
-                className="mt-1 w-48 rounded-md border px-2 py-1 text-sm"
-                style={{
-                  background: "var(--surface)",
-                  borderColor: "var(--border-subtle)",
-                  color: "var(--ink-strong)",
-                }}
-              >
-                <option value="">— dynamic —</option>
-                {crews.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.display_name || c.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setCrewId}
+                className="mt-1 w-48"
+                placeholder="Dynamic"
+                options={[
+                  { value: "", label: "Dynamic", description: "DevAI picks the crew" },
+                  ...crews.map((c) => ({ value: c.id, label: c.display_name || c.name })),
+                ]}
+                ariaLabel="Crew"
+              />
             </label>
 
             <div className="flex flex-col text-xs" style={{ color: "var(--ink-muted)" }}>
