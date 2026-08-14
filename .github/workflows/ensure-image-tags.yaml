@@ -102,6 +102,17 @@ jobs:
         run: |
           set -euo pipefail
           SHA="${{ github.sha }}"
+          # Runs finish out of order — a commit whose ALM image takes 30 min settles
+          # after a later dashboard-only commit. Moving the marker backwards then
+          # un-deploys the newer commit until someone pushes again.
+          CURRENT="$(gh api "repos/${OWNER_REPO}/git/refs/heads/deploy" -q .object.sha 2>/dev/null || true)"
+          if [ -n "$CURRENT" ] && [ "$CURRENT" != "$SHA" ]; then
+            STATUS="$(gh api "repos/${OWNER_REPO}/compare/${SHA}...${CURRENT}" -q .status 2>/dev/null || echo unknown)"
+            if [ "$STATUS" = "ahead" ]; then
+              echo "deploy already at $CURRENT, ahead of $SHA — leaving it"
+              exit 0
+            fi
+          fi
           gh api -X PATCH "repos/${OWNER_REPO}/git/refs/heads/deploy" -f sha="$SHA" -F force=true >/dev/null 2>&1 \
             || gh api -X POST "repos/${OWNER_REPO}/git/refs" -f ref="refs/heads/deploy" -f sha="$SHA" >/dev/null
           echo "deploy -> $SHA (images verified tagged)"
