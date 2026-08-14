@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
+import { EvalPanel, type EvalCase } from "@/components/eval-panel";
 import { SandboxConsole } from "@/components/sandbox-console";
 
 type Snapshot = {
@@ -35,6 +36,7 @@ export default function SandboxPage({ params }: { params: Promise<{ id: string }
   const [ports, setPorts] = useState<number[]>([]);
   const [port, setPort] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cases, setCases] = useState<EvalCase[]>([]);
 
   const base = `/api/sandboxes/${encodeURIComponent(id)}`;
 
@@ -57,6 +59,19 @@ export default function SandboxPage({ params }: { params: Promise<{ id: string }
       })
       .catch(() => setPorts([]));
   }, [base, load]);
+
+  // The agent's own checks, so a pinned sandbox opens with the suite it should
+  // still pass rather than an empty box.
+  useEffect(() => {
+    const agent = sandbox?.spec.agent.name;
+    if (!agent) return;
+    fetch(`/api/registry/agents/${encodeURIComponent(agent)}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { spec?: { evals?: EvalCase[] }; evals?: EvalCase[] } | null) => {
+        setCases(data?.spec?.evals ?? data?.evals ?? []);
+      })
+      .catch(() => setCases([]));
+  }, [sandbox?.spec.agent.name]);
 
   const snapshot = sandbox?.detail?.snapshot;
   const live = sandbox?.status === "ready";
@@ -97,6 +112,8 @@ export default function SandboxPage({ params }: { params: Promise<{ id: string }
           {error}
         </div>
       )}
+
+      <EvalPanel sandboxId={id} cases={cases} onCasesChange={setCases} />
 
       <SandboxConsole sandboxId={id} live={live} />
 

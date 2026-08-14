@@ -322,7 +322,9 @@ def create_app(
         # leaves behind (Redis, expiring with the sandbox it belongs to).
         app.state.sandbox_traces = None
         app.state.sandbox_invoker = None
+        app.state.sandbox_evals = None
         try:
+            from devai.sandbox.evals import EvalRunner, EvalStore
             from devai.sandbox.invoke import SandboxInvoker
             from devai.sandbox.trace import TraceStore
 
@@ -335,10 +337,14 @@ def create_app(
                     deps=_sandbox_stage_deps(app, config),
                     traces=app.state.sandbox_traces,
                 )
+                app.state.sandbox_evals = EvalRunner(
+                    app.state.sandbox_invoker, EvalStore(getattr(state, "redis", None))
+                )
                 logger.info("Sandbox invoker ready")
         except Exception:
             logger.exception("Sandbox invoker failed to start — invoke API will 503")
             app.state.sandbox_invoker = None
+            app.state.sandbox_evals = None
 
         # Repo onboarding service (Repos page). Independent of the
         # pipeline runtime: build an SCM client (reuse the pipeline's if

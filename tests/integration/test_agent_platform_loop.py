@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from devai.adapters.llm.base import LLMAdapter, LLMResponse, LLMUsage
 from devai.config import Settings
 from devai.pipeline.interfaces import StageDeps
+from devai.sandbox.evals import EvalRunner, EvalStore
 from devai.sandbox.invoke import SandboxInvoker
 from devai.sandbox.routes import router
 from devai.sandbox.service import SandboxService
@@ -73,6 +74,7 @@ async def platform(tmp_path: Path):
         deps=StageDeps(config=Settings(), llm=_ScriptedLLM()),
         traces=app.state.sandbox_traces,
     )
+    app.state.sandbox_evals = EvalRunner(app.state.sandbox_invoker, EvalStore(None))
     app.include_router(router)
     with TestClient(app) as client:
         yield client, catalog
@@ -107,6 +109,43 @@ async def test_a_draft_agent_is_testable_before_it_is_published(platform) -> Non
     )
     assert answered.status_code == 200, answered.text
     assert answered.json()["final_text"] == "v2.1 ships the sandbox console."
+
+
+async def test_a_draft_is_scored_against_its_checks_before_it_is_published(platform) -> None:
+    # The studio's gate: a suite, not a single chat turn, is what says "publish".
+    client, _ = platform
+
+    created = client.post(
+        "/api/sandboxes",
+        headers=_SAM,
+        json={
+            "agent": {"name": "draft-writer", "version": "draft"},
+            "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+            "draft": {
+                "kind": "Agent",
+                "metadata": {"name": "draft-writer"},
+                "spec": {"systemPrompt": "You write release notes."},
+            },
+        },
+    )
+    sandbox_id = created.json()["id"]
+
+    scored = client.post(
+        f"/api/sandboxes/{sandbox_id}/evals",
+        headers=_SAM,
+        json={
+            "cases": [
+                {"name": "names the version", "input": "summarise", "expect": {"contains": ["v2.1"]}},
+                {"name": "keeps it short", "input": "summarise", "expect": {"max_total_tokens": 10}},
+            ]
+        },
+    )
+
+    assert scored.status_code == 200, scored.text
+    body = scored.json()
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["failed"] == 1
+    assert body["results"][1]["failures"] == ["used 102 tokens, budget 10"]
 
 
 async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(platform) -> None:

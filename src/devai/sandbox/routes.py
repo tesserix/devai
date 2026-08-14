@@ -348,6 +348,51 @@ async def invoke_sandbox(request: Request, sandbox_id: str, body: dict[str, Any]
     return invocation.to_dict()
 
 
+def _evals(request: Request) -> Any:
+    runner = getattr(request.app.state, "sandbox_evals", None)
+    if runner is None:
+        raise HTTPException(status_code=503, detail="sandbox checks unavailable")
+    return runner
+
+
+@router.post("/{sandbox_id}/evals")
+async def run_evals(request: Request, sandbox_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Run the saved checks against this sandbox and answer with the scorecard."""
+    from devai.sandbox.evals import EvalCase
+
+    owner, is_admin = await _read_scope(request)
+    record = await _service(request).get(sandbox_id, owner=owner, is_admin=is_admin)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
+    runner = _evals(request)
+    try:
+        cases = [EvalCase.model_validate(c) for c in body.get("cases") or []]
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=f"invalid case: {e.errors()[0]['msg']}") from e
+    await _service(request).touch(sandbox_id)
+    try:
+        run = await runner.run(record, cases, triggered_by=owner or record.owner)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return run.to_dict()
+
+
+@router.get("/{sandbox_id}/evals")
+async def list_evals(request: Request, sandbox_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    await _sandbox_or_404(request, sandbox_id)
+    found = await _evals(request).store.list_for_sandbox(sandbox_id, limit=limit)
+    return [run.to_dict() for run in found]
+
+
+@router.get("/{sandbox_id}/evals/{run_id}")
+async def get_eval_run(request: Request, sandbox_id: str, run_id: str) -> dict[str, Any]:
+    await _sandbox_or_404(request, sandbox_id)
+    run = await _evals(request).store.get(sandbox_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"check run {run_id!r} not found")
+    return run.to_dict()
+
+
 @router.get("/{sandbox_id}/traces")
 async def list_traces(request: Request, sandbox_id: str, limit: int = 50) -> list[dict[str, Any]]:
     await _sandbox_or_404(request, sandbox_id)

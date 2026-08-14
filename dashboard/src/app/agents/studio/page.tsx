@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Bot, Check, FlaskConical, Rocket } from "lucide-react";
 
+import { EvalPanel, type EvalCase } from "@/components/eval-panel";
 import { SandboxConsole } from "@/components/sandbox-console";
 import { useToast } from "@/components/toast";
 import { api } from "@/lib/api";
@@ -30,6 +31,49 @@ const MODEL_DEFAULTS: Record<string, string> = {
   groq: "llama-3.3-70b-versatile",
 };
 
+/** Starter definitions — a blank system prompt is the slowest way to begin. */
+const TEMPLATES: { label: string; title: string; prompt: string; tools: string; check: EvalCase }[] = [
+  {
+    label: "Release notes",
+    title: "Release Notes Writer",
+    prompt:
+      "You are a release manager. Given a diff or a list of merged PRs, write release notes for customers: " +
+      "one line per user-visible change, grouped as Added / Changed / Fixed. Never invent a change.",
+    tools: "scm_list_files, scm_read_file",
+    check: {
+      name: "groups the changes",
+      input: "Merged: add sandbox console, fix token counter",
+      expect: { contains: ["Added", "Fixed"] },
+    },
+  },
+  {
+    label: "Code reviewer",
+    title: "Code Reviewer",
+    prompt:
+      "You review diffs. Report only defects you can point at: correctness, security, and data loss first, " +
+      "style last. If the diff is fine, say so in one line rather than inventing findings.",
+    tools: "scm_list_files, scm_read_file",
+    check: {
+      name: "flags a hardcoded secret",
+      input: "Review: +const token = 'ghp_live_abc123'",
+      expect: { contains: ["secret"] },
+    },
+  },
+  {
+    label: "Incident responder",
+    title: "Incident Responder",
+    prompt:
+      "You triage production alerts. State the likely blast radius, the most probable cause, and the next " +
+      "diagnostic step. Never propose a change that cannot be rolled back in one action.",
+    tools: "k8s_get_pods, k8s_logs",
+    check: {
+      name: "names a next step",
+      input: "CrashLoopBackOff on devai-api, 3 restarts in 5 minutes",
+      expect: { contains: ["logs"] },
+    },
+  },
+];
+
 function slug(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 253);
 }
@@ -52,6 +96,7 @@ export default function AgentStudioPage() {
   const [tools, setTools] = useState("");
   const [skills, setSkills] = useState("");
   const [maxTurns, setMaxTurns] = useState(8);
+  const [cases, setCases] = useState<EvalCase[]>([]);
 
   const [sandboxId, setSandboxId] = useState("");
   const [testedDefinition, setTestedDefinition] = useState("");
@@ -74,9 +119,12 @@ export default function AgentStudioPage() {
         builtinTools: list(tools),
         skills: list(skills),
         maxTurns,
+        // Checks travel with the definition, so a published agent can be
+        // re-tested later without anyone remembering what it was for.
+        evals: cases,
       },
     }),
-    [agentName, title, description, provider, model, systemPrompt, tools, skills, maxTurns],
+    [agentName, title, description, provider, model, systemPrompt, tools, skills, maxTurns, cases],
   );
 
   const issues = lintManifest(manifest, "Agent");
@@ -84,7 +132,9 @@ export default function AgentStudioPage() {
   const definable = Boolean(agentName && systemPrompt.trim()) && blocking.length === 0;
   // A sandbox pins the definition it was created with, so an edited draft needs
   // a fresh one — otherwise the trace answers a question you stopped asking.
-  const stale = Boolean(sandboxId) && testedDefinition !== JSON.stringify(manifest);
+  // Checks are not pinned: adding one is a new question about the same agent.
+  const pinned = JSON.stringify({ ...manifest.spec, evals: undefined });
+  const stale = Boolean(sandboxId) && testedDefinition !== pinned;
 
   async function startTest() {
     setBusy(true);
@@ -105,7 +155,7 @@ export default function AgentStudioPage() {
       const created = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof created.detail === "string" ? created.detail : `HTTP ${res.status}`);
       setSandboxId(created.id as string);
-      setTestedDefinition(JSON.stringify(manifest));
+      setTestedDefinition(pinned);
       setStep(1);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -174,6 +224,26 @@ export default function AgentStudioPage() {
 
       {step === 0 && (
         <section className="panel p-5 space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="label-eyebrow">Start from</span>
+            {TEMPLATES.map((t) => (
+              <button
+                key={t.label}
+                type="button"
+                onClick={() => {
+                  setTitle(t.title);
+                  setName(slug(t.title));
+                  setSystemPrompt(t.prompt);
+                  setTools(t.tools);
+                  setCases([t.check]);
+                }}
+                className="btn-secondary !py-1 !px-2 !text-[11px]"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="ag-title" className="label-eyebrow">
@@ -336,6 +406,7 @@ export default function AgentStudioPage() {
             )}
           </div>
 
+          {sandboxId && <EvalPanel sandboxId={sandboxId} cases={cases} onCasesChange={setCases} />}
           {sandboxId && <SandboxConsole sandboxId={sandboxId} live={false} />}
 
           <div className="flex justify-between">
