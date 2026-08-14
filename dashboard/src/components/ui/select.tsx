@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search } from "lucide-react";
 
 /**
@@ -10,6 +11,10 @@ import { Check, ChevronDown, Search } from "lucide-react";
  * descriptions that tell two options apart, and becomes unusable past a dozen
  * entries. This keeps the same keyboard contract (↑ ↓ Enter Esc, type to
  * filter) while showing a description, a badge and a group per option.
+ *
+ * The menu renders in a portal: inside a scrolling modal or a card with
+ * overflow, an in-flow menu is clipped by its ancestor and the options below
+ * the fold cannot be reached at all.
  */
 
 export type SelectOption = {
@@ -53,16 +58,49 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [menu, setMenu] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(
+    null,
+  );
   const boxRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const withSearch = searchable ?? options.length >= SEARCH_FROM;
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (boxRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
+
+  // Fixed coordinates off the trigger, flipped above when the space below is
+  // too tight — recomputed on scroll and resize so the menu tracks the field.
+  useLayoutEffect(() => {
+    if (!open) return;
+    function place() {
+      const rect = boxRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const flip = below < 220 && above > below;
+      const maxHeight = Math.min(360, flip ? above : below);
+      setMenu({
+        left: rect.left,
+        top: flip ? rect.top - maxHeight - 4 : rect.bottom + 4,
+        width: rect.width,
+        maxHeight,
+      });
+    }
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -134,10 +172,14 @@ export function Select({
         <ChevronDown className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />
       </button>
 
-      {open && !disabled && (
+      {open && !disabled && menu && typeof document !== "undefined" && createPortal(
         <div
-          className="absolute z-30 mt-1 w-full overflow-hidden rounded-md"
+          ref={menuRef}
+          className="fixed z-[100] overflow-hidden rounded-md"
           style={{
+            left: menu.left,
+            top: menu.top,
+            width: menu.width,
             background: "var(--surface-raised)",
             border: "1px solid var(--border)",
             boxShadow: "var(--shadow-raised)",
@@ -163,7 +205,11 @@ export function Select({
               />
             </div>
           )}
-          <ul role="listbox" className="max-h-60 overflow-y-auto py-1">
+          <ul
+            role="listbox"
+            className="overflow-y-auto py-1"
+            style={{ maxHeight: menu.maxHeight - (withSearch && options.length > 0 ? 38 : 0) }}
+          >
             {filtered.length === 0 && (
               <li className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
                 {options.length === 0 ? emptyLabel : `Nothing matches “${query}”.`}
@@ -218,7 +264,8 @@ export function Select({
               );
             })}
           </ul>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

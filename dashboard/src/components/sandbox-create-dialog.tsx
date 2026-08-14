@@ -118,7 +118,7 @@ export function SandboxCreateDialog({
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className="rounded-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
+        className="rounded-xl w-full max-w-2xl p-7 max-h-[88vh] overflow-y-auto"
         style={{
           background: "var(--surface-raised)",
           border: "1px solid var(--border)",
@@ -133,7 +133,7 @@ export function SandboxCreateDialog({
           here, so two runs are comparable.
         </p>
 
-        <div className="space-y-4">
+        <div className="space-y-5">
           <div>
             <div className="flex items-baseline justify-between">
               <span className="label-eyebrow">Agent</span>
