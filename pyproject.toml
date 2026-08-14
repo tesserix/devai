@@ -117,6 +117,12 @@ devai-mcp-hub = "devai.mcphub:create_hub_app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/devai"]
 
+# The `kit` extra installs from a git URL; hatchling refuses direct references
+# in metadata unless this is set, and refuses at metadata time — so an unset
+# flag breaks every install, not just `.[kit]`.
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120
