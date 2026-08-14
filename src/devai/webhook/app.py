@@ -327,10 +327,11 @@ def create_app(
             from devai.sandbox.trace import TraceStore
 
             app.state.sandbox_traces = TraceStore(getattr(state, "redis", None))
-            spec_registry = getattr(spec_service, "registry", None) if spec_service else None
-            if spec_registry is not None:
+            # The service, not its registry: an agent published from the UI has
+            # to be invokable without waiting for the next restart.
+            if spec_service is not None:
                 app.state.sandbox_invoker = SandboxInvoker(
-                    specializations=spec_registry,
+                    specializations=spec_service,
                     deps=_sandbox_stage_deps(app, config),
                     traces=app.state.sandbox_traces,
                 )

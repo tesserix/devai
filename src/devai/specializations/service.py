@@ -132,14 +132,28 @@ class SpecializationService:
         self._registry = None
 
     async def reload(self) -> int:
-        """Re-discover from disk. Returns the new count.
+        """Re-discover, from disk *and* the registry. Returns the new count.
 
         Used by the dashboard's "reload specs" action (and a future
-        SIGHUP handler) so YAML edits take effect without a restart.
+        SIGHUP handler) so YAML edits take effect without a restart. It goes
+        through the same load as start(): a disk-only rebuild would silently
+        drop every agent published from the UI.
         """
-        new_registry = SpecializationRegistry.from_directory(self.directory)
+        new_registry = await self._load()
         self._registry = new_registry
         return len(new_registry)
+
+    async def resolve_runnable(self, name: str) -> Specialization | None:
+        """The role, re-consulting the catalog once if it is not known yet.
+
+        An agent published from the UI is invokable straight away instead of
+        after the next restart — that is the whole author→run loop.
+        """
+        spec = self.get_full(name)
+        if spec is not None or self._registry_client is None:
+            return spec
+        await self.reload()
+        return self.get_full(name)
 
     # ── Read surface ─────────────────────────────────────────────────
 

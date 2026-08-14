@@ -29,6 +29,16 @@ system_prompt: You write release notes.
 """
 
 
+class _Specs:
+    """Stands in for SpecializationService — the invoker only resolves roles."""
+
+    def __init__(self, registry: SpecializationRegistry) -> None:
+        self._registry = registry
+
+    async def resolve_runnable(self, name: str) -> Any:
+        return self._registry.resolve(name) if self._registry.has(name) else None
+
+
 def _client(*, invoker: bool = True, responses: list[Any] | None = None) -> TestClient:
     from devai.adapters.llm.base import LLMResponse
     from devai.config import Settings
@@ -36,13 +46,14 @@ def _client(*, invoker: bool = True, responses: list[Any] | None = None) -> Test
 
     registry = SpecializationRegistry()
     registry.register(load_specialization_from_string(_YAML))
+    specs = _Specs(registry)
 
     app = FastAPI()
     app.state.sandbox_service = SandboxService(_FakeDB())
     app.state.sandbox_traces = TraceStore(None)
     app.state.sandbox_invoker = (
         SandboxInvoker(
-            specializations=registry,
+            specializations=specs,
             deps=StageDeps(config=Settings(), llm=_ScriptedLLM(responses or [LLMResponse(text="Here are the notes.")])),
             traces=app.state.sandbox_traces,
         )

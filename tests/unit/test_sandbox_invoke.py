@@ -69,6 +69,16 @@ def _record(**kw) -> SandboxRecord:
     )
 
 
+class _Specs:
+    """Stands in for SpecializationService — the invoker only resolves roles."""
+
+    def __init__(self, registry: SpecializationRegistry) -> None:
+        self._registry = registry
+
+    async def resolve_runnable(self, name: str):
+        return self._registry.resolve(name) if self._registry.has(name) else None
+
+
 def _registry() -> SpecializationRegistry:
     reg = SpecializationRegistry()
     reg.register(load_specialization_from_string(_SPEC_YAML))
@@ -77,7 +87,7 @@ def _registry() -> SpecializationRegistry:
 
 def _invoker(llm, *, registry=None, store=None) -> SandboxInvoker:
     return SandboxInvoker(
-        specializations=registry if registry is not None else _registry(),
+        specializations=registry if registry is not None else _Specs(_registry()),
         deps=StageDeps(config=Settings(), llm=llm),
         traces=store or TraceStore(None),
     )
@@ -192,3 +202,19 @@ async def test_a_model_failure_is_a_failed_trace_not_a_lost_one() -> None:
     assert not inv.ok
     assert "503" in inv.error
     assert (await store.get("sb-1", inv.id)) is not None
+
+
+async def test_an_agent_published_after_startup_is_invokable(monkeypatch) -> None:
+    # The invoker asks the catalog, not a snapshot of it: publishing an agent
+    # and immediately testing it in a sandbox is the loop, not a restart away.
+    registry = SpecializationRegistry()
+    specs = _Specs(registry)
+    inv = _invoker(_ScriptedLLM([LLMResponse(text="notes")]), registry=specs)
+
+    with pytest.raises(ValueError, match="not runnable"):
+        await inv.invoke(_record(), message="go", triggered_by="sam@example.com")
+
+    registry.register(load_specialization_from_string(_SPEC_YAML))
+
+    result = await inv.invoke(_record(), message="go", triggered_by="sam@example.com")
+    assert result.ok

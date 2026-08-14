@@ -98,3 +98,34 @@ async def test_the_source_records_that_the_registry_contributed(local_dir: Path)
     await svc.start()
 
     assert svc.source == "registry+local"
+
+
+async def test_reload_keeps_the_agents_adopted_from_the_registry(local_dir: Path) -> None:
+    svc = _service(local_dir, _FakeRegistry([{"name": "release-notes-writer", "systemPrompt": "Write notes."}]))
+    await svc.start()
+
+    await svc.reload()
+
+    assert svc.registry.has("release_notes_writer")
+    assert svc.registry.has("db_engineer")
+
+
+async def test_an_agent_published_after_start_is_runnable_without_a_restart(local_dir: Path) -> None:
+    catalog = _FakeRegistry([])
+    svc = _service(local_dir, catalog)
+    await svc.start()
+    assert await svc.resolve_runnable("release_notes_writer") is None
+
+    catalog._agents.append({"name": "release-notes-writer", "systemPrompt": "Write notes."})
+
+    spec = await svc.resolve_runnable("release_notes_writer")
+    assert spec is not None
+    assert spec.system_prompt == "Write notes."
+
+
+async def test_resolve_runnable_answers_from_the_catalog_it_already_has(local_dir: Path) -> None:
+    svc = _service(local_dir, _FakeRegistry([]))
+    await svc.start()
+
+    assert (await svc.resolve_runnable("db_engineer")) is not None
+    assert (await svc.resolve_runnable("no_such_role")) is None

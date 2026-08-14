@@ -26,7 +26,7 @@ from devai.sandbox.trace import Invocation, TraceStep, TraceStore
 if TYPE_CHECKING:
     from devai.pipeline.interfaces import StageDeps
     from devai.specializations.base import Specialization
-    from devai.specializations.registry import SpecializationRegistry
+    from devai.specializations.service import SpecializationService
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class SandboxInvoker:
     def __init__(
         self,
         *,
-        specializations: SpecializationRegistry,
+        specializations: SpecializationService,
         deps: StageDeps,
         traces: TraceStore,
     ) -> None:
@@ -50,7 +50,7 @@ class SandboxInvoker:
         """One turn. Model and tool failures become a failed trace, never a lost one."""
         if record.status not in _LIVE:
             raise ValueError(f"sandbox {record.id} is {record.status.value} and cannot be invoked")
-        spec = self._resolve(record)
+        spec = await self._resolve(record)
 
         steps: list[TraceStep] = [
             TraceStep(kind="prompt", name="system", output=spec.system_prompt),
@@ -98,13 +98,12 @@ class SandboxInvoker:
         await self._traces.save(invocation, ttl_seconds=self._ttl(record))
         return invocation
 
-    def _resolve(self, record: SandboxRecord) -> Specialization:
+    async def _resolve(self, record: SandboxRecord) -> Specialization:
         from devai.registry.mapping import role_name
 
-        name = role_name(record.spec.agent.name)
-        if not self._specs.has(name):
+        spec = await self._specs.resolve_runnable(role_name(record.spec.agent.name))
+        if spec is None:
             raise ValueError(f"sandbox {record.id} pins agent {record.spec.agent.name!r}, which is not runnable here")
-        spec = self._specs.resolve(name)
         # The sandbox's pin beats the role's own preference — that is what makes
         # a result attributable to a configuration rather than to a default.
         return replace(
