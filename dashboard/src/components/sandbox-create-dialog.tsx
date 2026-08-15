@@ -109,8 +109,6 @@ export function SandboxCreateDialog({
     }
   }
 
-  const field = "w-full px-3 py-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] text-sm text-[var(--ink-100)] focus:outline-none focus:border-indigo-500/50";
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
@@ -192,7 +190,7 @@ export function SandboxCreateDialog({
                 max={24}
                 value={ttlHours}
                 onChange={(e) => setTtlHours(Number(e.target.value))}
-                className={field}
+                className="field w-full"
               />
             </div>
           </div>

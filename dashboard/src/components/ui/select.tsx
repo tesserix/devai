@@ -146,16 +146,16 @@ export function Select({
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
-        className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full flex items-center gap-2 min-h-9 px-3 py-1.5 rounded-md text-left text-sm disabled:cursor-not-allowed disabled:opacity-60"
         style={{
-          background: "var(--surface-2)",
-          border: `1px solid ${open ? "var(--accent)" : "var(--surface-border)"}`,
+          background: "var(--surface)",
+          border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
           color: "var(--ink-100)",
         }}
       >
         {icon}
         <span
-          className={`min-w-0 flex-1 truncate ${mono ? "font-mono text-[13px]" : ""}`}
+          className={`min-w-0 flex-1 truncate ${mono && selected ? "font-mono text-[13px]" : ""}`}
           style={selected ? undefined : { color: "var(--ink-muted)" }}
         >
           {selected?.label ?? placeholder}
@@ -199,9 +199,9 @@ export function Select({
               />
             </div>
           )}
-          <ul role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
+          <ul role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1">
             {filtered.length === 0 && (
-              <li className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
+              <li className="px-2 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
                 {options.length === 0 ? emptyLabel : `Nothing matches “${query}”.`}
               </li>
             )}
@@ -213,7 +213,7 @@ export function Select({
                 <li key={`${o.group ?? ""}:${o.value}`} role="option" aria-selected={o.value === value}>
                   {header && (
                     <div
-                      className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider"
+                      className="px-2 pt-2 pb-1 text-[10px] uppercase tracking-wider"
                       style={{ color: "var(--ink-muted)" }}
                     >
                       {header}
@@ -224,7 +224,7 @@ export function Select({
                     disabled={o.disabled}
                     onMouseEnter={() => setActive(idx)}
                     onClick={() => pick(o)}
-                    className="w-full px-3 py-1.5 text-left disabled:opacity-40"
+                    className="w-full rounded-md px-2 py-1.5 text-left disabled:opacity-40"
                     style={{
                       background: isActive && !o.disabled ? "var(--accent-soft-bg-2)" : "transparent",
                       color: isActive && !o.disabled ? "var(--accent-soft-ink)" : "var(--ink)",

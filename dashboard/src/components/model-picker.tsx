@@ -162,8 +162,9 @@ export function ModelPicker({
             value={model}
             onChange={pickModel}
             options={modelOptions}
-            mono
-            placeholder={current ? "Choose a model" : "Pick a provider first"}
+            placeholder={
+              providers.length === 0 ? "Loading…" : current ? "Choose a model" : "Pick a provider first"
+            }
             icon={<Cpu className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ink-muted)" }} />}
             ariaLabel="Model"
           />

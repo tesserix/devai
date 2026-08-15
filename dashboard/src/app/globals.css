@@ -299,6 +299,8 @@ button:not(:disabled) { cursor: pointer; }
   border-radius: 6px;
   color: var(--ink);
   font-size: 14px;
+  /* Matches the Select trigger so inputs and dropdowns line up in a grid row. */
+  min-height: 36px;
   padding: 6px 10px;
   transition: border-color 120ms, box-shadow 120ms;
 }
