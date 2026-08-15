@@ -317,15 +317,26 @@ def test_a_sandboxed_job_is_pointed_at_the_proxy():
     assert env["HTTPS_PROXY"].endswith(str(PROXY_PORT))
 
 
-def test_every_kind_the_proxy_emits_can_be_applied() -> None:
-    """A manifest the builder emits but the client cannot route fails the whole
-    sandbox at creation, and the only evidence is a string in `detail`."""
+def test_every_kind_a_sandbox_emits_can_be_applied() -> None:
+    """A manifest a builder emits but the client cannot route fails the whole
+    sandbox at creation, and the only evidence is a string in `detail`.
+
+    Asserted against the builders rather than a hand-kept list of kinds, because
+    a hand-kept list is what let ConfigMap go missing.
+    """
     from devai.runtime.k8s_client import K8sJobRuntime
+    from devai.sandbox.isolation import build_isolation_manifests
+    from devai.sandbox.workspace import build_workspace_manifests
 
     rt = K8sJobRuntime.__new__(K8sJobRuntime)
     rt._core_v1 = object()  # noqa: SLF001
     rt._networking_v1 = object()  # noqa: SLF001
 
     record = _record()
-    for manifest in build_proxy_manifests(record, namespace="devai"):
+    manifests = [
+        *build_isolation_manifests(record, namespace="devai"),
+        *build_proxy_manifests(record, namespace="devai"),
+        *build_workspace_manifests(record, namespace="devai", token="-"),
+    ]
+    for manifest in manifests:
         rt._manifest_api(manifest["kind"])  # noqa: SLF001 — raises if unroutable
