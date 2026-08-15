@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search } from "lucide-react";
+import { placeMenu, type MenuPlacement } from "@/components/ui/select-position";
 
 /**
  * The one dropdown DevAI uses.
@@ -58,9 +59,7 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const [menu, setMenu] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(
-    null,
-  );
+  const [menu, setMenu] = useState<MenuPlacement | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const withSearch = searchable ?? options.length >= SEARCH_FROM;
@@ -75,23 +74,16 @@ export function Select({
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // Fixed coordinates off the trigger, flipped above when the space below is
-  // too tight — recomputed on scroll and resize so the menu tracks the field.
+  // Geometry lives in select-position.ts and is tested there; this only feeds
+  // it the live rect and keeps it current while the page moves.
   useLayoutEffect(() => {
     if (!open) return;
     function place() {
       const rect = boxRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const below = window.innerHeight - rect.bottom - 12;
-      const above = rect.top - 12;
-      const flip = below < 220 && above > below;
-      const maxHeight = Math.min(360, flip ? above : below);
-      setMenu({
-        left: rect.left,
-        top: flip ? rect.top - maxHeight - 4 : rect.bottom + 4,
-        width: rect.width,
-        maxHeight,
-      });
+      setMenu(
+        placeMenu(rect, { width: window.innerWidth, height: window.innerHeight }),
+      );
     }
     place();
     window.addEventListener("scroll", place, true);
@@ -175,11 +167,13 @@ export function Select({
       {open && !disabled && menu && typeof document !== "undefined" && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[100] overflow-hidden rounded-md"
+          className="fixed z-[100] flex flex-col overflow-hidden rounded-lg"
           style={{
             left: menu.left,
             top: menu.top,
+            bottom: menu.bottom,
             width: menu.width,
+            maxHeight: menu.maxHeight,
             background: "var(--surface-raised)",
             border: "1px solid var(--border)",
             boxShadow: "var(--shadow-raised)",
@@ -205,11 +199,7 @@ export function Select({
               />
             </div>
           )}
-          <ul
-            role="listbox"
-            className="overflow-y-auto py-1"
-            style={{ maxHeight: menu.maxHeight - (withSearch && options.length > 0 ? 38 : 0) }}
-          >
+          <ul role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
             {filtered.length === 0 && (
               <li className="px-3 py-3 text-sm" style={{ color: "var(--ink-muted)" }}>
                 {options.length === 0 ? emptyLabel : `Nothing matches “${query}”.`}
