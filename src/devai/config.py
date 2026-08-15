@@ -892,10 +892,15 @@ class Settings(BaseSettings):
         return self.github_app_id > 0 and len(self.github_app_private_key) > 0
 
     def export_langsmith_env(self) -> None:
-        """Export LangSmith config as environment variables (required by LangChain)."""
+        """Export LangSmith config as environment variables (required by LangChain).
+
+        A key that isn't shaped like a LangSmith key (an unreplaced bootstrap
+        placeholder, say) leaves tracing off: enabling it costs a 403 on every
+        LLM call and records nothing.
+        """
         import os
 
-        if self.langchain_api_key:
+        if self.langchain_api_key.startswith(("lsv2_", "ls__")):
             os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key
             os.environ["LANGCHAIN_PROJECT"] = self.langchain_project
             os.environ["LANGCHAIN_ENDPOINT"] = self.langchain_endpoint
