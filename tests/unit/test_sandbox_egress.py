@@ -315,3 +315,17 @@ def test_a_sandboxed_job_is_pointed_at_the_proxy():
     fenced = apply_sandbox_boundary(job, _record())
     env = {e["name"]: e.get("value") for e in fenced["spec"]["template"]["spec"]["containers"][0]["env"]}
     assert env["HTTPS_PROXY"].endswith(str(PROXY_PORT))
+
+
+def test_every_kind_the_proxy_emits_can_be_applied() -> None:
+    """A manifest the builder emits but the client cannot route fails the whole
+    sandbox at creation, and the only evidence is a string in `detail`."""
+    from devai.runtime.k8s_client import K8sJobRuntime
+
+    rt = K8sJobRuntime.__new__(K8sJobRuntime)
+    rt._core_v1 = object()  # noqa: SLF001
+    rt._networking_v1 = object()  # noqa: SLF001
+
+    record = _record()
+    for manifest in build_proxy_manifests(record, namespace="devai"):
+        rt._manifest_api(manifest["kind"])  # noqa: SLF001 — raises if unroutable

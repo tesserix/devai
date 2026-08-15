@@ -196,19 +196,21 @@ class SandboxService:
                 raise SandboxError(f"{plural[:-1]} {name} is not published")
 
 
+def _jsonb(value: Any) -> Any:
+    """asyncpg hands JSONB back as text; every JSONB column needs this."""
+    return json.loads(value) if isinstance(value, str) else value
+
+
 def _to_record(row: dict[str, Any]) -> SandboxRecord:
-    spec = row["spec"]
-    if isinstance(spec, str):  # asyncpg hands JSONB back as text
-        spec = json.loads(spec)
     return SandboxRecord(
         id=row["id"],
         owner=row["owner"],
-        spec=SandboxSpec.model_validate(spec),
+        spec=SandboxSpec.model_validate(_jsonb(row["spec"])),
         status=SandboxStatus(row["status"]),
         created_at=row["created_at"],
         expires_at=row["expires_at"],
         last_access_at=row.get("last_access_at"),
-        detail=row.get("detail") or {},
+        detail=_jsonb(row.get("detail")) or {},
     )
 
 

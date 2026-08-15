@@ -8,6 +8,7 @@ convenience here: an unspecified tool is mocked, never live.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from devai.sandbox.models import SandboxSpec, SandboxStatus, ToolMode
-from devai.sandbox.service import SandboxError, SandboxService
+from devai.sandbox.service import SandboxError, SandboxService, _to_record
 
 _MIN_SPEC: dict[str, Any] = {
     "agent": {"name": "code-remediator-agent", "version": "v1.8.2"},
@@ -280,3 +281,24 @@ async def test_unknown_registry_answer_does_not_block_creation() -> None:
 async def test_a_sandbox_without_an_owner_is_refused() -> None:
     with pytest.raises(SandboxError):
         await _service().create(SandboxSpec.model_validate(_MIN_SPEC), owner="")
+
+
+def test_a_row_whose_detail_came_back_as_json_text_still_loads() -> None:
+    """asyncpg hands JSONB back as text — `detail` needs the same decode `spec` gets.
+
+    Without it a sandbox that recorded a provisioning error is unreadable: every
+    read of it 500s, so the UI cannot even show why the sandbox failed.
+    """
+    now = datetime.now(UTC)
+    record = _to_record(
+        {
+            "id": "f71fa6eb-264f-4556-95e0-aa3ead334471",
+            "owner": "sam@example.com",
+            "spec": json.dumps(_MIN_SPEC),
+            "status": "failed",
+            "created_at": now,
+            "expires_at": now + timedelta(hours=1),
+            "detail": '{"error": "unsupported manifest kind: ConfigMap"}',
+        }
+    )
+    assert record.detail == {"error": "unsupported manifest kind: ConfigMap"}

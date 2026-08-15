@@ -257,6 +257,7 @@ class K8sJobRuntime:
             "NetworkPolicy": (self._networking_v1, "network_policy"),
             "PersistentVolumeClaim": (self._core_v1, "persistent_volume_claim"),
             "Secret": (self._core_v1, "secret"),
+            "ConfigMap": (self._core_v1, "config_map"),
             "Pod": (self._core_v1, "pod"),
             "Service": (self._core_v1, "service"),
         }
