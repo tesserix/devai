@@ -60,7 +60,7 @@ dependencies = [
     "langsmith>=0.2",
     # Kubernetes — async client backs the Job-runner stage that spawns
     # a Pod per agent run. See src/devai/runtime/k8s_client.py.
-    "kubernetes-asyncio>=32.0.0",
+    "kubernetes-asyncio>=36.1.0",
     # Temporal — durable orchestration backbone. The workflow adapter family
     # (adapters/workflow) and the devai-worker (orchestration/worker.py) use it
     # when DEVAI_WORKFLOW_PROVIDER=temporal; with the default inproc provider it
