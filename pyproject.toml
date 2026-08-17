@@ -34,7 +34,7 @@ dependencies = [
     "cryptography>=50.0.0",
     "PyJWT>=2.10.0",
     # PostgreSQL
-    "asyncpg>=0.30.0",
+    "asyncpg>=0.31.0",
     # Groq (fallback)
     "groq>=0.12.0",
     # Google Gemini
