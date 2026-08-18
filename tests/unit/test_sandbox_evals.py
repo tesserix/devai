@@ -20,6 +20,7 @@ from devai.sandbox.models import AgentRef, ModelRef, SandboxRecord, SandboxSpec,
 from devai.sandbox.trace import Invocation, TraceStep, TraceStore
 from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.registry import SpecializationRegistry
+from tests.unit.test_sandbox_invoke import _GrantedSandboxLLM
 
 _SPEC_YAML = """
 name: release_notes_writer
@@ -72,6 +73,7 @@ def _runner(llm) -> EvalRunner:
         specializations=_Specs(registry),
         deps=StageDeps(config=Settings(), llm=llm),
         traces=TraceStore(None),
+        credentials=_GrantedSandboxLLM(llm),
     )
     return EvalRunner(invoker, EvalStore(None))
 
@@ -209,11 +211,13 @@ async def test_a_run_is_readable_afterwards_so_two_runs_can_be_compared() -> Non
     store = EvalStore(None)
     registry = SpecializationRegistry()
     registry.register(load_specialization_from_string(_SPEC_YAML))
+    llm = _ScriptedLLM([LLMResponse(text="ok")])
     runner = EvalRunner(
         SandboxInvoker(
             specializations=_Specs(registry),
-            deps=StageDeps(config=Settings(), llm=_ScriptedLLM([LLMResponse(text="ok")])),
+            deps=StageDeps(config=Settings(), llm=llm),
             traces=TraceStore(None),
+            credentials=_GrantedSandboxLLM(llm),
         ),
         store,
     )

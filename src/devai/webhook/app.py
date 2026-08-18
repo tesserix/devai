@@ -18,20 +18,19 @@ if TYPE_CHECKING:
     from devai.config import Settings
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
+    from devai.pipeline.interfaces import StageDeps
 
 logger = logging.getLogger(__name__)
 _START_TIME = time.time()
 
 
-def _sandbox_stage_deps(app: FastAPI, config: Settings) -> object:
-    """The pipeline's own deps when it is up, so a sandbox run resolves the
-    invoking user's credentials exactly as a pipeline stage does; otherwise a
-    minimal bundle so invoking still works with the pipeline disabled."""
-    deps = getattr(getattr(app.state, "pipeline_service", None), "stage_deps", None)
-    if deps is not None:
-        return deps
-
+def _sandbox_stage_deps(app: FastAPI, config: Settings) -> StageDeps:
+    """Return service wiring that the sandbox credential resolver will strip."""
     from devai.pipeline.interfaces import StageDeps
+
+    deps = getattr(getattr(app.state, "pipeline_service", None), "stage_deps", None)
+    if isinstance(deps, StageDeps):
+        return deps
 
     llm = None
     try:
@@ -324,11 +323,26 @@ def create_app(
         app.state.sandbox_invoker = None
         app.state.sandbox_evals = None
         try:
+            from devai.sandbox.credentials import SandboxCredentialResolver
             from devai.sandbox.evals import EvalRunner, EvalStore
             from devai.sandbox.invoke import SandboxInvoker
             from devai.sandbox.trace import TraceStore
 
             app.state.sandbox_traces = TraceStore(getattr(state, "redis", None))
+            sandbox_audit = None
+            if app.state.sre_studio_db is not None:
+
+                async def sandbox_audit(event: dict[str, str]) -> None:
+                    details = {key: value for key, value in event.items() if key not in {"action", "owner"}}
+                    await app.state.sre_studio_db.audit(
+                        action=event["action"],
+                        actor=event["owner"],
+                        actor_type="user",
+                        entity_type="sandbox",
+                        entity_ref=event["sandbox_id"],
+                        details=details,
+                    )
+
             # The service, not its registry: an agent published from the UI has
             # to be invokable without waiting for the next restart.
             if spec_service is not None:
@@ -336,6 +350,10 @@ def create_app(
                     specializations=spec_service,
                     deps=_sandbox_stage_deps(app, config),
                     traces=app.state.sandbox_traces,
+                    credentials=SandboxCredentialResolver(
+                        service=settings_service,
+                        audit=sandbox_audit,
+                    ),
                 )
                 app.state.sandbox_evals = EvalRunner(
                     app.state.sandbox_invoker, EvalStore(getattr(state, "redis", None))

@@ -15,7 +15,7 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # A sandbox is ephemeral by design; anything longer is a deployment.
 MAX_TTL_SECONDS = 24 * 60 * 60
@@ -90,6 +90,23 @@ class SandboxLimits(_Pinned):
     max_wall_clock_s: int = Field(default=900, gt=0)
 
 
+class SandboxCredentials(_Pinned):
+    """Named user connectors explicitly granted to this sandbox.
+
+    The connector is resolved in the control plane. Its secret is never
+    mounted into the sandbox Job or workspace.
+    """
+
+    llm_connector: str = Field(default="", max_length=128, pattern=r"^$|^[A-Za-z0-9._-]+$")
+    confirmed: bool = False
+
+    @model_validator(mode="after")
+    def connector_is_explicitly_confirmed(self) -> SandboxCredentials:
+        if bool(self.llm_connector) != self.confirmed:
+            raise ValueError("LLM connector and explicit confirmation must be supplied together")
+        return self
+
+
 class SandboxSpec(_Pinned):
     agent: AgentRef
     model: ModelRef
@@ -103,6 +120,7 @@ class SandboxSpec(_Pinned):
     draft: dict[str, Any] | None = None
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
     limits: SandboxLimits = Field(default_factory=SandboxLimits)
+    credentials: SandboxCredentials = Field(default_factory=SandboxCredentials)
     ttl_seconds: int = Field(default=DEFAULT_TTL_SECONDS, gt=0, le=MAX_TTL_SECONDS)
     # A place to work — volume, shell and file service. Off by default: an eval
     # run that only needs an answer should not carry a PVC.

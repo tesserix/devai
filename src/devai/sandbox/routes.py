@@ -55,6 +55,8 @@ async def _resolve_principal(request: Request) -> Principal | None:
 def _owner_handle(principal: Principal | None) -> str | None:
     if principal is None:
         return None
+    if principal.tenant_id and principal.user_scope_id:
+        return principal.user_scope_id
     for attr in ("email", "display_name", "uid"):
         val = getattr(principal, attr, None)
         if val:
@@ -81,7 +83,10 @@ async def _read_scope(request: Request) -> tuple[str, bool]:
 
 
 def _is_admin(principal: Principal | None) -> bool:
-    return bool(principal and "admin" in (principal.roles or []))
+    if principal is None:
+        return False
+    roles = set(principal.roles or [])
+    return "platform-admin" in roles or ("admin" in roles and not principal.tenant_id)
 
 
 def _view(record: SandboxRecord) -> dict[str, Any]:

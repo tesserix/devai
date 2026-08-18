@@ -15,7 +15,7 @@ from devai.sandbox.trace import TraceStore
 from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.registry import SpecializationRegistry
 from tests.unit.test_sandbox import _FakeDB
-from tests.unit.test_sandbox_invoke import _ScriptedLLM
+from tests.unit.test_sandbox_invoke import _GrantedSandboxLLM, _ScriptedLLM
 from tests.unit.test_sandbox_invoke_routes import _MALLORY, _SAM, _SPEC, _YAML, _Specs
 
 _CASES: dict[str, Any] = {
@@ -37,10 +37,12 @@ def _client(*, evals: bool = True) -> TestClient:
     app = FastAPI()
     app.state.sandbox_service = SandboxService(_FakeDB())
     app.state.sandbox_traces = TraceStore(None)
+    llm = _ScriptedLLM([LLMResponse(text="Here are the notes.")] * 4)
     invoker = SandboxInvoker(
         specializations=_Specs(registry),
-        deps=StageDeps(config=Settings(), llm=_ScriptedLLM([LLMResponse(text="Here are the notes.")] * 4)),
+        deps=StageDeps(config=Settings(), llm=llm),
         traces=app.state.sandbox_traces,
+        credentials=_GrantedSandboxLLM(llm),
     )
     app.state.sandbox_invoker = invoker
     app.state.sandbox_evals = EvalRunner(invoker, EvalStore(None)) if evals else None
