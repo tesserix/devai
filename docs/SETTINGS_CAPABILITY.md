@@ -2,6 +2,8 @@
 
 Manage all of DevAI's connectors (LLM, SCM, memory, Slack, MCP, web-search) and their
 credentials from one Settings page — scoped per **user**, **team**, **tenant**, or **global**.
+Tenant user ownership is keyed by `tenant_id:subject_id`; tenant principals never
+fall back to an email-only row. See [ADR-0001](adr/0001-tenant-qualified-integrations-and-metering.md).
 Secret values are auto-provisioned into **GCP Secret Manager**; the app DB stores only references.
 A user's own credentials transparently drive both their **conversations** and their **pipeline runs**.
 
@@ -26,6 +28,12 @@ A user's own credentials transparently drive both their **conversations** and th
   configured. Because every adapter factory reads config via `getattr(settings, …)`, handing them
   the overlay routes a user's own creds into the same factories — zero duplication.
 - **Scope resolution** is most-specific-wins: `user → team → tenant → global`.
+- **Gateway enforcement.** Set `DEVAI_LLM_GATEWAY_REQUIRED=true` in production
+  to reject direct-provider connectors and require the `gateway` connector.
+  Gateway calls receive sanitized tenant/user/run/agent attribution headers.
+- **Cost isolation.** Redis usage projections and durable PostgreSQL LLM-call rows
+  both carry tenant and user identity. Users see themselves, tenant admins see
+  their tenant, and only `platform-admin` sees cross-tenant totals.
 
 ### Files
 

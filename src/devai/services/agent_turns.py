@@ -61,6 +61,11 @@ def update_turn_context(**fields: str) -> None:
     _turn_ctx.set({**ctx, **{k: v for k, v in fields.items() if v}})
 
 
+def get_turn_context() -> dict[str, str]:
+    """A copy of the current run/identity attribution context."""
+    return dict(_turn_ctx.get() or {})
+
+
 def reset_turn_context(token: contextvars.Token) -> None:
     _turn_ctx.reset(token)
 
@@ -89,7 +94,7 @@ async def emit_turn(kind: str, **fields: Any) -> None:
     }
     # Billing attribution riding the context (update_turn_context): who the
     # spend belongs to, and whether it draws down their trial budget.
-    for key in ("triggered_by", "trial"):
+    for key in ("triggered_by", "tenant_id", "user_id", "trial"):
         if ctx.get(key):
             envelope.setdefault(key, ctx[key])
     try:
@@ -98,4 +103,11 @@ async def emit_turn(kind: str, **fields: Any) -> None:
         logger.debug("turn sink failed (kind=%s)", kind, exc_info=True)
 
 
-__all__ = ["emit_turn", "reset_turn_context", "set_turn_context", "set_turn_sink", "update_turn_context"]
+__all__ = [
+    "emit_turn",
+    "get_turn_context",
+    "reset_turn_context",
+    "set_turn_context",
+    "set_turn_sink",
+    "update_turn_context",
+]

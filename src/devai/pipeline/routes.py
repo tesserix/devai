@@ -73,11 +73,10 @@ async def _llm_preflight(request: Request, principal: Any) -> None:
 
         overlay = config
         svc = getattr(request.app.state, "settings_service", None)
-        email = (getattr(principal, "email", "") or getattr(principal, "uid", "")) if principal else ""
-        if svc is not None and email:
+        if svc is not None and principal is not None:
             from devai.settings.llm_resolver import PrincipalLLMResolver
 
-            overlay = await PrincipalLLMResolver(config, svc).settings_for_email(email)
+            overlay = await PrincipalLLMResolver(config, svc).settings_for_principal(principal)
         connected = connected_providers(overlay)
     except Exception:  # noqa: BLE001 — a preflight must never block on its own error
         logger.debug("llm preflight skipped (resolution error)", exc_info=True)

@@ -28,7 +28,7 @@ from devai.mcphub.hub import MCPHub
 from devai.mcphub.server import (
     build_hub_server,
     profile_for_principal,
-    set_current_email,
+    set_current_principal,
     set_current_profile,
 )
 
@@ -157,7 +157,7 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
         set_current_profile(profile_for_principal(principal, requested))
         # Per-user MCP federation keys on the caller's email (their own
         # connected servers); blank for anonymous/service callers.
-        set_current_email(principal.email if principal else "")
+        set_current_principal(principal)
         return await call_next(request)
 
     @app.get("/healthz")

@@ -134,7 +134,13 @@ async def _resolve_spec_llm(spec: Specialization, ctx: RunContext) -> Any:
         deps = ctx.deps
         src = deps.config
         if deps.llm_resolver is not None and ctx.triggered_by:
-            src = await deps.llm_resolver.settings_for_email(ctx.triggered_by)
+            from devai.identity import Principal
+
+            principal = Principal.from_dict(ctx.task.principal) or Principal(email=ctx.triggered_by)
+            if hasattr(deps.llm_resolver, "settings_for_principal"):
+                src = await deps.llm_resolver.settings_for_principal(principal)
+            else:
+                src = await deps.llm_resolver.settings_for_email(ctx.triggered_by)
 
         adapter = create_llm_adapter(src, provider=provider)
         if getattr(adapter, "provider_name", "") == "noop":

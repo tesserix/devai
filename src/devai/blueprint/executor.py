@@ -505,9 +505,15 @@ class BlueprintExecutor:
         # (set BEFORE create_task — task creation snapshots the context), so
         # per-turn envelopes (usage, narration, tool calls) land on the
         # run's event stream without the agents knowing about runs at all.
-        from devai.services.agent_turns import reset_turn_context, set_turn_context
+        from devai.services.agent_turns import reset_turn_context, set_turn_context, update_turn_context
 
         ctx_token = set_turn_context(task.id, spec.resolved_agent() or "", spec.name)
+        principal = task.principal or {}
+        update_turn_context(
+            triggered_by=task.triggered_by or "",
+            tenant_id=str(principal.get("tenant_id") or ""),
+            user_id=str(principal.get("uid") or task.triggered_by or ""),
+        )
 
         sm = self._deps.state_manager
         getter = getattr(sm, "get_pipeline_control", None) if sm is not None else None

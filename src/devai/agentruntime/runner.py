@@ -336,6 +336,7 @@ class AgentRunner:
             web_search=(self.deps.extra or {}).get("web_search"),
             object_store=(self.deps.extra or {}).get("object_store"),
             workdir=(self.deps.extra or {}).get("workdir", ""),
+            extra={"principal": dict(task.principal or {})},
         )
 
 

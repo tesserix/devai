@@ -40,6 +40,20 @@ from devai.adapters.llm.base import (
 
 logger = logging.getLogger(__name__)
 
+_WIRE_EXTRA_KEYS = frozenset(
+    {
+        "frequency_penalty",
+        "parallel_tool_calls",
+        "presence_penalty",
+        "seed",
+        "tool_choice",
+    }
+)
+
+
+def _safe_header(value: Any) -> str:
+    return str(value or "").replace("\r", "").replace("\n", "")[:256]
+
 
 class OpenAILLMAdapter(LLMAdapter):
     """Adapter over `openai.AsyncOpenAI`."""
@@ -60,7 +74,7 @@ class OpenAILLMAdapter(LLMAdapter):
         if not api_key:
             raise AdapterNotConfigured("openai adapter requires DEVAI_OPENAI_API_KEY")
         try:
-            from openai import AsyncOpenAI  # type: ignore[import-untyped]
+            from openai import AsyncOpenAI
         except ImportError as e:
             raise AdapterNotInstalled("openai adapter requires `pip install openai` — falling back to Noop") from e
 
@@ -182,8 +196,20 @@ class OpenAILLMAdapter(LLMAdapter):
                 }
                 for t in request.tools
             ]
-        for k, v in (request.extra or {}).items():
-            kwargs.setdefault(k, v)
+        extra = request.extra or {}
+        for key in _WIRE_EXTRA_KEYS:
+            if key in extra:
+                kwargs[key] = extra[key]
+        if self.provider_name == "gateway":
+            headers = {
+                "x-devai-tenant-id": _safe_header(extra.get("tenant_id")),
+                "x-devai-user-id": _safe_header(extra.get("user_id")),
+                "x-devai-run-id": _safe_header(extra.get("run_id")),
+                "x-devai-agent": _safe_header(extra.get("agent")),
+            }
+            headers = {key: value for key, value in headers.items() if value}
+            if headers:
+                kwargs["extra_headers"] = headers
         return kwargs
 
     def _normalize(self, raw: Any, latency_ms: float) -> LLMResponse:

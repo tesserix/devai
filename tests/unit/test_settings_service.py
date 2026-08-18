@@ -107,7 +107,7 @@ def test_overlay_scope_resolution_user_wins():
         )
         await svc.upsert_connector(
             scope=Scope.USER,
-            scope_id="alice-uid",
+            scope_id="t1:alice-uid",
             connector_key="llm",
             provider="openai",
             prefs={"openai_model": "gpt-4.1"},
@@ -142,7 +142,7 @@ def test_overlay_collects_mcp_servers():
     async def go():
         await svc.upsert_connector(
             scope=Scope.USER,
-            scope_id="alice-uid",
+            scope_id="t1:alice-uid",
             connector_key="mcp",
             provider="streamable_http",
             instance_id="tools",
@@ -164,18 +164,44 @@ def test_delete_removes_secret():
     async def go():
         await svc.upsert_connector(
             scope=Scope.USER,
-            scope_id="alice-uid",
+            scope_id="t1:alice-uid",
             connector_key="llm",
             provider="openai",
             secret_values={"openai_api_key": "K"},
             updated_by="a",
         )
-        assert await svc.delete_connector(Scope.USER, "alice-uid", "llm") is True
+        assert await svc.delete_connector(Scope.USER, "t1:alice-uid", "llm") is True
         ov = await build_overlay(_Base(), _P(), svc)
         # Back to base (no connectors).
         assert ov.llm_provider == "anthropic"
 
     asyncio.run(go())
+
+
+@pytest.mark.asyncio
+async def test_same_subject_in_two_tenants_resolves_only_own_connector():
+    from devai.identity import Principal
+
+    svc = _svc()
+    for tenant, key in (("tenant-a", "KEY-A"), ("tenant-b", "KEY-B")):
+        await svc.upsert_connector(
+            scope=Scope.USER,
+            scope_id=f"{tenant}:shared-uid",
+            connector_key="llm",
+            provider="openai",
+            secret_values={"openai_api_key": key},
+            updated_by="same@example.com",
+        )
+
+    overlay_a = await build_overlay(
+        _Base(), Principal(email="same@example.com", uid="shared-uid", tenant_id="tenant-a"), svc
+    )
+    overlay_b = await build_overlay(
+        _Base(), Principal(email="same@example.com", uid="shared-uid", tenant_id="tenant-b"), svc
+    )
+
+    assert overlay_a.openai_api_key == "KEY-A"
+    assert overlay_b.openai_api_key == "KEY-B"
 
 
 def test_unknown_connector_rejected():

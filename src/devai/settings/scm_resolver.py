@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from devai.settings.models import CONNECTOR_BY_KEY
 
 if TYPE_CHECKING:
+    from devai.identity import Principal
     from devai.scm.base import SCMClient
     from devai.settings.service import SettingsService
 
@@ -55,13 +56,17 @@ class PrincipalSCMResolver:
         For callers that want to build-and-close their own SCM client from the
         user's creds (e.g. chat tools) without touching the resolver's cache.
         """
-        if self._service is None or not email or "@" not in email:
+        from devai.identity import Principal
+
+        return await self.settings_for_principal(Principal(uid="", email=email))
+
+    async def settings_for_principal(self, principal: Principal | None) -> Any:
+        if self._service is None or principal is None:
             return self._base
         try:
-            from devai.identity import Principal
             from devai.settings.overlay import build_overlay
 
-            return await build_overlay(self._base, Principal(uid="", email=email), self._service)
+            return await build_overlay(self._base, principal, self._service)
         except Exception:  # noqa: BLE001
             logger.warning("settings: SCM overlay fetch failed — using base settings", exc_info=True)
             return self._base
@@ -82,8 +87,15 @@ class PrincipalSCMResolver:
         """
         if self._service is None or not email or "@" not in email:
             return None
+        from devai.identity import Principal
+
+        return await self.resolve(Principal(uid="", email=email))
+
+    async def resolve(self, principal: Principal | None) -> SCMClient | None:
+        if self._service is None or principal is None:
+            return None
         try:
-            overlay = await self.settings_for_email(email)
+            overlay = await self.settings_for_principal(principal)
             if not self._has_own_scm(overlay):
                 return None
 
@@ -103,7 +115,7 @@ class PrincipalSCMResolver:
             self._cache[fingerprint] = client
             logger.info(
                 "settings: per-user SCM active for %s (provider=%s, auth=%s)",
-                email,
+                principal.email,
                 getattr(overlay, "scm_provider", "?"),
                 getattr(overlay, "scm_auth_method", "?"),
             )

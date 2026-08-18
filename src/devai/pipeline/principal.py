@@ -57,13 +57,19 @@ async def resolve_principal_run(
     agent_config = deps.config
     email = str(getattr(task, "triggered_by", "") or "")
     is_human = is_human_principal(email)
+    principal_data = getattr(task, "principal", None) or {}
+    from devai.identity import Principal
+
+    principal = Principal.from_dict(principal_data) or Principal(email=email)
 
     # ── 1. Settings overlay (their keys/model) ─────────────────────────
     has_own = False
     try:
         resolver = getattr(deps, "llm_resolver", None)
         if resolver is not None and is_human:
-            if hasattr(resolver, "llm_overlay_for_email"):
+            if hasattr(resolver, "llm_overlay_for_principal"):
+                overlay, has_own = await resolver.llm_overlay_for_principal(principal)
+            elif hasattr(resolver, "llm_overlay_for_email"):
                 overlay, has_own = await resolver.llm_overlay_for_email(email)
             else:  # older resolver surface (tests/doubles)
                 overlay = await resolver.settings_for_email(email)
@@ -95,17 +101,26 @@ async def resolve_principal_run(
         # provider emits is metered against this user's budget.
         from devai.services.agent_turns import update_turn_context
 
-        update_turn_context(triggered_by=email, trial="1")
+        update_turn_context(
+            triggered_by=email,
+            tenant_id=str(principal_data.get("tenant_id") or ""),
+            user_id=str(principal_data.get("uid") or email),
+            trial="1",
+        )
     else:
         from devai.services.agent_turns import update_turn_context
 
-        update_turn_context(triggered_by=email)
+        update_turn_context(
+            triggered_by=email,
+            tenant_id=str(principal_data.get("tenant_id") or ""),
+            user_id=str(principal_data.get("uid") or email),
+        )
 
     # ── 3. Per-principal SCM client (their PAT / GitHub App) ────────────
     agent_scm = deps.scm
     try:
         if is_human and getattr(deps, "scm_resolver", None) is not None:
-            agent_scm = await deps.scm_for_principal(email) or deps.scm
+            agent_scm = await deps.scm_for_principal(principal) or deps.scm
     except Exception:  # noqa: BLE001
         logger.debug("stage %s: per-user SCM resolution failed", stage_name, exc_info=True)
 

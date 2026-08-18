@@ -256,7 +256,7 @@ class MCPHub:
             surface += self.sandbox.tools()
         return select(surface, profile or ToolProfile.default())
 
-    async def list_tools_for(self, email: str, profile: ToolProfile | None = None) -> BudgetResult:
+    async def list_tools_for(self, identity: Any, profile: ToolProfile | None = None) -> BudgetResult:
         """The shared budgeted surface PLUS the caller's own MCP servers' tools.
 
         Personal tools (``usr-<instance>__<tool>``) are appended AFTER budget
@@ -265,7 +265,7 @@ class MCPHub:
         just the shared surface.
         """
         base = self.list_tools(profile)
-        descriptors = await self.personal.tool_descriptors(email) if email else []
+        descriptors = await self.personal.tool_descriptors(identity) if identity else []
         if not descriptors:
             return base
         personal = [
@@ -292,22 +292,25 @@ class MCPHub:
     def list_resources(self) -> list[FederatedResource]:
         return list(self._resources.values())
 
-    async def call_tool(self, name: str, arguments: dict[str, Any], *, email: str = "") -> Any:
+    async def call_tool(self, name: str, arguments: dict[str, Any], *, identity: Any = None, email: str = "") -> Any:
         # In a sandbox every MCP tool obeys the same policy as a built-in one:
         # an unclassified downstream tool may well be `refund_customer`.
         return await guard_mcp_call(
-            self._gateway, name, arguments or {}, lambda: self._call_downstream(name, arguments, email=email)
+            self._gateway,
+            name,
+            arguments or {},
+            lambda: self._call_downstream(name, arguments, identity=identity or email),
         )
 
-    async def _call_downstream(self, name: str, arguments: dict[str, Any], *, email: str = "") -> Any:
+    async def _call_downstream(self, name: str, arguments: dict[str, Any], *, identity: Any = None) -> Any:
         # A personal-leg tool (usr-…__…) routes to the caller's OWN server —
         # only ever resolvable with the caller's email, so isolation holds.
         if self.sandbox is not None and self.sandbox.owns(name):
             return await self.sandbox.call(name, arguments or {})
         if self.personal.owns(name):
-            if not email:
+            if not identity:
                 raise DownstreamError(f"mcphub: {name!r} is a personal MCP tool but the call carries no identity")
-            return await self.personal.call(email, name, arguments or {})
+            return await self.personal.call(identity, name, arguments or {})
         server, wire = route(name)
         conn = self._healthy_leg(server, name)
         return await conn.call_tool(wire, arguments or {})
