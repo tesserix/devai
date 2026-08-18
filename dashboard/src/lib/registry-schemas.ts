@@ -9,8 +9,10 @@ export const API_VERSION = "registry.agentic.dev/v1alpha1";
 export type FieldType =
   | "text"
   | "textarea"
+  | "number"
   | "select"
   | "checkbox"
+  | "ref" // one catalog artifact name (itemKind = the plural)
   | "refList" // multi-select of catalog artifact names (itemKind = the plural)
   | "group" // a nested object rendered from `children`
   | "objectList"; // a list of records, each rendered from `children`
@@ -24,6 +26,9 @@ export interface Field {
   options?: string[];
   required?: boolean;
   mono?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
   itemKind?: string; // for "refList": the plural to query, e.g. "skills"
   children?: Field[]; // for "group" / "objectList": nested field shapes (paths are RELATIVE)
 }
@@ -40,6 +45,11 @@ const META: Field[] = [
     help: "User-authored artifacts stay private to your account while tenant sharing is being hardened.",
   },
 ];
+
+const AGENT_MODEL_PROVIDER_OPTIONS = ["anthropic", "openai", "google", "vertex_gemini", "groq"];
+const AGENT_RISK_LEVEL_OPTIONS = ["low", "medium", "high", "critical"];
+const AGENT_MODEL_PROVIDERS = new Set([...AGENT_MODEL_PROVIDER_OPTIONS, "claude", "gemini", "vertex"]);
+const AGENT_RISK_LEVELS = new Set(AGENT_RISK_LEVEL_OPTIONS);
 
 // Spec fields per kind.
 const SPEC: Record<string, Field[]> = {
@@ -78,16 +88,37 @@ const SPEC: Record<string, Field[]> = {
     { path: "spec.description", label: "Description", type: "textarea", placeholder: "What the agent does autonomously." },
     {
       path: "spec.model", label: "Model", type: "group", help: "The LLM this agent reasons with.", children: [
-        { path: "provider", label: "Provider", type: "select", options: ["", "anthropic", "openai", "google", "groq"] },
-        { path: "name", label: "Model name", type: "text", placeholder: "claude-sonnet-4", mono: true },
-        { path: "temperature", label: "Temperature", type: "text", placeholder: "0.3", mono: true, help: "0–2." },
+        { path: "provider", label: "Provider", type: "select", options: ["", ...AGENT_MODEL_PROVIDER_OPTIONS], required: true },
+        { path: "name", label: "Model name", type: "text", placeholder: "claude-sonnet-4", mono: true, required: true },
+        { path: "temperature", label: "Temperature", type: "number", placeholder: "0.3", mono: true, min: 0, max: 2, step: 0.1, help: "0–2." },
       ],
+    },
+    {
+      path: "spec.promptRef",
+      label: "Prompt reference",
+      type: "ref",
+      itemKind: "prompts",
+      placeholder: "incident-responder-prompt-v1",
+      help: "Choose a registry Prompt, or provide an inline system prompt below. One is required.",
     },
     { path: "spec.systemPrompt", label: "System prompt", type: "textarea", placeholder: "You are an on-call SRE. …", help: "The agent's base instruction. References to Prompts below are available at runtime." },
     { path: "spec.skills", label: "Skills", type: "refList", itemKind: "skills", help: "Registry Skills this agent can perform." },
     { path: "spec.tools", label: "Tools", type: "refList", itemKind: "tools", help: "Registry Tools the agent may call." },
     { path: "spec.mcpServers", label: "MCP servers", type: "refList", itemKind: "mcp-servers", help: "MCP servers the agent connects to for tools." },
     { path: "spec.prompts", label: "Prompts", type: "refList", itemKind: "prompts", help: "Reusable Prompts available to the agent." },
+    {
+      path: "spec.limits", label: "Execution limits", type: "group", help: "Hard bounds applied to each agent run.", children: [
+        { path: "maxTurns", label: "Maximum turns", type: "number", min: 1, max: 1000, step: 1, required: true },
+        { path: "timeoutSeconds", label: "Timeout (seconds)", type: "number", min: 1, max: 86400, step: 1, required: true },
+      ],
+    },
+    {
+      path: "spec.riskLevel",
+      label: "Risk level",
+      type: "select",
+      options: AGENT_RISK_LEVEL_OPTIONS,
+      help: "High and critical agents require a human approval gate before consequential actions.",
+    },
     {
       path: "spec.a2a", label: "A2A (advanced)", type: "group", help: "Agent-to-agent protocol config (optional).", children: [
         { path: "url", label: "Service URL", type: "text", placeholder: "https://…", mono: true, help: "Where consumers reach this agent over A2A." },
@@ -119,9 +150,12 @@ export function starter(kind: string): Record<string, unknown> {
     Blueprint: { title: "", description: "", nodes: [], edges: [] },
     Agent: {
       title: "", description: "",
-      model: { provider: "", name: "", temperature: "" },
+      model: { provider: "", name: "", temperature: null },
+      promptRef: "",
       systemPrompt: "",
       skills: [], tools: [], mcpServers: [], prompts: [],
+      limits: { maxTurns: 20, timeoutSeconds: 900 },
+      riskLevel: "medium",
       a2a: { url: "", preferredTransport: "" },
     },
   };
@@ -207,10 +241,67 @@ export function lintManifest(doc: unknown, expectedKind: string): LintIssue[] {
   if (d.spec == null || typeof d.spec !== "object" || Array.isArray(d.spec)) {
     err("missing required field: spec");
   } else {
+    const spec = d.spec as Record<string, unknown>;
     for (const f of requiredPaths(expectedKind)) {
       if (f.path.startsWith("metadata.")) continue;
       const v = getPath(d, f.path);
       if (v == null || (typeof v === "string" && !v.trim())) err(`missing required field: ${f.path} (${f.label})`);
+    }
+    if (expectedKind === "Agent") {
+      const systemPrompt = spec.systemPrompt;
+      const promptRef = spec.promptRef;
+      if (systemPrompt != null && typeof systemPrompt !== "string") err("spec.systemPrompt must be a string");
+      if (promptRef != null && typeof promptRef !== "string") err("spec.promptRef must be a string");
+      const hasInline = typeof systemPrompt === "string" && systemPrompt.trim().length > 0;
+      const hasReference = typeof promptRef === "string" && promptRef.trim().length > 0;
+      if (!hasInline && !hasReference) {
+        err("agent requires an inline system prompt or a prompt reference");
+      }
+
+      const model = spec.model;
+      if (model == null || typeof model !== "object" || Array.isArray(model)) {
+        err("spec.model must be an object");
+      } else {
+        const typedModel = model as Record<string, unknown>;
+        if (typeof typedModel.provider !== "string" || !typedModel.provider.trim()) {
+          err("spec.model.provider is required");
+        } else if (!AGENT_MODEL_PROVIDERS.has(typedModel.provider)) {
+          err(`spec.model.provider must be one of ${[...AGENT_MODEL_PROVIDERS].join(", ")}`);
+        }
+        if (typeof typedModel.name !== "string" || !typedModel.name.trim()) {
+          err("spec.model.name is required");
+        }
+        if (
+          typedModel.temperature != null &&
+          (typeof typedModel.temperature !== "number" ||
+            !Number.isFinite(typedModel.temperature) ||
+            typedModel.temperature < 0 ||
+            typedModel.temperature > 2)
+        ) {
+          err("spec.model.temperature must be a number between 0 and 2");
+        }
+      }
+
+      const limits = spec.limits;
+      if (limits == null || typeof limits !== "object" || Array.isArray(limits)) {
+        err("spec.limits must be an object");
+      } else {
+        const typedLimits = limits as Record<string, unknown>;
+        if (!Number.isInteger(typedLimits.maxTurns) || Number(typedLimits.maxTurns) < 1 || Number(typedLimits.maxTurns) > 1000) {
+          err("spec.limits.maxTurns must be an integer between 1 and 1000");
+        }
+        if (
+          !Number.isInteger(typedLimits.timeoutSeconds) ||
+          Number(typedLimits.timeoutSeconds) < 1 ||
+          Number(typedLimits.timeoutSeconds) > 86400
+        ) {
+          err("spec.limits.timeoutSeconds must be an integer between 1 and 86400");
+        }
+      }
+
+      if (!AGENT_RISK_LEVELS.has(String(spec.riskLevel ?? ""))) {
+        err("spec.riskLevel must be one of low, medium, high, critical");
+      }
     }
   }
 

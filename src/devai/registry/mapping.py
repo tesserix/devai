@@ -111,12 +111,14 @@ def spec_to_agent_envelope(
         ("category", "category"),
         ("risk_level", "riskLevel"),
         ("output_key", "outputKey"),
-        ("max_turns", "maxTurns"),
-        ("timeout", "timeout"),
     ):
         v = getattr(spec, k_src, None)
         if v not in (None, ""):
             agent_spec[k_dst] = v
+    agent_spec["limits"] = {
+        "maxTurns": getattr(spec, "max_turns", 50),
+        "timeoutSeconds": getattr(spec, "timeout_seconds", 900),
+    }
     handover = getattr(spec, "handover_schema", None)
     if isinstance(handover, dict) and handover:
         agent_spec["handoverSchema"] = handover
@@ -203,9 +205,17 @@ def agent_envelope_to_spec(envelope: dict[str, Any]) -> Specialization:
         kwargs["output_key"] = str(spec["outputKey"])
     if model.get("temperature") is not None:
         kwargs["temperature"] = float(model["temperature"])
-    for src, dst in (("maxTurns", "max_turns"), ("timeout", "timeout_seconds")):
-        if spec.get(src) is not None:
-            kwargs[dst] = int(spec[src])
+    limits = spec.get("limits") if isinstance(spec.get("limits"), dict) else {}
+    max_turns = spec.get("maxTurns")
+    if max_turns is None:
+        max_turns = limits.get("maxTurns")
+    if max_turns is not None:
+        kwargs["max_turns"] = int(max_turns)
+    timeout_seconds = spec.get("timeout")
+    if timeout_seconds is None:
+        timeout_seconds = limits.get("timeoutSeconds")
+    if timeout_seconds is not None:
+        kwargs["timeout_seconds"] = int(timeout_seconds)
     return Specialization(**kwargs)
 
 

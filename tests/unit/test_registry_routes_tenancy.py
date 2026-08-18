@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from devai.registry.client import Agent
+from devai.registry.client import Agent, Prompt
 from devai.registry.routes import router
 
 
@@ -27,6 +27,8 @@ def _manifest(name: str, *, labels: dict[str, str] | None = None) -> dict[str, A
             "description": "private agent",
             "model": {"provider": "anthropic", "name": "claude-sonnet-4-6"},
             "systemPrompt": "Keep this private.",
+            "limits": {"maxTurns": 20, "timeoutSeconds": 900},
+            "riskLevel": "medium",
         },
     }
 
@@ -39,10 +41,20 @@ def _headers(user: str, tenant: str) -> dict[str, str]:
     }
 
 
+def _prompt_manifest(name: str) -> dict[str, Any]:
+    return {
+        "apiVersion": "registry.agentic.dev/v1alpha1",
+        "kind": "Prompt",
+        "metadata": {"name": name, "visibility": "public", "labels": {}},
+        "spec": {"title": name, "systemPrompt": "Use the referenced instructions."},
+    }
+
+
 class _Registry:
     def __init__(self) -> None:
         self._namespace = "devai"
         self.items: dict[str, dict[str, Any]] = {}
+        self.prompts: dict[str, dict[str, Any]] = {}
 
     def list_agents(self) -> list[Agent]:
         return [self._agent(body) for body in self.items.values()]
@@ -51,9 +63,28 @@ class _Registry:
         body = self.items.get(name)
         return self._agent(body) if body else None
 
+    def get_prompt(self, name: str) -> Prompt | None:
+        body = self.prompts.get(name)
+        if body is None:
+            return None
+        metadata = body["metadata"]
+        spec = body["spec"]
+        raw = {
+            **spec,
+            "name": metadata["name"],
+            "labels": dict(metadata.get("labels") or {}),
+            "visibility": metadata.get("visibility", ""),
+        }
+        return Prompt(
+            name=metadata["name"],
+            version=str(metadata.get("tag", "")),
+            content=str(spec.get("systemPrompt", "")),
+            raw=raw,
+        )
+
     def get_artifact_envelope(self, plural: str, name: str) -> dict[str, Any] | None:
-        assert plural == "agents"
-        body = self.items.get(name)
+        collection = self.items if plural == "agents" else self.prompts
+        body = collection.get(name)
         return deepcopy(body) if body else None
 
     def publish_agent(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -62,9 +93,15 @@ class _Registry:
         self.items[name] = copied
         return {"name": name}
 
+    def publish_prompt(self, body: dict[str, Any]) -> dict[str, Any]:
+        copied = deepcopy(body)
+        name = copied["metadata"]["name"]
+        self.prompts[name] = copied
+        return {"name": name}
+
     def delete(self, plural: str, name: str) -> None:
-        assert plural == "agents"
-        self.items.pop(name)
+        collection = self.items if plural == "agents" else self.prompts
+        collection.pop(name)
 
     def refresh(self) -> None:
         return None
@@ -270,6 +307,82 @@ def test_user_cannot_select_kagent_runtime() -> None:
 
     assert response.status_code == 403
     assert "unsafe-runtime" not in registry.items
+
+
+def test_agent_publish_requires_an_effective_system_prompt() -> None:
+    client, registry = _client()
+    body = _manifest("missing-prompt")
+    body["spec"]["systemPrompt"] = ""
+
+    response = client.post("/api/registry/agents", headers=_headers("alice", "tenant-a"), json=body)
+
+    assert response.status_code == 400
+    assert "systemPrompt" in response.text or "promptRef" in response.text
+    assert "missing-prompt" not in registry.items
+
+
+def test_agent_publish_rejects_invalid_model_limits_and_risk() -> None:
+    client, registry = _client()
+    body = _manifest("invalid-contract")
+    body["spec"]["model"]["provider"] = "made-up"
+    body["spec"]["model"]["temperature"] = "0.3"
+    body["spec"]["limits"] = {"maxTurns": 0, "timeoutSeconds": "900"}
+    body["spec"]["riskLevel"] = "extreme"
+
+    response = client.post("/api/registry/agents", headers=_headers("alice", "tenant-a"), json=body)
+
+    assert response.status_code == 400
+    assert "spec.model.provider" in response.text
+    assert "spec.model.temperature" in response.text
+    assert "spec.limits.maxTurns" in response.text
+    assert "spec.limits.timeoutSeconds" in response.text
+    assert "spec.riskLevel" in response.text
+    assert "invalid-contract" not in registry.items
+
+
+def test_agent_publish_accepts_runtime_provider_aliases() -> None:
+    client, registry = _client()
+    alice = _headers("alice", "tenant-a")
+
+    for provider in ("claude", "gemini"):
+        body = _manifest(f"{provider}-agent")
+        body["spec"]["model"]["provider"] = provider
+        response = client.post("/api/registry/agents", headers=alice, json=body)
+        assert response.status_code == 201, response.text
+        assert f"{provider}-agent" in registry.items
+
+
+def test_agent_prompt_reference_must_be_visible_to_the_publisher() -> None:
+    client, registry = _client()
+    alice = _headers("alice", "tenant-a")
+    bob = _headers("bob", "tenant-b")
+    assert client.post("/api/registry/prompts", headers=bob, json=_prompt_manifest("bob-private")).status_code == 201
+
+    body = _manifest("alice-agent")
+    body["spec"]["systemPrompt"] = ""
+    body["spec"]["promptRef"] = "bob-private"
+    hidden = client.post("/api/registry/agents", headers=alice, json=body)
+    assert hidden.status_code == 404
+    assert hidden.json() == {"detail": "prompt not found: bob-private"}
+    assert "alice-agent" not in registry.items
+
+    assert (
+        client.post("/api/registry/prompts", headers=alice, json=_prompt_manifest("alice-private")).status_code == 201
+    )
+    body["spec"]["promptRef"] = "alice-private"
+    published = client.post("/api/registry/agents", headers=alice, json=body)
+    assert published.status_code == 201
+    assert registry.items["alice-agent"]["spec"]["systemPrompt"] == "Use the referenced instructions."
+    editable = client.get("/api/registry/agents/alice-agent/manifest", headers=alice)
+    assert editable.status_code == 200
+    assert editable.json()["spec"]["promptRef"] == "alice-private"
+    assert editable.json()["spec"]["systemPrompt"] == ""
+
+    registry.prompts["platform-prompt"] = _prompt_manifest("platform-prompt")
+    platform_agent = _manifest("platform-prompt-agent")
+    platform_agent["spec"]["systemPrompt"] = ""
+    platform_agent["spec"]["promptRef"] = "platform-prompt"
+    assert client.post("/api/registry/agents", headers=alice, json=platform_agent).status_code == 201
 
 
 def test_only_owner_can_unpublish_private_agent() -> None:

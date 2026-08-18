@@ -248,6 +248,16 @@ export default function ArtifactEditor({
           {/* Form */}
           <div className="overflow-y-auto p-6 space-y-4 border-b lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border-subtle)" }}>
             {fields.map((f) => {
+              if (f.type === "ref") {
+                return (
+                  <RefInput
+                    key={f.path}
+                    f={f}
+                    value={String(getPath(doc, f.path) ?? "")}
+                    onChange={(v) => onField(f.path, v)}
+                  />
+                );
+              }
               if (f.type === "refList") {
                 return (
                   <RefListInput
@@ -271,7 +281,7 @@ export default function ArtifactEditor({
                           key={c.path}
                           f={c}
                           value={String(getPath(doc, `${f.path}.${c.path}`) ?? "")}
-                          onChange={(v) => onField(`${f.path}.${c.path}`, v)}
+                          onChange={(v) => onFieldVal(`${f.path}.${c.path}`, v)}
                         />
                       ))}
                     </div>
@@ -283,7 +293,7 @@ export default function ArtifactEditor({
                   key={f.path}
                   f={f}
                   value={String(getPath(doc, f.path) ?? "")}
-                  onChange={(v) => onField(f.path, v)}
+                  onChange={(v) => onFieldVal(f.path, v)}
                   disabled={editing && f.path === "metadata.name"}
                 />
               );
@@ -439,7 +449,7 @@ export default function ArtifactEditor({
   );
 }
 
-function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value: string; onChange: (v: unknown) => void; disabled?: boolean }) {
   const dimmed = disabled ? { opacity: 0.6, cursor: "not-allowed" } : undefined;
   return (
     <div>
@@ -449,7 +459,7 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
       {f.type === "select" ? (
         <Select
           value={value || f.options?.[0] || ""}
-          onChange={onChange}
+          onChange={(next) => onChange(next)}
           disabled={disabled}
           options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
           ariaLabel={f.label}
@@ -464,6 +474,19 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
+      ) : f.type === "number" ? (
+        <input
+          className={`field ${f.mono ? "font-mono text-[13px]" : ""}`}
+          style={dimmed}
+          disabled={disabled}
+          type="number"
+          min={f.min}
+          max={f.max}
+          step={f.step}
+          placeholder={f.placeholder}
+          value={value}
+          onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value))}
+        />
       ) : (
         <input
           className={`field ${f.mono ? "font-mono text-[13px]" : ""}`}
@@ -474,6 +497,51 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
           onChange={(e) => onChange(e.target.value)}
         />
       )}
+      {f.help && (
+        <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
+          {f.help}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RefInput({ f, value, onChange }: { f: Field; value: string; onChange: (v: string) => void }) {
+  const [candidates, setCandidates] = useState<string[]>([]);
+  const [unreachable, setUnreachable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listRegistry(f.itemKind ?? "prompts")
+      .then((items) => {
+        if (!cancelled) setCandidates(items.map((item) => item.name).filter(Boolean));
+      })
+      .catch(() => {
+        if (!cancelled) setUnreachable(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [f.itemKind]);
+
+  return (
+    <div>
+      <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ink-soft)" }}>
+        {f.label}
+      </label>
+      <input
+        className="field w-full font-mono text-[13px]"
+        list={`ref-${f.path}`}
+        placeholder={unreachable ? "catalog unavailable — type a name" : f.placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <datalist id={`ref-${f.path}`}>
+        {candidates.map((candidate) => (
+          <option key={candidate} value={candidate} />
+        ))}
+      </datalist>
       {f.help && (
         <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
           {f.help}
