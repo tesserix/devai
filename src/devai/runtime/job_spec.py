@@ -214,6 +214,9 @@ def build_job_spec(
     # vars just tell the adapter which project/location/model to dial.
     for plain_key in (
         "DEVAI_LLM_PROVIDER",
+        "DEVAI_LLM_FALLBACK_PROVIDER",
+        "DEVAI_LLM_GATEWAY_BASE_URL",
+        "DEVAI_LLM_GATEWAY_REQUIRED",
         "DEVAI_VERTEX_PROJECT",
         "DEVAI_VERTEX_LOCATION",
         "DEVAI_VERTEX_GEMINI_MODEL",

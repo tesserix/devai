@@ -21,8 +21,14 @@ class OpenAIProvider:
     """OpenAI Chat Completions provider."""
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+
         self._config = config
-        self.client = AsyncOpenAI(api_key=config.openai_api_key)
+        self.client = AsyncOpenAI(
+            api_key=config.openai_api_key,
+            base_url=gateway_base_url(config, "openai", getattr(config, "openai_base_url", "")),
+            default_headers={"x-devai-provider": "openai"} if gateway_required(config) else None,
+        )
         self.model = config.openai_model
 
     def _user_pinned_elsewhere(self) -> bool:

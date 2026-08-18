@@ -37,6 +37,7 @@ from devai.adapters.llm.base import (
     LLMUsage,
     ToolCall,
 )
+from devai.adapters.llm.gateway_routing import gateway_headers
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +50,6 @@ _WIRE_EXTRA_KEYS = frozenset(
         "tool_choice",
     }
 )
-
-
-def _safe_header(value: Any) -> str:
-    return str(value or "").replace("\r", "").replace("\n", "")[:256]
 
 
 class OpenAILLMAdapter(LLMAdapter):
@@ -70,6 +67,7 @@ class OpenAILLMAdapter(LLMAdapter):
         default_model: str = "",
         timeout_seconds: float | None = None,
         provider_name: str = "",
+        gateway_routed: bool = False,
     ) -> None:
         if not api_key:
             raise AdapterNotConfigured("openai adapter requires DEVAI_OPENAI_API_KEY")
@@ -86,6 +84,7 @@ class OpenAILLMAdapter(LLMAdapter):
         if timeout_seconds is not None:
             kwargs["timeout"] = timeout_seconds
         self._client = AsyncOpenAI(**kwargs)
+        self._gateway_routed = gateway_routed
         if default_model:
             self.default_model = default_model
         if provider_name:
@@ -200,14 +199,8 @@ class OpenAILLMAdapter(LLMAdapter):
         for key in _WIRE_EXTRA_KEYS:
             if key in extra:
                 kwargs[key] = extra[key]
-        if self.provider_name == "gateway":
-            headers = {
-                "x-devai-tenant-id": _safe_header(extra.get("tenant_id")),
-                "x-devai-user-id": _safe_header(extra.get("user_id")),
-                "x-devai-run-id": _safe_header(extra.get("run_id")),
-                "x-devai-agent": _safe_header(extra.get("agent")),
-            }
-            headers = {key: value for key, value in headers.items() if value}
+        if getattr(self, "_gateway_routed", self.provider_name == "gateway"):
+            headers = gateway_headers(extra, provider=self.provider_name)
             if headers:
                 kwargs["extra_headers"] = headers
         return kwargs

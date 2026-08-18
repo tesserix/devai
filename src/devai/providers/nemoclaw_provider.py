@@ -38,13 +38,20 @@ class NemoClawProvider:
     """NemoClaw GPU inference provider (OpenAI-compatible API)."""
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+
         api_key = config.nemoclaw_api_key or "not-needed"
         base_url = config.nemoclaw_endpoint
 
         if not base_url:
             base_url = self._discover_endpoint()
+        base_url = gateway_base_url(config, "nemoclaw", base_url)
 
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers={"x-devai-provider": "nemoclaw"} if gateway_required(config) else None,
+        )
         self.client = wrap_openai_client(client)
         self.model = config.nemoclaw_model
         self.max_tokens = config.nemoclaw_max_tokens

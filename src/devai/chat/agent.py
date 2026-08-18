@@ -176,12 +176,15 @@ class DevAIChatAgent:
         # chat uses LangChain directly, not the instrumented adapter, so
         # without this its cost/tokens never reach the ledger.
         self._usage_cb = _ChatUsageCallback(self)
+        from devai.adapters.llm.gateway_routing import gateway_base_url
+
         self.llm = ChatAnthropic(
             model=config.claude_model,
             anthropic_api_key=config.anthropic_api_key,
             max_tokens=4096,
             temperature=0.3,
             callbacks=[self._usage_cb],
+            anthropic_api_url=gateway_base_url(config, "anthropic", getattr(config, "anthropic_base_url", "")),
         )
         self._tools = self._build_tools()
         self._conversations: dict[str, list] = {}  # session_id -> message history

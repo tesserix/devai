@@ -34,6 +34,7 @@ from devai.adapters.base import (
     AdapterRegistry,
 )
 from devai.adapters.llm.base import LLMAdapter
+from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
 from devai.adapters.llm.noop import NoopLLMAdapter
 
 logger = logging.getLogger(__name__)
@@ -53,9 +54,10 @@ def _build_anthropic(settings: Any) -> LLMAdapter:
         raise AdapterNotConfigured("anthropic adapter requires DEVAI_ANTHROPIC_API_KEY")
     return AnthropicLLMAdapter(
         api_key=api_key,
-        base_url=getattr(settings, "anthropic_base_url", "") or "",
+        base_url=gateway_base_url(settings, "anthropic", getattr(settings, "anthropic_base_url", "") or ""),
         default_model=getattr(settings, "claude_model", "") or "",
         default_max_tokens=int(getattr(settings, "claude_max_tokens", 0) or 0) or None,
+        gateway_routed=gateway_required(settings),
     )
 
 
@@ -67,9 +69,10 @@ def _build_openai(settings: Any) -> LLMAdapter:
         raise AdapterNotConfigured("openai adapter requires DEVAI_OPENAI_API_KEY")
     return OpenAILLMAdapter(
         api_key=api_key,
-        base_url=getattr(settings, "openai_base_url", "") or "",
+        base_url=gateway_base_url(settings, "openai", getattr(settings, "openai_base_url", "") or ""),
         organization=getattr(settings, "openai_organization", "") or "",
         default_model=getattr(settings, "openai_model", "") or "",
+        gateway_routed=gateway_required(settings),
     )
 
 
@@ -85,9 +88,7 @@ def _build_gateway(settings: Any) -> LLMAdapter:
     """
     from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
 
-    base_url = getattr(settings, "llm_gateway_base_url", "") or ""
-    if not base_url:
-        raise AdapterNotConfigured("gateway adapter requires DEVAI_LLM_GATEWAY_BASE_URL")
+    base_url = gateway_base_url(settings, "gateway")
     return OpenAILLMAdapter(
         # The OpenAI SDK insists on a non-empty key; the gateway decides
         # whether to enforce it.
@@ -95,6 +96,7 @@ def _build_gateway(settings: Any) -> LLMAdapter:
         base_url=base_url,
         default_model=getattr(settings, "llm_gateway_model", "") or "",
         provider_name="gateway",
+        gateway_routed=True,
     )
 
 
@@ -111,8 +113,9 @@ def _build_vertex_gemini(settings: Any) -> LLMAdapter:
         location=getattr(settings, "vertex_location", "") or "global",
         default_model=getattr(settings, "vertex_gemini_model", "") or "",
         embedding_model=getattr(settings, "vertex_embedding_model", "") or "",
-        base_url=getattr(settings, "vertex_base_url", "") or "",
+        base_url=gateway_base_url(settings, "vertex_gemini", getattr(settings, "vertex_base_url", "") or ""),
         api_key=getattr(settings, "vertex_api_key", "") or "",
+        gateway_routed=gateway_required(settings),
     )
 
 
@@ -125,9 +128,14 @@ def _build_groq(settings: Any) -> LLMAdapter:
         raise AdapterNotConfigured("groq adapter requires DEVAI_GROQ_API_KEY")
     return OpenAILLMAdapter(
         api_key=api_key,
-        base_url=getattr(settings, "groq_base_url", "") or "https://api.groq.com/openai/v1",
+        base_url=gateway_base_url(
+            settings,
+            "groq",
+            getattr(settings, "groq_base_url", "") or "https://api.groq.com/openai/v1",
+        ),
         default_model=getattr(settings, "groq_model", "") or "",
         provider_name="groq",
+        gateway_routed=gateway_required(settings),
     )
 
 
@@ -141,9 +149,14 @@ def _build_openrouter(settings: Any) -> LLMAdapter:
         raise AdapterNotConfigured("openrouter adapter requires DEVAI_OPENROUTER_API_KEY")
     return OpenAILLMAdapter(
         api_key=api_key,
-        base_url=getattr(settings, "openrouter_base_url", "") or "https://openrouter.ai/api/v1",
+        base_url=gateway_base_url(
+            settings,
+            "openrouter",
+            getattr(settings, "openrouter_base_url", "") or "https://openrouter.ai/api/v1",
+        ),
         default_model=getattr(settings, "openrouter_model", "") or "",
         provider_name="openrouter",
+        gateway_routed=gateway_required(settings),
     )
 
 

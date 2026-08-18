@@ -25,9 +25,16 @@ class CodexLiteProvider:
     """
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
         from devai.services.tracing import wrap_openai_client
 
-        self.client = wrap_openai_client(AsyncOpenAI(api_key=config.openai_api_key))
+        self.client = wrap_openai_client(
+            AsyncOpenAI(
+                api_key=config.openai_api_key,
+                base_url=gateway_base_url(config, "openai", getattr(config, "openai_base_url", "")),
+                default_headers={"x-devai-provider": "openai"} if gateway_required(config) else None,
+            )
+        )
         self.model = config.openai_model
 
     async def generate(
@@ -105,6 +112,8 @@ class CodexSandboxProvider:
 
             # Run Codex in the cloned directory
             try:
+                from devai.adapters.llm.gateway_routing import gateway_base_url
+
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
@@ -113,6 +122,11 @@ class CodexSandboxProvider:
                     timeout=600,  # 10 minute timeout
                     env={
                         "OPENAI_API_KEY": self.config.openai_api_key,
+                        "OPENAI_BASE_URL": gateway_base_url(
+                            self.config,
+                            "openai",
+                            getattr(self.config, "openai_base_url", ""),
+                        ),
                         "HOME": tmpdir,
                         "PATH": "/usr/local/bin:/usr/bin:/bin",
                     },

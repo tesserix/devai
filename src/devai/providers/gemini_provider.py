@@ -23,13 +23,26 @@ class GeminiProvider:
     """Google Gemini provider for LLM inference."""
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+
         self._config = config
         api_key = config.gemini_api_key
         if not api_key:
             api_key = self._fetch_from_gcp(config.gcp_secret_gemini_api_key)
 
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(config.gemini_model)
+        self._gateway_client = None
+        if gateway_required(config):
+            from openai import AsyncOpenAI
+
+            self._gateway_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=gateway_base_url(config, "gemini"),
+                default_headers={"x-devai-provider": "gemini"},
+            )
+            self.model = None
+        else:
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel(config.gemini_model)
         self._model_name = config.gemini_model
 
     def _fetch_from_gcp(self, secret_name: str) -> str:
@@ -77,6 +90,18 @@ class GeminiProvider:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
 
         try:
+            if self._gateway_client is not None:
+                messages: list[dict[str, str]] = []
+                if system:
+                    messages.append({"role": "system", "content": system})
+                messages.append({"role": "user", "content": prompt})
+                response = await self._gateway_client.chat.completions.create(
+                    model=self._model_name,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return response.choices[0].message.content or ""
             response = await asyncio.to_thread(
                 self.model.generate_content,
                 full_prompt,

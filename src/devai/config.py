@@ -737,11 +737,12 @@ class Settings(BaseSettings):
     # own config, authenticating to Vertex via Workload Identity (GSA
     # agentgateway-llm, terraform-new/stacks/12-vertex). Model names are
     # gateway-side aliases, so swapping backends never touches DevAI.
-    llm_gateway_base_url: str = ""  # e.g. http://ai-gateway.agentgateway-system.svc.cluster.local:8080/v1
+    llm_gateway_base_url: str = ""  # e.g. http://ai-gateway.agentgateway-system.svc.cluster.local:8080
     llm_gateway_api_key: str = ""  # optional; gateway-enforced auth token
     llm_gateway_model: str = ""  # default model alias the gateway resolves
-    # Fail closed at the Settings boundary when direct provider egress is not
-    # permitted. Users may configure only the `gateway` connector in this mode.
+    # Fail closed in every provider builder when direct provider egress is not
+    # permitted. Users retain their provider choice; each maps to a dedicated
+    # route beneath llm_gateway_base_url.
     llm_gateway_required: bool = False
 
     # --- vertex adapter ---
@@ -833,13 +834,20 @@ class Settings(BaseSettings):
 
     # --- Secrets adapter (per-user/per-tenant secret provisioning) ---
     # Backs the Settings capability. The Settings store keeps only secret
-    # references; the adapter writes/reads the actual values. gcp_sm
-    # auto-provisions into Google Secret Manager (needs write IAM on the
-    # devai SA); env is read-only; noop refuses writes loudly. Unknown
-    # provider / missing SDK / missing project degrades to noop.
-    secrets_provider: str = "noop"  # noop | env | gcp_sm
+    # references; the adapter writes/reads the actual values. openbao reads
+    # under a workload role and writes blindly through secret-service;
+    # gcp_sm remains available for migration; env is read-only; noop refuses
+    # writes. Unknown provider or missing config degrades to noop.
+    secrets_provider: str = "noop"  # noop | env | gcp_sm | openbao
     # GCP project for gcp_sm (falls back to gke_project / gcp_project).
     secrets_gcp_project: str = ""
+    secrets_openbao_addr: str = ""
+    secrets_openbao_mount: str = "kv"
+    secrets_openbao_role: str = "read-devai-api"
+    secrets_openbao_auth_mount: str = "kubernetes"
+    secrets_openbao_token_file: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    secrets_broker_url: str = ""
+    secrets_broker_token_file: str = "/var/run/secrets/devai/secret-service/token"
     # Enable the Settings capability (per-user connectors + secrets API).
     settings_enabled: bool = True
 

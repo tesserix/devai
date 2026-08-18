@@ -90,9 +90,16 @@ class ClaudeProvider:
         """``model`` overrides the global default per role — the dev agent
         runs the UI model for UI work and claude-opus-4-8 for API work,
         reviewers run the review model, etc. (config llm_model_* fields)."""
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
         from devai.services.tracing import wrap_anthropic_client
 
-        self.client = wrap_anthropic_client(AsyncAnthropic(api_key=config.anthropic_api_key))
+        self.client = wrap_anthropic_client(
+            AsyncAnthropic(
+                api_key=config.anthropic_api_key,
+                base_url=gateway_base_url(config, "anthropic", getattr(config, "anthropic_base_url", "")),
+                default_headers={"x-devai-provider": "anthropic"} if gateway_required(config) else None,
+            )
+        )
         self.model = model or config.claude_model
         self.max_tokens = config.claude_max_tokens
         self.max_iterations = config.claude_max_iterations
