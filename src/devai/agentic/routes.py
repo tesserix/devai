@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -57,14 +56,16 @@ async def status(request: Request) -> dict[str, Any]:
     """
     await _require_operator(request)
     client = getattr(request.app.state, "registry_client", None)
+    config = getattr(request.app.state, "config", None)
     snapshot = await asyncio.to_thread(
         fetch_agentic_status,
         registry_client=client,
-        agentgateway_url=os.environ.get("DEVAI_AGENTGATEWAY_URL", "")
+        agentgateway_url=getattr(config, "agentgateway_controller_url", "")
         or _default("http://agentgateway.agentgateway-system.svc.cluster.local:9092"),
-        ai_gateway_url=os.environ.get("DEVAI_AI_GATEWAY_URL", "")
+        ai_gateway_url=getattr(config, "ai_gateway_url", "")
+        or getattr(config, "llm_gateway_base_url", "")
         or _default("http://ai-gateway.agentgateway-system.svc.cluster.local:8080"),
-        kagent_url=os.environ.get("DEVAI_KAGENT_CONTROLLER_URL", "")
+        kagent_url=getattr(config, "kagent_url", "")
         or _default("http://kagent-controller.kagent-system.svc.cluster.local:8083"),
     )
     snapshot.sandboxes = await probe_sandbox_storage(getattr(request.app.state, "sandbox_service", None))
