@@ -128,6 +128,13 @@ export function starter(kind: string): Record<string, unknown> {
   return { apiVersion: API_VERSION, kind, metadata: meta, spec: specByKind[kind] ?? specByKind.Skill };
 }
 
+export function editorDocument(
+  kind: string,
+  published?: Record<string, unknown>,
+): Record<string, unknown> {
+  return structuredClone(published ?? starter(kind));
+}
+
 // ── Manifest linting / safety scan ──────────────────────────────────────────
 export interface LintIssue {
   level: "error" | "warning";

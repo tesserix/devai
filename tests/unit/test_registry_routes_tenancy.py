@@ -197,6 +197,38 @@ def test_mine_requires_an_authenticated_user() -> None:
     assert response.status_code == 401
 
 
+def test_owner_can_read_editable_manifest_without_server_owned_labels() -> None:
+    client, _ = _client()
+    alice = _headers("alice", "tenant-a")
+    body = _manifest("editable-agent", labels={"devai.io/team": "platform"})
+    assert client.post("/api/registry/agents", headers=alice, json=body).status_code == 201
+
+    response = client.get("/api/registry/agents/editable-agent/manifest", headers=alice)
+
+    assert response.status_code == 200, response.text
+    manifest = response.json()
+    assert manifest["metadata"]["visibility"] == "private"
+    assert manifest["metadata"]["labels"] == {"devai.io/team": "platform"}
+    assert manifest["spec"]["systemPrompt"] == "Keep this private."
+
+
+def test_editable_manifest_is_hidden_from_anonymous_and_other_users() -> None:
+    client, registry = _client()
+    alice = _headers("alice", "tenant-a")
+    assert client.post("/api/registry/agents", headers=alice, json=_manifest("alice-draft")).status_code == 201
+    registry.items["platform-agent"] = _manifest("platform-agent")
+
+    assert client.get("/api/registry/agents/alice-draft/manifest").status_code == 401
+    assert (
+        client.get(
+            "/api/registry/agents/alice-draft/manifest",
+            headers=_headers("bob", "tenant-a"),
+        ).status_code
+        == 404
+    )
+    assert client.get("/api/registry/agents/platform-agent/manifest", headers=alice).status_code == 404
+
+
 def test_anonymous_publish_is_rejected() -> None:
     client, _ = _client()
     assert client.post("/api/registry/agents", json=_manifest("anonymous")).status_code == 401
