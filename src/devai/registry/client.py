@@ -19,6 +19,7 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -335,6 +336,44 @@ class RegistryClient:
     def publish_tool(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/tools", body)
 
+    def get_artifact_envelope(self, plural: str, name: str) -> dict[str, Any] | None:
+        """Return one raw artifact in this client's namespace.
+
+        The registry proxy uses the unflattened metadata labels for object-level
+        authorization before an overwrite. A 404 is a normal miss; transport,
+        authorization, and malformed-response failures raise so callers fail
+        closed instead of accidentally authorizing a write.
+        """
+        collection = {"mcp-servers": "servers"}.get(plural, plural)
+        path = f"/v0/{quote(collection, safe='')}/{quote(name, safe='')}"
+        if self._namespace:
+            path += f"?namespace={quote(self._namespace, safe='')}"
+        try:
+            import httpx
+        except ImportError as e:
+            raise RegistryError(f"registry: httpx not installed: {e}") from e
+        headers: dict[str, str] = {"Accept": "application/json"}
+        bearer = self._bearer()
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+        try:
+            response = httpx.get(f"{self._base_url}{path}", headers=headers, timeout=self._timeout)
+        except httpx.HTTPError as e:
+            raise RegistryError(f"registry: network error GET {path}: {e}") from e
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            raise RegistryError(f"registry: {response.status_code} on GET {path}: {response.text[:200]}")
+        try:
+            body: object = response.json()
+        except json.JSONDecodeError as e:
+            raise RegistryError(f"registry: invalid JSON on GET {path}: {e}") from e
+        if not isinstance(body, dict):
+            raise RegistryError(f"registry: GET {path} did not return an object")
+        if not all(isinstance(key, str) for key in body):
+            raise RegistryError(f"registry: GET {path} returned an object with non-string keys")
+        return {str(key): value for key, value in body.items()}
+
     def artifact_exists(self, plural: str, name: str) -> bool | None:
         """Does ``name`` already exist in this client's tenant namespace?
 
@@ -343,29 +382,17 @@ class RegistryClient:
         block a publish on a transient blip. Scoped to the tenant namespace —
         the registry enforces name uniqueness per namespace across all kinds.
         """
-        path = f"/v0/{plural}/{name}"
-        if self._namespace:
-            path += f"?namespace={self._namespace}"
         try:
-            import httpx  # type: ignore[import-untyped]
-        except ImportError:
+            return self.get_artifact_envelope(plural, name) is not None
+        except RegistryError:
             return None
-        headers: dict[str, str] = {"Accept": "application/json"}
-        bearer = self._bearer()
-        if bearer:
-            headers["Authorization"] = f"Bearer {bearer}"
-        try:
-            r = httpx.get(f"{self._base_url}{path}", headers=headers, timeout=self._timeout)
-        except httpx.HTTPError:
-            return None
-        if r.status_code == 200:
-            return True
-        if r.status_code == 404:
-            return False
-        return None
 
     def delete(self, plural: str, name: str, tag: str = "latest") -> None:
-        self._request("DELETE", f"/v0/{plural}/{name}/{tag}", body=None, raise_on_error=True)
+        collection = {"mcp-servers": "servers"}.get(plural, plural)
+        path = f"/v0/{quote(collection, safe='')}/{quote(name, safe='')}/{quote(tag, safe='')}"
+        if self._namespace:
+            path += f"?namespace={quote(self._namespace, safe='')}"
+        self._request("DELETE", path, body=None, raise_on_error=True)
 
     # ---- private ----------------------------------------------------------
 
@@ -480,6 +507,8 @@ def _unwrap(item: dict[str, Any], key: str) -> dict[str, Any]:
                 flat["name"] = meta["name"]
             if meta.get("tag") and "version" not in flat:
                 flat["version"] = meta["tag"]
+            if meta.get("visibility") and "visibility" not in flat:
+                flat["visibility"] = meta["visibility"]
             # Project metadata.labels up too. The flatten otherwise drops them,
             # but the dispatcher needs `devai.io/runtime` to decide whether an
             # agent is kagent-managed — the same label the kagent-agent-sync
