@@ -159,6 +159,42 @@ async def test_passthrough_no_user_key_falls_back_to_job(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_passthrough_never_forwards_a_shared_tenant_key(monkeypatch):
+    """A tenant connector can configure the normal Job path, but it is not the
+    triggering user's own credential and must never cross the A2A boundary."""
+
+    class _NoDispatch:
+        async def dispatch(self, *a, **k):
+            raise AssertionError("must not forward a shared tenant key to kagent")
+
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _NoDispatch())
+    shared_llm = Connector(
+        scope=Scope.TENANT,
+        scope_id="tenant-a",
+        connector_key="llm",
+        provider="anthropic",
+        secret_refs={"anthropic_api_key": "ref-tenant-anthropic"},
+        enabled=True,
+    )
+    svc = _FakeSettingsService([shared_llm], secrets={"ref-tenant-anthropic": "sk-ant-shared-tenant"})
+    deps = _deps(
+        kagent_url="http://kagent:8083",
+        agent_labels={"devai.io/runtime": "kagent"},
+        kagent_passthrough=True,
+        settings_service=svc,
+    )
+    task = DevAITask(
+        intent="x",
+        triggered_by="alice@x.com",
+        principal={"email": "alice@x.com", "uid": "alice", "tenant_id": "tenant-a"},
+    )
+
+    result = await _stage(deps).execute(task)
+
+    assert result.data.get("review_code_stub") is True
+
+
+@pytest.mark.asyncio
 async def test_passthrough_per_model_variant(monkeypatch):
     """User picks a specific model (openai o3) → dispatch targets the per-model
     variant `<agent>-openai-o3`, not the provider default `<agent>-openai`."""
@@ -340,4 +376,18 @@ async def test_falls_back_to_job_on_dispatch_error(monkeypatch):
     deps = _deps(kagent_url="http://kagent:8083", agent_labels={"devai.io/runtime": "kagent"})
     result = await _stage(deps).execute(DevAITask(intent="x"))
     # Dispatch failed → fall through to the Job path (stub, since no runtime).
+    assert result.data.get("review_code_stub") is True
+
+
+@pytest.mark.asyncio
+async def test_falls_back_to_job_on_non_object_dispatch_response(monkeypatch):
+    class _InvalidResponse:
+        async def dispatch(self, *a, **k):
+            return "unexpected response"
+
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _InvalidResponse())
+    deps = _deps(kagent_url="http://kagent:8083", agent_labels={"devai.io/runtime": "kagent"})
+
+    result = await _stage(deps).execute(DevAITask(intent="x"))
+
     assert result.data.get("review_code_stub") is True

@@ -441,7 +441,7 @@ class JobRunnerStage(PipelineStage):
         from devai.agentic.kagent_client import KagentError
 
         try:
-            return await client.dispatch(
+            result = await client.dispatch(
                 agent,
                 message,
                 namespace=namespace,
@@ -451,6 +451,7 @@ class JobRunnerStage(PipelineStage):
                 request_id=f"{task.id}:{self._stage_name}",
                 message_id=f"{task.id}:{self._stage_name}",
             )
+            return result if isinstance(result, dict) else None
         except KagentError:
             logger.warning("stage %s: kagent dispatch to %s failed", self._stage_name, agent, exc_info=True)
             return None
@@ -556,18 +557,18 @@ class JobRunnerStage(PipelineStage):
         """The triggering user's OWN LLM key for ``provider``, or "".
 
         Only the user's configured connector key is returned — never the
-        platform fallthrough. We check the overlay's `overlaid_attrs` so that a
-        run with no per-user connector (where the provider attr resolves to the
-        base/platform key) forwards nothing, keeping per-user billing honest. If
-        the user has no connector for ``provider``, the matched attr isn't in
-        their overrides → "" → that provider is skipped.
+        platform or shared-scope fallthrough. We check the overlay's
+        `user_overlaid_attrs` provenance so a tenant, org, team, or global key
+        configures the normal Job path but is never forwarded through A2A. If
+        the user has no personal connector for ``provider``, that provider is
+        skipped.
         """
         provider = (
             provider or str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic")
         ).lower()
         attr = _KAGENT_PROVIDER_KEY_ATTR.get(provider, "anthropic_api_key")
-        overlaid = set(getattr(settings, "overlaid_attrs", []) or [])
-        if attr not in overlaid:
+        user_overlaid = set(getattr(settings, "user_overlaid_attrs", []) or [])
+        if attr not in user_overlaid:
             return ""
         return str(getattr(settings, attr, "") or "")
 

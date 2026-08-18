@@ -280,7 +280,7 @@ which A's run forwards B's key.
 | Guardrail | Effect |
 |---|---|
 | **Human-principal only** | system/webhook/cron runs never forward a key (they'd resolve a service/global key) → they fall back to the Job path |
-| **Connector-scoped only** | `_kagent_user_key` returns a key only when it came from the principal's connector overlay (`overlaid_attrs`) — **never the platform base key** (`DEVAI_ANTHROPIC_API_KEY`), which is not an overlay override |
+| **Personal connector only** | `_kagent_user_key` returns a key only when overlay provenance marks it `Scope.USER` (`user_overlaid_attrs`) — **never** a platform, global, tenant, org, or team key |
 | **Per-principal** | the overlay is built from the run's authenticated `Principal`; no user receives another user's personal key (their connector is keyed to their uid/email) |
 | **Provider-matched** | only the key for `kagent_model_provider` is forwarded — a user on a different provider → no key → Job |
 | **No own key → Job** | a kagent run is never billed to a shared/platform key under passthrough |

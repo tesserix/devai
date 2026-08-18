@@ -39,18 +39,20 @@ class PrincipalSettingsOverlay:
     ``ConnectorField.settings_attr``), in which case the override wins.
     """
 
-    __slots__ = ("_base", "_overrides", "_mcp_servers", "_principal_email")
+    __slots__ = ("_base", "_overrides", "_override_scopes", "_mcp_servers", "_principal_email")
 
     def __init__(
         self,
         base: Any,
         overrides: dict[str, Any],
         *,
+        override_scopes: dict[str, Scope] | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         principal_email: str = "",
     ) -> None:
         object.__setattr__(self, "_base", base)
         object.__setattr__(self, "_overrides", overrides)
+        object.__setattr__(self, "_override_scopes", override_scopes or {})
         object.__setattr__(self, "_mcp_servers", mcp_servers or [])
         object.__setattr__(self, "_principal_email", principal_email)
 
@@ -69,6 +71,11 @@ class PrincipalSettingsOverlay:
     @property
     def overlaid_attrs(self) -> list[str]:
         return sorted(object.__getattribute__(self, "_overrides").keys())
+
+    @property
+    def user_overlaid_attrs(self) -> list[str]:
+        scopes = object.__getattribute__(self, "_override_scopes")
+        return sorted(name for name, scope in scopes.items() if scope is Scope.USER)
 
     def __repr__(self) -> str:
         return (
@@ -142,7 +149,12 @@ async def build_overlay(
         return base_settings
 
     overrides: dict[str, Any] = {}
+    override_scopes: dict[str, Scope] = {}
     mcp_servers: list[dict[str, Any]] = []
+
+    def set_override(name: str, value: Any, scope: Scope) -> None:
+        overrides[name] = value
+        override_scopes[name] = scope
 
     for (connector_key, _inst), c in merged.items():
         spec = CONNECTOR_BY_KEY.get(connector_key)
@@ -164,14 +176,14 @@ async def build_overlay(
 
         # Provider selection attribute.
         if c.provider and spec.provider_attr:
-            overrides[spec.provider_attr] = _coerce_provider(spec.provider_attr, c.provider)
+            set_override(spec.provider_attr, _coerce_provider(spec.provider_attr, c.provider), c.scope)
 
         # Non-secret prefs → their settings_attr.
         for fld in spec.fields:
             if fld.secret:
                 continue
             if fld.key in c.prefs and c.prefs[fld.key] not in ("", None):
-                overrides[fld.settings_attr] = c.prefs[fld.key]
+                set_override(fld.settings_attr, c.prefs[fld.key], c.scope)
 
         # Secret fields → resolve value from the backend.
         for fld in spec.fields:
@@ -180,7 +192,7 @@ async def build_overlay(
             if fld.key in c.secret_refs:
                 value = await _resolve(service, c, fld.key)
                 if value:
-                    overrides[fld.settings_attr] = value
+                    set_override(fld.settings_attr, value, c.scope)
 
         # SCM auth method: inferred from WHICH credentials the user supplied,
         # so a user picks PAT *or* GitHub App without a separate selector. App
@@ -194,14 +206,18 @@ async def build_overlay(
                 and bool(c.secret_refs.get("github_app_private_key"))
             )
             if has_app:
-                overrides["scm_auth_method"] = "github_app"
+                set_override("scm_auth_method", "github_app", c.scope)
             elif c.secret_refs.get("scm_token"):
                 provider = (c.provider or "github").lower()
-                overrides["scm_auth_method"] = {
-                    "github": "pat",
-                    "gitlab": "gitlab_token",
-                    "azure_devops": "ado_pat",
-                }.get(provider, "pat")
+                set_override(
+                    "scm_auth_method",
+                    {
+                        "github": "pat",
+                        "gitlab": "gitlab_token",
+                        "azure_devops": "ado_pat",
+                    }.get(provider, "pat"),
+                    c.scope,
+                )
 
         # LLM model policy: the user's enabled-models choice (Settings UI
         # toggles). Stored as a list or comma-joined string in prefs;
@@ -215,14 +231,15 @@ async def build_overlay(
             else:
                 enabled = []
             if enabled:
-                overrides["llm_enabled_models"] = enabled
+                set_override("llm_enabled_models", enabled, c.scope)
             fb_model = c.prefs.get("fallback_model")
             if isinstance(fb_model, str) and fb_model.strip():
-                overrides["llm_user_fallback_model"] = fb_model.strip()
+                set_override("llm_user_fallback_model", fb_model.strip(), c.scope)
 
     return PrincipalSettingsOverlay(
         base_settings,
         overrides,
+        override_scopes=override_scopes,
         mcp_servers=mcp_servers,
         principal_email=getattr(principal, "email", ""),
     )
