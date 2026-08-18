@@ -198,7 +198,12 @@ class SettingsService:
             ref = await self._secrets.set_secret(
                 logical,
                 value,
-                labels={"scope": scope.value, "connector": connector_key, "field": fkey},
+                labels={
+                    "scope": scope.value,
+                    "scope_id": scope_id,
+                    "connector": connector_key,
+                    "field": fkey,
+                },
             )
             secret_refs[fkey] = ref.name
 

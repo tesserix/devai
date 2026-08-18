@@ -35,6 +35,7 @@ from devai.adapters.llm.base import (
     LLMUsage,
     ToolCall,
 )
+from devai.adapters.llm.gateway_routing import gateway_headers
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class AnthropicLLMAdapter(LLMAdapter):
         default_model: str = "",
         default_max_tokens: int | None = None,
         timeout_seconds: float | None = None,
+        gateway_routed: bool = False,
     ) -> None:
         if not api_key:
             raise AdapterNotConfigured("anthropic adapter requires DEVAI_ANTHROPIC_API_KEY")
@@ -70,6 +72,7 @@ class AnthropicLLMAdapter(LLMAdapter):
         if timeout_seconds is not None:
             kwargs["timeout"] = timeout_seconds
         self._client = AsyncAnthropic(**kwargs)
+        self._gateway_routed = gateway_routed
 
         if default_model:
             self.default_model = default_model
@@ -178,6 +181,10 @@ class AnthropicLLMAdapter(LLMAdapter):
                 kwargs.setdefault(k, v)
             elif k == "agent" and isinstance(v, str):
                 kwargs.setdefault("metadata", {"user_id": f"devai:{v}"[:64]})
+        if getattr(self, "_gateway_routed", False):
+            headers = gateway_headers(request.extra, provider=self.provider_name)
+            if headers:
+                kwargs["extra_headers"] = headers
         return kwargs
 
     def _message_to_wire(self, m: Any) -> dict[str, Any]:

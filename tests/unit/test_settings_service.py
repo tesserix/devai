@@ -17,6 +17,7 @@ class _FakeSecrets(SecretsAdapter):
 
     def __init__(self, writable: bool = True) -> None:
         self.store: dict[str, str] = {}
+        self.labels: dict[str, str] = {}
         self._writable = writable
 
     async def can_write(self) -> bool:
@@ -24,6 +25,7 @@ class _FakeSecrets(SecretsAdapter):
 
     async def set_secret(self, key, value, *, labels=None):
         self.store[key] = value
+        self.labels = dict(labels or {})
         return SecretRef(name=key, provider="fake")
 
     async def get_secret(self, ref):
@@ -58,7 +60,8 @@ def _svc(writable=True):
 
 
 def test_upsert_stores_secret_ref_not_value():
-    svc = _svc()
+    secrets = _FakeSecrets()
+    svc = SettingsService(pool=None, secrets=secrets)
 
     async def go():
         c = await svc.upsert_connector(
@@ -78,6 +81,7 @@ def test_upsert_stores_secret_ref_not_value():
         pub = c.public_dict()
         assert "ALICE-KEY" not in str(pub)
         assert "openai_api_key" in pub["secrets_set"]
+        assert secrets.labels["scope_id"] == "alice-uid"
 
     asyncio.run(go())
 

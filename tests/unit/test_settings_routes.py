@@ -114,7 +114,7 @@ def test_tenant_user_cannot_manage_same_uid_in_another_tenant():
     assert response.status_code == 404
 
 
-def test_strict_gateway_mode_rejects_direct_llm_provider():
+def test_strict_gateway_mode_preserves_provider_choice():
     client = TestClient(_app(TENANT_ALICE, gateway_required=True))
 
     response = client.post(
@@ -122,8 +122,7 @@ def test_strict_gateway_mode_rejects_direct_llm_provider():
         json={"connector_key": "llm", "provider": "anthropic", "scope": "user"},
     )
 
-    assert response.status_code == 409
-    assert "gateway" in response.json()["detail"].lower()
+    assert response.status_code == 200
 
 
 def test_strict_gateway_mode_accepts_gateway_connector():

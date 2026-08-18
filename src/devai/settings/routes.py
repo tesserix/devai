@@ -388,18 +388,11 @@ async def upsert_connector(request: Request) -> dict[str, Any]:
     spec = CONNECTOR_BY_KEY[connector_key]
     if provider not in spec.providers:
         raise HTTPException(status_code=400, detail=f"unsupported provider {provider!r} for {connector_key}")
-    config = getattr(request.app.state, "config", None)
-    if connector_key == "llm" and bool(getattr(config, "llm_gateway_required", False)) and provider != "gateway":
-        raise HTTPException(
-            status_code=409,
-            detail="This deployment requires all LLM traffic to use the agent gateway; choose provider 'gateway'",
-        )
-
     secret_values = body.get("secrets") or {}
     if secret_values and not await svc.secrets_writable():
         raise HTTPException(
             status_code=409,
-            detail="Secrets backend is read-only — set DEVAI_SECRETS_PROVIDER=gcp_sm and grant write IAM",
+            detail="Secrets backend is read-only — configure the OpenBao secret-service broker",
         )
 
     try:

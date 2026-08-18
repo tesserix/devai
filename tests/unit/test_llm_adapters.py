@@ -317,6 +317,7 @@ def test_gateway_sends_attribution_as_headers_not_openai_parameters():
         "x-devai-user-id": "shared-uid",
         "x-devai-run-id": "run-1",
         "x-devai-agent": "reviewer",
+        "x-devai-provider": "gateway",
     }
 
 

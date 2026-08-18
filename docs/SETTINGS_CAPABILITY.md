@@ -4,7 +4,7 @@ Manage all of DevAI's connectors (LLM, SCM, memory, Slack, MCP, web-search) and 
 credentials from one Settings page — scoped per **user**, **team**, **tenant**, or **global**.
 Tenant user ownership is keyed by `tenant_id:subject_id`; tenant principals never
 fall back to an email-only row. See [ADR-0001](adr/0001-tenant-qualified-integrations-and-metering.md).
-Secret values are auto-provisioned into **GCP Secret Manager**; the app DB stores only references.
+Secret values are auto-provisioned into **OpenBao**; the app DB stores only references.
 A user's own credentials transparently drive both their **conversations** and their **pipeline runs**.
 
 ---
@@ -14,7 +14,7 @@ A user's own credentials transparently drive both their **conversations** and th
 ```
    Settings UI ──POST /api/settings/connectors──▶ SettingsService ──┬─▶ Postgres user_settings
    (per scope)                                                      │     (prefs + secret REFS only)
-                                                                    └─▶ SecretsAdapter ─▶ GCP Secret Manager
+                                                                    └─▶ SecretsAdapter ─▶ secret-service ─▶ OpenBao
                                                                           (secret VALUES only)
 
    A request/run for user U ─▶ build_overlay(U) ─▶ PrincipalSettingsOverlay ─▶ existing adapter factories
@@ -29,8 +29,8 @@ A user's own credentials transparently drive both their **conversations** and th
   the overlay routes a user's own creds into the same factories — zero duplication.
 - **Scope resolution** is most-specific-wins: `user → team → tenant → global`.
 - **Gateway enforcement.** Set `DEVAI_LLM_GATEWAY_REQUIRED=true` in production
-  to reject direct-provider connectors and require the `gateway` connector.
-  Gateway calls receive sanitized tenant/user/run/agent attribution headers.
+  to route every provider connector through its native AgentGateway route.
+  Gateway calls receive sanitized tenant/user/run/agent/provider attribution headers.
 - **Cost isolation.** Redis usage projections and durable PostgreSQL LLM-call rows
   both carry tenant and user identity. Users see themselves, tenant admins see
   their tenant, and only `platform-admin` sees cross-tenant totals.
@@ -39,7 +39,7 @@ A user's own credentials transparently drive both their **conversations** and th
 
 | File | Role |
 |------|------|
-| `src/devai/adapters/secrets/` | Secrets adapter family: `base.py` (ABC + `SecretRef`), `gcp_sm.py` (create/add-version via SDK), `env.py` (read-only), `noop.py`, `factory.py` |
+| `src/devai/adapters/secrets/` | Secrets adapter family: `base.py` (ABC + `SecretRef`), `openbao.py` (read-only OpenBao reads and brokered blind writes), `gcp_sm.py`, `env.py`, `noop.py`, `factory.py` |
 | `src/devai/settings/models.py` | `CONNECTOR_SPECS` catalog (the connectors + fields + which map to which `Settings` attr) + `Connector`/`Scope` |
 | `src/devai/settings/service.py` | `SettingsService` — Postgres `user_settings` store (in-memory fallback) + secret provisioning |
 | `src/devai/settings/overlay.py` | `PrincipalSettingsOverlay` + `build_overlay()` — the per-user config facade |
@@ -55,40 +55,37 @@ A user's own credentials transparently drive both their **conversations** and th
 | Env var | Default | Purpose |
 |---------|---------|---------|
 | `DEVAI_SETTINGS_ENABLED` | `true` | Enable the Settings capability + API. |
-| `DEVAI_SECRETS_PROVIDER` | `noop` | `noop` \| `env` \| `gcp_sm`. **`gcp_sm` is required to auto-provision secrets.** |
-| `DEVAI_SECRETS_GCP_PROJECT` | `""` | GCP project for `gcp_sm` (falls back to `DEVAI_GKE_PROJECT`). |
+| `DEVAI_SECRETS_PROVIDER` | `noop` | `noop` \| `env` \| `gcp_sm` \| `openbao`. **`openbao` is the production backend.** |
+| `DEVAI_SECRETS_OPENBAO_ADDR` | `""` | OpenBao service URL. |
+| `DEVAI_SECRETS_OPENBAO_ROLE` | `read-devai-api` | Read-only Kubernetes auth role. |
+| `DEVAI_SECRETS_BROKER_URL` | `""` | Internal secret-service URL used for blind writes and soft deletes. |
 
 With `secrets_provider=noop` the API still serves the catalog and non-secret prefs; secret writes
 return a clear **409** and the UI shows a read-only banner.
 
 ---
 
-## 3. Enabling secret auto-provisioning (GCP Secret Manager)
+## 3. Enabling secret auto-provisioning (OpenBao)
 
-`gcp_sm` uses **Application Default Credentials** (Workload Identity in-cluster) — no key material in
-code. It needs **write IAM**, which the devai service account does *not* have by default
-(`app-secrets-devai-prod@tesseracthub-480811.iam.gserviceaccount.com` is read-only/`secretAccessor`).
+DevAI has no OpenBao write policy. It reads under the `read-devai-api` Kubernetes role and sends
+writes/deletes to secret-service with a projected service-account token whose audience is
+`secret-service`. The broker verifies the token through Kubernetes TokenReview and fixes the path
+prefix server-side.
 
-Grant write access **out-of-band** (this is the one manual step; the code is inert until then):
-
-```bash
-gcloud projects add-iam-policy-binding tesseracthub-480811 \
-  --member="serviceAccount:app-secrets-devai-prod@tesseracthub-480811.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.admin"      # or: secretCreator + secretVersionManager + secretAccessor
-```
-
-Then set on the devai deployment (via `tesserix-k8s`):
+Set on the DevAI deployment through GitOps:
 
 ```
-DEVAI_SECRETS_PROVIDER=gcp_sm
-DEVAI_SECRETS_GCP_PROJECT=tesseracthub-480811
+DEVAI_SECRETS_PROVIDER=openbao
+DEVAI_SECRETS_OPENBAO_ADDR=http://openbao.openbao.svc.cluster.local:8200
+DEVAI_SECRETS_OPENBAO_ROLE=read-devai-api
+DEVAI_SECRETS_BROKER_URL=http://secret-service-api.secret-service.svc.cluster.local:8080
 ```
 
-Provisioned secrets are named `devai-{scope}-{scope_id}-{connector}-{instance}-{field}` and labelled
-`managed-by=devai` for easy auditing/cleanup.
+Provisioned secrets live at `devai/devai-api/<owner-hash>/<sanitized-name>`. The owner hash is derived
+from the tenant-qualified scope. Secret values never appear in broker audit records.
 
-> Until the IAM is granted, `can_write()` returns false, the UI shows "Secret storage is read-only",
-> and secret writes 409 — non-secret preferences still work.
+> If the broker, TokenReview, or OpenBao policy is unavailable, `can_write()` returns false, the UI
+> shows "Secret storage is read-only", and secret writes return 409. Non-secret preferences still work.
 
 ---
 
@@ -106,7 +103,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     instance_id   TEXT NOT NULL DEFAULT 'default',
     provider      TEXT NOT NULL DEFAULT '',
     prefs         JSONB NOT NULL DEFAULT '{}',   -- non-secret field values
-    secret_refs   JSONB NOT NULL DEFAULT '{}',   -- field -> GCP SM secret id (NEVER values)
+    secret_refs   JSONB NOT NULL DEFAULT '{}',   -- field -> OpenBao secret ref (NEVER values)
     enabled       BOOLEAN NOT NULL DEFAULT true,
     updated_by    TEXT NOT NULL DEFAULT '',
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -132,7 +129,7 @@ a user may manage their own `user` scope and their `team` scopes; `tenant`/`glob
 | `POST /api/settings/connectors` | Create/update a connector. Body: `{scope, scope_id?, connector_key, provider, instance_id?, prefs{}, secrets{}}` |
 | `DELETE /api/settings/connectors/{scope}/{scope_id}/{connector_key}?instance_id=` | Remove a connector + its provisioned secrets (`-` means the global empty scope_id) |
 
-`secrets{}` values are pushed to GCP SM and never echoed back. A secret write when the backend is
+`secrets{}` values are pushed to OpenBao through the blind-write broker and never echoed back. A secret write when the backend is
 read-only returns **409**.
 
 ---
