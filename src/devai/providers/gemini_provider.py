@@ -9,11 +9,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from devai.providers.groq_provider import _fetch_secret_via_adapter
 
 if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam
+
     from devai.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,7 @@ class GeminiProvider:
             api_key = self._fetch_from_gcp(config.gcp_secret_gemini_api_key)
 
         self._gateway_client = None
+        self._client: genai.Client | None = None
         if gateway_required(config):
             from openai import AsyncOpenAI
 
@@ -39,10 +43,8 @@ class GeminiProvider:
                 base_url=gateway_base_url(config, "gemini"),
                 default_headers={"x-devai-provider": "gemini"},
             )
-            self.model = None
         else:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(config.gemini_model)
+            self._client = genai.Client(api_key=api_key)
         self._model_name = config.gemini_model
 
     def _fetch_from_gcp(self, secret_name: str) -> str:
@@ -66,8 +68,6 @@ class GeminiProvider:
         response_format: dict[str, Any] | None = None,
     ) -> str:
         """Generate a response using Google Gemini."""
-        import asyncio
-
         # A user whose LLM connector pins a non-Gemini provider gets THEIR
         # provider, not the platform Gemini key — the connector choice wins
         # over this agent's hardcoded preference.
@@ -82,35 +82,39 @@ class GeminiProvider:
             from devai.providers.anthropic_claude import ClaudeProvider
 
             claude = ClaudeProvider(self._config)
-            return await claude.generate(
-                system_prompt=system or "You are a helpful assistant.",
-                user_message=prompt,
+            return str(
+                await claude.generate(
+                    system_prompt=system or "You are a helpful assistant.",
+                    user_message=prompt,
+                )
             )
 
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
 
         try:
             if self._gateway_client is not None:
-                messages: list[dict[str, str]] = []
+                messages: list[ChatCompletionMessageParam] = []
                 if system:
                     messages.append({"role": "system", "content": system})
                 messages.append({"role": "user", "content": prompt})
-                response = await self._gateway_client.chat.completions.create(
+                gateway_response = await self._gateway_client.chat.completions.create(
                     model=self._model_name,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-                return response.choices[0].message.content or ""
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                full_prompt,
-                generation_config=genai.types.GenerationConfig(
+                return gateway_response.choices[0].message.content or ""
+            if self._client is None:
+                raise RuntimeError("Gemini client is not configured")
+            gemini_response = await self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
                     temperature=temperature,
                     max_output_tokens=max_tokens,
                 ),
             )
-            return response.text or ""
+            return gemini_response.text or ""
         except Exception as e:
             # Fall back to OpenAI if available
             if self._config.openai_api_key:
