@@ -38,18 +38,18 @@ dependencies = [
     # Groq (fallback)
     "groq>=0.12.0",
     # Google Gemini
-    "google-generativeai>=0.8.6",
+    "google-genai==2.18.1",
     # GCP monitoring and management (exact pins to avoid resolution-too-deep)
     "google-cloud-monitoring==2.31.0",
-    "google-cloud-logging==3.11.4",
+    "google-cloud-logging==3.16.2",
     "google-cloud-recommender==2.22.0",
     "google-cloud-resource-manager==1.17.0",
-    "google-auth==2.38.0",
-    "google-api-core[grpc]==2.33.0",
-    "grpcio==1.75.1",
-    "grpcio-status==1.68.1",
+    "google-auth==2.56.3",
+    "google-api-core[grpc]==2.34.0",
+    "grpcio==1.83.0",
+    "grpcio-status==1.83.0",
     "proto-plus==1.27.2",
-    "protobuf==5.29.6",
+    "protobuf==6.33.5",
     "googleapis-common-protos==1.75.0",
     # LangGraph / LangChain / LangSmith
     "langgraph>=0.2",
@@ -76,7 +76,7 @@ dependencies = [
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
     # provisions per-user/per-tenant secrets into Google Secret Manager.
     # Imported lazily inside the gcp_sm adapter only.
-    "google-cloud-secret-manager>=2.20.0",
+    "google-cloud-secret-manager==2.30.0",
     # GCS object-store backend (adapters/object_store/gcs.py) — composer
     # attachments + the log-archive listing on the dashboard /logs page.
     # Imported lazily inside the gcs adapter only.
