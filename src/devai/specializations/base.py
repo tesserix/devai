@@ -45,8 +45,15 @@ class LLMProvider(str, Enum):
             return default if default is not None else cls.AUTO
         if isinstance(value, cls):
             return value
+        normalized = str(value).lower()
+        normalized = {
+            "anthropic": cls.CLAUDE.value,
+            "google": cls.GEMINI.value,
+            "vertex": cls.GEMINI.value,
+            "vertex_gemini": cls.GEMINI.value,
+        }.get(normalized, normalized)
         try:
-            return cls(str(value).lower())
+            return cls(normalized)
         except ValueError:
             return default if default is not None else cls.AUTO
 

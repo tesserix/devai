@@ -42,8 +42,64 @@ router = APIRouter(prefix="/api/registry", tags=["registry"])
 _OWNER_LABEL = "devai.tesserix.app/owner-id"
 _VISIBILITY_LABEL = "devai.tesserix.app/visibility"
 _RUNTIME_LABEL = "devai.io/runtime"
+_MODEL_PROVIDERS = frozenset({"anthropic", "claude", "openai", "google", "gemini", "vertex", "vertex_gemini", "groq"})
+_RISK_LEVELS = frozenset({"low", "medium", "high", "critical"})
 
 type RegistryItem = Skill | Prompt | McpServer | Agent
+
+
+def _agent_contract_errors(body: dict[str, Any]) -> list[str]:
+    spec = body.get("spec")
+    if not isinstance(spec, dict):
+        return ["spec must be an object"]
+
+    errors: list[str] = []
+    system_prompt = spec.get("systemPrompt")
+    prompt_ref = spec.get("promptRef")
+    if system_prompt is not None and not isinstance(system_prompt, str):
+        errors.append("spec.systemPrompt must be a string")
+    if prompt_ref is not None and not isinstance(prompt_ref, str):
+        errors.append("spec.promptRef must be a string")
+    has_inline = isinstance(system_prompt, str) and bool(system_prompt.strip())
+    has_reference = isinstance(prompt_ref, str) and bool(prompt_ref.strip())
+    if not has_inline and not has_reference:
+        errors.append("spec.systemPrompt or spec.promptRef is required")
+
+    model = spec.get("model")
+    if not isinstance(model, dict):
+        errors.append("spec.model must be an object")
+    else:
+        if not isinstance(model.get("provider"), str) or not model["provider"].strip():
+            errors.append("spec.model.provider is required")
+        elif model["provider"] not in _MODEL_PROVIDERS:
+            errors.append(f"spec.model.provider must be one of {', '.join(sorted(_MODEL_PROVIDERS))}")
+        if not isinstance(model.get("name"), str) or not model["name"].strip():
+            errors.append("spec.model.name is required")
+        temperature = model.get("temperature")
+        if temperature is not None and (
+            isinstance(temperature, bool) or not isinstance(temperature, int | float) or not 0 <= temperature <= 2
+        ):
+            errors.append("spec.model.temperature must be a number between 0 and 2")
+
+    limits = spec.get("limits")
+    if not isinstance(limits, dict):
+        errors.append("spec.limits must be an object")
+    else:
+        max_turns = limits.get("maxTurns")
+        if type(max_turns) is not int or not 1 <= max_turns <= 1000:
+            errors.append("spec.limits.maxTurns must be an integer between 1 and 1000")
+        timeout_seconds = limits.get("timeoutSeconds")
+        if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 86400:
+            errors.append("spec.limits.timeoutSeconds must be an integer between 1 and 86400")
+
+    if spec.get("riskLevel") not in _RISK_LEVELS:
+        errors.append("spec.riskLevel must be one of low, medium, high, critical")
+    return errors
+
+
+def _prompt_system_message(prompt: Prompt) -> str:
+    value = prompt.raw.get("systemPrompt") if isinstance(prompt.raw, dict) else None
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _client(request: Request) -> RegistryClient:
@@ -290,6 +346,9 @@ async def get_owned_agent_manifest(request: Request, name: str) -> dict[str, Any
             metadata["labels"] = {
                 key: value for key, value in labels.items() if key not in {_OWNER_LABEL, _VISIBILITY_LABEL}
             }
+    spec = manifest.get("spec")
+    if isinstance(spec, dict) and isinstance(spec.get("promptRef"), str) and spec["promptRef"].strip():
+        spec["systemPrompt"] = ""
     return manifest
 
 
@@ -368,6 +427,29 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
             status_code=403,
             detail="user-authored kagent runtime is disabled until the Substrate isolation gate passes",
         )
+    if plural == "agents":
+        contract_errors = _agent_contract_errors(body)
+        if contract_errors:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "invalid_agent_manifest", "issues": contract_errors},
+            )
+        spec = body["spec"]
+        prompt_ref = str(spec.get("promptRef") or "").strip()
+        if prompt_ref:
+            try:
+                prompt = await _visible_item(request, client.get_prompt, prompt_ref)
+            except RegistryError as e:
+                raise HTTPException(status_code=502, detail=str(e)) from e
+            if prompt is None:
+                raise HTTPException(status_code=404, detail=f"prompt not found: {prompt_ref}")
+            system_message = _prompt_system_message(prompt)
+            if not system_message:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"spec.promptRef '{prompt_ref}' has no non-empty spec.systemPrompt",
+                )
+            spec["systemPrompt"] = system_message
     labels[_OWNER_LABEL] = owner_id
     labels[_VISIBILITY_LABEL] = "private"
     meta["visibility"] = "private"

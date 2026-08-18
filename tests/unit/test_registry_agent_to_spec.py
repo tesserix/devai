@@ -66,6 +66,42 @@ def test_a_sparse_envelope_still_yields_a_usable_spec() -> None:
     assert spec.output_key == "tiny_output"
 
 
+def test_authored_nested_limits_become_runtime_bounds() -> None:
+    envelope = {
+        "metadata": {"name": "bounded-agent"},
+        "spec": {
+            "systemPrompt": "Stay within the limits.",
+            "model": {"provider": "claude", "name": "claude-sonnet-4-6"},
+            "limits": {"maxTurns": 24, "timeoutSeconds": 600},
+        },
+    }
+
+    spec = agent_envelope_to_spec(envelope)
+
+    assert spec.max_turns == 24
+    assert spec.timeout_seconds == 600
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        ("anthropic", LLMProvider.CLAUDE),
+        ("google", LLMProvider.GEMINI),
+        ("vertex_gemini", LLMProvider.GEMINI),
+    ],
+)
+def test_registry_provider_aliases_select_the_expected_runtime(provider: str, expected: LLMProvider) -> None:
+    envelope = {
+        "metadata": {"name": "provider-agent"},
+        "spec": {
+            "systemPrompt": "Use the selected provider.",
+            "model": {"provider": provider, "name": "provider-model"},
+        },
+    }
+
+    assert agent_envelope_to_spec(envelope).llm_provider is expected
+
+
 def test_the_flattened_shape_the_client_hands_back_is_accepted_too() -> None:
     # RegistryClient._unwrap projects metadata up and keeps `raw` flat, so the
     # mapping has to read what the client actually returns.
@@ -119,3 +155,18 @@ def test_publishing_a_spec_and_reading_it_back_preserves_what_runs_it() -> None:
     assert restored.risk_level is original.risk_level
     assert restored.allowed_tools == original.allowed_tools
     assert restored.max_turns == original.max_turns
+
+
+def test_publishing_a_spec_uses_the_authoring_limits_shape() -> None:
+    original = Specialization(
+        name="bounded_agent",
+        system_prompt="Respect the bounds.",
+        max_turns=7,
+        timeout_seconds=480,
+    )
+
+    envelope = spec_to_agent_envelope(original)
+
+    assert envelope["spec"]["limits"] == {"maxTurns": 7, "timeoutSeconds": 480}
+    assert "maxTurns" not in envelope["spec"]
+    assert "timeout" not in envelope["spec"]
