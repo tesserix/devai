@@ -12,12 +12,16 @@ not configured" empty state without guessing from a 404.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+from collections.abc import Callable
 from dataclasses import asdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from devai.authz import require_principal
+from devai.identity import extract_principal
 from devai.registry.client import (
     Agent,
     McpServer,
@@ -27,9 +31,18 @@ from devai.registry.client import (
     Skill,
 )
 
+if TYPE_CHECKING:
+    from devai.identity import Principal
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/registry", tags=["registry"])
+
+_OWNER_LABEL = "devai.tesserix.app/owner-id"
+_VISIBILITY_LABEL = "devai.tesserix.app/visibility"
+_RUNTIME_LABEL = "devai.io/runtime"
+
+type RegistryItem = Skill | Prompt | McpServer | Agent
 
 
 def _client(request: Request) -> RegistryClient:
@@ -53,6 +66,75 @@ def _to_dict(item: Skill | Prompt | McpServer | Agent) -> dict[str, Any]:
     return d
 
 
+async def _optional_principal(request: Request) -> Principal | None:
+    try:
+        return await extract_principal(request)
+    except Exception:  # noqa: BLE001
+        logger.warning("registry: principal lookup failed", exc_info=True)
+        return None
+
+
+def _owner_id(principal: Principal | None) -> str:
+    if principal is None:
+        return ""
+    scope = principal.user_scope_id.strip()
+    if not scope:
+        return ""
+    return hashlib.sha256(scope.encode()).hexdigest()[:32]
+
+
+def _labels(item: Skill | Prompt | McpServer | Agent | dict[str, Any]) -> dict[str, str]:
+    if isinstance(item, dict):
+        metadata = item.get("metadata")
+        raw_labels = metadata.get("labels") if isinstance(metadata, dict) else None
+    else:
+        raw_labels = getattr(item, "raw", {}).get("labels")
+        if raw_labels is None:
+            raw_labels = getattr(item, "labels", {})
+    if not isinstance(raw_labels, dict):
+        return {}
+    return {str(key): str(value) for key, value in raw_labels.items()}
+
+
+def _visibility(item: Skill | Prompt | McpServer | Agent | dict[str, Any]) -> str:
+    if isinstance(item, dict):
+        metadata = item.get("metadata")
+        value = metadata.get("visibility") if isinstance(metadata, dict) else ""
+    else:
+        value = getattr(item, "raw", {}).get("visibility", "")
+    return str(value or "").strip().lower()
+
+
+def _visible(item: Skill | Prompt | McpServer | Agent, principal: Principal | None) -> bool:
+    owner = _labels(item).get(_OWNER_LABEL, "")
+    if owner:
+        return owner == _owner_id(principal)
+    return _visibility(item) != "private"
+
+
+async def _visible_items[T: RegistryItem](
+    request: Request,
+    loader: Callable[[], list[T]],
+) -> list[T]:
+    principal, items = await asyncio.gather(
+        _optional_principal(request),
+        asyncio.to_thread(loader),
+    )
+    return [item for item in items if _visible(item, principal)]
+
+
+async def _visible_item[T: RegistryItem](
+    request: Request,
+    loader: Callable[[str], T | None],
+    name: str,
+) -> T | None:
+    principal = await _optional_principal(request)
+    item = await asyncio.to_thread(loader, name)
+    if item is None or not _visible(item, principal):
+        return None
+    return item
+
+
 @router.get("/health")
 async def registry_health(request: Request) -> dict[str, Any]:
     """Probe the registry. Returns ``reachable: false`` instead of a
@@ -67,7 +149,18 @@ async def registry_health(request: Request) -> dict[str, Any]:
 async def registry_counts(request: Request) -> dict[str, int]:
     client = _client(request)
     try:
-        return await asyncio.to_thread(client.counts)
+        skills, prompts, servers, agents = await asyncio.gather(
+            _visible_items(request, client.list_skills),
+            _visible_items(request, client.list_prompts),
+            _visible_items(request, client.list_mcp_servers),
+            _visible_items(request, client.list_agents),
+        )
+        return {
+            "skills": len(skills),
+            "prompts": len(prompts),
+            "mcp_servers": len(servers),
+            "agents": len(agents),
+        }
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
@@ -76,7 +169,7 @@ async def registry_counts(request: Request) -> dict[str, int]:
 async def list_skills(request: Request) -> list[dict[str, Any]]:
     client = _client(request)
     try:
-        items = await asyncio.to_thread(client.list_skills)
+        items = await _visible_items(request, client.list_skills)
         return [_to_dict(s) for s in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -86,7 +179,7 @@ async def list_skills(request: Request) -> list[dict[str, Any]]:
 async def get_skill(request: Request, name: str) -> dict[str, Any]:
     client = _client(request)
     try:
-        item = await asyncio.to_thread(client.get_skill, name)
+        item = await _visible_item(request, client.get_skill, name)
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     if item is None:
@@ -98,7 +191,7 @@ async def get_skill(request: Request, name: str) -> dict[str, Any]:
 async def list_prompts(request: Request) -> list[dict[str, Any]]:
     client = _client(request)
     try:
-        items = await asyncio.to_thread(client.list_prompts)
+        items = await _visible_items(request, client.list_prompts)
         return [_to_dict(p) for p in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -108,7 +201,7 @@ async def list_prompts(request: Request) -> list[dict[str, Any]]:
 async def get_prompt(request: Request, name: str) -> dict[str, Any]:
     client = _client(request)
     try:
-        item = await asyncio.to_thread(client.get_prompt, name)
+        item = await _visible_item(request, client.get_prompt, name)
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     if item is None:
@@ -123,7 +216,7 @@ async def list_mcp_servers(request: Request) -> list[dict[str, Any]]:
     treats them as MCP-only."""
     client = _client(request)
     try:
-        items = await asyncio.to_thread(client.list_mcp_servers)
+        items = await _visible_items(request, client.list_mcp_servers)
         return [_to_dict(s) for s in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -135,7 +228,7 @@ async def get_mcp_server(request: Request, name: str) -> dict[str, Any]:
     # FastAPI's ``:path`` converter so the slash isn't a route boundary.
     client = _client(request)
     try:
-        item = await asyncio.to_thread(client.get_mcp_server, name)
+        item = await _visible_item(request, client.get_mcp_server, name)
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     if item is None:
@@ -147,7 +240,7 @@ async def get_mcp_server(request: Request, name: str) -> dict[str, Any]:
 async def list_agents(request: Request) -> list[dict[str, Any]]:
     client = _client(request)
     try:
-        items = await asyncio.to_thread(client.list_agents)
+        items = await _visible_items(request, client.list_agents)
         return [_to_dict(a) for a in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -157,7 +250,7 @@ async def list_agents(request: Request) -> list[dict[str, Any]]:
 async def get_agent(request: Request, name: str) -> dict[str, Any]:
     client = _client(request)
     try:
-        item = await asyncio.to_thread(client.get_agent, name)
+        item = await _visible_item(request, client.get_agent, name)
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     if item is None:
@@ -169,6 +262,7 @@ async def get_agent(request: Request, name: str) -> dict[str, Any]:
 async def refresh(request: Request) -> dict[str, str]:
     """Invalidate the in-process cache. Dashboard 'Refresh catalog'
     button + the registry-bootstrap Job's post-run hook both call this."""
+    await require_principal(request)
     client = _client(request)
     client.refresh()
     return {"status": "cache cleared"}
@@ -193,16 +287,20 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
     write path behind the dashboard's artifact editor. Mirrors aregistry's
     POST /v0/{plural}.
 
-    Tenancy: every artifact is stamped with the tenant namespace, which is the
-    isolation + uniqueness boundary. Within a tenant the registry enforces name
-    uniqueness across all kinds, so on CREATE we reject a name that already
-    exists (a silent same-name publish would otherwise version-bump an existing
-    artifact). Pass ``?overwrite=true`` to publish a new version on purpose.
-    Team is optional metadata (a label), never part of the identity."""
+    User-authored artifacts stay in the platform catalog namespace but are
+    private by default. DevAI stamps an opaque owner label derived from the
+    verified principal, filters reads by that owner, and checks the same label
+    before versioning. Pass ``?overwrite=true`` to publish a new version of an
+    artifact the caller already owns. Team is optional grouping metadata, never
+    an authorization identity."""
     method = _PUBLISH_METHOD.get(plural)
     if method is None:
         raise HTTPException(status_code=404, detail=f"unknown registry kind: {plural}")
     client = _client(request)
+    principal = await require_principal(request)
+    owner_id = _owner_id(principal)
+    if not owner_id:
+        raise HTTPException(status_code=401, detail="authenticated principal has no stable subject")
     try:
         body = await request.json()
     except Exception as e:  # noqa: BLE001
@@ -224,14 +322,33 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
         )
     if ns:
         meta["namespace"] = ns
+    labels = meta.get("labels")
+    if labels is None:
+        labels = {}
+        meta["labels"] = labels
+    if not isinstance(labels, dict):
+        raise HTTPException(status_code=400, detail="manifest.metadata.labels must be an object")
+    if plural == "agents" and str(labels.get(_RUNTIME_LABEL, "")).strip().lower() == "kagent":
+        raise HTTPException(
+            status_code=403,
+            detail="user-authored kagent runtime is disabled until the Substrate isolation gate passes",
+        )
+    labels[_OWNER_LABEL] = owner_id
+    labels[_VISIBILITY_LABEL] = "private"
+    meta["visibility"] = "private"
 
-    # Enforce name uniqueness within the tenant on create. Skip when the caller
-    # explicitly opts into versioning an existing artifact.
     name = (meta.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="manifest.metadata.name is required")
     overwrite = request.query_params.get("overwrite", "").lower() in ("1", "true", "yes")
-    if name and not overwrite:
-        exists = await asyncio.to_thread(client.artifact_exists, plural, name)
-        if exists:
+    try:
+        existing = await asyncio.to_thread(client.get_artifact_envelope, plural, name)
+    except RegistryError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    if existing is not None:
+        if _labels(existing).get(_OWNER_LABEL) != owner_id:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {name}")
+        if not overwrite:
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -253,3 +370,27 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"publish: {e}") from e
     client.refresh()
     return result if isinstance(result, dict) else {"status": "published"}
+
+
+@router.delete("/{plural}/{name:path}")
+async def unpublish(request: Request, plural: str, name: str) -> dict[str, str]:
+    """Delete only an artifact owned by the authenticated caller."""
+    if plural not in _PUBLISH_METHOD:
+        raise HTTPException(status_code=404, detail=f"unknown registry kind: {plural}")
+    principal = await require_principal(request)
+    owner_id = _owner_id(principal)
+    if not owner_id:
+        raise HTTPException(status_code=401, detail="authenticated principal has no stable subject")
+    client = _client(request)
+    try:
+        existing = await asyncio.to_thread(client.get_artifact_envelope, plural, name)
+    except RegistryError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    if existing is None or _labels(existing).get(_OWNER_LABEL) != owner_id:
+        raise HTTPException(status_code=404, detail=f"artifact not found: {name}")
+    try:
+        await asyncio.to_thread(client.delete, plural, name)
+    except RegistryError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    client.refresh()
+    return {"deleted": name}

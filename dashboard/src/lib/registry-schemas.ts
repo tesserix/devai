@@ -32,7 +32,13 @@ export interface Field {
 const META: Field[] = [
   { path: "metadata.name", label: "Name", type: "text", placeholder: "my-artifact", required: true, mono: true, help: "Unique identifier within the collection." },
   { path: "metadata.tag", label: "Version", type: "text", placeholder: "auto · v0.0.1", mono: true, help: "Leave blank to auto-increment (v0.0.1, v0.0.2, …); set one (e.g. v1.2.0) to pin." },
-  { path: "metadata.visibility", label: "Visibility", type: "select", options: ["public", "internal", "private"] },
+  {
+    path: "metadata.visibility",
+    label: "Visibility",
+    type: "select",
+    options: ["private"],
+    help: "User-authored artifacts stay private to your account while tenant sharing is being hardened.",
+  },
 ];
 
 // Spec fields per kind.
@@ -98,7 +104,7 @@ export function fieldsFor(kind: string): Field[] {
 // starter returns a fresh, minimal doc for a kind with sensible defaults so the
 // editor and the live manifest are never empty.
 export function starter(kind: string): Record<string, unknown> {
-  const meta = { name: "", tag: "", visibility: "public", labels: {} as Record<string, string> };
+  const meta = { name: "", tag: "", visibility: "private", labels: {} as Record<string, string> };
   const specByKind: Record<string, Record<string, unknown>> = {
     Skill: { title: "", description: "", source: { repository: "" } },
     Tool: { title: "", description: "" },
