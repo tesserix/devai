@@ -676,6 +676,10 @@ class Settings(BaseSettings):
     # kagent_enabled), an agent labelled `devai.io/runtime=kagent` is dispatched
     # over A2A to its long-lived kagent Deployment instead of a one-shot Job.
     agentgateway_url: str = ""
+    # Operator-only health probes use the controller metrics endpoint, not the
+    # MCP data-plane URL above. AI gateway probes fall back to the LLM base URL.
+    agentgateway_controller_url: str = ""
+    ai_gateway_url: str = ""
     kagent_url: str = ""
     # Namespace the kagent controller serves A2A agents under
     # ({kagent_url}/api/a2a/{namespace}/{agent}); matches the kagent-agent-sync
