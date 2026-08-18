@@ -174,7 +174,7 @@ def _forward_trusted(request: Request) -> bool:
     """
     cfg = getattr(getattr(request, "app", None), "state", None)
     cfg = getattr(cfg, "config", None) if cfg else None
-    secret = getattr(cfg, "auth_bff_shared_secret", "") if cfg else ""
+    secret = getattr(cfg, "auth_bff_shared_secret", "").strip() if cfg else ""
     if not secret:
         # No shared secret. Trust the edge only if the deployment opts in
         # (default) — otherwise fail closed (never empty==empty match).

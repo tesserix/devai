@@ -63,3 +63,9 @@ def test_a_real_key_turns_tracing_on(key, _clean_langsmith_env):
     s.export_langsmith_env()
     assert os.environ["LANGCHAIN_TRACING_V2"] == "true"
     assert os.environ["LANGCHAIN_API_KEY"] == key
+
+
+def test_auth_bff_shared_secret_strips_header_invalid_whitespace():
+    s = Settings(_env_file=None, auth_bff_shared_secret="s3cret\n")
+
+    assert s.auth_bff_shared_secret == "s3cret"

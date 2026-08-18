@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -295,6 +295,11 @@ class Settings(BaseSettings):
     # When set, forwarded identity is ignored unless the secret matches —
     # closing header-spoofing if the pod is ever reachable without the edge.
     auth_bff_shared_secret: str = ""
+
+    @field_validator("auth_bff_shared_secret", mode="before")
+    @classmethod
+    def _strip_auth_bff_shared_secret(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     # Whether X-Forwarded-* identity is trusted when no shared secret is set.
     # Default True preserves today's behavior: with auth_bff_shared_secret
