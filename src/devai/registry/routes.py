@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
@@ -264,6 +265,32 @@ async def get_agent(request: Request, name: str) -> dict[str, Any]:
     if item is None:
         raise HTTPException(status_code=404, detail=f"agent not found: {name}")
     return _to_dict(item)
+
+
+@router.get("/agents/{name}/manifest")
+async def get_owned_agent_manifest(request: Request, name: str) -> dict[str, Any]:
+    """Return an editable manifest only to the agent's authenticated owner."""
+    principal = await require_principal(request)
+    owner_id = _owner_id(principal)
+    if not owner_id:
+        raise HTTPException(status_code=401, detail="authenticated principal has no stable subject")
+    client = _client(request)
+    try:
+        existing = await asyncio.to_thread(client.get_artifact_envelope, "agents", name)
+    except RegistryError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    if existing is None or _labels(existing).get(_OWNER_LABEL) != owner_id:
+        raise HTTPException(status_code=404, detail=f"agent not found: {name}")
+
+    manifest = deepcopy(existing)
+    metadata = manifest.get("metadata")
+    if isinstance(metadata, dict):
+        labels = metadata.get("labels")
+        if isinstance(labels, dict):
+            metadata["labels"] = {
+                key: value for key, value in labels.items() if key not in {_OWNER_LABEL, _VISIBILITY_LABEL}
+            }
+    return manifest
 
 
 @router.post("/refresh")

@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, Plus, Users } from "lucide-react";
+import { ExternalLink, Loader2, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { aregistryUrl } from "@/lib/aregistry";
+import ArtifactEditor from "@/components/artifact-editor";
+import { useConfirm } from "@/components/confirm-dialog";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
+import { useToast } from "@/components/toast";
 import { api } from "@/lib/api";
 
 type Agent = {
@@ -20,11 +23,16 @@ type Agent = {
 };
 
 export default function AgentsPage() {
+  const confirm = useConfirm();
+  const toast = useToast();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"all" | "mine">("all");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [editing, setEditing] = useState<{ name: string; manifest: Record<string, unknown> } | null>(null);
+  const [busyAgent, setBusyAgent] = useState<{ name: string; action: "edit" | "delete" } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,7 +53,41 @@ export default function AgentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [view]);
+  }, [view, reloadKey]);
+
+  async function editAgent(name: string) {
+    setBusyAgent({ name, action: "edit" });
+    setError(null);
+    try {
+      const manifest = await api.getOwnedRegistryAgent(name);
+      setEditing({ name, manifest });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyAgent(null);
+    }
+  }
+
+  async function unpublishAgent(name: string) {
+    const approved = await confirm({
+      title: `Unpublish ${name}?`,
+      message: "This removes the agent from your registry catalog. Existing version history may remain in registry storage.",
+      confirmLabel: "Unpublish",
+      tone: "danger",
+    });
+    if (!approved) return;
+    setBusyAgent({ name, action: "delete" });
+    setError(null);
+    try {
+      await api.unpublishArtifact("agents", name);
+      toast.success(`Unpublished agent "${name}".`);
+      setReloadKey((key) => key + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyAgent(null);
+    }
+  }
 
   const filtered = query
     ? agents.filter((a) => a.name.toLowerCase().includes(query.toLowerCase()))
@@ -124,19 +166,21 @@ export default function AgentsPage() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filtered.map((a) => (
-            <a
+            <article
               key={a.name}
-              href={aregistryUrl("agents", a.name)}
-              target="_blank"
-              rel="noreferrer"
-              title="Open in the agent registry"
-              className="panel p-4 block hover:border-[var(--surface-border-strong)] transition-colors group"
+              className="panel p-4 hover:border-[var(--surface-border-strong)] transition-colors group"
             >
               <div className="flex items-baseline justify-between gap-2">
-                <h2 className="text-sm font-mono font-semibold text-[var(--ink-50)] flex items-center gap-1.5">
+                <a
+                  href={aregistryUrl("agents", a.name)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open in the agent registry"
+                  className="text-sm font-mono font-semibold text-[var(--ink-50)] flex items-center gap-1.5"
+                >
                   {a.name}
                   <ExternalLink className="w-3.5 h-3.5 text-[var(--ink-500)] opacity-0 group-hover:opacity-100" />
-                </h2>
+                </a>
                 <span className="text-[11px] font-mono text-[var(--ink-500)]">v{a.version}</span>
               </div>
               <p className="text-sm text-[var(--ink-300)] mt-1">{a.description}</p>
@@ -148,9 +192,53 @@ export default function AgentsPage() {
                 <dt className="label-eyebrow">Language</dt>
                 <dd className="text-[var(--ink-100)]">{a.language}</dd>
               </dl>
-            </a>
+              {view === "mine" && (
+                <div className="mt-4 flex justify-end gap-2 border-t border-[var(--surface-border)] pt-3">
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs"
+                    disabled={busyAgent?.name === a.name}
+                    onClick={() => editAgent(a.name)}
+                  >
+                    {busyAgent?.name === a.name && busyAgent.action === "edit" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Pencil className="h-3.5 w-3.5" />
+                    )}
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs text-red-300"
+                    disabled={busyAgent?.name === a.name}
+                    onClick={() => unpublishAgent(a.name)}
+                  >
+                    {busyAgent?.name === a.name && busyAgent.action === "delete" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Unpublish
+                  </button>
+                </div>
+              )}
+            </article>
           ))}
         </div>
+      )}
+
+      {editing && (
+        <ArtifactEditor
+          kind="Agent"
+          open
+          initialDocument={editing.manifest}
+          onClose={() => setEditing(null)}
+          onCreated={(name) => {
+            toast.success(`Published a new version of agent "${name}".`);
+            setEditing(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
       )}
     </div>
   );

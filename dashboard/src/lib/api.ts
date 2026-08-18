@@ -140,6 +140,14 @@ export function registryAgentsPath(mine = false): string {
   return `/registry/agents${mine ? "?mine=true" : ""}`;
 }
 
+export function registryAgentManifestPath(name: string): string {
+  return `/registry/agents/${encodeURIComponent(name)}/manifest`;
+}
+
+export function registryArtifactPath(plural: string, name: string): string {
+  return `/registry/${encodeURIComponent(plural)}/${encodeURIComponent(name)}`;
+}
+
 // Turn a failed response into a short, human-readable message. Crucially, this
 // never surfaces a raw HTML error page (e.g. a Cloudflare 502 served when the
 // backend is slow or restarting) — those dump hundreds of lines of markup into
@@ -641,6 +649,8 @@ export const api = {
   listRegistryPrompts: () => apiFetch<RegistryItem[]>("/registry/prompts"),
   listRegistryMcpServers: () => apiFetch<RegistryItem[]>("/registry/mcp-servers"),
   listRegistryAgents: (mine = false) => apiFetch<RegistryItem[]>(registryAgentsPath(mine)),
+  getOwnedRegistryAgent: (name: string) =>
+    apiFetch<Record<string, unknown>>(registryAgentManifestPath(name)),
 
   // Generic registry list (used by the artifact editor's reference pickers).
   listRegistry: (plural: string) => apiFetch<RegistryItem[]>(`/registry/${plural}`),
@@ -655,6 +665,8 @@ export const api = {
       `/registry/${plural}${overwrite ? "?overwrite=true" : ""}`,
       { method: "POST", body: JSON.stringify(manifest) }
     ),
+  unpublishArtifact: (plural: string, name: string) =>
+    apiFetch<{ deleted: string }>(registryArtifactPath(plural, name), { method: "DELETE" }),
 
   // ── Authoring: custom skills ──────────────────────────────────────
   createSkill: (input: CreateSkillInput) =>

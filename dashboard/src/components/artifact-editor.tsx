@@ -28,12 +28,12 @@ import { api } from "@/lib/api";
 import { Select } from "@/components/ui/select";
 import { dump as toYAML, parse as parseYAML } from "@/lib/yaml";
 import {
+  editorDocument,
   fieldsFor,
   getPath,
   lintManifest,
   pluralForKind,
   setPath,
-  starter,
   type Field,
 } from "@/lib/registry-schemas";
 
@@ -82,15 +82,19 @@ export default function ArtifactEditor({
   open,
   onClose,
   onCreated,
+  initialDocument,
 }: {
   kind: string;
   open: boolean;
   onClose: () => void;
   onCreated: (name: string) => void;
+  initialDocument?: Doc;
 }) {
   const plural = useMemo(() => pluralForKind(kind), [kind]);
   const fields = useMemo(() => fieldsFor(kind), [kind]);
-  const [doc, setDoc] = useState<Doc>(() => starter(kind));
+  const editing = initialDocument != null;
+  const originalName = String(getPath(initialDocument, "metadata.name") ?? "").trim();
+  const [doc, setDoc] = useState<Doc>(() => editorDocument(kind, initialDocument));
   const [format, setFormat] = useState<Format>("yaml");
   const [raw, setRaw] = useState<string>("");
   const [labelRows, setLabelRows] = useState<[string, string][]>([]);
@@ -103,7 +107,7 @@ export default function ArtifactEditor({
 
   useEffect(() => {
     if (!open) return;
-    const d = starter(kind);
+    const d = editorDocument(kind, initialDocument);
     setDoc(d);
     setRaw(serialize(d, format));
     setLabelRows(rowsFromDoc(d));
@@ -111,7 +115,7 @@ export default function ArtifactEditor({
     setSubmitErr(null);
     setConflict(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, kind]);
+  }, [open, kind, initialDocument]);
 
   // The user's teams — optional grouping. Free-text is still allowed, so a
   // catalog blip never blocks authoring.
@@ -185,10 +189,11 @@ export default function ArtifactEditor({
   }
 
   const name = String(getPath(doc, "metadata.name") ?? "").trim();
+  const nameChanged = editing && name !== originalName;
   const lint = useMemo(() => (parseErr ? [] : lintManifest(doc, kind)), [doc, kind, parseErr]);
   const lintErrors = lint.filter((i) => i.level === "error");
   const lintWarnings = lint.filter((i) => i.level === "warning");
-  const canSubmit = !!name && !parseErr && lintErrors.length === 0 && !submitting;
+  const canSubmit = !!name && !nameChanged && !parseErr && lintErrors.length === 0 && !submitting;
 
   const team = teamOf(labelRows);
   function onTeam(value: string) {
@@ -228,7 +233,7 @@ export default function ArtifactEditor({
         {/* Header */}
         <div className="flex items-center justify-between px-6 h-16 border-b shrink-0" style={{ borderColor: "var(--border-subtle)" }}>
           <div>
-            <div className="label-eyebrow">New artifact</div>
+            <div className="label-eyebrow">{editing ? "Edit artifact" : "New artifact"}</div>
             <h2 className="font-serif text-xl font-semibold leading-tight" style={{ color: "var(--ink-strong)" }}>
               {kind}
             </h2>
@@ -279,6 +284,7 @@ export default function ArtifactEditor({
                   f={f}
                   value={String(getPath(doc, f.path) ?? "")}
                   onChange={(v) => onField(f.path, v)}
+                  disabled={editing && f.path === "metadata.name"}
                 />
               );
             })}
@@ -404,13 +410,15 @@ export default function ArtifactEditor({
           <span className="text-[12px]" style={{ color: submitErr || lintErrors.length ? "var(--error-ink)" : "var(--ink-muted)" }}>
             {submitErr
               ? submitErr
+              : nameChanged
+                ? "An existing agent's name cannot be changed — restore the published name to continue"
               : lintErrors.length
                 ? `${lintErrors.length} validation ${lintErrors.length === 1 ? "issue" : "issues"} — fix before publishing`
                 : "Published to your tenant · the name must be unique within it"}
           </span>
           <div className="flex items-center gap-2">
             <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            {conflict && (
+            {!editing && conflict && (
               <button
                 className="btn-secondary"
                 disabled={submitting}
@@ -420,9 +428,9 @@ export default function ArtifactEditor({
                 Publish as new version
               </button>
             )}
-            <button className="btn-primary" disabled={!canSubmit} style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={() => submit()}>
+            <button className="btn-primary" disabled={!canSubmit} style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={() => submit(editing)}>
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              Publish {kind}
+              {editing ? "Publish new version" : `Publish ${kind}`}
             </button>
           </div>
         </div>
