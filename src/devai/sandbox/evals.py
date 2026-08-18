@@ -108,9 +108,7 @@ class EvalRun:
     @classmethod
     def from_dict(cls, body: dict[str, Any]) -> EvalRun:
         known = set(CaseResult.__slots__)
-        results = [
-            CaseResult(**{k: v for k, v in r.items() if k in known}) for r in body.get("results") or []
-        ]
+        results = [CaseResult(**{k: v for k, v in r.items() if k in known}) for r in body.get("results") or []]
         return cls(
             id=str(body.get("id") or ""),
             sandbox_id=str(body.get("sandbox_id") or ""),

@@ -287,3 +287,18 @@ async def test_service_bearer_short_configured_token_never_matches() -> None:
     req = _make_bearer_request("Bearer short", "short")
     principal = await extract_principal(req)
     assert principal is None
+
+
+def test_user_scope_id_is_tenant_qualified() -> None:
+    tenant_a = Principal(email="same@example.com", uid="shared-uid", tenant_id="tenant-a")
+    tenant_b = Principal(email="same@example.com", uid="shared-uid", tenant_id="tenant-b")
+
+    assert tenant_a.user_scope_id == "tenant-a:shared-uid"
+    assert tenant_b.user_scope_id == "tenant-b:shared-uid"
+    assert tenant_a.user_scope_id != tenant_b.user_scope_id
+
+
+def test_user_scope_id_keeps_legacy_shape_without_tenant() -> None:
+    principal = Principal(email="local@example.com", uid="local-uid")
+
+    assert principal.user_scope_id == "local-uid"

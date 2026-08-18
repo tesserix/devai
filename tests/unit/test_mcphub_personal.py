@@ -116,6 +116,35 @@ async def test_unknown_email_no_tools(legs):
     assert await legs.tool_descriptors("not-an-email") == []
 
 
+async def test_same_email_in_two_tenants_gets_separate_personal_leg_cache(monkeypatch):
+    from devai.identity import Principal
+
+    monkeypatch.setattr(personal_mod, "check_external_endpoint", lambda url: None)
+    monkeypatch.setattr(personal_mod, "DownstreamConnection", _FakeConn)
+    tenant_a = Principal(email="same@example.com", uid="shared", tenant_id="tenant-a")
+    tenant_b = Principal(email="same@example.com", uid="shared", tenant_id="tenant-b")
+
+    async def fake_resolve(self, principal):  # noqa: ANN001
+        return [
+            {
+                "instance_id": principal.tenant_id,
+                "provider": "streamable_http",
+                "mcp_url": "https://api.acme.dev/mcp",
+                "mcp_token": f"token-{principal.tenant_id}",
+                "mcp_auth_header": "x-api-key",
+            }
+        ]
+
+    monkeypatch.setattr(PersonalLegs, "_resolve_connectors", fake_resolve)
+    personal = PersonalLegs(connect_timeout=1.0, ttl=60.0)
+
+    tools_a = await personal.tool_descriptors(tenant_a)
+    tools_b = await personal.tool_descriptors(tenant_b)
+
+    assert [tool["name"] for tool in tools_a] == ["usr-tenant-a__do_thing"]
+    assert [tool["name"] for tool in tools_b] == ["usr-tenant-b__do_thing"]
+
+
 # ── hub integration ────────────────────────────────────────────────────────
 
 

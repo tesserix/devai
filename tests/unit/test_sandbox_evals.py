@@ -175,9 +175,7 @@ async def test_a_suite_runs_every_case_and_summarises_the_outcome() -> None:
 async def test_each_case_keeps_the_trace_it_was_judged_on() -> None:
     llm = _ScriptedLLM([LLMResponse(text="ok")])
 
-    run = await _runner(llm).run(
-        _record(), [EvalCase(name="c1", input="go")], triggered_by="sam@example.com"
-    )
+    run = await _runner(llm).run(_record(), [EvalCase(name="c1", input="go")], triggered_by="sam@example.com")
 
     assert run.results[0].invocation_id.startswith("inv-")
 

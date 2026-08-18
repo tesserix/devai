@@ -112,6 +112,20 @@ class Principal:
         """The team a new task is attributed to when the caller didn't pick one."""
         return self.team_ids[0] if self.team_ids else ""
 
+    @property
+    def user_scope_id(self) -> str:
+        """Stable settings/usage owner key, qualified by the auth tenant.
+
+        Identity-provider subjects are only guaranteed unique inside their
+        issuer/tenant. Keeping the historical unqualified shape when no tenant
+        exists preserves local and service identities, while authenticated
+        tenant principals cannot collide with the same subject in another
+        tenant.
+        """
+        subject = (self.uid or self.email).strip()
+        tenant = self.tenant_id.strip()
+        return f"{tenant}:{subject}" if tenant and subject else subject
+
     @classmethod
     def system(cls) -> Principal:
         """Fallback principal for code paths with no real caller (cron, internal jobs)."""

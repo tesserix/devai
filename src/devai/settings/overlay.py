@@ -63,7 +63,8 @@ class PrincipalSettingsOverlay:
     @property
     def mcp_servers(self) -> list[dict[str, Any]]:
         """Per-user MCP server connectors (name/url/token) for runner resolution."""
-        return object.__getattribute__(self, "_mcp_servers")
+        servers: list[dict[str, Any]] = object.__getattribute__(self, "_mcp_servers")
+        return servers
 
     @property
     def overlaid_attrs(self) -> list[str]:
@@ -102,15 +103,21 @@ async def build_overlay(
         lookups.append((Scope.ORG, org_id))
     for team_id in getattr(principal, "team_ids", []) or []:
         lookups.append((Scope.TEAM, team_id))
-    # User rows may be keyed by uid (GIP) or email (local auth / run records
-    # that only carry triggered_by). Look up BOTH when they differ — email
-    # first so a uid-keyed row (saved by the richer principal) wins.
+    # Tenant principals use one tenant-qualified subject key. Never fall back
+    # to an unqualified uid/email here: the same subject can exist in another
+    # tenant. Tenantless/local principals retain the legacy uid/email lookup.
     uid = getattr(principal, "uid", "") or ""
     email = getattr(principal, "email", "") or ""
-    if email and email != uid:
-        lookups.append((Scope.USER, email))
-    if uid:
-        lookups.append((Scope.USER, uid))
+    tenant_id = getattr(principal, "tenant_id", "") or ""
+    if tenant_id:
+        user_scope_id = getattr(principal, "user_scope_id", "") or f"{tenant_id}:{uid or email}"
+        if user_scope_id:
+            lookups.append((Scope.USER, user_scope_id))
+    else:
+        if email and email != uid:
+            lookups.append((Scope.USER, email))
+        if uid:
+            lookups.append((Scope.USER, uid))
 
     # Collect connectors per (key, instance) with most-specific-wins.
     merged: dict[tuple[str, str], Connector] = {}
@@ -123,7 +130,7 @@ async def build_overlay(
         # only carry the email. Match user connectors by email (scope_id OR
         # updated_by) so per-user LLM resolves at run time. Applied LAST so it
         # wins (it's the user's own, most-specific scope).
-        if email and hasattr(service, "list_user_connectors_by_email"):
+        if not tenant_id and email and hasattr(service, "list_user_connectors_by_email"):
             for c in await service.list_user_connectors_by_email(email):
                 if c.enabled:
                     merged[(c.connector_key, c.instance_id)] = c

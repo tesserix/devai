@@ -740,6 +740,9 @@ class Settings(BaseSettings):
     llm_gateway_base_url: str = ""  # e.g. http://ai-gateway.agentgateway-system.svc.cluster.local:8080/v1
     llm_gateway_api_key: str = ""  # optional; gateway-enforced auth token
     llm_gateway_model: str = ""  # default model alias the gateway resolves
+    # Fail closed at the Settings boundary when direct provider egress is not
+    # permitted. Users may configure only the `gateway` connector in this mode.
+    llm_gateway_required: bool = False
 
     # --- vertex adapter ---
     # Vertex AI (Gemini) over REST with Application Default Credentials —

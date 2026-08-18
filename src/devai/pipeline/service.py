@@ -197,6 +197,8 @@ class PipelineService:
                         cost_usd=cost,
                         duration_ms=0.0,
                         triggered_by=email,
+                        tenant_id=str(envelope.get("tenant_id") or ""),
+                        user_id=str(envelope.get("user_id") or email),
                         agent=str(envelope.get("agent") or ""),
                         run_id=run_id,
                     )
@@ -212,6 +214,9 @@ class PipelineService:
                     tok_in=tok_in,
                     tok_out=tok_out,
                     cost=cost,
+                    tenant_id=str(envelope.get("tenant_id") or ""),
+                    user_id=str(envelope.get("user_id") or email),
+                    triggered_by=email,
                 )
             )
             if envelope.get("trial") and email:
@@ -226,7 +231,17 @@ class PipelineService:
 
     @staticmethod
     async def _persist_turn_execution(
-        *, run_id: str, agent: str, provider: str, model: str, tok_in: int, tok_out: int, cost: float
+        *,
+        run_id: str,
+        agent: str,
+        provider: str,
+        model: str,
+        tok_in: int,
+        tok_out: int,
+        cost: float,
+        tenant_id: str,
+        user_id: str,
+        triggered_by: str,
     ) -> None:
         try:
             from devai.services.database import get_global_db
@@ -243,6 +258,9 @@ class PipelineService:
                 tokens_output=tok_out,
                 cost_usd=cost,
                 duration_ms=0.0,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                triggered_by=triggered_by,
             )
         except Exception:  # noqa: BLE001 — analytics persistence is best-effort
             logger.debug("turn execution persistence failed", exc_info=True)

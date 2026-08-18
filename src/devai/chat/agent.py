@@ -90,6 +90,8 @@ class _ChatUsageCallback:
             model = getattr(self._agent.config, "claude_model", "") or "claude"
             principal = getattr(self._agent, "_principal", None)
             email = getattr(principal, "email", "") if principal else ""
+            tenant_id = getattr(principal, "tenant_id", "") if principal else ""
+            user_id = getattr(principal, "uid", "") if principal else ""
             cost = estimate_cost("anthropic", model, tok_in, tok_out)
             import asyncio
             import datetime
@@ -104,6 +106,8 @@ class _ChatUsageCallback:
                 cost_usd=cost,
                 duration_ms=0.0,
                 triggered_by=email,
+                tenant_id=tenant_id,
+                user_id=user_id or email,
                 agent="chat",
                 status="ok",
             )
@@ -204,7 +208,7 @@ class DevAIChatAgent:
 
                 svc = get_settings_service()
                 if svc is not None:
-                    overlay = await PrincipalSCMResolver(self.config, svc).settings_for_email(email)
+                    overlay = await PrincipalSCMResolver(self.config, svc).settings_for_principal(self._principal)
                     return create_scm_client(overlay)
             except Exception:  # noqa: BLE001
                 logger.debug("chat: per-user SCM resolution failed — using platform client", exc_info=True)

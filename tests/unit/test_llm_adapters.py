@@ -288,6 +288,38 @@ def test_factory_explicit_provider_override_wins_over_settings():
     assert a.provider_name == "noop"
 
 
+def test_gateway_sends_attribution_as_headers_not_openai_parameters():
+    from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
+
+    adapter = object.__new__(OpenAILLMAdapter)
+    adapter.provider_name = "gateway"
+    adapter.default_model = "devai-default"
+    request = LLMRequest(
+        messages=[LLMMessage(role=LLMRole.USER, content="hello")],
+        extra={
+            "agent": "reviewer",
+            "run_id": "run-1",
+            "triggered_by": "same@example.com",
+            "tenant_id": "tenant-a",
+            "user_id": "shared-uid",
+        },
+    )
+
+    kwargs = adapter._build_kwargs(request)
+
+    assert "agent" not in kwargs
+    assert "run_id" not in kwargs
+    assert "triggered_by" not in kwargs
+    assert "tenant_id" not in kwargs
+    assert "user_id" not in kwargs
+    assert kwargs["extra_headers"] == {
+        "x-devai-tenant-id": "tenant-a",
+        "x-devai-user-id": "shared-uid",
+        "x-devai-run-id": "run-1",
+        "x-devai-agent": "reviewer",
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Dataclass round-trip
 # ─────────────────────────────────────────────────────────────────────

@@ -173,6 +173,9 @@ class Database:
         cost_usd: float,
         duration_ms: float,
         status: str = "ok",
+        tenant_id: str = "",
+        user_id: str = "",
+        triggered_by: str = "",
     ) -> None:
         """Persist one LLM call as a completed agent_executions row.
 
@@ -186,8 +189,9 @@ class Database:
             await self.pool.execute(
                 """INSERT INTO agent_executions
                    (run_id, agent_name, status, started_at, completed_at, duration_ms,
-                    provider, model, tokens_input, tokens_output, llm_cost_usd)
-                   VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6, $7, $8, $9)""",
+                    provider, model, tokens_input, tokens_output, llm_cost_usd,
+                    tenant_id, user_id, triggered_by)
+                   VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
                 run_id,
                 agent_name or "unknown",
                 "completed" if status == "ok" else "failed",
@@ -197,6 +201,9 @@ class Database:
                 int(tokens_input),
                 int(tokens_output),
                 float(cost_usd),
+                tenant_id,
+                user_id,
+                triggered_by,
             )
         except Exception:  # noqa: BLE001 — accounting must never break an LLM call
             logger.debug("record_llm_call failed (agent=%s)", agent_name, exc_info=True)
@@ -608,7 +615,9 @@ class Database:
     # best-effort: callers wrap in try/except so a missing table → empty.
     # =========================================================================
 
-    async def analytics_agent_stats(self, days: int = 30) -> list[dict[str, Any]]:
+    async def analytics_agent_stats(
+        self, days: int = 30, *, tenant_id: str = "", user_id: str = ""
+    ) -> list[dict[str, Any]]:
         """Per-agent executions, avg duration, tokens, cost, failures."""
         rows = await self.pool.fetch(
             """SELECT agent_name,
@@ -620,13 +629,19 @@ class Database:
                       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)::int AS failures
                FROM agent_executions
                WHERE started_at >= NOW() - make_interval(days => $1)
+                 AND ($2 = '' OR tenant_id = $2)
+                 AND ($3 = '' OR user_id = $3)
                GROUP BY agent_name
                ORDER BY executions DESC""",
             days,
+            tenant_id,
+            user_id,
         )
         return [dict(r) for r in rows]
 
-    async def analytics_llm_cost_by_model(self, days: int = 30) -> list[dict[str, Any]]:
+    async def analytics_llm_cost_by_model(
+        self, days: int = 30, *, tenant_id: str = "", user_id: str = ""
+    ) -> list[dict[str, Any]]:
         """Calls, tokens, and USD cost grouped by provider/model."""
         rows = await self.pool.fetch(
             """SELECT COALESCE(provider, 'unknown')          AS provider,
@@ -637,13 +652,19 @@ class Database:
                       COALESCE(SUM(llm_cost_usd), 0)::float   AS cost_usd
                FROM agent_executions
                WHERE started_at >= NOW() - make_interval(days => $1)
+                 AND ($2 = '' OR tenant_id = $2)
+                 AND ($3 = '' OR user_id = $3)
                GROUP BY provider, model
                ORDER BY cost_usd DESC NULLS LAST""",
             days,
+            tenant_id,
+            user_id,
         )
         return [dict(r) for r in rows]
 
-    async def analytics_llm_cost_timeseries(self, days: int = 30) -> list[dict[str, Any]]:
+    async def analytics_llm_cost_timeseries(
+        self, days: int = 30, *, tenant_id: str = "", user_id: str = ""
+    ) -> list[dict[str, Any]]:
         """Daily LLM cost + token totals."""
         rows = await self.pool.fetch(
             """SELECT to_char(date_trunc('day', started_at), 'YYYY-MM-DD') AS date,
@@ -651,8 +672,12 @@ class Database:
                       COALESCE(SUM(tokens_input + tokens_output), 0)::bigint AS tokens
                FROM agent_executions
                WHERE started_at >= NOW() - make_interval(days => $1)
+                 AND ($2 = '' OR tenant_id = $2)
+                 AND ($3 = '' OR user_id = $3)
                GROUP BY 1 ORDER BY 1""",
             days,
+            tenant_id,
+            user_id,
         )
         return [dict(r) for r in rows]
 

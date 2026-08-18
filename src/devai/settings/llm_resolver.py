@@ -149,13 +149,17 @@ class PrincipalLLMResolver:
         nothing configured). Lets callers build adapters for a DIFFERENT
         provider than the user's default while still honoring their keys —
         e.g. a specialization that pins ``llm_provider`` per role."""
-        if self._service is None or not email or "@" not in email:
+        from devai.identity import Principal
+
+        return await self.settings_for_principal(Principal(uid="", email=email))
+
+    async def settings_for_principal(self, principal: Principal | None) -> Any:
+        if self._service is None or principal is None:
             return self._base
         try:
-            from devai.identity import Principal
             from devai.settings.overlay import build_overlay
 
-            return await build_overlay(self._base, Principal(uid="", email=email), self._service)
+            return await build_overlay(self._base, principal, self._service)
         except Exception:  # noqa: BLE001
             logger.warning("settings: overlay fetch failed — using base settings", exc_info=True)
             return self._base
@@ -174,6 +178,13 @@ class PrincipalLLMResolver:
         if not relevant:
             return self._base, False
         return overlay, True
+
+    async def llm_overlay_for_principal(self, principal: Principal | None) -> tuple[Any, bool]:
+        overlay = await self.settings_for_principal(principal)
+        if overlay is self._base:
+            return self._base, False
+        relevant = set(getattr(overlay, "overlaid_attrs", ()) or ()) & _llm_attrs()
+        return (overlay, True) if relevant else (self._base, False)
 
 
 __all__ = ["PrincipalLLMResolver"]
