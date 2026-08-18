@@ -25,14 +25,10 @@ permissions:
   contents: read
   packages: write
   security-events: write
-  id-token: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}/devai-sre
-  GCP_PROJECT_ID: tesseracthub-480811
-  GKE_CLUSTER: tesseract-prod-in-gke
-  GKE_REGION: asia-south1
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -94,15 +90,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Authenticate to GCP (WIF)
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        id: auth_wif
-        uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: projects/849928263410/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-actions@tesseracthub-480811.iam.gserviceaccount.com
-          project_id: ${{ env.GCP_PROJECT_ID }}
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -132,18 +119,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0},mode=max', steps.cache.outputs.ref) || '' }}
-
-      - name: Get GKE credentials
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
-        uses: google-github-actions/get-gke-credentials@v3
-        with:
-          cluster_name: ${{ env.GKE_CLUSTER }}
-          location: ${{ env.GKE_REGION }}
-          project_id: ${{ env.GCP_PROJECT_ID }}
-
-      - name: Restart SRE deployment
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_wif.outcome == 'success'
-        run: kubectl rollout restart deployment/devai-sre -n devai
 
       # CHART-12: gating scan (exit-code 1 on CRITICAL/HIGH), trivy-action pinned
       # to a commit SHA (v0.36.0) instead of mutable @master.
