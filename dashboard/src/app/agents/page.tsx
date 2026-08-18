@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ExternalLink, Plus, Users } from "lucide-react";
 import { aregistryUrl } from "@/lib/aregistry";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
+import { api } from "@/lib/api";
 
 type Agent = {
   name: string;
@@ -23,17 +24,28 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<"all" | "mine">("all");
 
   useEffect(() => {
-    fetch("/api/registry/agents")
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
-        return r.json();
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setAgents([]);
+    api
+      .listRegistryAgents(view === "mine")
+      .then((data) => {
+        if (!cancelled) setAgents(data as Agent[]);
       })
-      .then((data: Agent[]) => setAgents(data))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
 
   const filtered = query
     ? agents.filter((a) => a.name.toLowerCase().includes(query.toLowerCase()))
@@ -70,6 +82,29 @@ export default function AgentsPage() {
 
       <GuidancePanel id="agents" />
 
+      <div className="inline-flex rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] p-1" aria-label="Agent view">
+        <button
+          type="button"
+          aria-pressed={view === "all"}
+          onClick={() => setView("all")}
+          className={`rounded px-3 py-1.5 text-sm transition-colors ${
+            view === "all" ? "bg-indigo-600 text-white" : "text-[var(--ink-300)] hover:text-[var(--ink-100)]"
+          }`}
+        >
+          All agents
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === "mine"}
+          onClick={() => setView("mine")}
+          className={`rounded px-3 py-1.5 text-sm transition-colors ${
+            view === "mine" ? "bg-indigo-600 text-white" : "text-[var(--ink-300)] hover:text-[var(--ink-100)]"
+          }`}
+        >
+          My agents
+        </button>
+      </div>
+
       {error && (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">
           {error}
@@ -81,7 +116,9 @@ export default function AgentsPage() {
       ) : filtered.length === 0 ? (
         <div className="text-sm text-[var(--ink-500)]">
           {agents.length === 0
-            ? "Registry returned 0 agents. Make sure the registry-bootstrap Job has completed."
+            ? view === "mine"
+              ? "You have not published any agents yet."
+              : "Registry returned 0 agents. Make sure the registry-bootstrap Job has completed."
             : `No agents match "${query}".`}
         </div>
       ) : (

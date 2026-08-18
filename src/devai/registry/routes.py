@@ -237,10 +237,18 @@ async def get_mcp_server(request: Request, name: str) -> dict[str, Any]:
 
 
 @router.get("/agents")
-async def list_agents(request: Request) -> list[dict[str, Any]]:
+async def list_agents(request: Request, mine: bool = False) -> list[dict[str, Any]]:
     client = _client(request)
     try:
-        items = await _visible_items(request, client.list_agents)
+        if mine:
+            principal = await require_principal(request)
+            owner_id = _owner_id(principal)
+            if not owner_id:
+                raise HTTPException(status_code=401, detail="authenticated principal has no stable subject")
+            loaded = await asyncio.to_thread(client.list_agents)
+            items = [item for item in loaded if _labels(item).get(_OWNER_LABEL) == owner_id]
+        else:
+            items = await _visible_items(request, client.list_agents)
         return [_to_dict(a) for a in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e

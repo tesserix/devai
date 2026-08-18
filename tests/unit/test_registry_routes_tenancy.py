@@ -167,6 +167,36 @@ def test_owner_can_list_read_and_version_private_agent() -> None:
     assert registry.items["my-agent"]["spec"]["systemPrompt"] == "Updated by the owner."
 
 
+def test_mine_lists_only_agents_owned_by_the_authenticated_user() -> None:
+    client, registry = _client()
+    alice_tenant_a = _headers("alice", "tenant-a")
+    bob_tenant_a = _headers("bob", "tenant-a")
+    alice_tenant_b = _headers("alice", "tenant-b")
+
+    assert client.post("/api/registry/agents", headers=alice_tenant_a, json=_manifest("alice-agent")).status_code == 201
+    assert client.post("/api/registry/agents", headers=bob_tenant_a, json=_manifest("bob-agent")).status_code == 201
+    assert (
+        client.post("/api/registry/agents", headers=alice_tenant_b, json=_manifest("other-tenant-agent")).status_code
+        == 201
+    )
+    registry.items["platform-agent"] = _manifest("platform-agent")
+
+    alice_names = {row["name"] for row in client.get("/api/registry/agents?mine=true", headers=alice_tenant_a).json()}
+    bob_names = {row["name"] for row in client.get("/api/registry/agents?mine=true", headers=bob_tenant_a).json()}
+
+    assert alice_names == {"alice-agent"}
+    assert bob_names == {"bob-agent"}
+
+
+def test_mine_requires_an_authenticated_user() -> None:
+    client, registry = _client()
+    registry.items["platform-agent"] = _manifest("platform-agent")
+
+    response = client.get("/api/registry/agents?mine=true")
+
+    assert response.status_code == 401
+
+
 def test_anonymous_publish_is_rejected() -> None:
     client, _ = _client()
     assert client.post("/api/registry/agents", json=_manifest("anonymous")).status_code == 401

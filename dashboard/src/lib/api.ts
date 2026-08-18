@@ -136,6 +136,10 @@ async function apiFetch<T>(path: string, opts?: RequestInit & { soft?: boolean }
   return res.json();
 }
 
+export function registryAgentsPath(mine = false): string {
+  return `/registry/agents${mine ? "?mine=true" : ""}`;
+}
+
 // Turn a failed response into a short, human-readable message. Crucially, this
 // never surfaces a raw HTML error page (e.g. a Cloudflare 502 served when the
 // backend is slow or restarting) — those dump hundreds of lines of markup into
@@ -636,7 +640,7 @@ export const api = {
   listRegistrySkills: () => apiFetch<RegistryItem[]>("/registry/skills"),
   listRegistryPrompts: () => apiFetch<RegistryItem[]>("/registry/prompts"),
   listRegistryMcpServers: () => apiFetch<RegistryItem[]>("/registry/mcp-servers"),
-  listRegistryAgents: () => apiFetch<RegistryItem[]>("/registry/agents"),
+  listRegistryAgents: (mine = false) => apiFetch<RegistryItem[]>(registryAgentsPath(mine)),
 
   // Generic registry list (used by the artifact editor's reference pickers).
   listRegistry: (plural: string) => apiFetch<RegistryItem[]>(`/registry/${plural}`),
