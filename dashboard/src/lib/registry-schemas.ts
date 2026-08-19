@@ -24,6 +24,7 @@ export interface Field {
   placeholder?: string;
   help?: string;
   options?: string[];
+  optionLabels?: Record<string, string>;
   required?: boolean;
   mono?: boolean;
   min?: number;
@@ -50,6 +51,8 @@ const AGENT_MODEL_PROVIDER_OPTIONS = ["anthropic", "openai", "google", "vertex_g
 const AGENT_RISK_LEVEL_OPTIONS = ["low", "medium", "high", "critical"];
 const AGENT_MODEL_PROVIDERS = new Set([...AGENT_MODEL_PROVIDER_OPTIONS, "claude", "gemini", "vertex"]);
 const AGENT_RISK_LEVELS = new Set(AGENT_RISK_LEVEL_OPTIONS);
+export const AGENT_RUNTIME_FIELD = "metadata.labels.devai.io/runtime";
+const AGENT_RUNTIME_LABEL = "devai.io/runtime";
 
 // Spec fields per kind.
 const SPEC: Record<string, Field[]> = {
@@ -127,6 +130,17 @@ const SPEC: Record<string, Field[]> = {
   Agent: [
     { path: "spec.title", label: "Title", type: "text", placeholder: "On-Call Responder", required: true },
     { path: "spec.description", label: "Description", type: "textarea", placeholder: "What the agent does autonomously." },
+    {
+      path: AGENT_RUNTIME_FIELD,
+      label: "Execution runtime",
+      type: "select",
+      options: ["job", "kagent"],
+      optionLabels: {
+        job: "On-demand Job",
+        kagent: "Substrate Actor (gated)",
+      },
+      help: "Jobs are isolated and available now. Substrate publishes devai.io/runtime=kagent and remains fail-closed until the platform isolation gate passes.",
+    },
     {
       path: "spec.model", label: "Model", type: "group", help: "The LLM this agent reasons with.", children: [
         { path: "provider", label: "Provider", type: "select", options: ["", ...AGENT_MODEL_PROVIDER_OPTIONS], required: true },
@@ -312,6 +326,10 @@ export function lintManifest(doc: unknown, expectedKind: string): LintIssue[] {
       if (v == null || (typeof v === "string" && !v.trim())) err(`missing required field: ${f.path} (${f.label})`);
     }
     if (expectedKind === "Agent") {
+      const runtime = (meta?.labels as Record<string, unknown> | undefined)?.[AGENT_RUNTIME_LABEL];
+      if (runtime != null && runtime !== "" && runtime !== "kagent") {
+        err("metadata.labels.devai.io/runtime must be absent or kagent");
+      }
       const systemPrompt = spec.systemPrompt;
       const promptRef = spec.promptRef;
       if (systemPrompt != null && typeof systemPrompt !== "string") err("spec.systemPrompt must be a string");
@@ -468,6 +486,34 @@ export function setPath(obj: Record<string, unknown>, path: string, value: unkno
     cur = cur[k] as Record<string, unknown>;
   }
   cur[keys[keys.length - 1]] = value;
+  return clone;
+}
+
+export function agentRuntimeTarget(doc: Record<string, unknown>): "job" | "kagent" {
+  const metadata = doc.metadata;
+  const labels = metadata && typeof metadata === "object"
+    ? (metadata as Record<string, unknown>).labels
+    : undefined;
+  return labels && typeof labels === "object" && (labels as Record<string, unknown>)[AGENT_RUNTIME_LABEL] === "kagent"
+    ? "kagent"
+    : "job";
+}
+
+export function setAgentRuntimeTarget(
+  doc: Record<string, unknown>,
+  target: unknown,
+): Record<string, unknown> {
+  const clone = structuredClone(doc);
+  const metadata = clone.metadata && typeof clone.metadata === "object"
+    ? clone.metadata as Record<string, unknown>
+    : {};
+  clone.metadata = metadata;
+  const labels = metadata.labels && typeof metadata.labels === "object" && !Array.isArray(metadata.labels)
+    ? metadata.labels as Record<string, unknown>
+    : {};
+  metadata.labels = labels;
+  if (target === "kagent") labels[AGENT_RUNTIME_LABEL] = "kagent";
+  else delete labels[AGENT_RUNTIME_LABEL];
   return clone;
 }
 

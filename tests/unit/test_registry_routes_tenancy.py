@@ -383,6 +383,26 @@ def test_user_cannot_select_kagent_runtime() -> None:
     assert "unsafe-runtime" not in registry.items
 
 
+def test_agent_publish_rejects_unknown_runtime_target() -> None:
+    client, registry = _client()
+    body = _manifest("unknown-runtime", labels={"devai.io/runtime": "other"})
+
+    response = client.post(
+        "/api/registry/agents",
+        headers=_headers("alice", "tenant-a"),
+        json=body,
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": {
+            "code": "invalid_agent_runtime",
+            "message": "metadata.labels.devai.io/runtime must be absent or kagent",
+        }
+    }
+    assert "unknown-runtime" not in registry.items
+
+
 def test_agent_publish_requires_an_effective_system_prompt() -> None:
     client, registry = _client()
     body = _manifest("missing-prompt")

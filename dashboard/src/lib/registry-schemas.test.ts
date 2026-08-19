@@ -1,6 +1,14 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { editorDocument, fieldsFor, lintManifest, pluralForKind, starter } from "./registry-schemas.ts";
+import {
+  agentRuntimeTarget,
+  editorDocument,
+  fieldsFor,
+  lintManifest,
+  pluralForKind,
+  setAgentRuntimeTarget,
+  starter,
+} from "./registry-schemas.ts";
 
 test("user-authored artifacts are private by default and cannot select broader visibility", () => {
   const manifest = starter("Agent");
@@ -87,6 +95,44 @@ test("agent authoring emits typed model limits and risk fields", () => {
   assert.match(messages, /spec\.limits\.maxTurns/);
   assert.match(messages, /spec\.limits\.timeoutSeconds/);
   assert.match(messages, /spec\.riskLevel/);
+});
+
+test("agent runtime target maps the authoring control to the registry label", () => {
+  const manifest = starter("Agent");
+  const runtime = fieldsFor("Agent").find((field) => field.path === "metadata.labels.devai.io/runtime");
+
+  assert.equal(agentRuntimeTarget(manifest), "job");
+  assert.deepEqual(runtime?.options, ["job", "kagent"]);
+
+  const substrate = setAgentRuntimeTarget(manifest, "kagent");
+  assert.equal(agentRuntimeTarget(substrate), "kagent");
+  assert.equal(
+    ((substrate.metadata as Record<string, unknown>).labels as Record<string, string>)["devai.io/runtime"],
+    "kagent",
+  );
+
+  const job = setAgentRuntimeTarget(substrate, "job");
+  assert.equal(agentRuntimeTarget(job), "job");
+  assert.equal(
+    ((job.metadata as Record<string, unknown>).labels as Record<string, string>)["devai.io/runtime"],
+    undefined,
+  );
+});
+
+test("agent runtime lint rejects labels outside the supported execution targets", () => {
+  const manifest = starter("Agent");
+  const metadata = manifest.metadata as Record<string, unknown>;
+  const spec = manifest.spec as Record<string, unknown>;
+  metadata.name = "review-agent";
+  metadata.labels = { "devai.io/runtime": "arbitrary-backend" };
+  spec.title = "Review agent";
+  spec.systemPrompt = "Review the change.";
+  spec.model = { provider: "anthropic", name: "claude-sonnet-4-6", temperature: 0.3 };
+
+  assert.match(
+    lintManifest(manifest, "Agent").map((issue) => issue.message).join("\n"),
+    /devai\.io\/runtime/,
+  );
 });
 
 test("agent evaluation gate requires an immutable suite reference", () => {
