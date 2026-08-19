@@ -186,6 +186,68 @@ class EvaluationRunCreate(EvaluationModel):
         return self
 
 
+ComparisonAxisName = Literal["prompt_version", "model", "agent_version", "tool_config"]
+
+
+def _default_comparison_axes() -> list[ComparisonAxisName]:
+    return ["prompt_version", "model", "agent_version", "tool_config"]
+
+
+class ComparisonCreate(EvaluationModel):
+    baseline_run_id: Annotated[str, Field(min_length=1, max_length=100)]
+    candidate_run_id: Annotated[str, Field(min_length=1, max_length=100)]
+    axes: list[ComparisonAxisName] = Field(
+        default_factory=_default_comparison_axes,
+        min_length=1,
+        max_length=4,
+    )
+
+    @model_validator(mode="after")
+    def distinct_runs_and_axes(self) -> ComparisonCreate:
+        if self.baseline_run_id == self.candidate_run_id:
+            raise ValueError("baseline and candidate eval runs must differ")
+        if len(self.axes) != len(set(self.axes)):
+            raise ValueError("comparison axes must be unique")
+        return self
+
+
+class ComparisonMetric(EvaluationModel):
+    baseline: float
+    candidate: float
+    delta: float
+    percent_delta: float | None = None
+
+
+class ComparisonAxis(EvaluationModel):
+    baseline: Any = None
+    candidate: Any = None
+    changed: bool
+
+
+class ComparisonCase(EvaluationModel):
+    case_id: str
+    baseline_passed: bool
+    candidate_passed: bool
+    baseline_trace_url: str | None = None
+    candidate_trace_url: str | None = None
+
+
+class EvaluationComparison(EvaluationModel):
+    id: str
+    baseline_run_id: str
+    candidate_run_id: str
+    dataset: dict[str, str]
+    metrics: dict[str, ComparisonMetric]
+    axes: dict[ComparisonAxisName, ComparisonAxis]
+    changed_cases: list[ComparisonCase]
+    regressions: list[ComparisonCase]
+    newly_passing: list[ComparisonCase]
+    sample_size: int = Field(ge=0)
+    caveat: str
+    summary: str
+    created_at: str
+
+
 __all__ = [
     "ArtifactVersionRef",
     "DatasetCase",
@@ -194,6 +256,12 @@ __all__ = [
     "EvalSuite",
     "EvalSuiteCreate",
     "EvalThresholds",
+    "ComparisonAxis",
+    "ComparisonAxisName",
+    "ComparisonCase",
+    "ComparisonCreate",
+    "ComparisonMetric",
+    "EvaluationComparison",
     "EvaluationRunCreate",
     "JudgeConfig",
     "JudgeDimension",

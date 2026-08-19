@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from devai.authz import require_principal
 from devai.evaluations.models import (
+    ComparisonCreate,
     DatasetCreate,
     DatasetVersion,
     EvalSuite,
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
+comparison_router = APIRouter(prefix="/api/comparisons", tags=["evaluation-comparisons"])
 
 
 def _service(request: Request) -> EvaluationService:
@@ -201,4 +203,24 @@ async def get_evaluation_run(request: Request, run_id: str) -> dict[str, Any]:
     return run.to_dict()
 
 
-__all__ = ["router"]
+@comparison_router.post("", status_code=201)
+async def create_comparison(request: Request, body: ComparisonCreate) -> dict[str, Any]:
+    principal = await require_principal(request)
+    try:
+        comparison = await _service(request).create_comparison(principal, body)
+        return comparison.model_dump(mode="json")
+    except Exception as error:  # noqa: BLE001 — request boundary maps dependency failures
+        raise _translate_error(error) from error
+
+
+@comparison_router.get("/{comparison_id}")
+async def get_comparison(request: Request, comparison_id: str) -> dict[str, Any]:
+    principal = await require_principal(request)
+    try:
+        comparison = await _service(request).get_comparison(principal, comparison_id)
+        return comparison.model_dump(mode="json")
+    except Exception as error:  # noqa: BLE001 — request boundary maps dependency failures
+        raise _translate_error(error) from error
+
+
+__all__ = ["comparison_router", "router"]

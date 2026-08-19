@@ -3,17 +3,24 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from devai.adapters.object_store.base import ObjectStoreAdapter
 from devai.evaluations.models import (
     ArtifactVersionRef,
+    ComparisonAxis,
+    ComparisonAxisName,
+    ComparisonCase,
+    ComparisonCreate,
+    ComparisonMetric,
     DatasetCase,
     DatasetCreate,
     DatasetVersion,
     EvalSuite,
     EvalSuiteCreate,
     EvalThresholds,
+    EvaluationComparison,
     ResolvedEvaluation,
 )
 from devai.identity import Principal
@@ -53,6 +60,12 @@ class EvaluationDatabase(Protocol):
     async def list_eval_suites(self, owner_scope: str, *, limit: int) -> list[dict[str, Any]]: ...
 
     async def get_eval_suite(self, owner_scope: str, name: str, version: str) -> dict[str, Any] | None: ...
+
+    async def get_eval_run_by_id(self, owner_scope: str, run_id: str) -> dict[str, Any] | None: ...
+
+    async def create_eval_comparison(self, **values: Any) -> dict[str, Any]: ...
+
+    async def get_eval_comparison(self, owner_scope: str, comparison_id: str) -> dict[str, Any] | None: ...
 
 
 class EvaluationRegistry(Protocol):
@@ -163,6 +176,218 @@ class EvaluationService:
             thresholds=suite.thresholds,
             judge=suite.judge,
         )
+
+    async def create_comparison(
+        self,
+        principal: Principal,
+        request: ComparisonCreate,
+    ) -> EvaluationComparison:
+        owner_scope = self._owner_scope(principal)
+        baseline = await self._database.get_eval_run_by_id(owner_scope, request.baseline_run_id)
+        candidate = await self._database.get_eval_run_by_id(owner_scope, request.candidate_run_id)
+        if baseline is None or candidate is None:
+            raise EvaluationNotFound("evaluation run not found")
+        baseline_dataset = baseline.get("dataset")
+        candidate_dataset = candidate.get("dataset")
+        if not isinstance(baseline_dataset, dict) or baseline_dataset != candidate_dataset:
+            raise EvaluationInvalid("evaluation runs must use the same dataset version")
+
+        comparison_id = self._comparison_id(owner_scope, request)
+        result = self._build_comparison(
+            comparison_id,
+            baseline,
+            candidate,
+            request.axes,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        row = await self._database.create_eval_comparison(
+            id=comparison_id,
+            owner_scope=owner_scope,
+            tenant_id=principal.tenant_id,
+            user_id=principal.uid or principal.email,
+            baseline_run_id=request.baseline_run_id,
+            candidate_run_id=request.candidate_run_id,
+            axes=list(request.axes),
+            result=result.model_dump(mode="json"),
+        )
+        stored = dict(row.get("result") or result.model_dump(mode="json"))
+        stored["created_at"] = str(row.get("created_at") or stored["created_at"])
+        return EvaluationComparison.model_validate(stored)
+
+    async def get_comparison(self, principal: Principal, comparison_id: str) -> EvaluationComparison:
+        row = await self._database.get_eval_comparison(self._owner_scope(principal), comparison_id)
+        if row is None:
+            raise EvaluationNotFound(f"comparison {comparison_id} not found")
+        body = dict(row.get("result") or {})
+        body["created_at"] = str(row.get("created_at") or body.get("created_at") or "")
+        return EvaluationComparison.model_validate(body)
+
+    @staticmethod
+    def _comparison_id(owner_scope: str, request: ComparisonCreate) -> str:
+        canonical = json.dumps(
+            [owner_scope, request.baseline_run_id, request.candidate_run_id, list(request.axes)],
+            separators=(",", ":"),
+        )
+        return f"cmp-{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"
+
+    @classmethod
+    def _build_comparison(
+        cls,
+        comparison_id: str,
+        baseline: dict[str, Any],
+        candidate: dict[str, Any],
+        axis_names: list[ComparisonAxisName],
+        *,
+        created_at: str,
+    ) -> EvaluationComparison:
+        metrics = cls._comparison_metrics(baseline.get("summary") or {}, candidate.get("summary") or {})
+        changed_cases = cls._changed_cases(baseline.get("results") or [], candidate.get("results") or [])
+        regressions = [case for case in changed_cases if case.baseline_passed and not case.candidate_passed]
+        newly_passing = [case for case in changed_cases if not case.baseline_passed and case.candidate_passed]
+        axes = cls._comparison_axes(
+            baseline.get("configuration") or {},
+            candidate.get("configuration") or {},
+            axis_names,
+        )
+        sample_size = min(len(baseline.get("results") or []), len(candidate.get("results") or []))
+        caveat = (
+            "Small sample: treat deltas as directional; statistical significance is not established."
+            if sample_size < 30
+            else "No significance test is inferred from one paired run; review repeated-run variance before promotion."
+        )
+        return EvaluationComparison(
+            id=comparison_id,
+            baseline_run_id=str(baseline["id"]),
+            candidate_run_id=str(candidate["id"]),
+            dataset={str(key): str(value) for key, value in baseline["dataset"].items()},
+            metrics=metrics,
+            axes=axes,
+            changed_cases=changed_cases,
+            regressions=regressions,
+            newly_passing=newly_passing,
+            sample_size=sample_size,
+            caveat=caveat,
+            summary=cls._comparison_summary(metrics, len(regressions)),
+            created_at=created_at,
+        )
+
+    @staticmethod
+    def _comparison_metrics(
+        baseline: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> dict[str, ComparisonMetric]:
+        baseline_values = EvaluationService._metric_values(baseline)
+        candidate_values = EvaluationService._metric_values(candidate)
+        metrics: dict[str, ComparisonMetric] = {}
+        for name in sorted(set(baseline_values) | set(candidate_values)):
+            baseline_value = baseline_values.get(name, 0.0)
+            candidate_value = candidate_values.get(name, 0.0)
+            delta = round(candidate_value - baseline_value, 6)
+            percent_delta = None
+            if baseline_value != 0:
+                percent_delta = round(delta / abs(baseline_value) * 100, 4)
+            metrics[name] = ComparisonMetric(
+                baseline=baseline_value,
+                candidate=candidate_value,
+                delta=delta,
+                percent_delta=percent_delta,
+            )
+        return metrics
+
+    @staticmethod
+    def _metric_values(summary: dict[str, Any]) -> dict[str, float]:
+        values = {
+            "success": float(summary.get("pass_rate") or 0.0),
+            "p95_latency_ms": float(summary.get("p95_latency_ms") or 0.0),
+            "cost_usd": float(summary.get("cost_usd") or 0.0),
+            "total_tokens": float(summary.get("total_tokens") or 0.0),
+        }
+        dimensions = summary.get("dimensions") or {}
+        if isinstance(dimensions, dict):
+            for name, metric in dimensions.items():
+                if isinstance(metric, dict):
+                    values[str(name)] = float(metric.get("average", metric.get("pass_rate", 0.0)) or 0.0)
+        return values
+
+    @staticmethod
+    def _changed_cases(
+        baseline_results: list[dict[str, Any]],
+        candidate_results: list[dict[str, Any]],
+    ) -> list[ComparisonCase]:
+        candidate_by_id = {str(result.get("name") or ""): result for result in candidate_results}
+        changed: list[ComparisonCase] = []
+        for baseline in baseline_results:
+            case_id = str(baseline.get("name") or "")
+            candidate = candidate_by_id.get(case_id)
+            if candidate is None or bool(baseline.get("passed")) == bool(candidate.get("passed")):
+                continue
+            changed.append(
+                ComparisonCase(
+                    case_id=case_id,
+                    baseline_passed=bool(baseline.get("passed")),
+                    candidate_passed=bool(candidate.get("passed")),
+                    baseline_trace_url=EvaluationService._trace_url(baseline),
+                    candidate_trace_url=EvaluationService._trace_url(candidate),
+                )
+            )
+        return changed
+
+    @staticmethod
+    def _trace_url(result: dict[str, Any]) -> str | None:
+        trace_url = result.get("trace_url")
+        if trace_url:
+            return str(trace_url)
+        invocation_id = result.get("invocation_id")
+        return f"/api/traces/{invocation_id}" if invocation_id else None
+
+    @staticmethod
+    def _comparison_axes(
+        baseline: dict[str, Any],
+        candidate: dict[str, Any],
+        names: list[ComparisonAxisName],
+    ) -> dict[ComparisonAxisName, ComparisonAxis]:
+        paths: dict[ComparisonAxisName, tuple[str, ...]] = {
+            "prompt_version": ("prompt", "version"),
+            "model": ("model",),
+            "agent_version": ("agent", "version"),
+            "tool_config": ("tools",),
+        }
+
+        def value(configuration: dict[str, Any], path: tuple[str, ...]) -> Any:
+            current: Any = configuration
+            for segment in path:
+                if not isinstance(current, dict):
+                    return None
+                current = current.get(segment)
+            return current
+
+        axes: dict[ComparisonAxisName, ComparisonAxis] = {}
+        for name in names:
+            baseline_value = value(baseline, paths[name])
+            candidate_value = value(candidate, paths[name])
+            axes[name] = ComparisonAxis(
+                baseline=baseline_value,
+                candidate=candidate_value,
+                changed=baseline_value != candidate_value,
+            )
+        return axes
+
+    @staticmethod
+    def _comparison_summary(metrics: dict[str, ComparisonMetric], regression_count: int) -> str:
+        success = metrics.get("success")
+        quality = "Candidate has no measured success-rate change"
+        if success and success.delta > 0:
+            quality = f"Candidate improves success by {success.delta * 100:.1f} percentage points"
+        elif success and success.delta < 0:
+            quality = f"Candidate reduces success by {abs(success.delta) * 100:.1f} percentage points"
+        cost = metrics.get("cost_usd")
+        latency = metrics.get("p95_latency_ms")
+        cost_text = f"cost changes by {(cost.percent_delta or 0):+.1f}%" if cost else "cost is unavailable"
+        latency_text = (
+            f"P95 latency changes by {(latency.percent_delta or 0):+.1f}%" if latency else "P95 latency is unavailable"
+        )
+        regression_text = f"{regression_count} pass-to-fail regression(s) require review"
+        return f"{quality}; {cost_text} and {latency_text}; {regression_text}."
 
     async def _resolve_builtin_suite(self, ref: ArtifactVersionRef) -> ResolvedEvaluation:
         spec = await self._builtin_spec("eval-suites", "EvalSuite", ref)

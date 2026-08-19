@@ -867,9 +867,15 @@ def create_app(
 
     # Versioned evaluation datasets and suites. The routes are mounted even
     # when storage is unavailable so callers receive an explicit 503.
-    from devai.evaluations.routes import router as evaluation_router
+    from devai.evaluations.routes import (
+        comparison_router,
+    )
+    from devai.evaluations.routes import (
+        router as evaluation_router,
+    )
 
     app.include_router(evaluation_router)
+    app.include_router(comparison_router)
 
     # Runtime version picker (/api/adk/versions) — what a sandbox may pin to.
     from devai.kit.routes import router as adk_router
