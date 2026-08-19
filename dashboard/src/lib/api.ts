@@ -300,6 +300,10 @@ export function registryAgentsPath(mine = false): string {
   return `/registry/agents${mine ? "?mine=true" : ""}`;
 }
 
+export function registryAgentRuntimeStatusPath(mine = false): string {
+  return `/registry/agents/runtime-status${mine ? "?mine=true" : ""}`;
+}
+
 export function registryAgentManifestPath(name: string): string {
   return `/registry/agents/${encodeURIComponent(name)}/manifest`;
 }
@@ -868,6 +872,8 @@ export const api = {
   listRegistryPrompts: () => apiFetch<RegistryItem[]>("/registry/prompts"),
   listRegistryMcpServers: () => apiFetch<RegistryItem[]>("/registry/mcp-servers"),
   listRegistryAgents: (mine = false) => apiFetch<RegistryItem[]>(registryAgentsPath(mine)),
+  getRegistryAgentRuntimeStatus: (mine = false) =>
+    apiFetch<AgentRuntimeSnapshot>(registryAgentRuntimeStatusPath(mine), { soft: true }),
   getOwnedRegistryAgent: (name: string) =>
     apiFetch<Record<string, unknown>>(registryAgentManifestPath(name)),
 
@@ -1175,6 +1181,46 @@ export interface RegistryItem {
   description?: string;
   version?: string;
   [key: string]: unknown;
+}
+
+export type AgentRuntimeState = "on_demand" | "provisioning" | "cold_starting" | "ready" | "unavailable";
+
+export interface AgentRuntimeStatus {
+  target: "job" | "substrate";
+  state: AgentRuntimeState;
+  runnable: boolean;
+  substrate_runnable: boolean;
+  reason: string;
+  actor_state: "not_applicable" | "not_observed" | "cold_starting" | "idle_or_scaled_to_zero";
+  ready_since: string | null;
+  last_run_at: string | null;
+  cold_start_ms: number | null;
+  run_latency_ms: number | null;
+  variants: {
+    name: string;
+    kind: string;
+    model: string;
+    state: "ready" | "unavailable";
+    reason: string;
+  }[];
+}
+
+export interface AgentRuntimeSnapshot {
+  available: boolean;
+  substrate_enabled: boolean;
+  agents: Record<string, AgentRuntimeStatus>;
+  worker_pools: {
+    name: string;
+    capacity: number | null;
+    occupancy: number | null;
+    headroom: number | null;
+    telemetry_available: boolean;
+  }[];
+  latency: {
+    telemetry_available: boolean;
+    cold_start_ms: number | null;
+    run_latency_ms: number | null;
+  };
 }
 
 export interface CreateSkillInput {

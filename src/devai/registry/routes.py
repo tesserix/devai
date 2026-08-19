@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, HTTPException, Request
 
+from devai.agentic.runtime_status import build_agent_runtime_snapshot, fetch_controller_inventory
 from devai.authz import require_principal
 from devai.evaluations.gates import (
     EVAL_APPROVER_ANNOTATION,
@@ -465,6 +466,41 @@ async def list_agents(request: Request, mine: bool = False) -> list[dict[str, An
         return [_to_dict(a) for a in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/agents/runtime-status")
+async def agent_runtime_status(request: Request, mine: bool = False) -> dict[str, Any]:
+    """Return live runtime evidence for only the agents visible to the caller."""
+    principal = await require_principal(request)
+    client = _client(request)
+    try:
+        loaded = await asyncio.to_thread(client.list_agents)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    if mine:
+        owner_id = _owner_id(principal)
+        if not owner_id:
+            raise HTTPException(status_code=401, detail="authenticated principal has no stable subject")
+        agents = [item for item in loaded if _labels(item).get(_OWNER_LABEL) == owner_id]
+    else:
+        agents = [item for item in loaded if _visible(item, principal)]
+
+    from devai.config import settings as base_settings
+    from devai.settings.overlay import build_overlay
+
+    effective = await build_overlay(
+        getattr(request.app.state, "config", base_settings),
+        principal,
+        getattr(request.app.state, "settings_service", None),
+    )
+    inventory = await fetch_controller_inventory(str(getattr(effective, "kagent_url", "") or ""))
+    return build_agent_runtime_snapshot(
+        agents,
+        inventory,
+        substrate_enabled=bool(getattr(effective, "kagent_enabled", False)),
+        namespace=str(getattr(effective, "kagent_default_namespace", "") or "kagent-system"),
+    )
 
 
 @router.get("/agents/{name}")

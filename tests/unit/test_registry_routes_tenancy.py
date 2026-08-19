@@ -153,7 +153,7 @@ class _Registry:
         )
 
 
-def _client(*, gate_service: Any = None) -> tuple[TestClient, _Registry]:
+def _client(*, gate_service: Any = None, kagent_enabled: bool = False) -> tuple[TestClient, _Registry]:
     app = FastAPI()
     registry = _Registry()
     app.state.registry_client = registry
@@ -161,6 +161,9 @@ def _client(*, gate_service: Any = None) -> tuple[TestClient, _Registry]:
     app.state.config = SimpleNamespace(
         auth_bff_shared_secret="",
         trust_forwarded_without_secret=True,
+        kagent_enabled=kagent_enabled,
+        kagent_url="http://kagent-controller.kagent-system.svc.cluster.local:8083",
+        kagent_default_namespace="kagent-system",
     )
     app.include_router(router)
     return TestClient(app), registry
@@ -341,6 +344,65 @@ def test_mine_requires_an_authenticated_user() -> None:
     registry.items["platform-agent"] = _manifest("platform-agent")
 
     response = client.get("/api/registry/agents?mine=true")
+
+    assert response.status_code == 401
+
+
+def test_runtime_status_is_scoped_to_the_callers_visible_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_inventory(_url: str):
+        from devai.agentic.runtime_status import controller_inventory_from_payload
+
+        return controller_inventory_from_payload(
+            {
+                "data": [
+                    {
+                        "agent": {
+                            "kind": "SandboxAgent",
+                            "metadata": {
+                                "name": "alice-agent",
+                                "namespace": "kagent-system",
+                                "labels": {
+                                    "app.kubernetes.io/managed-by": "agentic-registry",
+                                    "registry.agentic.dev/agent": "alice-agent",
+                                },
+                            },
+                            "status": {
+                                "conditions": [
+                                    {"type": "Accepted", "status": "True"},
+                                    {"type": "Ready", "status": "True"},
+                                ]
+                            },
+                        },
+                        "deploymentReady": True,
+                        "accepted": True,
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("devai.registry.routes.fetch_controller_inventory", fake_inventory)
+    client, registry = _client(kagent_enabled=True)
+    alice = _headers("alice", "tenant-a")
+    bob = _headers("bob", "tenant-b")
+    assert client.post("/api/registry/agents", headers=alice, json=_manifest("alice-agent")).status_code == 201
+    assert client.post("/api/registry/agents", headers=bob, json=_manifest("bob-agent")).status_code == 201
+    registry.items["alice-agent"]["metadata"]["labels"]["devai.io/runtime"] = "kagent"
+    registry.items["bob-agent"]["metadata"]["labels"]["devai.io/runtime"] = "kagent"
+
+    alice_status = client.get("/api/registry/agents/runtime-status", headers=alice)
+    bob_status = client.get("/api/registry/agents/runtime-status", headers=bob)
+
+    assert alice_status.status_code == 200
+    assert set(alice_status.json()["agents"]) == {"alice-agent"}
+    assert alice_status.json()["agents"]["alice-agent"]["substrate_runnable"] is True
+    assert set(bob_status.json()["agents"]) == {"bob-agent"}
+    assert "alice-agent" not in bob_status.text
+
+
+def test_runtime_status_mine_requires_authentication() -> None:
+    client, _ = _client()
+
+    response = client.get("/api/registry/agents/runtime-status?mine=true")
 
     assert response.status_code == 401
 

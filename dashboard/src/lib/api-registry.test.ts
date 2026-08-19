@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
+  registryAgentRuntimeStatusPath,
   comparisonPath,
   evaluationRunPath,
   registryAgentManifestPath,
@@ -24,6 +25,11 @@ test("encodes agent lifecycle paths without changing their collection", () => {
     registryArtifactPath("agents", "my/agent"),
     "/registry/agents/my%2Fagent",
   );
+});
+
+test("scopes runtime status to the selected agent view", () => {
+  assert.equal(registryAgentRuntimeStatusPath(true), "/registry/agents/runtime-status?mine=true");
+  assert.equal(registryAgentRuntimeStatusPath(false), "/registry/agents/runtime-status");
 });
 
 test("encodes owner-scoped sandbox, trace, evaluation, and comparison paths", () => {
