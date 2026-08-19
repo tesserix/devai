@@ -6,6 +6,7 @@ pinned configuration, read what it actually did.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -86,11 +87,31 @@ def _registry() -> SpecializationRegistry:
     return reg
 
 
+class _GrantedSandboxLLM:
+    def __init__(self, llm: LLMAdapter) -> None:
+        self._llm = llm
+
+    async def resolve(self, record, deps):
+        del record
+        return replace(
+            deps,
+            llm=self._llm,
+            scm=None,
+            memory=None,
+            secrets=None,
+            settings_service=None,
+            llm_resolver=None,
+            scm_resolver=None,
+            extra=None,
+        )
+
+
 def _invoker(llm, *, registry=None, store=None) -> SandboxInvoker:
     return SandboxInvoker(
         specializations=registry if registry is not None else _Specs(_registry()),
         deps=StageDeps(config=Settings(), llm=llm),
         traces=store or TraceStore(None),
+        credentials=_GrantedSandboxLLM(llm),  # type: ignore[arg-type]
     )
 
 
@@ -203,6 +224,73 @@ async def test_a_model_failure_is_a_failed_trace_not_a_lost_one() -> None:
     assert not inv.ok
     assert "503" in inv.error
     assert (await store.get("sb-1", inv.id)) is not None
+
+
+async def test_provider_errors_are_redacted_before_logging_or_tracing(caplog) -> None:
+    exposed = "sk-ant-api03-should-never-reach-a-trace"
+
+    class _Boom(LLMAdapter):
+        provider_name = "boom"
+
+        async def generate(self, request):  # type: ignore[override]
+            raise RuntimeError(f"Authorization: Bearer {exposed}")
+
+    with caplog.at_level("WARNING"):
+        invocation = await _invoker(_Boom()).invoke(
+            _record(),
+            message="go",
+            triggered_by="sam@example.com",
+        )
+
+    assert exposed not in invocation.error
+    assert exposed not in caplog.text
+    assert "Bearer ***" in invocation.error
+
+
+async def test_a_sandbox_never_resolves_or_falls_back_to_principal_credentials() -> None:
+    user_llm = _ScriptedLLM([LLMResponse(text="leaked user key")])
+    platform_llm = _ScriptedLLM([LLMResponse(text="leaked platform key")])
+
+    class _UserLLMResolver:
+        calls = 0
+
+        async def resolve(self, principal):
+            self.calls += 1
+            return user_llm
+
+    class _UserSCMResolver:
+        calls = 0
+
+        async def resolve(self, principal):
+            self.calls += 1
+            return object()
+
+    llm_resolver = _UserLLMResolver()
+    scm_resolver = _UserSCMResolver()
+    invoker = SandboxInvoker(
+        specializations=_Specs(_registry()),
+        deps=StageDeps(
+            config=Settings(),
+            llm=platform_llm,
+            scm=object(),  # type: ignore[arg-type]
+            llm_resolver=llm_resolver,
+            scm_resolver=scm_resolver,
+        ),
+        traces=TraceStore(None),
+    )
+
+    invocation = await invoker.invoke(
+        _record(),
+        message="try every credential",
+        triggered_by="sam@example.com",
+    )
+
+    assert not invocation.ok
+    assert "sandbox LLM connector" in invocation.error
+    assert llm_resolver.calls == 0
+    assert scm_resolver.calls == 0
+    assert user_llm.calls == 0
+    assert platform_llm.calls == 0
 
 
 _DRAFT = {

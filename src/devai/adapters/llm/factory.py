@@ -183,6 +183,8 @@ _SPEC_PROVIDER_ALIASES = {
     "openai": "openai",
     "codex": "openai",
     "gemini": "vertex_gemini",  # Vertex is the live Gemini path (PSC + WI)
+    "vertex": "vertex_gemini",
+    "google": "vertex_gemini",
     "vertex_gemini": "vertex_gemini",
     "gateway": "gateway",
     "groq": "groq",

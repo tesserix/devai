@@ -14,7 +14,7 @@ from devai.sandbox.trace import TraceStore
 from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.registry import SpecializationRegistry
 from tests.unit.test_sandbox import _FakeDB
-from tests.unit.test_sandbox_invoke import _ScriptedLLM
+from tests.unit.test_sandbox_invoke import _GrantedSandboxLLM, _ScriptedLLM
 
 _SAM = {"X-Forwarded-Email": "sam@example.com"}
 _MALLORY = {"X-Forwarded-Email": "mallory@example.com"}
@@ -51,11 +51,13 @@ def _client(*, invoker: bool = True, responses: list[Any] | None = None) -> Test
     app = FastAPI()
     app.state.sandbox_service = SandboxService(_FakeDB())
     app.state.sandbox_traces = TraceStore(None)
+    llm = _ScriptedLLM(responses or [LLMResponse(text="Here are the notes.")])
     app.state.sandbox_invoker = (
         SandboxInvoker(
             specializations=specs,
-            deps=StageDeps(config=Settings(), llm=_ScriptedLLM(responses or [LLMResponse(text="Here are the notes.")])),
+            deps=StageDeps(config=Settings(), llm=llm),
             traces=app.state.sandbox_traces,
+            credentials=_GrantedSandboxLLM(llm),
         )
         if invoker
         else None

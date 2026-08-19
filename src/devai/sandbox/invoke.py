@@ -25,6 +25,7 @@ from devai.sandbox.trace import Invocation, TraceStep, TraceStore
 
 if TYPE_CHECKING:
     from devai.pipeline.interfaces import StageDeps
+    from devai.sandbox.credentials import SandboxCredentialProvider
     from devai.specializations.base import Specialization
     from devai.specializations.service import SpecializationService
 
@@ -41,10 +42,14 @@ class SandboxInvoker:
         specializations: SpecializationService,
         deps: StageDeps,
         traces: TraceStore,
+        credentials: SandboxCredentialProvider | None = None,
     ) -> None:
+        from devai.sandbox.credentials import SandboxCredentialResolver
+
         self._specs = specializations
         self._deps = deps
         self._traces = traces
+        self._credentials = credentials or SandboxCredentialResolver()
 
     async def invoke(self, record: SandboxRecord, *, message: str, triggered_by: str) -> Invocation:
         """One turn. Model and tool failures become a failed trace, never a lost one."""
@@ -83,15 +88,18 @@ class SandboxInvoker:
             )
             steps.append(TraceStep(kind="response", name="final", output=result.final_text))
         except Exception as exc:  # noqa: BLE001 — a broken run is evidence, not an outage
-            logger.warning("sandbox %s: invocation failed", record.id, exc_info=True)
+            from devai.services.redact import redact_secrets
+
+            safe_error = redact_secrets(str(exc))[:500]
+            logger.warning("sandbox %s: invocation failed: %s", record.id, safe_error)
             invocation.ok = False
-            invocation.error = str(exc)
+            invocation.error = safe_error
             steps.append(
                 TraceStep(
                     kind="llm",
                     name=record.spec.model.model,
                     latency_ms=int((time.perf_counter() - started) * 1000),
-                    error=str(exc),
+                    error=safe_error,
                 )
             )
 
@@ -101,6 +109,7 @@ class SandboxInvoker:
     async def _resolve(self, record: SandboxRecord) -> Specialization:
         from devai.registry.mapping import agent_envelope_to_spec, role_name
 
+        spec: Specialization | None
         if record.spec.draft:
             spec = agent_envelope_to_spec(record.spec.draft)
         else:
@@ -127,25 +136,31 @@ class SandboxInvoker:
         from devai.agentruntime import AgentDispatcher, SpecAgent
         from devai.pipeline.types import DevAITask
 
-        deps = self._with_gateway(record, gateway, triggered_by=triggered_by)
-        task = DevAITask(intent=message, triggered_by=triggered_by)
-        # Through the dispatcher, so the run uses the invoking user's own
-        # credentials by the same resolution every other execution path uses.
+        deps = await self._credentials.resolve(record, self._deps)
+        deps = self._with_gateway(deps, record, gateway, triggered_by=triggered_by)
+        task = DevAITask(intent=message, triggered_by=f"sandbox:{record.id}")
+        # The synthetic principal prevents the normal dispatcher from resolving
+        # any user or platform fallback outside the explicit sandbox grant.
         return await AgentDispatcher(deps).dispatch(SpecAgent(spec), task, instruction=message)
 
-    def _with_gateway(self, record: SandboxRecord, gateway: ToolGateway, *, triggered_by: str) -> StageDeps:
+    def _with_gateway(
+        self,
+        deps: StageDeps,
+        record: SandboxRecord,
+        gateway: ToolGateway,
+        *,
+        triggered_by: str,
+    ) -> StageDeps:
         """A copy of the shared deps whose tool dispatch is fenced by this sandbox."""
         from devai.tools.dispatch import ToolDispatcher
 
-        deps = self._deps
-        extra = dict(deps.extra or {})
-        extra["tool_dispatcher"] = ToolDispatcher(
+        dispatcher = ToolDispatcher(
             deps.scm,
             dry_run=True,
             triggered_by=triggered_by,
             gateway=gateway,
         )
-        return replace(deps, extra=extra)
+        return replace(deps, extra={"tool_dispatcher": dispatcher})
 
     def _ttl(self, record: SandboxRecord) -> int:
         remaining = int((record.expires_at - datetime.now(UTC)).total_seconds())

@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { Select } from "@/components/ui/select";
+import { api, type SettingsConnector } from "@/lib/api";
+import {
+  canonicalSandboxProvider,
+  sandboxLlmConnectorOptions,
+  type SandboxConnectorOption,
+} from "@/lib/sandbox-connectors";
 
 type RegistryAgent = {
   name: string;
@@ -36,12 +42,16 @@ export function SandboxCreateDialog({
   const [model, setModel] = useState("claude-sonnet-4-20250514");
   const [adkVersion, setAdkVersion] = useState("");
   const [toolMode, setToolMode] = useState("mock");
+  const [connectorOptions, setConnectorOptions] = useState<SandboxConnectorOption[]>([]);
+  const [llmConnector, setLlmConnector] = useState("");
+  const [connectorConfirmed, setConnectorConfirmed] = useState(false);
   const [ttlHours, setTtlHours] = useState(4);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setConnectorConfirmed(false);
     fetch("/api/registry/agents", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: RegistryAgent[]) => {
@@ -57,6 +67,17 @@ export function SandboxCreateDialog({
         setAdkVersion((v) => v || d.default || d.versions?.[0] || "");
       })
       .catch(() => setVersions([]));
+    api
+      .listSettings()
+      .then((data: { connectors: SettingsConnector[] }) => {
+        const options = sandboxLlmConnectorOptions(data.connectors ?? []);
+        setConnectorOptions(options);
+        setLlmConnector((current) => current || options[0]?.value || "");
+      })
+      .catch(() => {
+        setConnectorOptions([]);
+        setLlmConnector("");
+      });
   }, [open]);
 
   // Pinning an agent pre-fills the model it was published with — still editable,
@@ -66,7 +87,14 @@ export function SandboxCreateDialog({
     if (!chosen) return;
     if (chosen.model_provider) setProvider(chosen.model_provider);
     if (chosen.model_name) setModel(chosen.model_name);
-  }, [agent, agents]);
+    const compatible = connectorOptions.filter(
+      (option) => option.provider === canonicalSandboxProvider(chosen.model_provider),
+    );
+    setLlmConnector((current) =>
+      compatible.some((option) => option.value === current) ? current : compatible[0]?.value || "",
+    );
+    setConnectorConfirmed(false);
+  }, [agent, agents, connectorOptions]);
 
   const agentOptions = useMemo(
     () =>
@@ -82,6 +110,9 @@ export function SandboxCreateDialog({
   if (!open) return null;
 
   const selected = agents.find((a) => a.name === agent);
+  const compatibleConnectorOptions = connectorOptions.filter(
+    (option) => option.provider === canonicalSandboxProvider(provider),
+  );
 
   async function create() {
     setBusy(true);
@@ -94,6 +125,7 @@ export function SandboxCreateDialog({
         body: JSON.stringify({
           agent: { name: agent, version: selected?.version || "latest" },
           model: { provider, model },
+          credentials: { llm_connector: llmConnector, confirmed: connectorConfirmed },
           adk_version: adkVersion || null,
           tools: { default_mode: toolMode },
           ttl_seconds: Math.round(ttlHours * 3600),
@@ -157,8 +189,50 @@ export function SandboxCreateDialog({
             onChange={(next) => {
               setProvider(next.provider);
               setModel(next.model);
+              const compatible = connectorOptions.filter(
+                (option) => option.provider === canonicalSandboxProvider(next.provider),
+              );
+              setLlmConnector(compatible[0]?.value || "");
+              setConnectorConfirmed(false);
             }}
           />
+
+          <div>
+            <label htmlFor="sb-llm-connector" className="label-eyebrow">
+              Sandbox LLM credential
+            </label>
+            <Select
+              id="sb-llm-connector"
+              value={llmConnector}
+              onChange={(value) => {
+                setLlmConnector(value);
+                setConnectorConfirmed(false);
+              }}
+              options={compatibleConnectorOptions}
+              placeholder={compatibleConnectorOptions.length === 0 ? `No personal ${provider} connector` : "Choose a connector"}
+              ariaLabel="Sandbox LLM credential"
+            />
+            {compatibleConnectorOptions.length === 0 && (
+              <p className="text-xs mt-1.5" style={{ color: "var(--ink-muted)" }}>
+                Add a personal connector with its own key in <a href="/settings" className="text-indigo-300 hover:underline">Settings</a>.
+                Shared team, tenant and platform credentials cannot enter a sandbox.
+              </p>
+            )}
+          </div>
+
+          <label className="flex items-start gap-2 text-xs" style={{ color: "var(--ink-soft)" }}>
+            <input
+              type="checkbox"
+              checked={connectorConfirmed}
+              disabled={!llmConnector}
+              onChange={(event) => setConnectorConfirmed(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              I authorize this sandbox to use the selected connector. Its key stays in the DevAI control plane,
+              calls go through AgentGateway, and no SCM, cloud or platform credential is inherited.
+            </span>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -215,7 +289,7 @@ export function SandboxCreateDialog({
             <button
               type="button"
               onClick={create}
-              disabled={busy || !agent}
+              disabled={busy || !agent || !llmConnector || !connectorConfirmed}
               className="btn-primary !py-1 !px-3 !text-xs disabled:opacity-50"
             >
               {busy ? "Creating…" : "Create sandbox"}

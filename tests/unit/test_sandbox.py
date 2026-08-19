@@ -69,6 +69,20 @@ def test_minimal_spec_defaults_to_safe_boundaries() -> None:
     assert spec.ttl_seconds == 4 * 60 * 60
     assert spec.limits.max_cost_usd > 0
     assert spec.limits.max_tokens > 0
+    assert spec.credentials.llm_connector == ""
+    assert spec.credentials.confirmed is False
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {"llm_connector": "sandbox-evals", "confirmed": False},
+        {"llm_connector": "", "confirmed": True},
+    ],
+)
+def test_connector_name_and_confirmation_have_to_be_supplied_together(credentials: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError, match="connector"):
+        SandboxSpec.model_validate({**_MIN_SPEC, "credentials": credentials})
 
 
 def test_spec_is_frozen_so_a_pinned_configuration_cannot_drift() -> None:

@@ -173,8 +173,11 @@ class AgentRunner:
             try:
                 resp = await llm.generate(req)
             except Exception as e:  # noqa: BLE001 — surface as a soft failure
-                logger.exception("AgentRunner: llm.generate failed for %s", spec.name)
-                result.error = f"llm_error: {e}"
+                from devai.services.redact import redact_secrets
+
+                safe_error = redact_secrets(str(e))[:500]
+                logger.error("AgentRunner: llm.generate failed for %s: %s", spec.name, safe_error)
+                result.error = f"llm_error: {safe_error}"
                 break
 
             result.prompt_tokens += resp.usage.prompt_tokens
