@@ -327,6 +327,12 @@ class RegistryClient:
     def publish_agent(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/agents", body)
 
+    def publish_dataset(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/datasets", self._artifact_envelope("Dataset", body))
+
+    def publish_eval_suite(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/evalsuites", self._artifact_envelope("EvalSuite", body))
+
     def publish_blueprint(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/blueprints", body)
 
@@ -395,6 +401,22 @@ class RegistryClient:
         self._request("DELETE", path, body=None, raise_on_error=True)
 
     # ---- private ----------------------------------------------------------
+
+    def _artifact_envelope(self, kind: str, body: dict[str, Any]) -> dict[str, Any]:
+        spec = dict(body)
+        name = str(spec.pop("name", ""))
+        tag = str(spec.pop("version", "") or "latest")
+        if not name:
+            raise RegistryError(f"registry: {kind} name is required")
+        metadata = {"name": name, "tag": tag}
+        if self._namespace:
+            metadata["namespace"] = self._namespace
+        return {
+            "apiVersion": "registry.agentic.dev/v1alpha1",
+            "kind": kind,
+            "metadata": metadata,
+            "spec": spec,
+        }
 
     def _get(self, path: str, *, use_cache: bool = True) -> dict[str, Any]:
         if use_cache:
