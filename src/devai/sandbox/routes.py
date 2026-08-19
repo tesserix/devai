@@ -383,6 +383,7 @@ async def run_evals(request: Request, sandbox_id: str, body: dict[str, Any]) -> 
         raise HTTPException(status_code=422, detail="provide exactly one of cases, dataset, or suite")
     dataset_ref = None
     suite_ref = None
+    scorers: list[str] = []
     try:
         if "cases" in body:
             cases = [EvalCase.model_validate(c) for c in body.get("cases") or []]
@@ -401,6 +402,7 @@ async def run_evals(request: Request, sandbox_id: str, body: dict[str, Any]) -> 
             cases = resolved.cases
             dataset_ref = resolved.dataset.model_dump(mode="json")
             suite_ref = resolved.suite.model_dump(mode="json") if resolved.suite else None
+            scorers = resolved.scorers
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=f"invalid case: {e.errors()[0]['msg']}") from e
     except EvaluationNotFound as e:
@@ -419,6 +421,7 @@ async def run_evals(request: Request, sandbox_id: str, body: dict[str, Any]) -> 
             user_id=str(getattr(principal, "uid", "") or getattr(principal, "email", "") or owner),
             dataset_ref=dataset_ref,
             suite_ref=suite_ref,
+            scorers=scorers,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e

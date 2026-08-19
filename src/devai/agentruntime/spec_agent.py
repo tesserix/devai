@@ -87,6 +87,7 @@ class SpecAgent:
             tool_calls=rr.tool_calls,
             prompt_tokens=rr.prompt_tokens,
             completion_tokens=rr.completion_tokens,
+            trace_steps=rr.trace_steps,
             stub=rr.stub,
             error=rr.error,
             final_text=rr.final_text,

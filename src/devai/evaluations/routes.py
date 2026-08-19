@@ -1,13 +1,31 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from devai.authz import require_principal
-from devai.evaluations.models import DatasetCreate, DatasetVersion, EvalSuite, EvalSuiteCreate
-from devai.evaluations.service import EvaluationConflict, EvaluationError, EvaluationNotFound, EvaluationService
+from devai.evaluations.models import (
+    DatasetCreate,
+    DatasetVersion,
+    EvalSuite,
+    EvalSuiteCreate,
+    EvaluationRunCreate,
+)
+from devai.evaluations.service import (
+    EvaluationConflict,
+    EvaluationError,
+    EvaluationInvalid,
+    EvaluationNotFound,
+    EvaluationService,
+)
+from devai.sandbox.models import DatasetRef, SandboxStatus
+from devai.sandbox.service import SandboxError
+
+if TYPE_CHECKING:
+    from devai.sandbox.evals import EvalRunner
+    from devai.sandbox.service import SandboxService
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +47,23 @@ def _suite_view(suite: EvalSuite) -> dict[str, Any]:
     return suite.model_dump(mode="json", exclude={"owner_scope"})
 
 
+def _runner(request: Request) -> EvalRunner:
+    runner = getattr(request.app.state, "sandbox_evals", None)
+    if runner is None:
+        raise HTTPException(status_code=503, detail="evaluation runner unavailable")
+    return cast("EvalRunner", runner)
+
+
+def _sandboxes(request: Request) -> SandboxService:
+    service = getattr(request.app.state, "sandbox_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="sandbox service unavailable")
+    return cast("SandboxService", service)
+
+
 def _translate_error(error: Exception) -> HTTPException:
+    if isinstance(error, EvaluationInvalid):
+        return HTTPException(status_code=422, detail=str(error))
     if isinstance(error, EvaluationConflict):
         return HTTPException(status_code=409, detail=str(error))
     if isinstance(error, EvaluationNotFound):
@@ -95,6 +129,74 @@ async def get_suite(request: Request, name: str, version: str) -> dict[str, Any]
         return _suite_view(await _service(request).get_suite(principal, name, version))
     except Exception as error:  # noqa: BLE001 — request boundary maps dependency failures
         raise _translate_error(error) from error
+
+
+@router.post("", status_code=201)
+async def run_evaluation(request: Request, body: EvaluationRunCreate) -> dict[str, Any]:
+    principal = await require_principal(request)
+    try:
+        resolved = await _service(request).resolve_suite(principal, body.suite)
+        owner_scope = principal.user_scope_id
+        if not owner_scope:
+            raise EvaluationInvalid("authenticated principal has no stable subject")
+        sandboxes = _sandboxes(request)
+        pinned_dataset = DatasetRef(ref=resolved.dataset.name, version=resolved.dataset.version)
+        if body.sandbox_id is not None:
+            record = await sandboxes.get(body.sandbox_id, owner=owner_scope, is_admin=False)
+            if record is None:
+                raise EvaluationNotFound(f"sandbox {body.sandbox_id} not found")
+            if record.spec.dataset != pinned_dataset:
+                raise EvaluationInvalid("sandbox does not pin the suite's exact dataset version")
+        else:
+            if body.sandbox is None:
+                raise EvaluationInvalid("sandbox specification is required")
+            if body.sandbox.dataset is not None and body.sandbox.dataset != pinned_dataset:
+                raise EvaluationInvalid("sandbox dataset does not match the suite's pinned dataset version")
+            spec = body.sandbox.model_copy(update={"dataset": pinned_dataset})
+            record = await sandboxes.create(
+                spec,
+                owner=owner_scope,
+                tenant_id=principal.tenant_id,
+                user_id=principal.uid or principal.email,
+            )
+        if record.status != SandboxStatus.READY:
+            raise EvaluationInvalid(f"sandbox {record.id} is not ready")
+        run = await _runner(request).run(
+            record,
+            resolved.cases,
+            triggered_by=owner_scope,
+            owner_scope=owner_scope,
+            tenant_id=principal.tenant_id,
+            user_id=principal.uid or principal.email,
+            dataset_ref=resolved.dataset.model_dump(mode="json"),
+            suite_ref=body.suite.model_dump(mode="json"),
+            scorers=resolved.scorers,
+        )
+        return run.to_dict()
+    except HTTPException:
+        raise
+    except SandboxError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:  # noqa: BLE001 — request boundary maps dependency failures
+        raise _translate_error(error) from error
+
+
+@router.get("/{run_id}")
+async def get_evaluation_run(request: Request, run_id: str) -> dict[str, Any]:
+    principal = await require_principal(request)
+    owner_scope = principal.user_scope_id
+    if not owner_scope:
+        raise HTTPException(status_code=404, detail=f"evaluation {run_id} not found")
+    try:
+        run = await _runner(request).store.get_by_id(owner_scope, run_id)
+    except Exception as error:  # noqa: BLE001 — durable reads fail closed
+        logger.exception("durable evaluation read failed")
+        raise HTTPException(status_code=503, detail="evaluation storage unavailable") from error
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"evaluation {run_id} not found")
+    return run.to_dict()
 
 
 __all__ = ["router"]

@@ -17,13 +17,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from devai.evaluations.scorers import ScorerContext, run_quality
 from devai.pipeline.interfaces import PipelineStage, StageDeps
 from devai.pipeline.types import DevAITask, StageResult
 
 logger = logging.getLogger(__name__)
-
-# Run quality passes when at/above this composite score.
-_PASS_BAR = 0.7
 
 
 def score_run(task: DevAITask) -> tuple[float, bool, dict[str, Any]]:
@@ -34,30 +32,8 @@ def score_run(task: DevAITask) -> tuple[float, bool, dict[str, Any]]:
       - gates_clean — review / security / tests all resolved (no unblocked verdict)
       - completion  — fraction of attempted stages that completed (vs failed)
     """
-    ctx = task.agent_context
-    delivered = 1.0 if isinstance(task.pr_number, int) and task.pr_number > 0 else 0.0
-    gates_bad = (
-        bool(ctx.get("review_changes_requested")) or bool(ctx.get("security_blocked")) or bool(ctx.get("test_failed"))
-    )
-    gates_clean = 0.0 if gates_bad else 1.0
-    completed = len(task.stages_completed)
-    failed = len(task.stages_failed)
-    completion = completed / max(1, completed + failed)
-
-    score = 0.4 * delivered + 0.3 * gates_clean + 0.3 * completion
-    if gates_bad:
-        score = min(score, 0.5)  # a run that shipped with an unresolved gate cannot pass
-    score = round(score, 3)
-    breakdown = {
-        "delivered": delivered,
-        "gates_clean": gates_clean,
-        "completion": round(completion, 3),
-        "stages_completed": completed,
-        "stages_failed": failed,
-        "pr_number": task.pr_number,
-        "deploy_status": ctx.get("deploy_status"),
-    }
-    return score, score >= _PASS_BAR, breakdown
+    result = run_quality(ScorerContext(task=task))
+    return result.score, result.passed, result.detail
 
 
 class EvaluateStage(PipelineStage):

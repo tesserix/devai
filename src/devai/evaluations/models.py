@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from devai.sandbox.evals import EvalCase
+from devai.sandbox.models import SandboxSpec
 
 Name = Annotated[str, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
 Version = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
@@ -25,8 +26,13 @@ class DatasetCase(EvaluationModel):
     id: Name
     input: Annotated[str, Field(min_length=1, max_length=100_000)]
     expected_output: str | None = None
+    expected_regex: str = ""
+    expected_json_schema: dict[str, Any] | None = None
     expected_tools: list[Name] = Field(default_factory=list, max_length=100)
     forbidden_tools: list[Name] = Field(default_factory=list, max_length=100)
+    max_total_tokens: int | None = Field(default=None, gt=0)
+    max_latency_ms: int | None = Field(default=None, gt=0)
+    max_cost_usd: float | None = Field(default=None, ge=0)
     context: dict[str, Any] = Field(default_factory=dict)
     tags: list[Name] = Field(default_factory=list, max_length=100)
 
@@ -37,8 +43,14 @@ class DatasetCase(EvaluationModel):
                 "input": self.input,
                 "expect": {
                     "contains": [self.expected_output] if self.expected_output else [],
+                    "exact_output": self.expected_output,
+                    "matches": self.expected_regex,
+                    "json_schema": self.expected_json_schema,
                     "tools_called": self.expected_tools,
                     "tools_not_called": self.forbidden_tools,
+                    "max_total_tokens": self.max_total_tokens,
+                    "max_latency_ms": self.max_latency_ms,
+                    "max_cost_usd": self.max_cost_usd,
                 },
             }
         )
@@ -114,6 +126,20 @@ class ResolvedEvaluation(EvaluationModel):
     cases: list[EvalCase]
     dataset: ArtifactVersionRef
     suite: ArtifactVersionRef | None = None
+    scorers: list[str] = Field(default_factory=list)
+    thresholds: EvalThresholds = Field(default_factory=EvalThresholds)
+
+
+class EvaluationRunCreate(EvaluationModel):
+    suite: ArtifactVersionRef
+    sandbox_id: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    sandbox: SandboxSpec | None = None
+
+    @model_validator(mode="after")
+    def exactly_one_sandbox_source(self) -> EvaluationRunCreate:
+        if (self.sandbox_id is None) == (self.sandbox is None):
+            raise ValueError("provide exactly one of sandbox_id or sandbox")
+        return self
 
 
 __all__ = [
@@ -124,5 +150,6 @@ __all__ = [
     "EvalSuite",
     "EvalSuiteCreate",
     "EvalThresholds",
+    "EvaluationRunCreate",
     "ResolvedEvaluation",
 ]

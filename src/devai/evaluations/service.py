@@ -30,6 +30,10 @@ class EvaluationNotFound(EvaluationError):
     pass
 
 
+class EvaluationInvalid(EvaluationError):
+    pass
+
+
 class EvaluationDatabase(Protocol):
     async def create_eval_dataset_version(self, **values: Any) -> dict[str, Any] | None: ...
 
@@ -92,6 +96,11 @@ class EvaluationService:
         return self._dataset_from_row(row, cases=cases)
 
     async def create_suite(self, principal: Principal, request: EvalSuiteCreate) -> EvalSuite:
+        from devai.evaluations.scorers import known
+
+        unknown = sorted(set(request.scorers) - set(known()))
+        if unknown:
+            raise EvaluationInvalid(f"unknown scorer(s): {', '.join(unknown)}")
         await self.get_dataset(principal, request.dataset.name, request.dataset.version)
         row = await self._database.create_eval_suite(
             owner_scope=self._owner_scope(principal),
@@ -130,6 +139,8 @@ class EvaluationService:
             cases=[case.as_eval_case() for case in dataset.cases],
             dataset=suite.dataset,
             suite=ref,
+            scorers=suite.scorers,
+            thresholds=suite.thresholds,
         )
 
     @staticmethod
@@ -172,4 +183,10 @@ class EvaluationService:
         )
 
 
-__all__ = ["EvaluationConflict", "EvaluationError", "EvaluationNotFound", "EvaluationService"]
+__all__ = [
+    "EvaluationConflict",
+    "EvaluationError",
+    "EvaluationInvalid",
+    "EvaluationNotFound",
+    "EvaluationService",
+]

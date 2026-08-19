@@ -7,6 +7,7 @@ studio actually has to answer before publishing.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -79,7 +80,13 @@ def _runner(llm, **kwargs) -> EvalRunner:
 
 
 def _invocation(**kw) -> Invocation:
-    inv = Invocation(id="inv-1", sandbox_id="sb-1", agent="a", final_text=kw.get("final_text", ""))
+    inv = Invocation(
+        id="inv-1",
+        sandbox_id="sb-1",
+        agent="a",
+        final_text=kw.get("final_text", ""),
+        execution_backend=kw.get("execution_backend", "inline"),
+    )
     inv.ok = kw.get("ok", True)
     inv.steps = kw.get("steps", [])
     return inv
@@ -256,6 +263,16 @@ async def test_a_run_is_readable_afterwards_so_two_runs_can_be_compared() -> Non
 
 
 @pytest.mark.asyncio
+async def test_global_run_lookup_is_scoped_to_the_server_derived_owner() -> None:
+    store = EvalStore(None)
+    run = EvalRun(id="eval-1", sandbox_id="sb-1", owner_scope="tenant-a:alice")
+    await store.save(run, ttl_seconds=300)
+
+    assert await store.get_by_id("tenant-a:alice", "eval-1") is not None
+    assert await store.get_by_id("tenant-a:bob", "eval-1") is None
+
+
+@pytest.mark.asyncio
 async def test_a_tool_calling_case_is_graded_on_the_tool_it_chose() -> None:
     llm = _ScriptedLLM(
         [
@@ -271,3 +288,104 @@ async def test_a_tool_calling_case_is_graded_on_the_tool_it_chose() -> None:
     )
 
     assert run.results[0].passed
+
+
+@pytest.mark.asyncio
+async def test_a_suite_persists_every_named_scorer_for_every_case() -> None:
+    llm = _ScriptedLLM([LLMResponse(text="expected")])
+    cases = [
+        EvalCase(name="one", input="go", expect=EvalExpect(exact_output="expected")),
+        EvalCase(name="two", input="go", expect=EvalExpect(exact_output="different")),
+    ]
+
+    run = await _runner(llm).run(
+        _record(),
+        cases,
+        triggered_by="sam@example.com",
+        scorers=["exact_match", "task_completion"],
+    )
+
+    assert [list(result.scores) for result in run.results] == [
+        ["exact_match", "task_completion"],
+        ["exact_match", "task_completion"],
+    ]
+    assert run.results[0].scores["exact_match"] == {
+        "name": "exact_match",
+        "score": 1.0,
+        "passed": True,
+        "unit": "ratio",
+        "detail": {},
+    }
+    assert not run.results[1].passed
+    assert run.summary["dimensions"] == {
+        "exact_match": {"average": 0.5, "passed": 1, "failed": 1, "pass_rate": 0.5, "unit": "ratio"},
+        "task_completion": {"average": 1.0, "passed": 2, "failed": 0, "pass_rate": 1.0, "unit": "ratio"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_case_execution_is_bounded_and_result_order_is_stable() -> None:
+    class _BlockingInvoker:
+        def __init__(self) -> None:
+            self.active = 0
+            self.peak = 0
+            self.two_started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def invoke(self, record, *, message: str, triggered_by: str) -> Invocation:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            if self.active == 2:
+                self.two_started.set()
+            await self.release.wait()
+            self.active -= 1
+            return Invocation(id=f"inv-{message}", sandbox_id=record.id, agent="agent", final_text=message)
+
+    invoker = _BlockingInvoker()
+    runner = EvalRunner(invoker, EvalStore(None), max_concurrency=2)  # type: ignore[arg-type]
+    cases = [EvalCase(name=f"case-{index}", input=str(index)) for index in range(4)]
+
+    running = asyncio.create_task(runner.run(_record(), cases, triggered_by="sam@example.com"))
+    await asyncio.wait_for(invoker.two_started.wait(), timeout=1)
+    assert invoker.peak == 2
+    invoker.release.set()
+
+    run = await running
+    assert invoker.peak == 2
+    assert [result.name for result in run.results] == ["case-0", "case-1", "case-2", "case-3"]
+    assert {result.execution_backend for result in run.results} == {"inline"}
+
+
+@pytest.mark.asyncio
+async def test_fifty_case_acceptance_summary_keeps_scores_cost_latency_and_trace_links() -> None:
+    class _FiftyCaseInvoker:
+        def __init__(self) -> None:
+            self.count = 0
+
+        async def invoke(self, record, *, message: str, triggered_by: str) -> Invocation:
+            del triggered_by
+            self.count += 1
+            return Invocation(
+                id=f"inv-{message}",
+                sandbox_id=record.id,
+                agent="agent",
+                final_text="done",
+                execution_backend="kubernetes_job",
+                wall_clock_ms=self.count,
+                steps=[TraceStep(kind="llm", cost_usd=0.01)],
+            )
+
+    cases = [EvalCase(name=f"case-{index}", input=str(index)) for index in range(50)]
+    run = await EvalRunner(_FiftyCaseInvoker(), EvalStore(None)).run(
+        _record(),
+        cases,
+        triggered_by="sam@example.com",
+        scorers=["task_completion", "cost"],
+    )
+
+    assert run.summary["pass_rate"] == 1.0
+    assert run.summary["p95_latency_ms"] == 48
+    assert run.summary["cost_usd"] == 0.5
+    assert run.summary["dimensions"]["task_completion"]["pass_rate"] == 1.0
+    assert all(result.to_dict()["trace_url"] for result in run.results)
+    assert {result.execution_backend for result in run.results} == {"kubernetes_job"}

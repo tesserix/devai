@@ -223,6 +223,19 @@ class SpecializationService:
             dict(result.handover) if isinstance(result.handover, dict) else {"value": result.handover}
         )
         patch.setdefault("ok", not result.error)
+        patch.setdefault("final_text", result.final_text)
+        patch.setdefault(
+            "usage",
+            {
+                "prompt_tokens": result.prompt_tokens,
+                "completion_tokens": result.completion_tokens,
+                "total_tokens": result.prompt_tokens + result.completion_tokens,
+                "tool_calls": result.tool_calls,
+                "turns": result.turns,
+            },
+        )
+        if result.trace_steps:
+            patch.setdefault("trace_steps", result.trace_steps)
         if result.final_text and f"{spec.name}_text" not in patch:
             patch[f"{spec.name}_text"] = result.final_text
         return patch
