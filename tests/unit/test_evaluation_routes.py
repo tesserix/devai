@@ -283,6 +283,41 @@ def test_top_level_evaluation_reuses_an_owned_job_backed_sandbox_and_links_trace
     assert runner.calls[0]["scorers"] == ["task_completion"]
 
 
+def test_judged_evaluation_passes_authenticated_principal_and_pinned_config_to_runner() -> None:
+    runner = _Runner()
+    sandboxes = _Sandboxes()
+    client = _evaluation_run_app(ALICE, runner=runner, sandboxes=sandboxes)
+    assert client.post("/api/evaluations/datasets", json=_dataset_body()).status_code == 201
+    created = client.post(
+        "/api/evaluations/suites",
+        json={
+            "name": "judged-gate",
+            "version": "1",
+            "dataset": {"name": "golden", "version": "3"},
+            "scorers": ["task_completion", "llm_judge"],
+            "judge": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-20250514",
+                "rubric": {
+                    "name": "quality",
+                    "version": "3",
+                    "dimensions": {"helpfulness": "The answer is useful."},
+                },
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    response = client.post(
+        "/api/evaluations",
+        json={"suite": {"name": "judged-gate", "version": "1"}, "sandbox_id": "sb-1"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert runner.calls[0]["principal"] == ALICE
+    assert runner.calls[0]["judge_config"].rubric.version == "3"
+
+
 def test_top_level_evaluation_can_provision_a_sandbox_pinned_to_the_suite_dataset() -> None:
     runner = _Runner()
     sandboxes = _Sandboxes()

@@ -11,6 +11,8 @@ from devai.evaluations.models import (
     DatasetCreate,
     EvalSuiteCreate,
     EvalThresholds,
+    JudgeConfig,
+    JudgeRubric,
 )
 from devai.evaluations.service import EvaluationConflict, EvaluationNotFound, EvaluationService
 from devai.identity import Principal
@@ -178,3 +180,48 @@ def test_dataset_case_carries_tool_order_and_arguments_into_the_scorer_contract(
 
     assert eval_case.expect.tool_order == "unordered"
     assert eval_case.expect.tool_arguments == [{"customer_id": "c-17"}, {"order_id": "4471"}]
+
+
+def test_dataset_case_carries_human_judge_scores_into_the_calibration_contract() -> None:
+    case = DatasetCase(
+        id="refund",
+        input="Refund order 4471",
+        human_scores={"helpfulness": 0.9, "groundedness": 0.75},
+    )
+
+    assert case.as_eval_case().human_scores == {"helpfulness": 0.9, "groundedness": 0.75}
+
+
+async def test_suite_persists_and_resolves_the_pinned_judge_configuration() -> None:
+    database = _Database()
+    service = EvaluationService(database=database, object_store=NoopObjectStoreAdapter())
+    await service.create_dataset(_principal(), _dataset())
+    judge = JudgeConfig(
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        rubric=JudgeRubric(
+            name="support-quality",
+            version="3",
+            dimensions={
+                "helpfulness": "The answer gives the user an actionable next step.",
+                "groundedness": "Every factual claim is supported by retrieved evidence.",
+            },
+        ),
+    )
+
+    created = await service.create_suite(
+        _principal(),
+        EvalSuiteCreate(
+            name="judged-release-gate",
+            version="1",
+            dataset=ArtifactVersionRef(name="remediation-golden", version="3"),
+            scorers=["exact_match", "llm_judge"],
+            judge=judge,
+        ),
+    )
+    resolved = await service.resolve_suite(_principal(), ArtifactVersionRef(name="judged-release-gate", version="1"))
+
+    assert created.judge == judge
+    assert resolved.judge == judge
+    stored = database.suites[("tenant-a:alice", "judged-release-gate", "1")]
+    assert stored["thresholds"]["_judge"]["rubric"]["version"] == "3"

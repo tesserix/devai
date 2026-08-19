@@ -377,6 +377,7 @@ def create_app(
                 )
                 if app.state.sre_studio_db is not None:
                     from devai.evaluations.job import JobEvaluationInvoker
+                    from devai.evaluations.judge import JudgeFactory
 
                     evaluation_invoker = JobEvaluationInvoker(
                         deps=sandbox_deps,
@@ -388,6 +389,7 @@ def create_app(
                         EvalStore(None, database=app.state.sre_studio_db),
                         max_cases=int(getattr(config, "sandbox_max_eval_cases_per_run", 50) or 50),
                         max_concurrency=int(getattr(config, "sandbox_eval_max_concurrency", 4) or 4),
+                        judge_factory=JudgeFactory(sandbox_deps),
                     )
                     logger.info("Evaluation runner ready (backend=%s)", evaluation_invoker.execution_backend)
                 logger.info("Sandbox invoker ready")

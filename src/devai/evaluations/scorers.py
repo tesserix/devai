@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -29,14 +29,19 @@ class ScorerResult:
         }
 
 
+class JudgeScorer(Protocol):
+    async def score(self, context: ScorerContext) -> ScorerResult: ...
+
+
 @dataclass(slots=True, frozen=True)
 class ScorerContext:
     invocation: Any = None
     expect: Any = None
     task: Any = None
+    judge: JudgeScorer | None = None
 
 
-ScoreFunction = Callable[[ScorerContext], ScorerResult]
+ScoreFunction = Callable[[ScorerContext], ScorerResult | Awaitable[ScorerResult]]
 
 
 @dataclass(slots=True, frozen=True)
@@ -528,6 +533,12 @@ def cost(context: ScorerContext) -> ScorerResult:
     )
 
 
+async def llm_judge(context: ScorerContext) -> ScorerResult:
+    if context.judge is None:
+        return _failed("llm_judge", "judge runtime unavailable")
+    return await context.judge.score(context)
+
+
 def run_quality(context: ScorerContext) -> ScorerResult:
     task = context.task
     if task is None:
@@ -576,19 +587,22 @@ def bind(names: list[str]) -> list[BoundScorer]:
     return _REGISTRY.bind(names)
 
 
-for _name, _scorer in {
-    "exact_match": exact_match,
-    "regex": regex,
-    "json_schema": json_schema,
-    "expected_tool_call": expected_tool_call,
-    "safety": safety,
-    "tool_trajectory": tool_trajectory,
-    "task_completion": task_completion,
-    "latency": latency,
-    "tokens": tokens,
-    "cost": cost,
-    "run_quality": run_quality,
-}.items():
+_DEFAULT_SCORERS: tuple[tuple[str, ScoreFunction], ...] = (
+    ("exact_match", exact_match),
+    ("regex", regex),
+    ("json_schema", json_schema),
+    ("expected_tool_call", expected_tool_call),
+    ("safety", safety),
+    ("tool_trajectory", tool_trajectory),
+    ("task_completion", task_completion),
+    ("latency", latency),
+    ("tokens", tokens),
+    ("cost", cost),
+    ("llm_judge", llm_judge),
+    ("run_quality", run_quality),
+)
+
+for _name, _scorer in _DEFAULT_SCORERS:
     register(_name, _scorer)
 
 

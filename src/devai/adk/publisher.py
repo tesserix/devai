@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from devai.adk.builders import Agent, Dataset, EvalSuite, McpServer, Prompt, Skill
+from devai.adk.builders import Agent, Dataset, EvalSuite, McpServer, Prompt, Rubric, Skill
 from devai.registry import RegistryClient, RegistryError
 
 
@@ -63,7 +63,7 @@ class Publisher:
         self._client = RegistryClient(base_url=registry_url, token=token, timeout_seconds=timeout_seconds)
         self._summary = PublishSummary()
 
-    def publish(self, builder: Skill | Prompt | McpServer | Agent | Dataset | EvalSuite) -> PublishResult:
+    def publish(self, builder: Skill | Prompt | McpServer | Agent | Dataset | EvalSuite | Rubric) -> PublishResult:
         body = builder.to_dict()
         name = builder.name
         try:
@@ -78,7 +78,10 @@ class Publisher:
         self._summary.add(r)
         return r
 
-    def publish_many(self, builders: list[Skill | Prompt | McpServer | Agent | Dataset | EvalSuite]) -> PublishSummary:
+    def publish_many(
+        self,
+        builders: list[Skill | Prompt | McpServer | Agent | Dataset | EvalSuite | Rubric],
+    ) -> PublishSummary:
         for b in builders:
             self.publish(b)
         return self._summary
@@ -89,7 +92,7 @@ class Publisher:
 
 def _publish_builder(
     client: RegistryClient,
-    builder: Skill | Prompt | McpServer | Agent | Dataset | EvalSuite,
+    builder: Skill | Prompt | McpServer | Agent | Dataset | EvalSuite | Rubric,
     body: dict[str, object],
 ) -> str:
     if isinstance(builder, Skill):
@@ -98,6 +101,9 @@ def _publish_builder(
     if isinstance(builder, Prompt):
         client.publish_prompt(body)
         return "prompt"
+    if isinstance(builder, Rubric):
+        client.publish_prompt(body)
+        return "rubric"
     if isinstance(builder, McpServer):
         client.publish_mcp_server(body)
         return "mcp-server"

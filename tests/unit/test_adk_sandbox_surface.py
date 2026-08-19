@@ -9,7 +9,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from devai.adk import Agent, Dataset, EvalSuite, Publisher, SandboxClient
+from devai.adk import Agent, Dataset, EvalSuite, Publisher, Rubric, SandboxClient
 from devai.adk.client import AdkAPIError
 from devai.adk.validation import validate_artifacts
 from devai.cli.adk_commands import _builder_for, adk_app
@@ -88,6 +88,49 @@ def test_eval_suite_emits_extensible_scorers_and_structured_thresholds() -> None
     }
 
 
+def test_rubric_artifact_can_pin_a_provider_agnostic_judge_on_a_suite() -> None:
+    rubric = (
+        Rubric("support-quality")
+        .version("3")
+        .description("Human-calibrated support answer quality")
+        .dimension("helpfulness", "The answer gives an actionable next step.")
+        .dimension("groundedness", "Claims are supported by retrieved evidence.")
+    )
+    suite = (
+        EvalSuite("release-gate")
+        .dataset("release-smoke", "3")
+        .scorers("exact_match", "llm_judge")
+        .judge("anthropic", "claude-sonnet-4-20250514", rubric)
+    )
+
+    assert json.loads(rubric.to_dict()["content"])["dimensions"] == {
+        "helpfulness": "The answer gives an actionable next step.",
+        "groundedness": "Claims are supported by retrieved evidence.",
+    }
+    assert suite.to_dict()["judge"] == {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "rubric": {
+            "name": "support-quality",
+            "version": "3",
+            "dimensions": {
+                "helpfulness": "The answer gives an actionable next step.",
+                "groundedness": "Claims are supported by retrieved evidence.",
+            },
+        },
+        "passThreshold": 0.7,
+        "maxTokens": 800,
+        "maxCostPerCaseUsd": 0.05,
+        "timeoutSeconds": 30.0,
+    }
+    labelled = Dataset("calibration").case(
+        "refund",
+        "Can I get a refund?",
+        human_scores={"helpfulness": 0.9, "groundedness": 0.8},
+    )
+    assert labelled.to_dict()["cases"][0]["humanScores"] == {"helpfulness": 0.9, "groundedness": 0.8}
+
+
 def test_eval_suite_yaml_builder_preserves_scorers_and_thresholds() -> None:
     builder = _builder_for(
         {
@@ -131,12 +174,17 @@ def test_publisher_routes_dataset_and_eval_suite_to_registry(monkeypatch: pytest
             published.append(("eval-suite", body))
             return {}
 
+        def publish_prompt(self, body: dict[str, Any]) -> dict[str, Any]:
+            published.append(("rubric", body))
+            return {}
+
     monkeypatch.setattr("devai.adk.publisher.RegistryClient", Registry)
     publisher = Publisher(registry_url="https://registry.example")
 
     assert publisher.publish(Dataset("smoke").case("works", "go")).ok is True
     assert publisher.publish(EvalSuite("gate").dataset("smoke", "1")).ok is True
-    assert [kind for kind, _ in published] == ["dataset", "eval-suite"]
+    assert publisher.publish(Rubric("quality").dimension("helpfulness", "Useful answer")).ok is True
+    assert [kind for kind, _ in published] == ["dataset", "eval-suite", "rubric"]
 
 
 def test_registry_client_wraps_eval_artifacts_in_registry_envelopes(monkeypatch: pytest.MonkeyPatch) -> None:

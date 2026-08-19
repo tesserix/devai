@@ -29,6 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from devai.sandbox.trace import Invocation
 
 if TYPE_CHECKING:
+    from devai.evaluations.models import JudgeConfig
+    from devai.identity import Principal
     from devai.sandbox.models import SandboxRecord
 
 logger = logging.getLogger(__name__)
@@ -71,8 +73,15 @@ class EvalCase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     input: str = Field(min_length=1)
     expect: EvalExpect = Field(default_factory=EvalExpect)
+    human_scores: dict[str, float] = Field(default_factory=dict, max_length=5)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def human_scores_are_normalized(self) -> EvalCase:
+        if any(score < 0 or score > 1 for score in self.human_scores.values()):
+            raise ValueError("human judge scores must be between 0 and 1")
+        return self
 
 
 @dataclass(slots=True)
@@ -85,6 +94,7 @@ class CaseResult:
     final_text: str = ""
     totals: dict[str, Any] = field(default_factory=dict)
     scores: dict[str, dict[str, Any]] = field(default_factory=dict)
+    human_scores: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         body = asdict(self)
@@ -102,6 +112,7 @@ class EvalRun:
     user_id: str = ""
     dataset_ref: dict[str, str] | None = None
     suite_ref: dict[str, str] | None = None
+    judge: dict[str, Any] | None = None
     results: list[CaseResult] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     duration_ms: int = 0
@@ -134,7 +145,7 @@ class EvalRun:
                 "pass_rate": round(passed_scores / len(scores), 4),
                 "unit": scores[0]["unit"],
             }
-        return {
+        summary = {
             "cases": total,
             "passed": passed,
             "failed": total - passed,
@@ -147,6 +158,29 @@ class EvalRun:
             "duration_ms": self.duration_ms,
             "dimensions": dimensions,
         }
+        calibration = self._calibration()
+        if calibration is not None:
+            summary["calibration"] = calibration
+        return summary
+
+    def _calibration(self) -> dict[str, Any] | None:
+        pairs: list[tuple[float, float, float]] = []
+        for result in self.results:
+            judge = result.scores.get("llm_judge", {}).get("detail", {})
+            threshold = float(judge.get("pass_threshold", 0.7))
+            judged_dimensions = judge.get("dimensions", {})
+            for dimension, human_score in result.human_scores.items():
+                judged = judged_dimensions.get(dimension)
+                if isinstance(judged, dict) and "score" in judged:
+                    pairs.append((float(human_score), float(judged["score"]), threshold))
+        if not pairs:
+            return None
+        agreements = sum(1 for human, judged, threshold in pairs if (human >= threshold) == (judged >= threshold))
+        return {
+            "labelled_scores": len(pairs),
+            "threshold_agreement": round(agreements / len(pairs), 4),
+            "mean_absolute_error": round(sum(abs(human - judged) for human, judged, _ in pairs) / len(pairs), 6),
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -155,6 +189,7 @@ class EvalRun:
             "agent": self.agent,
             "dataset": self.dataset_ref,
             "suite": self.suite_ref,
+            "judge": self.judge,
             "created_at": self.created_at,
             "results": [r.to_dict() for r in self.results],
             "summary": self.summary,
@@ -183,6 +218,7 @@ class EvalRun:
             user_id=str(body.get("user_id") or ""),
             dataset_ref=body.get("dataset"),
             suite_ref=body.get("suite"),
+            judge=body.get("judge"),
             results=results,
             created_at=str(body.get("created_at") or ""),
             duration_ms=int(summary.get("duration_ms") or 0),
@@ -231,11 +267,13 @@ class EvalRunner:
         *,
         max_cases: int = _DEFAULT_MAX_CASES,
         max_concurrency: int = 4,
+        judge_factory: Any | None = None,
     ) -> None:
         self._invoker = invoker
         self._store = store
         self._max_cases = max(1, max_cases)
         self._max_concurrency = max(1, max_concurrency)
+        self._judge_factory = judge_factory
 
     @property
     def store(self) -> EvalStore:
@@ -253,6 +291,8 @@ class EvalRunner:
         dataset_ref: dict[str, str] | None = None,
         suite_ref: dict[str, str] | None = None,
         scorers: list[str] | None = None,
+        principal: Principal | None = None,
+        judge_config: JudgeConfig | None = None,
     ) -> EvalRun:
         """Run every case with bounded fan-out and preserve dataset order."""
         from devai.evaluations.scorers import bind
@@ -262,6 +302,10 @@ class EvalRunner:
         if len(cases) > self._max_cases:
             raise ValueError(f"tenant dataset quota is {self._max_cases} cases per eval run")
         bound_scorers = bind(scorers or [])
+        judge_scorers = [scorer for scorer in bound_scorers if scorer.name == "llm_judge"]
+        deterministic_scorers = [scorer for scorer in bound_scorers if scorer.name != "llm_judge"]
+        if bool(judge_scorers) != (judge_config is not None):
+            raise ValueError("llm_judge scorer requires exactly one pinned judge configuration")
 
         run = EvalRun(
             id=f"eval-{uuid.uuid4().hex[:12]}",
@@ -276,20 +320,31 @@ class EvalRunner:
         started = time.perf_counter()
         semaphore = asyncio.Semaphore(self._max_concurrency)
         results: list[CaseResult | None] = [None] * len(cases)
+        invocations: list[Invocation | None] = [None] * len(cases)
 
         async def run_case(index: int, case: EvalCase) -> None:
             async with semaphore:
-                results[index] = await self._one(
+                results[index], invocations[index] = await self._one(
                     record,
                     case,
                     triggered_by=triggered_by,
-                    scorers=bound_scorers,
+                    scorers=deterministic_scorers,
                 )
 
         async with asyncio.TaskGroup() as group:
             for index, case in enumerate(cases):
                 group.create_task(run_case(index, case))
         run.results = [result for result in results if result is not None]
+        if judge_scorers and judge_config is not None:
+            await self._judge(
+                run,
+                record,
+                cases,
+                invocations,
+                judge_scorers,
+                principal=principal,
+                judge_config=judge_config,
+            )
         run.duration_ms = int((time.perf_counter() - started) * 1000)
 
         await self._store.save(run, ttl_seconds=self._ttl(record))
@@ -302,19 +357,21 @@ class EvalRunner:
         *,
         triggered_by: str,
         scorers: list[Any],
-    ) -> CaseResult:
+    ) -> tuple[CaseResult, Invocation | None]:
         try:
             invocation = await self._invoker.invoke(record, message=case.input, triggered_by=triggered_by)
         except Exception as e:  # noqa: BLE001 — one broken case is a red case, not a dead suite
             logger.warning("eval case %s could not run", case.name, exc_info=True)
-            return CaseResult(
+            result = CaseResult(
                 name=case.name,
                 passed=False,
                 failures=[f"could not run: {e}"],
-                scores=self._score(case, None, scorers),
+                scores=await self._score(case, None, scorers),
+                human_scores=case.human_scores,
             )
+            return result, None
 
-        scores = self._score(case, invocation, scorers)
+        scores = await self._score(case, invocation, scorers)
         if scores:
             failures = [
                 f"{name}: {score['detail'].get('failure') or score['detail'].get('error', 'failed')}"
@@ -323,7 +380,7 @@ class EvalRunner:
             ]
         else:
             failures = grade(case.expect, invocation)
-        return CaseResult(
+        result = CaseResult(
             name=case.name,
             passed=not failures,
             failures=failures,
@@ -332,17 +389,29 @@ class EvalRunner:
             final_text=invocation.final_text,
             totals=invocation.totals,
             scores=scores,
+            human_scores=case.human_scores,
         )
+        return result, invocation
 
     @staticmethod
-    def _score(case: EvalCase, invocation: Invocation | None, scorers: list[Any]) -> dict[str, dict[str, Any]]:
+    async def _score(
+        case: EvalCase,
+        invocation: Invocation | None,
+        scorers: list[Any],
+        *,
+        judge: Any = None,
+    ) -> dict[str, dict[str, Any]]:
+        import inspect
+
         from devai.evaluations.scorers import ScorerContext, ScorerResult
 
         results: dict[str, dict[str, Any]] = {}
-        context = ScorerContext(invocation=invocation, expect=case.expect)
+        context = ScorerContext(invocation=invocation, expect=case.expect, judge=judge)
         for scorer in scorers:
             try:
                 result = scorer.score(context)
+                if inspect.isawaitable(result):
+                    result = await result
             except Exception:  # noqa: BLE001 — one broken scorer is a failed dimension
                 logger.warning("eval scorer %s failed", scorer.name, exc_info=True)
                 result = ScorerResult(
@@ -353,6 +422,73 @@ class EvalRunner:
                 )
             results[scorer.name] = result.to_dict()
         return results
+
+    async def _judge(
+        self,
+        run: EvalRun,
+        record: SandboxRecord,
+        cases: list[EvalCase],
+        invocations: list[Invocation | None],
+        scorers: list[Any],
+        *,
+        principal: Principal | None,
+        judge_config: JudgeConfig,
+    ) -> None:
+        from devai.evaluations.judge import JudgeBudget
+
+        run.judge = judge_config.model_dump(mode="json")
+        agent_cost = sum(float(result.totals.get("cost_usd", 0.0)) for result in run.results)
+        budget = JudgeBudget(remaining_usd=max(0.0, record.spec.limits.max_cost_usd - agent_cost))
+        try:
+            if self._judge_factory is None or principal is None:
+                raise ValueError("judge runtime unavailable")
+            judge, effective_config = await self._judge_factory.create(
+                principal=principal,
+                config=judge_config,
+                budget=budget,
+                metadata={
+                    "tenant_id": run.tenant_id,
+                    "user_id": run.user_id,
+                    "run_id": run.id,
+                    "sandbox_id": run.sandbox_id,
+                },
+            )
+            run.judge = effective_config.model_dump(mode="json")
+        except Exception:  # noqa: BLE001 — judge availability must not discard deterministic results
+            logger.warning("evaluation judge could not be resolved", exc_info=True)
+            self._mark_judge_unavailable(run, "judge runtime unavailable")
+            return
+
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+
+        async def score_case(index: int) -> None:
+            async with semaphore:
+                scores = await self._score(cases[index], invocations[index], scorers, judge=judge)
+                run.results[index].scores.update(scores)
+                self._refresh_result(run.results[index])
+
+        async with asyncio.TaskGroup() as group:
+            for index in range(len(cases)):
+                group.create_task(score_case(index))
+        run.judge_cost_usd = budget.spent_usd
+
+    @staticmethod
+    def _mark_judge_unavailable(run: EvalRun, error: str) -> None:
+        from devai.evaluations.scorers import ScorerResult
+
+        score = ScorerResult(name="llm_judge", score=0.0, passed=False, detail={"error": error}).to_dict()
+        for result in run.results:
+            result.scores["llm_judge"] = score
+            EvalRunner._refresh_result(result)
+
+    @staticmethod
+    def _refresh_result(result: CaseResult) -> None:
+        result.failures = [
+            f"{name}: {score['detail'].get('failure') or score['detail'].get('error', 'failed')}"
+            for name, score in result.scores.items()
+            if not score["passed"]
+        ]
+        result.passed = not result.failures
 
     def _ttl(self, record: SandboxRecord) -> int:
         remaining = int((record.expires_at - datetime.now(UTC)).total_seconds())
