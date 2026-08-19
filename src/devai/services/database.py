@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class SandboxQuotaExceeded(RuntimeError):
+    """An atomic sandbox reservation crossed a tenant/user quota."""
+
+
 class Database:
     """Async PostgreSQL client for the DevAI ALM lifecycle store."""
 
@@ -1092,19 +1096,60 @@ class Database:
         created_at: datetime,
         expires_at: datetime,
         last_access_at: datetime | None = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        max_live_per_tenant: int = 0,
+        monthly_cost_limit_usd: float = 0.0,
     ) -> None:
-        await self.pool.execute(
-            """INSERT INTO sandboxes
-                 (id, owner, spec, status, created_at, expires_at, last_access_at)
-               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)""",
-            sandbox_id,
-            owner,
-            json.dumps(spec),
-            status,
-            created_at,
-            expires_at,
-            last_access_at or created_at,
-        )
+        quota_key = tenant_id or user_id or owner
+        async with self.pool.acquire() as connection, connection.transaction():
+            if quota_key and (max_live_per_tenant > 0 or monthly_cost_limit_usd > 0):
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"sandbox-quota:{quota_key}",
+                )
+            if max_live_per_tenant > 0:
+                live = await connection.fetchval(
+                    """SELECT COUNT(*)
+                         FROM sandboxes
+                        WHERE status NOT IN ('destroyed', 'failed')
+                          AND (($1 <> '' AND split_part(owner, ':', 1) = $1)
+                               OR ($1 = '' AND owner = $2))""",
+                    tenant_id,
+                    owner,
+                )
+                if int(live or 0) >= max_live_per_tenant:
+                    scope = f"tenant {tenant_id}" if tenant_id else f"user {user_id or owner}"
+                    raise SandboxQuotaExceeded(f"{scope} reached its concurrent sandbox quota ({max_live_per_tenant})")
+            if monthly_cost_limit_usd > 0:
+                spent = await connection.fetchval(
+                    """SELECT COALESCE(SUM(llm_cost_usd), 0)
+                         FROM agent_executions
+                        WHERE run_id LIKE 'sandbox:%'
+                          AND started_at >= date_trunc('month', CURRENT_TIMESTAMP)
+                          AND (($1 <> '' AND (tenant_id = $1 OR (tenant_id = '' AND user_id = $3)))
+                               OR ($1 = '' AND user_id = $2))""",
+                    tenant_id,
+                    user_id or owner,
+                    owner,
+                )
+                if float(spent or 0.0) >= monthly_cost_limit_usd:
+                    scope = f"tenant {tenant_id}" if tenant_id else f"user {user_id or owner}"
+                    raise SandboxQuotaExceeded(
+                        f"{scope} reached its monthly sandbox cost quota (${monthly_cost_limit_usd:.2f})"
+                    )
+            await connection.execute(
+                """INSERT INTO sandboxes
+                     (id, owner, spec, status, created_at, expires_at, last_access_at)
+                   VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)""",
+                sandbox_id,
+                owner,
+                json.dumps(spec),
+                status,
+                created_at,
+                expires_at,
+                last_access_at or created_at,
+            )
 
     async def get_sandbox(self, sandbox_id: str) -> dict[str, Any] | None:
         row = await self.pool.fetchrow("SELECT * FROM sandboxes WHERE id = $1", sandbox_id)

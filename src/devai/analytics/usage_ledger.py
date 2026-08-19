@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _USERS = "devai:usage:users"  # legacy tenantless user set
 _IDENTITIES = "devai:usage:identities"
+_SANDBOXES = "devai:usage:sandboxes"
 _RECENT_MAX = 300
 
 
@@ -84,6 +85,7 @@ class UsageLedger:
         agent: str = "",
         run_id: str = "",
         status: str = "ok",
+        sandbox_id: str = "",
     ) -> None:
         client = await self._client()
         if client is None:
@@ -123,6 +125,11 @@ class UsageLedger:
                 pipe.hset(_IDENTITIES, identity_key, triggered_by or user)
                 if not tenant:
                     pipe.sadd(_USERS, user)
+            sandbox = sandbox_id.strip()
+            if sandbox:
+                sandbox_prefix = f"{_ns(tenant=tenant)}sandbox:{sandbox}:"
+                _bump_scope(pipe, sandbox_prefix)
+                pipe.hset(_SANDBOXES, f"{tenant}\x1f{sandbox}", user)
             rec = json.dumps(
                 {
                     "ts": day,
@@ -138,6 +145,7 @@ class UsageLedger:
                     "cost_usd": round(cost_usd, 6),
                     "duration_ms": round(duration_ms, 1),
                     "status": status,
+                    "sandbox_id": sandbox,
                 }
             )
             pipe.lpush(f"{_ns()}recent", rec)
@@ -212,6 +220,27 @@ class UsageLedger:
                 row["tenant_id"] = identity_tenant
                 out.append(row)
             return sorted(out, key=lambda r: r["cost_usd"], reverse=True)
+        except Exception:  # noqa: BLE001
+            return []
+
+    async def by_sandbox(self, tenant: str = "", user: str = "") -> list[dict[str, Any]]:
+        """Sandbox totals visible to one user, one tenant admin, or platform admin."""
+        client = await self._client()
+        if client is None:
+            return []
+        try:
+            sandboxes = {_text(key): _text(value) for key, value in (await client.hgetall(_SANDBOXES)).items()}
+            out = []
+            for identity_key, owner in sorted(sandboxes.items()):
+                identity_tenant, _, sandbox_id = identity_key.partition("\x1f")
+                if tenant and identity_tenant != tenant:
+                    continue
+                if user and owner != user:
+                    continue
+                row = self._row(await client.hgetall(f"{_ns(tenant=identity_tenant)}sandbox:{sandbox_id}:total"))
+                row.update({"sandbox_id": sandbox_id, "tenant_id": identity_tenant, "user_id": owner})
+                out.append(row)
+            return sorted(out, key=lambda item: item["cost_usd"], reverse=True)
         except Exception:  # noqa: BLE001
             return []
 

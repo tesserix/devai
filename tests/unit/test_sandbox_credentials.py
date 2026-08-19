@@ -58,6 +58,15 @@ class _LLM(LLMAdapter):
         return LLMResponse(text="ok")
 
 
+class _CaptureLLM(_LLM):
+    def __init__(self) -> None:
+        self.requests: list[LLMRequest] = []
+
+    async def generate(self, request):  # type: ignore[override]
+        self.requests.append(request)
+        return await super().generate(request)
+
+
 def _record(
     connector: str = "sandbox-evals",
     *,
@@ -397,12 +406,30 @@ async def test_sandbox_llm_calls_are_attributed_and_bounded_before_dispatch() ->
         "sandbox_id": "sb-1",
         "run_id": "sandbox:sb-1",
         "user_id": "alice@example.com",
+        "tenant_id": "",
     }
     assert response.extra["sandbox_tokens_used"] == 10
     assert response.extra["sandbox_cost_usd"] == 0.25
 
     with pytest.raises(SandboxBudgetExceeded, match="token budget"):
         await metered.generate(LLMRequest())
+
+
+@pytest.mark.asyncio
+async def test_sandbox_metering_splits_tenant_qualified_owner_for_attribution() -> None:
+    inner = _CaptureLLM()
+    metered = SandboxMeteredLLMAdapter(
+        inner,
+        sandbox_id="sb-tenant",
+        owner="tenant-a:shared-subject",
+        max_tokens=100,
+        max_cost_usd=1.0,
+    )
+
+    await metered.generate(LLMRequest())
+
+    assert inner.requests[0].extra["tenant_id"] == "tenant-a"
+    assert inner.requests[0].extra["user_id"] == "shared-subject"
 
 
 @pytest.mark.asyncio

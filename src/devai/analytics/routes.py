@@ -178,12 +178,21 @@ async def usage(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[s
     per-user breakdown. All with real USD cost."""
     ledger = _ledger(request)
     if ledger is None:
-        return {"summary": {}, "by_model": [], "by_user": [], "timeseries": [], "enabled": False, "scope": "none"}
+        return {
+            "summary": {},
+            "by_model": [],
+            "by_user": [],
+            "by_sandbox": [],
+            "timeseries": [],
+            "enabled": False,
+            "scope": "none",
+        }
     scope_tenant, scope_user, can_list_users = await _usage_scope(request)
     return {
         "summary": await ledger.summary(scope_user, scope_tenant),
         "by_model": await ledger.by_model(scope_user, scope_tenant),
         "by_user": await ledger.by_user(scope_tenant) if can_list_users else [],
+        "by_sandbox": await ledger.by_sandbox(scope_tenant, "" if can_list_users else scope_user),
         "timeseries": await ledger.timeseries(days, scope_user, scope_tenant),
         "enabled": True,
         "scope": "all" if can_list_users and not scope_tenant else ("tenant" if can_list_users else "me"),

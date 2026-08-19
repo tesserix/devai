@@ -608,6 +608,10 @@ class Settings(BaseSettings):
     terminal_sandbox_enabled: bool = False
     terminal_sandbox_timeout_seconds: int = 3600
 
+    # --- Agent sandbox governance ---
+    sandbox_max_live_per_tenant: int = 5
+    sandbox_monthly_cost_limit_usd: float = 100.0
+
     # --- Agent Registry (aregistry HTTP client) ---
     # The shared catalog of skills + prompts + MCP servers + agents.
     # When `registry_url` is empty, DevAI runs in pure-local-YAML mode

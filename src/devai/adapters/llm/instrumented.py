@@ -242,6 +242,7 @@ class InstrumentedLLMAdapter(LLMAdapter):
                 agent=str(extra.get("agent", "") or ""),
                 run_id=str(extra.get("run_id", "") or ""),
                 status=status,
+                sandbox_id=str(extra.get("sandbox_id", "") or ""),
             )
             loop = asyncio.get_running_loop()
             loop.create_task(coro)

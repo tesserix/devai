@@ -64,14 +64,16 @@ def _owner_handle(principal: Principal | None) -> str | None:
     return None
 
 
-async def _write_scope(request: Request) -> tuple[str, bool]:
+async def _write_scope(request: Request) -> tuple[str, bool, str, str]:
     principal = await _resolve_principal(request)
     owner = _owner_handle(principal)
     if owner is None:
         if _require_auth(request):
             raise HTTPException(status_code=401, detail="authentication required")
         owner = f"anon:{uuid.uuid4().hex[:12]}"
-    return owner, _is_admin(principal)
+    tenant_id = str(getattr(principal, "tenant_id", "") or "")
+    user_id = str(getattr(principal, "uid", "") or getattr(principal, "email", "") or owner)
+    return owner, _is_admin(principal), tenant_id, user_id
 
 
 async def _read_scope(request: Request) -> tuple[str, bool]:
@@ -96,13 +98,13 @@ def _view(record: SandboxRecord) -> dict[str, Any]:
 @router.post("", status_code=201)
 async def create_sandbox(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     svc = _service(request)
-    owner, _ = await _write_scope(request)
+    owner, _, tenant_id, user_id = await _write_scope(request)
     try:
         spec = SandboxSpec.model_validate(body)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=e.errors(include_url=False)) from e
     try:
-        return _view(await svc.create(spec, owner=owner))
+        return _view(await svc.create(spec, owner=owner, tenant_id=tenant_id, user_id=user_id))
     except SandboxError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 

@@ -18,6 +18,7 @@ from devai.sandbox.invoke import SandboxInvoker
 from devai.sandbox.models import (
     AgentRef,
     ModelRef,
+    SandboxLimits,
     SandboxRecord,
     SandboxSpec,
     SandboxStatus,
@@ -60,6 +61,7 @@ def _record(**kw) -> SandboxRecord:
         tools=kw.get("tools", ToolPolicy(default_mode=ToolMode.MOCK)),
         draft=kw.get("draft"),
         adk_version="0.2.0",
+        limits=kw.get("limits", SandboxLimits()),
     )
     return SandboxRecord(
         id=kw.get("id", "sb-1"),
@@ -224,6 +226,27 @@ async def test_a_model_failure_is_a_failed_trace_not_a_lost_one() -> None:
     assert not inv.ok
     assert "503" in inv.error
     assert (await store.get("sb-1", inv.id)) is not None
+
+
+async def test_wall_clock_budget_stops_the_run_and_records_the_reason(monkeypatch) -> None:
+    limits = SandboxLimits.model_construct(max_tokens=100, max_cost_usd=1.0, max_wall_clock_s=0)
+    invoker = _invoker(_ScriptedLLM([]))
+
+    async def never_finishes(*args, **kwargs):
+        del args, kwargs
+        await __import__("asyncio").Event().wait()
+
+    monkeypatch.setattr(invoker, "_run", never_finishes)
+
+    invocation = await invoker.invoke(
+        _record(limits=limits),
+        message="go",
+        triggered_by="sam@example.com",
+    )
+
+    assert not invocation.ok
+    assert "wall-clock budget" in invocation.error
+    assert invocation.steps[-1].error == invocation.error
 
 
 async def test_provider_errors_are_redacted_before_logging_or_tracing(caplog) -> None:

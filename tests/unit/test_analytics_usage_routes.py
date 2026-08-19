@@ -19,6 +19,9 @@ class _Ledger:
     async def by_user(self, tenant: str = ""):
         return [{"tenant": tenant}]
 
+    async def by_sandbox(self, tenant: str = "", user: str = ""):
+        return [{"tenant": tenant, "user": user}]
+
     async def timeseries(self, days: int = 30, user: str = "", tenant: str = ""):
         return []
 
@@ -79,6 +82,7 @@ def test_user_usage_is_scoped_by_tenant_and_subject(monkeypatch):
     assert response.status_code == 200
     assert response.json()["summary"] == {"calls": 1, "tenant": "tenant-a", "user": "shared-uid"}
     assert response.json()["by_user"] == []
+    assert response.json()["by_sandbox"] == [{"tenant": "tenant-a", "user": "shared-uid"}]
 
 
 def test_tenant_admin_sees_only_tenant_rollup(monkeypatch):
@@ -92,6 +96,7 @@ def test_tenant_admin_sees_only_tenant_rollup(monkeypatch):
     assert response.status_code == 200
     assert response.json()["summary"] == {"calls": 1, "tenant": "tenant-a", "user": ""}
     assert response.json()["by_user"] == [{"tenant": "tenant-a"}]
+    assert response.json()["by_sandbox"] == [{"tenant": "tenant-a", "user": ""}]
 
 
 def test_postgres_cost_and_agent_rollups_receive_the_same_principal_scope(monkeypatch):

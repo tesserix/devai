@@ -142,6 +142,47 @@ async def test_create_pins_the_spec_and_sets_an_expiry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_passes_tenant_quota_context_to_the_atomic_database_write() -> None:
+    db = _FakeDB()
+    settings = type(
+        "Settings",
+        (),
+        {"sandbox_max_live_per_tenant": 5, "sandbox_monthly_cost_limit_usd": 25.0},
+    )()
+
+    rec = await _service(db, settings=settings).create(
+        SandboxSpec.model_validate(_MIN_SPEC),
+        owner="tenant-a:subject-a",
+        tenant_id="tenant-a",
+        user_id="subject-a",
+    )
+
+    row = db.rows[rec.id]
+    assert row["tenant_id"] == "tenant-a"
+    assert row["user_id"] == "subject-a"
+    assert row["max_live_per_tenant"] == 5
+    assert row["monthly_cost_limit_usd"] == 25.0
+
+
+@pytest.mark.asyncio
+async def test_tenant_quota_rejection_is_a_clear_sandbox_error() -> None:
+    from devai.services.database import SandboxQuotaExceeded
+
+    class _QuotaDB(_FakeDB):
+        async def create_sandbox(self, **kw: Any) -> dict[str, Any]:
+            del kw
+            raise SandboxQuotaExceeded("tenant tenant-a reached its concurrent sandbox quota (5)")
+
+    with pytest.raises(SandboxError, match="tenant-a.*concurrent sandbox quota"):
+        await _service(_QuotaDB()).create(
+            SandboxSpec.model_validate(_MIN_SPEC),
+            owner="tenant-a:subject-a",
+            tenant_id="tenant-a",
+            user_id="subject-a",
+        )
+
+
+@pytest.mark.asyncio
 async def test_get_hides_another_owners_sandbox() -> None:
     svc = _service()
     rec = await svc.create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")

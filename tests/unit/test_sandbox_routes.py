@@ -28,9 +28,9 @@ _SPEC: dict[str, Any] = {
 }
 
 
-def _client(*, wired: bool = True) -> TestClient:
+def _client(*, wired: bool = True, db: Any | None = None) -> TestClient:
     app = FastAPI()
-    app.state.sandbox_service = SandboxService(_FakeDB()) if wired else None
+    app.state.sandbox_service = SandboxService(db or _FakeDB()) if wired else None
     app.include_router(router)
     return TestClient(app)
 
@@ -42,6 +42,16 @@ def test_create_returns_the_pinned_spec() -> None:
     assert body["status"] == "pending"
     assert body["spec"]["tools"]["default_mode"] == "mock"
     assert body["expires_at"] > body["created_at"]
+
+
+def test_create_derives_quota_identity_from_the_authenticated_tenant() -> None:
+    db = _FakeDB()
+    response = _client(db=db).post("/api/sandboxes", json=_SPEC, headers=_TENANT_A)
+
+    assert response.status_code == 201
+    row = next(iter(db.rows.values()))
+    assert row["tenant_id"] == "tenant-a"
+    assert row["user_id"] == "same-subject"
 
 
 def test_invalid_spec_is_rejected() -> None:
