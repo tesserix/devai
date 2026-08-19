@@ -1,5 +1,9 @@
 # DevAI registry seeds
 
+For the complete author, validate, commit, push, merge, reseed, and verify
+procedure, see
+[`docs/agentic/AGENT-REGISTRY-PUBLISHING.md`](../../docs/agentic/AGENT-REGISTRY-PUBLISHING.md).
+
 In-tree v1alpha1 manifests for every Skill / Agent / Prompt / MCPServer that
 DevAI publishes to the Solo.io agentregistry (aregistry). These seeds are
 the **source of truth** — when the cluster is bootstrapped or rebuilt, the

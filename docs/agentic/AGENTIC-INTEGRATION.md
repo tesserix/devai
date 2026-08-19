@@ -5,6 +5,9 @@ definition from the **Agent Registry**, dispatches it through the **Agent Gatewa
 runs it as a Kubernetes Job, and uses the **A2A (Agent-to-Agent) protocol** for
 inter-agent handoffs.
 
+Publishing and release operations are covered separately in
+[Publishing DevAI agents to the Agent Registry](AGENT-REGISTRY-PUBLISHING.md).
+
 Diagrams are provided in two formats:
 
 - **Mermaid blocks** below render natively on GitHub / GitLab / VS Code.
