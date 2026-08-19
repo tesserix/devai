@@ -323,6 +323,7 @@ def create_app(
         app.state.sandbox_invoker = None
         app.state.sandbox_evals = None
         app.state.evaluation_service = None
+        app.state.agent_gate_service = None
         try:
             from devai.sandbox.credentials import SandboxCredentialResolver
             from devai.sandbox.evals import EvalRunner, EvalStore
@@ -340,12 +341,17 @@ def create_app(
                 object_store=trace_object_store,
             )
             if app.state.sre_studio_db is not None and getattr(trace_object_store, "provider_name", "noop") != "noop":
-                from devai.evaluations import EvaluationService
+                from devai.evaluations import AgentGateService, EvaluationService
 
                 app.state.evaluation_service = EvaluationService(
                     database=app.state.sre_studio_db,
                     object_store=trace_object_store,
                     registry=getattr(app.state, "registry_client", None),
+                )
+                app.state.agent_gate_service = AgentGateService(
+                    database=app.state.sre_studio_db,
+                    evaluations=app.state.evaluation_service,
+                    audit=app.state.sre_studio_db.audit,
                 )
                 logger.info("Evaluation dataset service ready (durable metadata + object store)")
             elif app.state.sre_studio_db is not None:

@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from copy import deepcopy
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from devai.config import settings
+from devai.evaluations.gates import AgentPublishGate
+from devai.evaluations.models import ArtifactVersionRef
 from devai.registry.client import Agent, Prompt
 from devai.registry.routes import router
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _manifest(name: str, *, labels: dict[str, str] | None = None) -> dict[str, Any]:
@@ -33,12 +39,15 @@ def _manifest(name: str, *, labels: dict[str, str] | None = None) -> dict[str, A
     }
 
 
-def _headers(user: str, tenant: str) -> dict[str, str]:
-    return {
+def _headers(user: str, tenant: str, *, roles: list[str] | None = None) -> dict[str, str]:
+    headers = {
         "x-forwarded-user": f"{user}@example.com",
         "x-forwarded-uid": user,
         "x-forwarded-tenant": tenant,
     }
+    if roles:
+        headers["x-forwarded-roles"] = ",".join(roles)
+    return headers
 
 
 def _prompt_manifest(name: str) -> dict[str, Any]:
@@ -127,16 +136,81 @@ class _Registry:
         )
 
 
-def _client() -> tuple[TestClient, _Registry]:
+def _client(*, gate_service: Any = None) -> tuple[TestClient, _Registry]:
     app = FastAPI()
     registry = _Registry()
     app.state.registry_client = registry
+    app.state.agent_gate_service = gate_service
     app.state.config = SimpleNamespace(
         auth_bff_shared_secret="",
         trust_forwarded_without_secret=True,
     )
     app.include_router(router)
     return TestClient(app), registry
+
+
+class _GateService:
+    def __init__(self, gate: AgentPublishGate) -> None:
+        self.gate = gate
+        self.calls: list[dict[str, Any]] = []
+
+    async def evaluate(
+        self,
+        principal: Any,
+        manifest: dict[str, Any],
+        candidate_run_id: str,
+        *,
+        baseline_run_id: str | None = None,
+    ) -> AgentPublishGate:
+        self.calls.append(
+            {
+                "principal": principal,
+                "manifest": deepcopy(manifest),
+                "candidate_run_id": candidate_run_id,
+                "baseline_run_id": baseline_run_id,
+            }
+        )
+        return self.gate
+
+    async def override(
+        self,
+        principal: Any,
+        gate: AgentPublishGate,
+        *,
+        reason: str,
+    ) -> AgentPublishGate:
+        if "admin" not in principal.roles:
+            raise PermissionError("admin role required for an evaluation gate override")
+        return gate.model_copy(
+            update={
+                "status": "overridden",
+                "approver": principal.user_scope_id,
+                "override_reason": reason,
+            }
+        )
+
+
+def _gate(status: str, *, failing_cases: list[str] | None = None) -> AgentPublishGate:
+    return AgentPublishGate(
+        agent_name="gated-agent",
+        status=status,
+        suite=ArtifactVersionRef(name="golden", version="1"),
+        candidate_run_id="eval-candidate",
+        baseline_run_id="eval-baseline" if status == "blocked" else None,
+        comparison_id="cmp-1" if status == "blocked" else None,
+        failing_cases=failing_cases or [],
+    )
+
+
+def _gated_manifest() -> dict[str, Any]:
+    body = _manifest("gated-agent")
+    body["metadata"]["annotations"] = {
+        "devai.tesserix.app/eval-run-id": "eval-candidate",
+        "devai.tesserix.app/eval-approver": "attacker-chosen",
+        "devai.tesserix.app/eval-gate": "passed",
+    }
+    body["spec"]["evalSuite"] = {"ref": "golden", "version": "1"}
+    return body
 
 
 def test_publish_is_private_and_server_owned() -> None:
@@ -398,3 +472,121 @@ def test_only_owner_can_unpublish_private_agent() -> None:
     assert removed.status_code == 200
     assert removed.json() == {"deleted": "owned-agent"}
     assert "owned-agent" not in registry.items
+
+
+def test_declared_eval_suite_fails_closed_when_gate_service_is_unavailable() -> None:
+    client, registry = _client()
+
+    response = client.post(
+        "/api/registry/agents",
+        headers=_headers("alice", "tenant-a"),
+        json=_gated_manifest(),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "agent evaluation gate unavailable"}
+    assert "gated-agent" not in registry.items
+
+
+def test_declared_eval_suite_blocks_publish_with_exact_failing_cases() -> None:
+    gate_service = _GateService(_gate("blocked", failing_cases=["refund-policy"]))
+    client, registry = _client(gate_service=gate_service)
+
+    response = client.post(
+        "/api/registry/agents",
+        headers=_headers("alice", "tenant-a"),
+        json=_gated_manifest(),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "agent_evaluation_gate_blocked"
+    assert response.json()["detail"]["gate"]["failing_cases"] == ["refund-policy"]
+    assert "gated-agent" not in registry.items
+
+
+def test_gate_override_requires_admin_and_is_server_stamped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "admin_emails", "admin@example.com")
+    gate_service = _GateService(_gate("blocked", failing_cases=["refund-policy"]))
+    client, registry = _client(gate_service=gate_service)
+    override_headers = {
+        "x-devai-eval-gate-override": "true",
+        "x-devai-eval-gate-override-reason": "Judge outage approved by release lead",
+    }
+
+    denied = client.post(
+        "/api/registry/agents",
+        headers={**_headers("alice", "tenant-a"), **override_headers},
+        json=_gated_manifest(),
+    )
+    approved = client.post(
+        "/api/registry/agents",
+        headers={**_headers("admin", "tenant-a", roles=["admin"]), **override_headers},
+        json=_gated_manifest(),
+    )
+
+    assert denied.status_code == 403
+    assert approved.status_code == 201, approved.text
+    assert approved.json()["gate"]["status"] == "overridden"
+    metadata = registry.items["gated-agent"]["metadata"]
+    assert metadata["labels"]["devai.tesserix.app/eval-gate"] == "overridden"
+    assert metadata["annotations"]["devai.tesserix.app/eval-approver"] == "tenant-a:admin"
+    assert metadata["annotations"]["devai.tesserix.app/eval-override-reason"] == "Judge outage approved by release lead"
+
+
+def test_passed_gate_is_server_stamped_and_returned_with_publish_result() -> None:
+    gate_service = _GateService(_gate("passed"))
+    client, registry = _client(gate_service=gate_service)
+
+    response = client.post(
+        "/api/registry/agents",
+        headers=_headers("alice", "tenant-a"),
+        json=_gated_manifest(),
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["gate"]["status"] == "passed"
+    metadata = registry.items["gated-agent"]["metadata"]
+    assert metadata["labels"]["devai.tesserix.app/eval-gate"] == "passed"
+    assert metadata["labels"]["devai.tesserix.app/lifecycle"] == "published"
+    assert metadata["annotations"]["devai.tesserix.app/eval-run-id"] == "eval-candidate"
+    assert "devai.tesserix.app/eval-approver" not in metadata["annotations"]
+    assert gate_service.calls[0]["principal"].user_scope_id == "tenant-a:alice"
+
+
+def test_overwrite_compares_with_server_stamped_published_baseline() -> None:
+    gate_service = _GateService(_gate("passed"))
+    client, registry = _client(gate_service=gate_service)
+    alice = _headers("alice", "tenant-a")
+    first = _gated_manifest()
+    assert client.post("/api/registry/agents", headers=alice, json=first).status_code == 201
+    registry.items["gated-agent"]["metadata"]["annotations"]["devai.tesserix.app/eval-run-id"] = "eval-baseline"
+
+    response = client.post(
+        "/api/registry/agents?overwrite=true",
+        headers=alice,
+        json=_gated_manifest(),
+    )
+
+    assert response.status_code == 201, response.text
+    assert gate_service.calls[-1]["baseline_run_id"] == "eval-baseline"
+
+
+def test_gated_overwrite_fails_closed_without_a_published_baseline_run() -> None:
+    gate_service = _GateService(_gate("passed"))
+    client, registry = _client(gate_service=gate_service)
+    alice = _headers("alice", "tenant-a")
+    first = _gated_manifest()
+    first["spec"].pop("evalSuite")
+    first["metadata"].pop("annotations")
+    assert client.post("/api/registry/agents", headers=alice, json=first).status_code == 201
+    registry.items["gated-agent"]["spec"]["evalSuite"] = {"ref": "golden", "version": "1"}
+
+    response = client.post(
+        "/api/registry/agents?overwrite=true",
+        headers=alice,
+        json=_gated_manifest(),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "agent_evaluation_baseline_required"
+    assert len(gate_service.calls) == 0

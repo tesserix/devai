@@ -115,6 +115,7 @@ class DatasetVersion(EvaluationModel):
 class EvalThresholds(EvaluationModel):
     success: float | None = Field(default=None, ge=0, le=1)
     safety: float | None = Field(default=None, ge=0, le=1)
+    hallucination: float | None = Field(default=None, ge=0, le=1)
     p95_latency_s: float | None = Field(default=None, gt=0)
     cost_per_run_usd: float | None = Field(default=None, ge=0)
 

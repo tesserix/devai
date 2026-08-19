@@ -74,7 +74,13 @@ def test_eval_suite_emits_extensible_scorers_and_structured_thresholds() -> None
         EvalSuite("release-gate")
         .dataset("release-smoke", "3")
         .scorers("exact_match", "tool_trajectory", "latency", "cost")
-        .thresholds(success=0.95, safety=1.0, p95_latency_s=3, cost_per_run_usd=0.05)
+        .thresholds(
+            success=0.95,
+            safety=1.0,
+            hallucination=0.02,
+            p95_latency_s=3,
+            cost_per_run_usd=0.05,
+        )
     )
 
     body = suite.to_dict()
@@ -83,6 +89,7 @@ def test_eval_suite_emits_extensible_scorers_and_structured_thresholds() -> None
     assert body["thresholds"] == {
         "success": 0.95,
         "safety": 1.0,
+        "hallucination": 0.02,
         "p95_latency_s": 3.0,
         "cost_per_run_usd": 0.05,
     }
@@ -143,6 +150,7 @@ def test_eval_suite_yaml_builder_preserves_scorers_and_thresholds() -> None:
                 "thresholds": {
                     "success": 0.95,
                     "safety": 1.0,
+                    "hallucination": 0.02,
                     "p95_latency_s": 3,
                     "cost_per_run_usd": 0.05,
                 },
@@ -154,6 +162,7 @@ def test_eval_suite_yaml_builder_preserves_scorers_and_thresholds() -> None:
     assert builder.to_dict()["thresholds"] == {
         "success": 0.95,
         "safety": 1.0,
+        "hallucination": 0.02,
         "p95_latency_s": 3.0,
         "cost_per_run_usd": 0.05,
     }
@@ -354,6 +363,8 @@ def test_sandbox_client_covers_lifecycle_and_eval_surface() -> None:
             return httpx.Response(200, json=[{"id": "inv-1"}])
         if request.url.path.endswith("/evals"):
             return httpx.Response(200, json={"summary": {"passed": 1, "failed": 0, "pass_rate": 1.0}})
+        if request.url.path == "/api/evaluations":
+            return httpx.Response(201, json={"id": "eval-durable", "summary": {"passed": 1, "failed": 0}})
         return httpx.Response(200, json={"id": "inv-1", "final_text": "done"})
 
     client = SandboxClient(base_url="https://devai.example", transport=httpx.MockTransport(handle))
@@ -361,13 +372,40 @@ def test_sandbox_client_covers_lifecycle_and_eval_surface() -> None:
     assert client.invoke("sbx-1", "go")["final_text"] == "done"
     assert client.traces("sbx-1") == [{"id": "inv-1"}]
     assert client.test("sbx-1", [{"name": "works", "input": "go", "expect": {}}])["summary"]["passed"] == 1
+    assert client.evaluate("sbx-1", "release-gate", "2")["id"] == "eval-durable"
     assert client.destroy("sbx-1") == {"destroyed": "sbx-1"}
     assert calls == [
         ("POST", "/api/sandboxes/sbx-1/invoke", {"message": "go"}),
         ("GET", "/api/sandboxes/sbx-1/traces", None),
         ("POST", "/api/sandboxes/sbx-1/evals", {"cases": [{"name": "works", "input": "go", "expect": {}}]}),
+        (
+            "POST",
+            "/api/evaluations",
+            {"suite": {"name": "release-gate", "version": "2"}, "sandbox_id": "sbx-1"},
+        ),
         ("DELETE", "/api/sandboxes/sbx-1", None),
     ]
+
+
+def test_sandbox_client_publishes_agent_through_devai_gate_headers() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(201, json={"name": "reviewer", "gate": {"status": "overridden"}})
+
+    client = SandboxClient(base_url="https://devai.example", transport=httpx.MockTransport(handle))
+    result = client.publish_agent(
+        {"kind": "Agent", "metadata": {"name": "reviewer"}, "spec": {}},
+        overwrite=True,
+        override_reason="Approved judge outage",
+    )
+
+    assert result["gate"]["status"] == "overridden"
+    assert seen[0].url.path == "/api/registry/agents"
+    assert seen[0].url.query == b"overwrite=true"
+    assert seen[0].headers["x-devai-eval-gate-override"] == "true"
+    assert seen[0].headers["x-devai-eval-gate-override-reason"] == "Approved judge outage"
 
 
 def test_sandbox_client_returns_a_typed_redacted_error() -> None:
@@ -384,6 +422,7 @@ def test_sandbox_client_returns_a_typed_redacted_error() -> None:
 
 class _CLIClient:
     created: dict[str, Any] | None = None
+    published: dict[str, Any] | None = None
 
     def create(self, spec: dict[str, Any]) -> dict[str, Any]:
         self.created = spec
@@ -404,6 +443,32 @@ class _CLIClient:
             "summary": {"cases": 2, "passed": 1, "failed": 1, "pass_rate": 0.5, "cost_usd": 0.02, "p95_latency_ms": 40},
             "results": [{"name": "bad", "passed": False, "failures": ["missing expected text: 'ok'"]}],
         }
+
+    def evaluate(self, sandbox_id: str, suite_name: str, suite_version: str) -> dict[str, Any]:
+        del sandbox_id, suite_name, suite_version
+        return {
+            "id": "eval-durable",
+            "summary": {
+                "cases": 2,
+                "passed": 1,
+                "failed": 1,
+                "pass_rate": 0.5,
+                "cost_usd": 0.02,
+                "p95_latency_ms": 40,
+            },
+            "results": [{"name": "bad", "passed": False, "failures": ["missing expected text: 'ok'"]}],
+        }
+
+    def publish_agent(
+        self,
+        manifest: dict[str, Any],
+        *,
+        overwrite: bool = False,
+        override_reason: str = "",
+    ) -> dict[str, Any]:
+        del overwrite, override_reason
+        self.published = manifest
+        return {"name": manifest["metadata"]["name"], "gate": {"status": "passed"}}
 
     def close(self) -> None:
         return None
@@ -445,6 +510,37 @@ def test_cli_sandbox_create_builds_a_draft_spec(tmp_path: Path, monkeypatch: pyt
     assert fake.created["agent"] == {"name": "reviewer", "version": "7"}
     assert fake.created["credentials"] == {"llm_connector": "personal-anthropic", "confirmed": True}
     assert fake.created["draft"]["metadata"]["name"] == "reviewer"
+
+
+def test_cli_agent_publish_uses_owner_scoped_api_and_attaches_eval_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _write_artifact(
+        tmp_path,
+        "agents",
+        "reviewer",
+        "Agent",
+        {
+            "title": "Reviewer",
+            "model": {"provider": "anthropic", "name": "claude-sonnet-4-6"},
+            "systemPrompt": "Review the supplied diff.",
+            "limits": {"maxTurns": 8, "timeoutSeconds": 900},
+            "riskLevel": "medium",
+            "evalSuite": {"ref": "release-gate", "version": "2"},
+        },
+    )
+    fake = _CLIClient()
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: fake)
+
+    result = CliRunner().invoke(
+        adk_app,
+        ["publish", str(agent), "--eval-run-id", "eval-durable"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.published is not None
+    assert fake.published["metadata"]["annotations"] == {"devai.tesserix.app/eval-run-id": "eval-durable"}
 
 
 def test_cli_adk_test_exits_nonzero_and_names_failed_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -498,6 +594,7 @@ def test_cli_adk_test_resolves_suite_dataset_and_applies_threshold(
     assert result.exit_code == 0, result.output
     assert "bad" in result.output
     assert "50.0%" in result.output
+    assert "eval-durable" in result.output
 
 
 def test_cli_adk_test_uses_inline_agent_evals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

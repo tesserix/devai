@@ -8,6 +8,7 @@ import ArtifactEditor from "@/components/artifact-editor";
 import { useConfirm } from "@/components/confirm-dialog";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 import { useToast } from "@/components/toast";
+import { agentLifecycle, type AgentGateStatus } from "@/lib/agent-lifecycle";
 import { api } from "@/lib/api";
 
 type Agent = {
@@ -20,7 +21,20 @@ type Agent = {
   model_name: string;
   skills: string[];
   prompts: string[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
 };
+
+function lifecycleFor(agent: Agent) {
+  const lifecycle = agent.labels?.["devai.tesserix.app/lifecycle"] ?? "";
+  const gateStatus = (agent.labels?.["devai.tesserix.app/eval-gate"] ?? "") as AgentGateStatus;
+  return agentLifecycle({
+    evaluationRunId: agent.annotations?.["devai.tesserix.app/eval-run-id"],
+    gateStatus,
+    published: true,
+    running: lifecycle === "running",
+  });
+}
 
 export default function AgentsPage() {
   const confirm = useConfirm();
@@ -184,6 +198,16 @@ export default function AgentsPage() {
                 <span className="text-[11px] font-mono text-[var(--ink-500)]">v{a.version}</span>
               </div>
               <p className="text-sm text-[var(--ink-300)] mt-1">{a.description}</p>
+              <div className="mt-2 flex items-center gap-2 text-[11px]">
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 capitalize text-emerald-300">
+                  {lifecycleFor(a).current}
+                </span>
+                {a.labels?.["devai.tesserix.app/eval-gate"] && (
+                  <span className="font-mono text-[var(--ink-500)]">
+                    gate:{a.labels["devai.tesserix.app/eval-gate"]}
+                  </span>
+                )}
+              </div>
               <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                 <dt className="label-eyebrow">Model</dt>
                 <dd className="font-mono text-[var(--ink-100)]">{a.model_provider}/{a.model_name}</dd>

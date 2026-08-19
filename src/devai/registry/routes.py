@@ -22,6 +22,20 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import APIRouter, HTTPException, Request
 
 from devai.authz import require_principal
+from devai.evaluations.gates import (
+    EVAL_APPROVER_ANNOTATION,
+    EVAL_BASELINE_ANNOTATION,
+    EVAL_COMPARISON_ANNOTATION,
+    EVAL_GATE_ANNOTATION_PREFIX,
+    EVAL_GATE_LABEL,
+    EVAL_GATED_AT_ANNOTATION,
+    EVAL_OVERRIDE_REASON_ANNOTATION,
+    EVAL_RUN_ANNOTATION,
+    EVAL_SUITE_ANNOTATION,
+    LIFECYCLE_LABEL,
+    AgentGateService,
+    AgentPublishGate,
+)
 from devai.identity import extract_principal
 from devai.registry.client import (
     Agent,
@@ -44,6 +58,8 @@ router = APIRouter(prefix="/api/registry", tags=["registry"])
 _OWNER_LABEL = "devai.tesserix.app/owner-id"
 _VISIBILITY_LABEL = "devai.tesserix.app/visibility"
 _RUNTIME_LABEL = "devai.io/runtime"
+_GATE_OVERRIDE_HEADER = "x-devai-eval-gate-override"
+_GATE_OVERRIDE_REASON_HEADER = "x-devai-eval-gate-override-reason"
 _MODEL_PROVIDERS = frozenset({"anthropic", "claude", "openai", "google", "gemini", "vertex", "vertex_gemini", "groq"})
 _RISK_LEVELS = frozenset({"low", "medium", "high", "critical"})
 
@@ -96,6 +112,15 @@ def _agent_contract_errors(body: dict[str, Any]) -> list[str]:
 
     if spec.get("riskLevel") not in _RISK_LEVELS:
         errors.append("spec.riskLevel must be one of low, medium, high, critical")
+    eval_suite = spec.get("evalSuite")
+    if eval_suite is not None:
+        if not isinstance(eval_suite, dict):
+            errors.append("spec.evalSuite must be an object")
+        else:
+            if not isinstance(eval_suite.get("ref"), str) or not eval_suite["ref"].strip():
+                errors.append("spec.evalSuite.ref is required")
+            if not isinstance(eval_suite.get("version"), str) or not eval_suite["version"].strip():
+                errors.append("spec.evalSuite.version is required")
     return errors
 
 
@@ -153,6 +178,104 @@ def _labels(item: RegistryItem | dict[str, Any]) -> dict[str, str]:
     if not isinstance(raw_labels, dict):
         return {}
     return {str(key): str(value) for key, value in raw_labels.items()}
+
+
+def _annotations(item: dict[str, Any]) -> dict[str, str]:
+    metadata = item.get("metadata")
+    raw = metadata.get("annotations") if isinstance(metadata, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
+
+
+def _declares_eval_suite(body: dict[str, Any]) -> bool:
+    spec = body.get("spec")
+    return isinstance(spec, dict) and spec.get("evalSuite") is not None
+
+
+def _stamp_gate(metadata: dict[str, Any], labels: dict[str, Any], gate: AgentPublishGate) -> None:
+    raw_annotations = metadata.get("annotations")
+    annotations = dict(raw_annotations) if isinstance(raw_annotations, dict) else {}
+    annotations = {
+        str(key): str(value)
+        for key, value in annotations.items()
+        if not str(key).startswith(EVAL_GATE_ANNOTATION_PREFIX)
+    }
+    annotations[EVAL_RUN_ANNOTATION] = gate.candidate_run_id
+    annotations[EVAL_SUITE_ANNOTATION] = f"{gate.suite.name}@{gate.suite.version}"
+    annotations[EVAL_GATED_AT_ANNOTATION] = gate.evaluated_at
+    if gate.baseline_run_id:
+        annotations[EVAL_BASELINE_ANNOTATION] = gate.baseline_run_id
+    if gate.comparison_id:
+        annotations[EVAL_COMPARISON_ANNOTATION] = gate.comparison_id
+    if gate.approver:
+        annotations[EVAL_APPROVER_ANNOTATION] = gate.approver
+    if gate.override_reason:
+        annotations[EVAL_OVERRIDE_REASON_ANNOTATION] = gate.override_reason
+    metadata["annotations"] = annotations
+    labels[EVAL_GATE_LABEL] = gate.status
+    labels[LIFECYCLE_LABEL] = "published"
+
+
+async def _evaluate_publish_gate(
+    request: Request,
+    principal: Principal,
+    manifest: dict[str, Any],
+    existing: dict[str, Any] | None,
+) -> AgentPublishGate:
+    service: AgentGateService | None = getattr(request.app.state, "agent_gate_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="agent evaluation gate unavailable")
+    metadata = manifest.get("metadata")
+    annotations = metadata.get("annotations") if isinstance(metadata, dict) else None
+    candidate_run_id = str(annotations.get(EVAL_RUN_ANNOTATION) or "").strip() if isinstance(annotations, dict) else ""
+    if not candidate_run_id:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "agent_evaluation_run_required", "message": "a declared eval suite requires a run id"},
+        )
+    baseline_run_id = _annotations(existing or {}).get(EVAL_RUN_ANNOTATION) or None
+    if existing is not None and _declares_eval_suite(existing) and baseline_run_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "agent_evaluation_baseline_required",
+                "message": "a previously gated agent requires its published evaluation run",
+            },
+        )
+    try:
+        gate = await service.evaluate(
+            principal,
+            manifest,
+            candidate_run_id,
+            baseline_run_id=baseline_run_id,
+        )
+        if gate.status == "blocked" and request.headers.get(_GATE_OVERRIDE_HEADER, "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            gate = await service.override(
+                principal,
+                gate,
+                reason=request.headers.get(_GATE_OVERRIDE_REASON_HEADER, ""),
+            )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if gate.status == "blocked":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "agent_evaluation_gate_blocked",
+                "message": "agent evaluation gate blocked publication",
+                "gate": gate.model_dump(mode="json"),
+            },
+        )
+    return gate
 
 
 def _visibility(item: RegistryItem | dict[str, Any]) -> str:
@@ -462,6 +585,7 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
                 status_code=400,
                 detail={"code": "invalid_agent_manifest", "issues": contract_errors},
             )
+        gate_manifest = deepcopy(body)
         spec = body["spec"]
         prompt_ref = str(spec.get("promptRef") or "").strip()
         if prompt_ref:
@@ -503,6 +627,11 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
                 ),
             )
 
+    gate: AgentPublishGate | None = None
+    if plural == "agents" and _declares_eval_suite(gate_manifest):
+        gate = await _evaluate_publish_gate(request, principal, gate_manifest, existing)
+        _stamp_gate(meta, labels, gate)
+
     try:
         result = await asyncio.to_thread(getattr(client, method), body)
     except RegistryError as e:
@@ -514,7 +643,10 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"publish: {e}") from e
     client.refresh()
-    return result if isinstance(result, dict) else {"status": "published"}
+    response = dict(result) if isinstance(result, dict) else {"status": "published"}
+    if gate is not None:
+        response["gate"] = gate.model_dump(mode="json")
+    return response
 
 
 @router.delete("/{plural}/{name:path}")

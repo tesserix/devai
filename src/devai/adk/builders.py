@@ -523,10 +523,11 @@ class EvalSuite:
         *,
         success: float | None = None,
         safety: float | None = None,
+        hallucination: float | None = None,
         p95_latency_s: float | None = None,
         cost_per_run_usd: float | None = None,
     ) -> EvalSuite:
-        for name, value in (("success", success), ("safety", safety)):
+        for name, value in (("success", success), ("safety", safety), ("hallucination", hallucination)):
             if value is not None and not 0 <= value <= 1:
                 raise ValueError(f"{name} threshold must be between 0 and 1")
         if p95_latency_s is not None and p95_latency_s <= 0:
@@ -538,6 +539,7 @@ class EvalSuite:
             for name, value in (
                 ("success", success),
                 ("safety", safety),
+                ("hallucination", hallucination),
                 ("p95_latency_s", p95_latency_s),
                 ("cost_per_run_usd", cost_per_run_usd),
             )
