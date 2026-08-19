@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from typing import Any, Protocol
@@ -16,6 +17,7 @@ from devai.evaluations.models import (
     ResolvedEvaluation,
 )
 from devai.identity import Principal
+from devai.sandbox.evals import EvalCase
 
 
 class EvaluationError(RuntimeError):
@@ -53,10 +55,21 @@ class EvaluationDatabase(Protocol):
     async def get_eval_suite(self, owner_scope: str, name: str, version: str) -> dict[str, Any] | None: ...
 
 
+class EvaluationRegistry(Protocol):
+    def get_artifact_envelope(self, plural: str, name: str) -> dict[str, Any] | None: ...
+
+
 class EvaluationService:
-    def __init__(self, *, database: EvaluationDatabase, object_store: ObjectStoreAdapter) -> None:
+    def __init__(
+        self,
+        *,
+        database: EvaluationDatabase,
+        object_store: ObjectStoreAdapter,
+        registry: EvaluationRegistry | None = None,
+    ) -> None:
         self._database = database
         self._object_store = object_store
+        self._registry = registry
 
     async def create_dataset(self, principal: Principal, request: DatasetCreate) -> DatasetVersion:
         content = self._dataset_content(request)
@@ -129,11 +142,18 @@ class EvaluationService:
         return self._suite_from_row(row)
 
     async def resolve_dataset(self, principal: Principal, ref: ArtifactVersionRef) -> ResolvedEvaluation:
-        dataset = await self.get_dataset(principal, ref.name, ref.version)
+        try:
+            dataset = await self.get_dataset(principal, ref.name, ref.version)
+        except EvaluationNotFound:
+            cases = await self._resolve_builtin_dataset(ref)
+            return ResolvedEvaluation(cases=cases, dataset=ref)
         return ResolvedEvaluation(cases=[case.as_eval_case() for case in dataset.cases], dataset=ref)
 
     async def resolve_suite(self, principal: Principal, ref: ArtifactVersionRef) -> ResolvedEvaluation:
-        suite = await self.get_suite(principal, ref.name, ref.version)
+        try:
+            suite = await self.get_suite(principal, ref.name, ref.version)
+        except EvaluationNotFound:
+            return await self._resolve_builtin_suite(ref)
         dataset = await self.get_dataset(principal, suite.dataset.name, suite.dataset.version)
         return ResolvedEvaluation(
             cases=[case.as_eval_case() for case in dataset.cases],
@@ -143,6 +163,72 @@ class EvaluationService:
             thresholds=suite.thresholds,
             judge=suite.judge,
         )
+
+    async def _resolve_builtin_suite(self, ref: ArtifactVersionRef) -> ResolvedEvaluation:
+        spec = await self._builtin_spec("eval-suites", "EvalSuite", ref)
+        dataset_value = spec.get("datasetRef")
+        if not isinstance(dataset_value, dict):
+            raise EvaluationError(f"built-in eval suite {ref.name}@{ref.version} has no dataset reference")
+        try:
+            dataset_ref = ArtifactVersionRef.model_validate(
+                {"name": dataset_value.get("ref"), "version": dataset_value.get("version")}
+            )
+            scorers = [str(name) for name in spec.get("scorers") or []]
+            thresholds = EvalThresholds.model_validate(spec.get("thresholds") or {})
+        except (TypeError, ValueError) as error:
+            raise EvaluationError(f"built-in eval suite {ref.name}@{ref.version} is invalid") from error
+        from devai.evaluations.scorers import known
+
+        if not scorers or len(scorers) != len(set(scorers)) or set(scorers) - set(known()):
+            raise EvaluationError(f"built-in eval suite {ref.name}@{ref.version} has invalid scorers")
+        cases = await self._resolve_builtin_dataset(dataset_ref)
+        return ResolvedEvaluation(
+            cases=cases,
+            dataset=dataset_ref,
+            suite=ref,
+            scorers=scorers,
+            thresholds=thresholds,
+        )
+
+    async def _resolve_builtin_dataset(self, ref: ArtifactVersionRef) -> list[EvalCase]:
+        spec = await self._builtin_spec("datasets", "Dataset", ref)
+        values = spec.get("cases")
+        if not isinstance(values, list) or not 1 <= len(values) <= 50:
+            raise EvaluationError(f"built-in dataset {ref.name}@{ref.version} has invalid cases")
+        try:
+            cases = [EvalCase.model_validate(value) for value in values]
+        except (TypeError, ValueError) as error:
+            raise EvaluationError(f"built-in dataset {ref.name}@{ref.version} has invalid cases") from error
+        names = [case.name for case in cases]
+        if len(names) != len(set(names)):
+            raise EvaluationError(f"built-in dataset {ref.name}@{ref.version} has duplicate cases")
+        return cases
+
+    async def _builtin_spec(self, plural: str, kind: str, ref: ArtifactVersionRef) -> dict[str, Any]:
+        if self._registry is None:
+            raise EvaluationNotFound(f"{kind.lower()} {ref.name}@{ref.version} not found")
+        try:
+            envelope = await asyncio.to_thread(self._registry.get_artifact_envelope, plural, ref.name)
+        except Exception as error:  # noqa: BLE001 — registry dependency errors fail closed
+            raise EvaluationError("built-in evaluation registry unavailable") from error
+        if not isinstance(envelope, dict) or envelope.get("kind") != kind:
+            raise EvaluationNotFound(f"{kind.lower()} {ref.name}@{ref.version} not found")
+        metadata = envelope.get("metadata")
+        spec = envelope.get("spec")
+        if not isinstance(metadata, dict) or not isinstance(spec, dict):
+            raise EvaluationNotFound(f"{kind.lower()} {ref.name}@{ref.version} not found")
+        labels = metadata.get("labels")
+        source = labels.get("devai.io/source") if isinstance(labels, dict) else None
+        version = str(metadata.get("tag") or spec.get("version") or "")
+        if (
+            metadata.get("name") != ref.name
+            or metadata.get("namespace") != "devai"
+            or metadata.get("visibility") != "public"
+            or source != "devai"
+            or version != ref.version
+        ):
+            raise EvaluationNotFound(f"{kind.lower()} {ref.name}@{ref.version} not found")
+        return {str(key): value for key, value in spec.items()}
 
     @staticmethod
     def _owner_scope(principal: Principal) -> str:

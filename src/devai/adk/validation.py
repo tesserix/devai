@@ -48,7 +48,7 @@ def validate_artifacts(
         spec = _mapping(document.get("spec"))
         metadata = _mapping(document.get("metadata"))
         name = str(metadata.get("name") or spec.get("name") or "")
-        version = str(spec.get("version") or "")
+        version = str(spec.get("version") or metadata.get("tag") or "")
         if kind and name:
             latest.add((kind, name))
             catalog.add((kind, name, version))

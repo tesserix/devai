@@ -16,6 +16,8 @@ architecture/registry-seeds/
   agents/              one per Agent — runtime resource that points at a Skill
   prompts/             one per Prompt — extracted system prompts so the
                        dashboard prompt-editor can A/B test variants
+  datasets/            versioned public golden cases for built-in agents
+  eval-suites/         versioned scorer and threshold gates over datasets
   mcp-servers/         one per MCP server DevAI publishes (fiber-mcp etc.)
   projects/            top-level Project resource grouping it all
 ```
