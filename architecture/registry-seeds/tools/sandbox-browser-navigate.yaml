@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-browser-navigate
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: browser_navigate
+spec:
+  displayName: Browser Navigate
+  description: Navigate the sandbox browser to an HTTP or HTTPS URL.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      url:
+        type: string
+    required:
+    - url
+  tags: [sandbox, mcp-tool, browser]

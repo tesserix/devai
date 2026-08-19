@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from devai.identity import Principal, extract_principal
 from devai.sandbox.broker import BrokerError, CredentialBroker
+from devai.sandbox.browser_proxy import proxy_browser_request, proxy_browser_socket
 from devai.sandbox.ide_proxy import proxy_ide_request, proxy_ide_socket
 from devai.sandbox.job import sandbox_secret_name
 from devai.sandbox.models import SandboxRecord, SandboxSpec
@@ -190,7 +191,7 @@ async def list_grants(request: Request, sandbox_id: str) -> list[dict[str, Any]]
     return [g.model_dump(mode="json") for g in _broker(request).grants(sandbox_id)]
 
 
-async def _workspace_client(request: Request, record: SandboxRecord) -> WorkspaceClient:
+async def _workspace_access(request: Request, record: SandboxRecord) -> tuple[str, str]:
     """Resolve the workspace endpoint + capability token for one sandbox.
 
     The token is read from the workspace Secret at call time — it is never in
@@ -206,6 +207,11 @@ async def _workspace_client(request: Request, record: SandboxRecord) -> Workspac
         token = await runtime.read_secret_key(f"devai-sandbox-ws-{record.id}", "token")
     except Exception as e:  # noqa: BLE001 — a missing Secret means the workspace is gone
         raise HTTPException(status_code=409, detail="workspace is not ready") from e
+    return str(endpoint), token
+
+
+async def _workspace_client(request: Request, record: SandboxRecord) -> WorkspaceClient:
+    endpoint, token = await _workspace_access(request, record)
     return WorkspaceClient(endpoint, token=token)
 
 
@@ -259,6 +265,25 @@ def _ide_endpoint(record: SandboxRecord) -> str:
     return str(endpoint)
 
 
+def _browser_endpoint(record: SandboxRecord) -> str:
+    if not record.spec.browser:
+        raise HTTPException(status_code=409, detail="this sandbox was not created with a browser")
+    endpoint = (record.detail.get("workspace") or {}).get("endpoint") if record.detail else None
+    if not endpoint:
+        raise HTTPException(status_code=409, detail="this sandbox has no workspace")
+    return str(endpoint)
+
+
+@router.api_route("/{sandbox_id}/browser/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+async def browser_desktop(request: Request, sandbox_id: str, path: str = "") -> Response:
+    """Owner-authenticated first hop to the token-authenticated workspace."""
+    record = await _sandbox_or_404(request, sandbox_id)
+    endpoint = _browser_endpoint(record)
+    _, token = await _workspace_access(request, record)
+    await _service(request).touch(sandbox_id)
+    return await proxy_browser_request(request, endpoint, path, token)
+
+
 @router.api_route("/{sandbox_id}/ide/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
 async def ide(request: Request, sandbox_id: str, path: str = "") -> Response:
     """Take over the workspace in an editor, behind the sandbox's own ownership check."""
@@ -277,6 +302,26 @@ def _same_origin(websocket: WebSocket) -> bool:
         return True
     host = websocket.headers.get("host", "")
     return urlsplit(origin).netloc == host
+
+
+@router.websocket("/{sandbox_id}/browser/{path:path}")
+async def browser_desktop_ws(websocket: WebSocket, sandbox_id: str, path: str = "") -> None:
+    """Bridge noVNC only for the same-origin owner of this live browser."""
+    if not _same_origin(websocket):
+        await websocket.close(code=1008)
+        return
+    owner, is_admin = await _read_scope(websocket)  # type: ignore[arg-type]
+    record = await _service(websocket).get(sandbox_id, owner=owner, is_admin=is_admin)  # type: ignore[arg-type]
+    if record is None or not record.spec.browser:
+        await websocket.close(code=1008)
+        return
+    try:
+        endpoint = _browser_endpoint(record)
+        _, token = await _workspace_access(websocket, record)  # type: ignore[arg-type]
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+    await proxy_browser_socket(websocket, endpoint, path, token)
 
 
 @router.websocket("/{sandbox_id}/ide/{path:path}")

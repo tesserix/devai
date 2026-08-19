@@ -60,12 +60,48 @@ multi-tenant platform:
   Jupyter are open. Ours is closed by construction: the workspace listens only
   inside the pod, and every route is behind the existing session auth plus a
   per-sandbox capability token. There is no unauthenticated mode to forget.
-- **`seccomp=unconfined`.** We keep the restricted pod security context and pay
-  for the browser's syscalls with a narrow, explicit profile instead — or run
-  that leg under gVisor, which we already have a node pool for.
+- **`seccomp=unconfined`.** Browser workspaces explicitly use Kubernetes'
+  `RuntimeDefault` seccomp profile, remain non-root, drop every capability and
+  disallow privilege escalation. The active production cluster has no gVisor
+  `RuntimeClass`, so claiming gVisor isolation would be false; the separate
+  browser image is tested under the runtime's default syscall filter instead.
 - **Two replicas of one shared container.** A sandbox is per-tenant, per-owner
   and TTL-bounded. Sharing one workspace across callers destroys both the
   isolation and the reproducibility that make the eval numbers mean anything.
+
+### 3.1 Browser leg operating envelope
+
+One opt-in browser runs per workspace. Plan for low single-digit control calls
+per second, at most one in flight because operations are serialised, screenshots
+bounded to 5 MB, page content bounded to 2 MB, and navigation/actions bounded to
+30 seconds. Downloads go directly to the existing 5 GiB `/workspace` PVC; no
+browser payload is stored in the control-plane database, so browser data at 12
+and 36 months remains zero beyond the existing snapshot/TTL policy.
+
+The target is 99.9% monthly availability for a ready workspace. Local control
+operations have a p99 target below one second; navigation inherits the remote
+site's latency but fails by 30 seconds. When Chromium, Xvfb, the egress proxy or
+the remote site is unavailable, only that sandbox operation fails and the
+workspace files and shell remain available. Requests are not retried: clicks
+and navigation are not generally idempotent.
+
+The agent and engineer drive the same headed Chromium process. Playwright is the
+programmatic path; Xvfb → x11vnc → noVNC is the human path. noVNC binds only to
+workspace loopback and has no Service port. Traffic crosses two independent
+checks: DevAI resolves the authenticated owner, then the workspace validates its
+per-sandbox capability token before proxying to loopback. Cross-origin WebSocket
+handshakes are refused. Chromium receives the per-sandbox `HTTP(S)_PROXY`, and
+navigation additionally rejects non-HTTP schemes, URL credentials, and
+private/link-local/metadata addresses before loading.
+
+The browser is a separate `devai-browser` target so ordinary runners keep their
+current size and 200m CPU/512 MiB request. An opted-in browser workspace requests
+500m CPU/1 GiB with the existing 2 CPU/4 GiB limit; the incremental cost is only
+for opted-in workspaces plus one Chromium image in the registry/node cache. The
+additive `browser` field defaults off. Rollback is one Git revert: old records
+continue as ordinary workspaces and no migration or durable-data reversal is
+needed. A headless-only browser was the simpler alternative, rejected because
+it cannot satisfy live human diagnosis or takeover of the same session.
 
 ## 4. Egress — the control that actually matters
 
@@ -126,7 +162,7 @@ number was an index into.
 | Issue | Scope |
 |---|---|
 | Workspace runtime | the pod, `/workspace` PVC, shell + file services, capability token, lifecycle tied to the existing `sandboxes` table |
-| Browser leg | CDP + VNC, gVisor or a narrow seccomp profile, screenshot/navigate/click as tools |
+| Browser leg | Playwright + loopback-only noVNC, RuntimeDefault seccomp, six browser tools |
 | MCP profile | workspace tools registered as `kind:Tool`, federated by the hub, gated by #181 |
 | Egress proxy | allowlist forward proxy, NetworkPolicy pinned to it, access log to the run trace |
 | Credential broker | short-lived scoped credentials on request, every grant recorded (extends #194) |

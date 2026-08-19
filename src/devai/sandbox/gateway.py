@@ -50,6 +50,8 @@ _READ_ONLY_PREFIXES = (
     "sandbox__file_read",
     "sandbox__file_list",
     "sandbox__file_search",
+    "sandbox__browser_screenshot",
+    "sandbox__browser_get_content",
 )
 
 

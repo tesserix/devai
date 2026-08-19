@@ -16,6 +16,8 @@ on:
     paths:
       - 'src/devai/runner/**'
       - 'src/devai/runtime/**'
+      - 'src/devai/sandbox/**'
+      - 'src/devai/mcphub/**'
       - 'src/devai/registry/**'
       - 'src/devai/specializations/**'
       - 'src/devai/agents/**'
@@ -29,6 +31,8 @@ on:
     paths:
       - 'src/devai/runner/**'
       - 'src/devai/runtime/**'
+      - 'src/devai/sandbox/**'
+      - 'src/devai/mcphub/**'
       - 'Dockerfile.runner'
       - 'pyproject.toml'
       - '.github/workflows/runner-build.yaml'
@@ -42,13 +46,22 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/devai-runner
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
-    name: Build & Push Runner
+    name: Build & Push ${{ matrix.image }}
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: runner
+            image: devai-runner
+            title: DevAI agent-execution runner image
+          - target: browser
+            image: devai-browser
+            title: DevAI browser workspace image
 
     steps:
       - uses: actions/checkout@v7
@@ -67,25 +80,26 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix={{branch}}-,enable=${{ github.event_name != 'pull_request' }}
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
-            org.opencontainers.image.title=devai-runner
-            org.opencontainers.image.description=DevAI agent-execution runner image
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.description=${{ matrix.title }}
 
       - name: Compute cache ref
         id: cache
-        run: echo "ref=$(echo '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+        run: echo "ref=$(echo '${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:buildcache' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.runner
+          target: ${{ matrix.target }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -126,6 +140,9 @@ jobs:
       - name: Build Summary
         if: always()
         run: |
-          echo "## Runner Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** \`${GITHUB_SHA::8}\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Runner Build Summary"
+            echo "**Image:** ${{ matrix.image }}"
+            echo "**Target:** ${{ matrix.target }}"
+            echo "**Commit:** \`${GITHUB_SHA::8}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

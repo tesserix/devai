@@ -125,6 +125,18 @@ def test_ttl_is_capped_so_a_sandbox_cannot_live_forever() -> None:
         SandboxSpec.model_validate({**_MIN_SPEC, "ttl_seconds": 60 * 60 * 24 * 30})
 
 
+def test_browser_requires_a_workspace() -> None:
+    with pytest.raises(ValidationError, match="browser.*workspace"):
+        SandboxSpec.model_validate({**_MIN_SPEC, "browser": True})
+
+
+def test_browser_can_be_enabled_for_a_workspace() -> None:
+    spec = SandboxSpec.model_validate({**_MIN_SPEC, "workspace": True, "browser": True})
+
+    assert spec.workspace is True
+    assert spec.browser is True
+
+
 # ── lifecycle ─────────────────────────────────────────────────────────
 
 

@@ -30,6 +30,7 @@ export interface SandboxSpec {
   workspace?: boolean;
   repo?: { url: string; ref: string; scope: string } | null;
   ide?: boolean;
+  browser?: boolean;
   allow_domains?: string[];
   allow_scopes?: string[];
 }

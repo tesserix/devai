@@ -68,6 +68,8 @@ export function SandboxCreateDialog({
   const [llmConnector, setLlmConnector] = useState("");
   const [connectorConfirmed, setConnectorConfirmed] = useState(false);
   const [ttlHours, setTtlHours] = useState(4);
+  const [workspace, setWorkspace] = useState(false);
+  const [browser, setBrowser] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -168,6 +170,8 @@ export function SandboxCreateDialog({
           dataset: selectedDataset ? { ref: selectedDataset.name, version: selectedDataset.version } : null,
           tools: { default_mode: toolMode, overrides: toolOverrides },
           ttl_seconds: Math.round(ttlHours * 3600),
+          workspace,
+          browser,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -384,6 +388,37 @@ export function SandboxCreateDialog({
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex items-start gap-2 text-xs" style={{ color: "var(--ink-soft)" }}>
+              <input
+                type="checkbox"
+                checked={workspace}
+                onChange={(event) => {
+                  setWorkspace(event.target.checked);
+                  if (!event.target.checked) setBrowser(false);
+                }}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-medium" style={{ color: "var(--ink-strong)" }}>Workspace</span>
+                Files, shell and previews on an isolated volume.
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-xs" style={{ color: "var(--ink-soft)" }}>
+              <input
+                type="checkbox"
+                checked={browser}
+                disabled={!workspace}
+                onChange={(event) => setBrowser(event.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-medium" style={{ color: "var(--ink-strong)" }}>Browser</span>
+                Playwright controls with a live, owner-only desktop.
+              </span>
+            </label>
           </div>
 
           {error && (
