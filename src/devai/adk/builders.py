@@ -235,6 +235,7 @@ class Agent:
     _title: str = ""
     _status: str = ""
     _website_url: str = ""
+    _sandbox: dict[str, Any] | None = None
 
     def description(self, text: str) -> Agent:
         self._description = text
@@ -291,6 +292,41 @@ class Agent:
         self._website_url = url
         return self
 
+    def sandbox(
+        self,
+        *,
+        default_mode: str = "mock",
+        tool_modes: dict[str, str] | None = None,
+        dataset: tuple[str, str] | None = None,
+        max_tokens: int = 100_000,
+        max_cost_usd: float = 10.0,
+        max_wall_clock_s: int = 900,
+        ttl_seconds: int = 4 * 60 * 60,
+    ) -> Agent:
+        """Publish safe defaults used when this agent enters a sandbox."""
+        modes = {"real", "mock", "replay", "block"}
+        if default_mode not in modes:
+            raise ValueError(f"unknown default tool mode: {default_mode!r}")
+        overrides = dict(tool_modes or {})
+        unknown = sorted(set(overrides.values()) - modes)
+        if unknown:
+            raise ValueError(f"unknown tool modes: {', '.join(unknown)}")
+        if min(max_tokens, max_wall_clock_s, ttl_seconds) <= 0 or max_cost_usd <= 0:
+            raise ValueError("sandbox limits and TTL must be positive")
+        body: dict[str, Any] = {
+            "tools": {"default_mode": default_mode, "overrides": overrides},
+            "limits": {
+                "max_tokens": max_tokens,
+                "max_cost_usd": max_cost_usd,
+                "max_wall_clock_s": max_wall_clock_s,
+            },
+            "ttl_seconds": ttl_seconds,
+        }
+        if dataset is not None:
+            body["dataset"] = {"ref": dataset[0], "version": str(dataset[1])}
+        self._sandbox = body
+        return self
+
     @property
     def name(self) -> str:
         return self._name
@@ -318,4 +354,107 @@ class Agent:
             body["status"] = self._status
         if self._website_url:
             body["websiteUrl"] = self._website_url
+        if self._sandbox is not None:
+            body["sandbox"] = self._sandbox
         return body
+
+
+@dataclass(slots=True)
+class Dataset:
+    """A versioned set of deterministic sandbox cases."""
+
+    _name: str
+    _version: str = "1"
+    _description: str = ""
+    _cases: list[dict[str, Any]] = field(default_factory=list)
+
+    def version(self, value: str) -> Dataset:
+        self._version = str(value)
+        return self
+
+    def description(self, text: str) -> Dataset:
+        self._description = text
+        return self
+
+    def case(
+        self,
+        name: str,
+        input: str,
+        *,
+        contains: list[str] | None = None,
+        not_contains: list[str] | None = None,
+        matches: str = "",
+        tools_called: list[str] | None = None,
+        tools_not_called: list[str] | None = None,
+        max_total_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+    ) -> Dataset:
+        expect: dict[str, Any] = {}
+        optional: dict[str, Any] = {
+            "contains": contains,
+            "not_contains": not_contains,
+            "matches": matches or None,
+            "tools_called": tools_called,
+            "tools_not_called": tools_not_called,
+            "max_total_tokens": max_total_tokens,
+            "max_latency_ms": max_latency_ms,
+        }
+        expect.update({key: value for key, value in optional.items() if value is not None})
+        self._cases.append({"name": name, "input": input, "expect": expect})
+        return self
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self._name,
+            "version": self._version,
+            "description": self._description,
+            "cases": list(self._cases),
+        }
+
+
+@dataclass(slots=True)
+class EvalSuite:
+    """A versioned gate over one immutable dataset version."""
+
+    _name: str
+    _version: str = "1"
+    _description: str = ""
+    _dataset_ref: dict[str, str] | None = None
+    _minimum_pass_rate: float = 1.0
+
+    def version(self, value: str) -> EvalSuite:
+        self._version = str(value)
+        return self
+
+    def description(self, text: str) -> EvalSuite:
+        self._description = text
+        return self
+
+    def dataset(self, ref: str, version: str) -> EvalSuite:
+        self._dataset_ref = {"ref": ref, "version": str(version)}
+        return self
+
+    def minimum_pass_rate(self, value: float) -> EvalSuite:
+        if not 0 <= value <= 1:
+            raise ValueError("minimum pass rate must be between 0 and 1")
+        self._minimum_pass_rate = value
+        return self
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def to_dict(self) -> dict[str, Any]:
+        if self._dataset_ref is None:
+            raise ValueError("eval suite needs a dataset reference")
+        return {
+            "name": self._name,
+            "version": self._version,
+            "description": self._description,
+            "datasetRef": self._dataset_ref,
+            "minimumPassRate": self._minimum_pass_rate,
+        }
