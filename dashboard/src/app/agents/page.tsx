@@ -182,21 +182,27 @@ export default function AgentsPage() {
           {filtered.map((a) => (
             <article
               key={a.name}
-              className="panel p-4 hover:border-[var(--surface-border-strong)] transition-colors group"
+              className="panel relative p-4 hover:border-[var(--surface-border-strong)] transition-colors group"
             >
               <div className="flex items-baseline justify-between gap-2">
-                <a
-                  href={aregistryUrl("agents", a.name)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Open in the agent registry"
+                <Link
+                  href={`/agents/${encodeURIComponent(a.name)}`}
+                  title="Open agent workbench"
                   className="text-sm font-mono font-semibold text-[var(--ink-50)] flex items-center gap-1.5"
                 >
                   {a.name}
-                  <ExternalLink className="w-3.5 h-3.5 text-[var(--ink-500)] opacity-0 group-hover:opacity-100" />
-                </a>
+                </Link>
                 <span className="text-[11px] font-mono text-[var(--ink-500)]">v{a.version}</span>
               </div>
+              <a
+                href={aregistryUrl("agents", a.name)}
+                target="_blank"
+                rel="noreferrer"
+                title="Open in the agent registry"
+                className="absolute right-4 top-10 text-[var(--ink-500)] opacity-0 group-hover:opacity-100"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
               <p className="text-sm text-[var(--ink-300)] mt-1">{a.description}</p>
               <div className="mt-2 flex items-center gap-2 text-[11px]">
                 <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 capitalize text-emerald-300">
