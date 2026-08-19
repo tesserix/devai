@@ -345,6 +345,7 @@ def create_app(
                 app.state.evaluation_service = EvaluationService(
                     database=app.state.sre_studio_db,
                     object_store=trace_object_store,
+                    registry=getattr(app.state, "registry_client", None),
                 )
                 logger.info("Evaluation dataset service ready (durable metadata + object store)")
             elif app.state.sre_studio_db is not None:
