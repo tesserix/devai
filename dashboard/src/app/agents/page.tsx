@@ -9,7 +9,7 @@ import { useConfirm } from "@/components/confirm-dialog";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 import { useToast } from "@/components/toast";
 import { agentLifecycle, type AgentGateStatus } from "@/lib/agent-lifecycle";
-import { api } from "@/lib/api";
+import { api, type AgentRuntimeSnapshot, type AgentRuntimeStatus } from "@/lib/api";
 
 type Agent = {
   name: string;
@@ -25,21 +25,32 @@ type Agent = {
   annotations?: Record<string, string>;
 };
 
-function lifecycleFor(agent: Agent) {
-  const lifecycle = agent.labels?.["devai.tesserix.app/lifecycle"] ?? "";
+function lifecycleFor(agent: Agent, runtime?: AgentRuntimeStatus) {
   const gateStatus = (agent.labels?.["devai.tesserix.app/eval-gate"] ?? "") as AgentGateStatus;
   return agentLifecycle({
     evaluationRunId: agent.annotations?.["devai.tesserix.app/eval-run-id"],
     gateStatus,
     published: true,
-    running: lifecycle === "running",
+    running: runtime?.substrate_runnable === true,
   });
+}
+
+function runtimeLabel(runtime?: AgentRuntimeStatus) {
+  if (!runtime) return "Runtime unknown";
+  if (runtime.state === "ready") return "Substrate ready · Actor idle/scaled to zero";
+  if (runtime.state === "cold_starting") return "Substrate Actor cold-starting";
+  if (runtime.state === "provisioning") return "Substrate provisioning";
+  if (runtime.state === "unavailable") return `Substrate unavailable · ${runtime.reason}`;
+  return runtime.reason === "substrate_disabled"
+    ? "On-demand Job · Substrate dormant"
+    : "On-demand Job";
 }
 
 export default function AgentsPage() {
   const confirm = useConfirm();
   const toast = useToast();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [runtime, setRuntime] = useState<AgentRuntimeSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -66,6 +77,24 @@ export default function AgentsPage() {
       });
     return () => {
       cancelled = true;
+    };
+  }, [view, reloadKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const next = await api.getRegistryAgentRuntimeStatus(view === "mine");
+        if (!cancelled) setRuntime(next);
+      } catch {
+        if (!cancelled) setRuntime(null);
+      }
+    };
+    void tick();
+    const interval = setInterval(() => void tick(), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
     };
   }, [view, reloadKey]);
 
@@ -138,6 +167,24 @@ export default function AgentsPage() {
 
       <GuidancePanel id="agents" />
 
+      {runtime && (
+        <section className="panel p-4 text-xs text-[var(--ink-300)]" aria-label="Substrate runtime status">
+          <div className="font-medium text-[var(--ink-100)]">
+            {runtime.substrate_enabled
+              ? runtime.available
+                ? "Substrate controller reachable"
+                : "Substrate controller unavailable — runs fall back to on-demand Jobs"
+              : "Substrate dormant — runs use on-demand Jobs"}
+          </div>
+          <div className="mt-1 text-[var(--ink-500)]">
+            {runtime.worker_pools.length > 0
+              ? `WorkerPool ${runtime.worker_pools.map((pool) => pool.name).join(", ")}: capacity and occupancy are not exposed by the controller.`
+              : "WorkerPool capacity and occupancy are not exposed by the controller."}
+            {" "}Cold-start, last-run, and run-latency measurements are not available yet.
+          </div>
+        </section>
+      )}
+
       <div className="inline-flex rounded-md border border-[var(--surface-border)] bg-[var(--surface-2)] p-1" aria-label="Agent view">
         <button
           type="button"
@@ -206,7 +253,10 @@ export default function AgentsPage() {
               <p className="text-sm text-[var(--ink-300)] mt-1">{a.description}</p>
               <div className="mt-2 flex items-center gap-2 text-[11px]">
                 <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 capitalize text-emerald-300">
-                  {lifecycleFor(a).current}
+                  {lifecycleFor(a, runtime?.agents[a.name]).current}
+                </span>
+                <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-sky-300">
+                  {runtimeLabel(runtime?.agents[a.name])}
                 </span>
                 {a.labels?.["devai.tesserix.app/eval-gate"] && (
                   <span className="font-mono text-[var(--ink-500)]">
