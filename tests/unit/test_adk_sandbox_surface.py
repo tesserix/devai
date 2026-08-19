@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from devai.adk import Agent, Dataset, EvalSuite, Publisher, SandboxClient
 from devai.adk.client import AdkAPIError
 from devai.adk.validation import validate_artifacts
-from devai.cli.adk_commands import adk_app
+from devai.cli.adk_commands import _builder_for, adk_app
 from devai.registry import RegistryClient
 
 
@@ -66,6 +66,53 @@ def test_dataset_and_eval_suite_emit_registry_wire_bodies() -> None:
         "description": "",
         "datasetRef": {"ref": "release-smoke", "version": "3"},
         "minimumPassRate": 1.0,
+    }
+
+
+def test_eval_suite_emits_extensible_scorers_and_structured_thresholds() -> None:
+    suite = (
+        EvalSuite("release-gate")
+        .dataset("release-smoke", "3")
+        .scorers("exact_match", "tool_trajectory", "latency", "cost")
+        .thresholds(success=0.95, safety=1.0, p95_latency_s=3, cost_per_run_usd=0.05)
+    )
+
+    body = suite.to_dict()
+
+    assert body["scorers"] == ["exact_match", "tool_trajectory", "latency", "cost"]
+    assert body["thresholds"] == {
+        "success": 0.95,
+        "safety": 1.0,
+        "p95_latency_s": 3.0,
+        "cost_per_run_usd": 0.05,
+    }
+
+
+def test_eval_suite_yaml_builder_preserves_scorers_and_thresholds() -> None:
+    builder = _builder_for(
+        {
+            "kind": "EvalSuite",
+            "metadata": {"name": "release-gate"},
+            "spec": {
+                "version": "2",
+                "datasetRef": {"ref": "release-smoke", "version": "3"},
+                "scorers": ["exact_match", "tool_trajectory", "latency", "cost"],
+                "thresholds": {
+                    "success": 0.95,
+                    "safety": 1.0,
+                    "p95_latency_s": 3,
+                    "cost_per_run_usd": 0.05,
+                },
+            },
+        }
+    )
+
+    assert builder.to_dict()["scorers"] == ["exact_match", "tool_trajectory", "latency", "cost"]
+    assert builder.to_dict()["thresholds"] == {
+        "success": 0.95,
+        "safety": 1.0,
+        "p95_latency_s": 3.0,
+        "cost_per_run_usd": 0.05,
     }
 
 

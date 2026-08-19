@@ -21,7 +21,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -77,6 +77,11 @@ class EvalRun:
     id: str
     sandbox_id: str
     agent: str = ""
+    owner_scope: str = ""
+    tenant_id: str = ""
+    user_id: str = ""
+    dataset_ref: dict[str, str] | None = None
+    suite_ref: dict[str, str] | None = None
     results: list[CaseResult] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     duration_ms: int = 0
@@ -115,9 +120,19 @@ class EvalRun:
             "id": self.id,
             "sandbox_id": self.sandbox_id,
             "agent": self.agent,
+            "dataset": self.dataset_ref,
+            "suite": self.suite_ref,
             "created_at": self.created_at,
             "results": [r.to_dict() for r in self.results],
             "summary": self.summary,
+        }
+
+    def to_storage_dict(self) -> dict[str, Any]:
+        return {
+            **self.to_dict(),
+            "owner_scope": self.owner_scope,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
         }
 
     @classmethod
@@ -130,6 +145,11 @@ class EvalRun:
             id=str(body.get("id") or ""),
             sandbox_id=str(body.get("sandbox_id") or ""),
             agent=str(body.get("agent") or ""),
+            owner_scope=str(body.get("owner_scope") or ""),
+            tenant_id=str(body.get("tenant_id") or ""),
+            user_id=str(body.get("user_id") or ""),
+            dataset_ref=body.get("dataset"),
+            suite_ref=body.get("suite"),
             results=results,
             created_at=str(body.get("created_at") or ""),
             duration_ms=int(summary.get("duration_ms") or 0),
@@ -180,7 +200,18 @@ class EvalRunner:
     def store(self) -> EvalStore:
         return self._store
 
-    async def run(self, record: SandboxRecord, cases: list[EvalCase], *, triggered_by: str) -> EvalRun:
+    async def run(
+        self,
+        record: SandboxRecord,
+        cases: list[EvalCase],
+        *,
+        triggered_by: str,
+        owner_scope: str = "",
+        tenant_id: str = "",
+        user_id: str = "",
+        dataset_ref: dict[str, str] | None = None,
+        suite_ref: dict[str, str] | None = None,
+    ) -> EvalRun:
         """Every case, in order. Cases run sequentially so a suite cannot burst
         past the provider's rate limit and score itself on 429s."""
         if not cases:
@@ -188,7 +219,16 @@ class EvalRunner:
         if len(cases) > self._max_cases:
             raise ValueError(f"tenant dataset quota is {self._max_cases} cases per eval run")
 
-        run = EvalRun(id=f"eval-{uuid.uuid4().hex[:12]}", sandbox_id=record.id, agent=record.spec.agent.name)
+        run = EvalRun(
+            id=f"eval-{uuid.uuid4().hex[:12]}",
+            sandbox_id=record.id,
+            agent=record.spec.agent.name,
+            owner_scope=owner_scope,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            dataset_ref=dataset_ref,
+            suite_ref=suite_ref,
+        )
         started = time.perf_counter()
         for case in cases:
             run.results.append(await self._one(record, case, triggered_by=triggered_by))
@@ -219,11 +259,26 @@ class EvalRunner:
         return max(remaining, 300)
 
 
-class EvalStore:
-    """Runs live beside the traces they judged, with the same TTL."""
+class EvalRunDatabase(Protocol):
+    async def save_eval_run(self, run: dict[str, Any]) -> None: ...
 
-    def __init__(self, redis: Any | None) -> None:
+    async def get_eval_run(self, owner_scope: str, sandbox_id: str, run_id: str) -> dict[str, Any] | None: ...
+
+    async def list_eval_runs(
+        self,
+        owner_scope: str,
+        sandbox_id: str,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]: ...
+
+
+class EvalStore:
+    """Durable in Postgres, with an ephemeral fallback for isolated tests."""
+
+    def __init__(self, redis: Any | None, *, database: EvalRunDatabase | None = None) -> None:
         self._redis = redis
+        self._database = database
         self._local: dict[str, str] = {}
         self._local_index: dict[str, list[str]] = {}
 
@@ -234,6 +289,9 @@ class EvalStore:
         return f"{_PREFIX}:{sandbox_id}:evalruns"
 
     async def save(self, run: EvalRun, *, ttl_seconds: int) -> None:
+        if self._database is not None:
+            await self._database.save_eval_run(run.to_storage_dict())
+            return
         key = self._key(run.sandbox_id, run.id)
         index = self._index_key(run.sandbox_id)
         body = json.dumps(run.to_dict())
@@ -248,7 +306,10 @@ class EvalStore:
         except Exception:  # noqa: BLE001 — a lost result must not fail the suite
             logger.warning("sandbox evals: save failed for %s", run.id, exc_info=True)
 
-    async def get(self, sandbox_id: str, run_id: str) -> EvalRun | None:
+    async def get(self, sandbox_id: str, run_id: str, *, owner_scope: str = "") -> EvalRun | None:
+        if self._database is not None:
+            stored = await self._database.get_eval_run(owner_scope, sandbox_id, run_id)
+            return EvalRun.from_dict(stored) if stored else None
         try:
             key = self._key(sandbox_id, run_id)
             body = self._local.get(key) if self._redis is None else await self._redis.get(key)
@@ -257,7 +318,16 @@ class EvalStore:
             return None
         return _decode(body)
 
-    async def list_for_sandbox(self, sandbox_id: str, *, limit: int = 20) -> list[EvalRun]:
+    async def list_for_sandbox(
+        self,
+        sandbox_id: str,
+        *,
+        limit: int = 20,
+        owner_scope: str = "",
+    ) -> list[EvalRun]:
+        if self._database is not None:
+            rows = await self._database.list_eval_runs(owner_scope, sandbox_id, limit=limit)
+            return [EvalRun.from_dict(row) for row in rows]
         index = self._index_key(sandbox_id)
         try:
             if self._redis is None:

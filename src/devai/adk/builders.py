@@ -425,6 +425,8 @@ class EvalSuite:
     _description: str = ""
     _dataset_ref: dict[str, str] | None = None
     _minimum_pass_rate: float = 1.0
+    _scorers: list[str] = field(default_factory=list)
+    _thresholds: dict[str, float] = field(default_factory=dict)
 
     def version(self, value: str) -> EvalSuite:
         self._version = str(value)
@@ -444,6 +446,40 @@ class EvalSuite:
         self._minimum_pass_rate = value
         return self
 
+    def scorers(self, *names: str) -> EvalSuite:
+        cleaned = [name.strip() for name in names if name.strip()]
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("eval suite scorers must be unique")
+        self._scorers = cleaned
+        return self
+
+    def thresholds(
+        self,
+        *,
+        success: float | None = None,
+        safety: float | None = None,
+        p95_latency_s: float | None = None,
+        cost_per_run_usd: float | None = None,
+    ) -> EvalSuite:
+        for name, value in (("success", success), ("safety", safety)):
+            if value is not None and not 0 <= value <= 1:
+                raise ValueError(f"{name} threshold must be between 0 and 1")
+        if p95_latency_s is not None and p95_latency_s <= 0:
+            raise ValueError("p95_latency_s threshold must be positive")
+        if cost_per_run_usd is not None and cost_per_run_usd < 0:
+            raise ValueError("cost_per_run_usd threshold must not be negative")
+        self._thresholds = {
+            name: float(value)
+            for name, value in (
+                ("success", success),
+                ("safety", safety),
+                ("p95_latency_s", p95_latency_s),
+                ("cost_per_run_usd", cost_per_run_usd),
+            )
+            if value is not None
+        }
+        return self
+
     @property
     def name(self) -> str:
         return self._name
@@ -451,10 +487,15 @@ class EvalSuite:
     def to_dict(self) -> dict[str, Any]:
         if self._dataset_ref is None:
             raise ValueError("eval suite needs a dataset reference")
-        return {
+        body: dict[str, Any] = {
             "name": self._name,
             "version": self._version,
             "description": self._description,
             "datasetRef": self._dataset_ref,
             "minimumPassRate": self._minimum_pass_rate,
         }
+        if self._scorers:
+            body["scorers"] = list(self._scorers)
+        if self._thresholds:
+            body["thresholds"] = dict(self._thresholds)
+        return body

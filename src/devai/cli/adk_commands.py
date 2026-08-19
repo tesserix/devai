@@ -562,5 +562,18 @@ def _builder_for(doc: dict[str, Any]) -> Skill | Prompt | McpServer | Agent | Da
             suite_builder.dataset(str(dataset_ref["ref"]), str(dataset_ref["version"]))
         if "minimumPassRate" in spec:
             suite_builder.minimum_pass_rate(float(spec["minimumPassRate"]))
+        suite_builder.scorers(*(str(scorer) for scorer in spec.get("scorers") or []))
+        thresholds = _mapping(spec.get("thresholds"))
+        if thresholds:
+            suite_builder.thresholds(
+                success=float(thresholds["success"]) if thresholds.get("success") is not None else None,
+                safety=float(thresholds["safety"]) if thresholds.get("safety") is not None else None,
+                p95_latency_s=(
+                    float(thresholds["p95_latency_s"]) if thresholds.get("p95_latency_s") is not None else None
+                ),
+                cost_per_run_usd=(
+                    float(thresholds["cost_per_run_usd"]) if thresholds.get("cost_per_run_usd") is not None else None
+                ),
+            )
         return suite_builder
     raise ValueError(f"unknown kind: {kind!r}")

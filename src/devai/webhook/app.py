@@ -322,6 +322,7 @@ def create_app(
         app.state.sandbox_traces = None
         app.state.sandbox_invoker = None
         app.state.sandbox_evals = None
+        app.state.evaluation_service = None
         try:
             from devai.sandbox.credentials import SandboxCredentialResolver
             from devai.sandbox.evals import EvalRunner, EvalStore
@@ -338,6 +339,16 @@ def create_app(
                 getattr(state, "redis", None),
                 object_store=trace_object_store,
             )
+            if app.state.sre_studio_db is not None and getattr(trace_object_store, "provider_name", "noop") != "noop":
+                from devai.evaluations import EvaluationService
+
+                app.state.evaluation_service = EvaluationService(
+                    database=app.state.sre_studio_db,
+                    object_store=trace_object_store,
+                )
+                logger.info("Evaluation dataset service ready (durable metadata + object store)")
+            elif app.state.sre_studio_db is not None:
+                logger.warning("Evaluation datasets disabled: durable object store unavailable")
             sandbox_audit = None
             if app.state.sre_studio_db is not None:
 
@@ -364,11 +375,12 @@ def create_app(
                         audit=sandbox_audit,
                     ),
                 )
-                app.state.sandbox_evals = EvalRunner(
-                    app.state.sandbox_invoker,
-                    EvalStore(getattr(state, "redis", None)),
-                    max_cases=int(getattr(config, "sandbox_max_eval_cases_per_run", 50) or 50),
-                )
+                if app.state.sre_studio_db is not None:
+                    app.state.sandbox_evals = EvalRunner(
+                        app.state.sandbox_invoker,
+                        EvalStore(None, database=app.state.sre_studio_db),
+                        max_cases=int(getattr(config, "sandbox_max_eval_cases_per_run", 50) or 50),
+                    )
                 logger.info("Sandbox invoker ready")
         except Exception:
             logger.exception("Sandbox invoker failed to start — invoke API will 503")
@@ -840,6 +852,12 @@ def create_app(
 
     app.include_router(sandbox_router)
     app.include_router(trace_router)
+
+    # Versioned evaluation datasets and suites. The routes are mounted even
+    # when storage is unavailable so callers receive an explicit 503.
+    from devai.evaluations.routes import router as evaluation_router
+
+    app.include_router(evaluation_router)
 
     # Runtime version picker (/api/adk/versions) — what a sandbox may pin to.
     from devai.kit.routes import router as adk_router

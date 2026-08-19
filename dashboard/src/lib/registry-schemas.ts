@@ -75,6 +75,46 @@ const SPEC: Record<string, Field[]> = {
     { path: "spec.description", label: "Description", type: "textarea", placeholder: "What this prompt produces." },
     { path: "spec.template", label: "Template", type: "textarea", placeholder: "Summarize the following:\n\n{{input}}", mono: true, help: "Use {{variables}} for runtime values." },
   ],
+  Dataset: [
+    { path: "spec.description", label: "Description", type: "textarea", placeholder: "What behavior this immutable dataset version verifies." },
+    {
+      path: "spec.cases",
+      label: "Cases",
+      type: "objectList",
+      required: true,
+      help: "Add the core case fields here. Expected tools, forbidden tools, context, and tags can be added in the live manifest.",
+      children: [
+        { path: "id", label: "Case ID", type: "text", required: true, mono: true },
+        { path: "input", label: "Input", type: "textarea", required: true },
+        { path: "expectedOutput", label: "Expected output", type: "textarea" },
+      ],
+    },
+  ],
+  EvalSuite: [
+    { path: "spec.description", label: "Description", type: "textarea", placeholder: "What this release gate verifies." },
+    {
+      path: "spec.datasetRef",
+      label: "Pinned dataset",
+      type: "group",
+      required: true,
+      help: "Both the dataset name and immutable version are required.",
+      children: [
+        { path: "ref", label: "Dataset", type: "text", required: true, mono: true },
+        { path: "version", label: "Version", type: "text", required: true, mono: true },
+      ],
+    },
+    {
+      path: "spec.thresholds",
+      label: "Thresholds",
+      type: "group",
+      children: [
+        { path: "success", label: "Success rate", type: "number", min: 0, max: 1, step: 0.01 },
+        { path: "safety", label: "Safety rate", type: "number", min: 0, max: 1, step: 0.01 },
+        { path: "p95_latency_s", label: "P95 latency (s)", type: "number", min: 0.1, step: 0.1 },
+        { path: "cost_per_run_usd", label: "Cost / run (USD)", type: "number", min: 0, step: 0.001 },
+      ],
+    },
+  ],
   Workflow: [
     { path: "spec.title", label: "Title", type: "text", placeholder: "Release Train", required: true },
     { path: "spec.description", label: "Description", type: "textarea", placeholder: "What this workflow orchestrates." },
@@ -146,6 +186,13 @@ export function starter(kind: string): Record<string, unknown> {
       packages: [{ registryType: "npm", identifier: "", transport: { type: "stdio" } }],
     },
     Prompt: { title: "", description: "", template: "" },
+    Dataset: { description: "", cases: [] },
+    EvalSuite: {
+      description: "",
+      datasetRef: { ref: "", version: "" },
+      scorers: [],
+      thresholds: { success: null, safety: null, p95_latency_s: null, cost_per_run_usd: null },
+    },
     Workflow: { title: "", description: "", nodes: [], edges: [] },
     Blueprint: { title: "", description: "", nodes: [], edges: [] },
     Agent: {
@@ -303,6 +350,69 @@ export function lintManifest(doc: unknown, expectedKind: string): LintIssue[] {
         err("spec.riskLevel must be one of low, medium, high, critical");
       }
     }
+    if (expectedKind === "Dataset") {
+      if (!Array.isArray(spec.cases) || spec.cases.length === 0) {
+        err("spec.cases must contain at least one versioned case");
+      } else {
+        const ids = new Set<string>();
+        for (const value of spec.cases) {
+          if (value == null || typeof value !== "object" || Array.isArray(value)) {
+            err("spec.cases entries must be objects");
+            continue;
+          }
+          const item = value as Record<string, unknown>;
+          const id = typeof item.id === "string" ? item.id.trim() : "";
+          if (!id) err("spec.cases[].id is required");
+          else if (ids.has(id)) err(`spec.cases contains duplicate id "${id}"`);
+          else ids.add(id);
+          if (typeof item.input !== "string" || !item.input.trim()) err(`spec.cases[${id || "?"}].input is required`);
+        }
+      }
+    }
+    if (expectedKind === "EvalSuite") {
+      const datasetRef = spec.datasetRef;
+      if (datasetRef == null || typeof datasetRef !== "object" || Array.isArray(datasetRef)) {
+        err("spec.datasetRef must pin a dataset name and version");
+      } else {
+        const ref = datasetRef as Record<string, unknown>;
+        if (typeof ref.ref !== "string" || !ref.ref.trim()) err("spec.datasetRef.ref is required");
+        if (typeof ref.version !== "string" || !ref.version.trim()) err("spec.datasetRef.version is required");
+      }
+      if (!Array.isArray(spec.scorers) || spec.scorers.length === 0) {
+        err("spec.scorers must contain at least one scorer");
+      } else {
+        const scorerNames = new Set<string>();
+        for (const scorer of spec.scorers) {
+          if (typeof scorer !== "string" || !scorer.trim()) {
+            err("spec.scorers entries must be non-empty strings");
+          } else if (scorerNames.has(scorer)) {
+            err(`spec.scorers contains duplicate scorer "${scorer}"`);
+          } else {
+            scorerNames.add(scorer);
+          }
+        }
+      }
+      const thresholds = spec.thresholds;
+      if (thresholds != null && (typeof thresholds !== "object" || Array.isArray(thresholds))) {
+        err("spec.thresholds must be an object");
+      } else if (thresholds != null) {
+        const values = thresholds as Record<string, unknown>;
+        for (const name of ["success", "safety"] as const) {
+          const value = values[name];
+          if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)) {
+            err(`spec.thresholds.${name} must be a number between 0 and 1`);
+          }
+        }
+        const latency = values.p95_latency_s;
+        if (latency != null && (typeof latency !== "number" || !Number.isFinite(latency) || latency <= 0)) {
+          err("spec.thresholds.p95_latency_s must be a positive number");
+        }
+        const cost = values.cost_per_run_usd;
+        if (cost != null && (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0)) {
+          err("spec.thresholds.cost_per_run_usd must be a non-negative number");
+        }
+      }
+    }
   }
 
   for (const k of Object.keys(d)) if (!TOP_LEVEL.has(k)) warn(`unexpected top-level field "${k}" will be ignored`);
@@ -349,6 +459,10 @@ export function pluralForKind(kind: string): string {
       return "blueprints";
     case "Agent":
       return "agents";
+    case "Dataset":
+      return "datasets";
+    case "EvalSuite":
+      return "eval-suites";
     default:
       return `${kind.toLowerCase()}s`;
   }
