@@ -225,10 +225,10 @@ class EvaluationService:
     @staticmethod
     def _comparison_id(owner_scope: str, request: ComparisonCreate) -> str:
         canonical = json.dumps(
-            [owner_scope, request.baseline_run_id, request.candidate_run_id, list(request.axes)],
+            [owner_scope, request.baseline_run_id, request.candidate_run_id, sorted(request.axes)],
             separators=(",", ":"),
         )
-        return f"cmp-{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"
+        return f"cmp-{hashlib.sha256(canonical.encode()).hexdigest()[:32]}"
 
     @classmethod
     def _build_comparison(

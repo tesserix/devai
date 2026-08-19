@@ -1380,6 +1380,9 @@ class Database:
                           AND candidate.owner_scope = $2
                        ON CONFLICT (id) DO UPDATE
                          SET result = eval_comparisons.result
+                       WHERE eval_comparisons.owner_scope = EXCLUDED.owner_scope
+                         AND eval_comparisons.baseline_run_id = EXCLUDED.baseline_run_id
+                         AND eval_comparisons.candidate_run_id = EXCLUDED.candidate_run_id
                        RETURNING id, result, created_at""",
                 values["id"],
                 values["owner_scope"],

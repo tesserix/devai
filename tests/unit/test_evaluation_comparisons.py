@@ -84,7 +84,16 @@ async def test_same_dataset_runs_produce_decision_ready_deltas_and_paired_case_t
         Principal(email="alice@example.com", uid="alice", tenant_id="tenant-a"),
         ComparisonCreate(baseline_run_id="eval-baseline", candidate_run_id="eval-candidate"),
     )
+    reordered = await service.create_comparison(
+        Principal(email="alice@example.com", uid="alice", tenant_id="tenant-a"),
+        ComparisonCreate(
+            baseline_run_id="eval-baseline",
+            candidate_run_id="eval-candidate",
+            axes=["tool_config", "agent_version", "model", "prompt_version"],
+        ),
+    )
 
+    assert reordered.id == comparison.id
     assert comparison.dataset == {"name": "golden", "version": "3"}
     assert comparison.metrics["groundedness"].delta == 0.04
     assert comparison.metrics["p95_latency_ms"].percent_delta == 22.2222

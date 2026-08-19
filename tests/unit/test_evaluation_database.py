@@ -263,6 +263,9 @@ async def test_comparison_creation_scopes_both_runs_in_the_insert_query() -> Non
     assert "INSERT INTO eval_comparisons" in query
     assert "baseline.owner_scope = $2" in query
     assert "candidate.owner_scope = $2" in query
+    assert "eval_comparisons.owner_scope = EXCLUDED.owner_scope" in query
+    assert "eval_comparisons.baseline_run_id = EXCLUDED.baseline_run_id" in query
+    assert "eval_comparisons.candidate_run_id = EXCLUDED.candidate_run_id" in query
     assert args[:6] == (
         "cmp-1",
         "tenant-a:alice",
