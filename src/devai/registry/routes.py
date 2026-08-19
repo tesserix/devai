@@ -573,12 +573,21 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
         meta["labels"] = labels
     if not isinstance(labels, dict):
         raise HTTPException(status_code=400, detail="manifest.metadata.labels must be an object")
-    if plural == "agents" and str(labels.get(_RUNTIME_LABEL, "")).strip().lower() == "kagent":
-        raise HTTPException(
-            status_code=403,
-            detail="user-authored kagent runtime is disabled until the Substrate isolation gate passes",
-        )
     if plural == "agents":
+        runtime_target = str(labels.get(_RUNTIME_LABEL, "")).strip().lower()
+        if runtime_target and runtime_target != "kagent":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_agent_runtime",
+                    "message": "metadata.labels.devai.io/runtime must be absent or kagent",
+                },
+            )
+        if runtime_target == "kagent":
+            raise HTTPException(
+                status_code=403,
+                detail="user-authored kagent runtime is disabled until the Substrate isolation gate passes",
+            )
         contract_errors = _agent_contract_errors(body)
         if contract_errors:
             raise HTTPException(

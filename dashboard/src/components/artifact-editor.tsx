@@ -28,12 +28,15 @@ import { api } from "@/lib/api";
 import { Select } from "@/components/ui/select";
 import { dump as toYAML, parse as parseYAML } from "@/lib/yaml";
 import {
+  AGENT_RUNTIME_FIELD,
+  agentRuntimeTarget,
   editorDocument,
   fieldsFor,
   getPath,
   lintManifest,
   pluralForKind,
   setPath,
+  setAgentRuntimeTarget,
   type Field,
 } from "@/lib/registry-schemas";
 
@@ -149,6 +152,11 @@ export default function ArtifactEditor({
     setLabelRows(rows);
     applyDoc(setPath(doc, "metadata.labels", labelsObject(rows)));
   }
+  function onRuntimeTarget(value: unknown) {
+    const next = setAgentRuntimeTarget(doc, value);
+    setLabelRows(rowsFromDoc(next));
+    applyDoc(next);
+  }
   function onRaw(text: string) {
     setRaw(text);
     try {
@@ -248,6 +256,16 @@ export default function ArtifactEditor({
           {/* Form */}
           <div className="overflow-y-auto p-6 space-y-4 border-b lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border-subtle)" }}>
             {fields.map((f) => {
+              if (f.path === AGENT_RUNTIME_FIELD) {
+                return (
+                  <FieldInput
+                    key={f.path}
+                    f={f}
+                    value={agentRuntimeTarget(doc)}
+                    onChange={onRuntimeTarget}
+                  />
+                );
+              }
               if (f.type === "ref") {
                 return (
                   <RefInput
@@ -472,7 +490,7 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
           value={value || f.options?.[0] || ""}
           onChange={(next) => onChange(next)}
           disabled={disabled}
-          options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
+          options={(f.options ?? []).map((o) => ({ value: o, label: f.optionLabels?.[o] ?? o }))}
           ariaLabel={f.label}
         />
       ) : f.type === "textarea" ? (
