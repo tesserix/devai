@@ -224,3 +224,35 @@ async def test_override_requires_verified_admin_and_durable_audit() -> None:
     assert events[0]["action"] == "agent.eval_gate.override"
     assert events[0]["actor"] == "tenant-a:alice"
     assert events[0]["details"]["failing_cases"] == ["refund-policy"]
+
+
+@pytest.mark.asyncio
+async def test_risk_approval_requires_verified_admin_reason_and_durable_audit() -> None:
+    events: list[dict[str, Any]] = []
+
+    async def audit(**event: Any) -> None:
+        events.append(event)
+
+    service = AgentGateService(database=_Database({}), evaluations=_Evaluations(), audit=audit)
+
+    with pytest.raises(PermissionError, match="admin"):
+        await service.approve_risk(_principal(), agent_name="release-agent", risk_level="high", reason="Reviewed")
+    approver = await service.approve_risk(
+        _principal(roles=["platform-admin"]),
+        agent_name="release-agent",
+        risk_level="high",
+        reason="Reviewed tool and data boundaries",
+    )
+
+    assert approver == "tenant-a:alice"
+    assert events == [
+        {
+            "action": "agent.risk_gate.approve",
+            "actor": "tenant-a:alice",
+            "actor_type": "user",
+            "agent_name": "release-agent",
+            "entity_type": "agent",
+            "entity_ref": "release-agent",
+            "details": {"risk_level": "high", "reason": "Reviewed tool and data boundaries"},
+        }
+    ]

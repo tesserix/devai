@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { agentLifecycle, gateFailureMessages } from "./agent-lifecycle.ts";
+import {
+  agentLifecycle,
+  gateAllowsAdminOverride,
+  gateFailureMessages,
+  lifecycleGateFromError,
+} from "./agent-lifecycle.ts";
 
 test("agent lifecycle advances only from durable server evidence", () => {
   assert.deepEqual(agentLifecycle({}), {
@@ -58,4 +63,27 @@ test("blocked gates retain tested state and surface exact failures", () => {
       "success: actual 0.8; required at least 0.95",
     ],
   );
+});
+
+test("extracts both evaluation and static lifecycle gate failures", () => {
+  const staticGate = { status: "blocked" as const, issues: ["missing skill"] };
+  assert.deepEqual(
+    lifecycleGateFromError({
+      detail: { code: "agent_lifecycle_gate_blocked", gate: staticGate },
+    }),
+    staticGate,
+  );
+  assert.equal(lifecycleGateFromError({ detail: { code: "another_error", gate: staticGate } }), null);
+});
+
+test("allows overrides only for evaluation failures or approval holds", () => {
+  assert.equal(gateAllowsAdminOverride({ status: "blocked", failing_cases: ["case-1"] }), true);
+  assert.equal(
+    gateAllowsAdminOverride({
+      status: "blocked",
+      stages: [{ name: "security", status: "blocked", issues: ["prompt injection"] }],
+    }),
+    false,
+  );
+  assert.equal(gateAllowsAdminOverride({ status: "approval_required", requires_approval: true }), true);
 });

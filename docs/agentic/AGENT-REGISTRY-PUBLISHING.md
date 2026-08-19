@@ -19,7 +19,9 @@ DevAI has two supported paths. They solve different problems:
 
 Do not publish a tenant Agent directly to the Registry API. Agents pass through
 `POST /api/registry/agents`, where DevAI verifies the authenticated owner,
-evaluation run, exact draft, baseline, thresholds, and any privileged override.
+the complete caller-visible reference graph, provider/model fit, static security
+policy, risk approval, evaluation run, exact draft, baseline, thresholds, and
+any privileged override.
 The decision and failure behavior are recorded in
 [ADR 0003](../adr/0003-agent-artifact-promotion-gate.md).
 
@@ -42,6 +44,21 @@ For a changed version that intentionally replaces an existing Agent, add
 `--overwrite`. A blocked evaluation may only be overridden by an `admin` or
 `platform-admin`, with a non-empty `--override-reason`; the server writes the
 audit record before publication.
+
+Publication follows one fail-closed sequence:
+
+1. Build resolves all Skill, Tool, MCP server, and Prompt references without
+   revealing whether another user's private artifact exists.
+2. Security rejects wildcard grants and dangerous prompt instructions. High or
+   critical risk requires an audited `admin` or `platform-admin` approval.
+3. Test verifies the durable owner-scoped sandbox evaluation when
+   `spec.evalSuite` is declared.
+4. The server publishes and stamps its own gate evidence. Client-supplied gate
+   labels and approval annotations are ignored.
+
+Build and static security failures are not break-glass overrideable. The
+dashboard shows their exact actionable findings. Publication means the artifact
+is discoverable; only live runtime status may describe it as running.
 
 The CLI must report a successful gate or publication status. A non-zero exit
 means nothing should be treated as released.

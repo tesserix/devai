@@ -37,6 +37,7 @@ from devai.evaluations.gates import (
     AgentPublishGate,
 )
 from devai.identity import extract_principal
+from devai.registry.agent_harness import AgentHarness, AgentHarnessReport
 from devai.registry.client import (
     Agent,
     Dataset,
@@ -58,6 +59,10 @@ router = APIRouter(prefix="/api/registry", tags=["registry"])
 _OWNER_LABEL = "devai.tesserix.app/owner-id"
 _VISIBILITY_LABEL = "devai.tesserix.app/visibility"
 _RUNTIME_LABEL = "devai.io/runtime"
+_BUILD_GATE_LABEL = "devai.tesserix.app/build-gate"
+_SECURITY_GATE_LABEL = "devai.tesserix.app/security-gate"
+_RISK_APPROVER_ANNOTATION = "devai.tesserix.app/risk-approver"
+_RISK_APPROVAL_REASON_ANNOTATION = "devai.tesserix.app/risk-approval-reason"
 _GATE_OVERRIDE_HEADER = "x-devai-eval-gate-override"
 _GATE_OVERRIDE_REASON_HEADER = "x-devai-eval-gate-override-reason"
 _MODEL_PROVIDERS = frozenset({"anthropic", "claude", "openai", "google", "gemini", "vertex", "vertex_gemini", "groq"})
@@ -278,6 +283,28 @@ async def _evaluate_publish_gate(
     return gate
 
 
+async def _run_agent_harness(
+    client: RegistryClient,
+    principal: Principal,
+    manifest: dict[str, Any],
+) -> AgentHarnessReport:
+    owner_id = _owner_id(principal)
+
+    async def resolve(plural: str, name: str) -> dict[str, Any] | None:
+        try:
+            item = await asyncio.to_thread(client.get_artifact_envelope, plural, name)
+        except RegistryError as error:
+            raise HTTPException(status_code=503, detail="agent lifecycle gate unavailable") from error
+        if item is None:
+            return None
+        owner = _labels(item).get(_OWNER_LABEL, "")
+        if owner:
+            return item if owner == owner_id else None
+        return item if _visibility(item) != "private" else None
+
+    return await AgentHarness(resolve).run(manifest)
+
+
 def _visibility(item: RegistryItem | dict[str, Any]) -> str:
     if isinstance(item, dict):
         metadata = item.get("metadata")
@@ -493,7 +520,25 @@ async def get_owned_agent_manifest(request: Request, name: str) -> dict[str, Any
         labels = metadata.get("labels")
         if isinstance(labels, dict):
             metadata["labels"] = {
-                key: value for key, value in labels.items() if key not in {_OWNER_LABEL, _VISIBILITY_LABEL}
+                key: value
+                for key, value in labels.items()
+                if key
+                not in {
+                    _OWNER_LABEL,
+                    _VISIBILITY_LABEL,
+                    _BUILD_GATE_LABEL,
+                    _SECURITY_GATE_LABEL,
+                    EVAL_GATE_LABEL,
+                    LIFECYCLE_LABEL,
+                }
+            }
+        annotations = metadata.get("annotations")
+        if isinstance(annotations, dict):
+            metadata["annotations"] = {
+                key: value
+                for key, value in annotations.items()
+                if not str(key).startswith(EVAL_GATE_ANNOTATION_PREFIX)
+                and key not in {_RISK_APPROVER_ANNOTATION, _RISK_APPROVAL_REASON_ANNOTATION}
             }
     spec = manifest.get("spec")
     if isinstance(spec, dict) and isinstance(spec.get("promptRef"), str) and spec["promptRef"].strip():
@@ -573,6 +618,7 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
         meta["labels"] = labels
     if not isinstance(labels, dict):
         raise HTTPException(status_code=400, detail="manifest.metadata.labels must be an object")
+    harness: AgentHarnessReport | None = None
     if plural == "agents":
         runtime_target = str(labels.get(_RUNTIME_LABEL, "")).strip().lower()
         if runtime_target and runtime_target != "kagent":
@@ -594,6 +640,21 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
                 status_code=400,
                 detail={"code": "invalid_agent_manifest", "issues": contract_errors},
             )
+        declares_eval_suite = _declares_eval_suite(body)
+        for label in (_BUILD_GATE_LABEL, _SECURITY_GATE_LABEL, EVAL_GATE_LABEL, LIFECYCLE_LABEL):
+            labels.pop(label, None)
+        raw_annotations = meta.get("annotations")
+        annotations = dict(raw_annotations) if isinstance(raw_annotations, dict) else {}
+        annotations = {
+            str(key): str(value)
+            for key, value in annotations.items()
+            if key not in {_RISK_APPROVER_ANNOTATION, _RISK_APPROVAL_REASON_ANNOTATION}
+            and (
+                not str(key).startswith(EVAL_GATE_ANNOTATION_PREFIX)
+                or (declares_eval_suite and key == EVAL_RUN_ANNOTATION)
+            )
+        }
+        meta["annotations"] = annotations
         gate_manifest = deepcopy(body)
         spec = body["spec"]
         prompt_ref = str(spec.get("promptRef") or "").strip()
@@ -611,6 +672,46 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
                     detail=f"spec.promptRef '{prompt_ref}' has no non-empty spec.systemPrompt",
                 )
             spec["systemPrompt"] = system_message
+        harness = await _run_agent_harness(client, principal, body)
+        if harness.status == "approval_required" and request.headers.get(_GATE_OVERRIDE_HEADER, "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            service: AgentGateService | None = getattr(request.app.state, "agent_gate_service", None)
+            if service is None:
+                raise HTTPException(status_code=503, detail="agent risk approval gate unavailable")
+            reason = request.headers.get(_GATE_OVERRIDE_REASON_HEADER, "")
+            try:
+                approver = await service.approve_risk(
+                    principal,
+                    agent_name=str(meta.get("name") or "").strip(),
+                    risk_level=str(spec.get("riskLevel") or "").strip().lower(),
+                    reason=reason,
+                )
+            except PermissionError as error:
+                raise HTTPException(status_code=403, detail=str(error)) from error
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            except RuntimeError as error:
+                raise HTTPException(status_code=503, detail=str(error)) from error
+            harness = harness.approve(approver, reason.strip())
+        if not harness.ok:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "agent_lifecycle_gate_blocked",
+                    "message": "agent build or security gate blocked publication",
+                    "gate": harness.model_dump(mode="json", exclude_none=True),
+                },
+            )
+        labels[_BUILD_GATE_LABEL] = "passed"
+        labels[_SECURITY_GATE_LABEL] = "passed"
+        labels[LIFECYCLE_LABEL] = "published"
+        if harness.approved_by:
+            annotations[_RISK_APPROVER_ANNOTATION] = harness.approved_by
+            annotations[_RISK_APPROVAL_REASON_ANNOTATION] = harness.approval_reason or ""
+        meta["annotations"] = annotations
     labels[_OWNER_LABEL] = owner_id
     labels[_VISIBILITY_LABEL] = "private"
     meta["visibility"] = "private"
@@ -655,6 +756,8 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
     response = dict(result) if isinstance(result, dict) else {"status": "published"}
     if gate is not None:
         response["gate"] = gate.model_dump(mode="json")
+    if harness is not None:
+        response["harness"] = harness.model_dump(mode="json", exclude_none=True)
     return response
 
 
