@@ -112,7 +112,7 @@ class EvaluationService:
             dataset_name=request.dataset.name,
             dataset_version=request.dataset.version,
             scorers=list(request.scorers),
-            thresholds=request.thresholds.model_dump(mode="json", exclude_none=True),
+            thresholds=self._suite_configuration(request),
         )
         if row is None:
             raise EvaluationConflict(f"eval suite {request.name}@{request.version} already exists")
@@ -141,6 +141,7 @@ class EvaluationService:
             suite=ref,
             scorers=suite.scorers,
             thresholds=suite.thresholds,
+            judge=suite.judge,
         )
 
     @staticmethod
@@ -171,16 +172,26 @@ class EvaluationService:
 
     @staticmethod
     def _suite_from_row(row: dict[str, Any]) -> EvalSuite:
+        configuration = dict(row.get("thresholds") or {})
+        judge = configuration.pop("_judge", None)
         return EvalSuite(
             name=row["name"],
             version=row["version"],
             description=row.get("description") or "",
             dataset=ArtifactVersionRef(name=row["dataset_name"], version=row["dataset_version"]),
             scorers=list(row.get("scorers") or []),
-            thresholds=EvalThresholds.model_validate(row.get("thresholds") or {}),
+            thresholds=EvalThresholds.model_validate(configuration),
+            judge=judge,
             owner_scope=row["owner_scope"],
             created_at=str(row["created_at"]),
         )
+
+    @staticmethod
+    def _suite_configuration(request: EvalSuiteCreate) -> dict[str, Any]:
+        configuration = request.thresholds.model_dump(mode="json", exclude_none=True)
+        if request.judge is not None:
+            configuration["_judge"] = request.judge.model_dump(mode="json")
+        return configuration
 
 
 __all__ = [

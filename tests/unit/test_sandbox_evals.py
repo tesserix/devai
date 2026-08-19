@@ -8,16 +8,20 @@ studio actually has to answer before publishing.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from devai.adapters.llm.base import LLMAdapter, LLMResponse, LLMUsage, ToolCall
 from devai.config import Settings
+from devai.evaluations.judge import LLMJudge
+from devai.evaluations.models import JudgeConfig, JudgeRubric
+from devai.identity import Principal
 from devai.pipeline.interfaces import StageDeps
 from devai.sandbox.evals import CaseResult, EvalCase, EvalExpect, EvalRun, EvalRunner, EvalStore, grade
 from devai.sandbox.invoke import SandboxInvoker
-from devai.sandbox.models import AgentRef, ModelRef, SandboxRecord, SandboxSpec, SandboxStatus
+from devai.sandbox.models import AgentRef, ModelRef, SandboxLimits, SandboxRecord, SandboxSpec, SandboxStatus
 from devai.sandbox.trace import Invocation, TraceStep, TraceStore
 from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.registry import SpecializationRegistry
@@ -430,3 +434,121 @@ async def test_fifty_case_acceptance_summary_keeps_scores_cost_latency_and_trace
     assert run.summary["dimensions"]["task_completion"]["pass_rate"] == 1.0
     assert all(result.to_dict()["trace_url"] for result in run.results)
     assert {result.execution_backend for result in run.results} == {"kubernetes_job"}
+
+
+@pytest.mark.asyncio
+async def test_judge_budget_exhaustion_fails_only_the_judge_dimension_after_agent_calls() -> None:
+    class _Invoker:
+        def __init__(self) -> None:
+            self.count = 0
+
+        async def invoke(self, record, *, message: str, triggered_by: str) -> Invocation:
+            del triggered_by
+            self.count += 1
+            return Invocation(
+                id=f"inv-{message}",
+                sandbox_id=record.id,
+                agent="agent",
+                message=message,
+                final_text="expected",
+                steps=[TraceStep(kind="llm", cost_usd=0.095)],
+            )
+
+    class _Factory:
+        def __init__(self, invoker: _Invoker) -> None:
+            self.invoker = invoker
+
+        async def create(self, *, principal, config, budget, metadata):
+            assert self.invoker.count == 1
+            assert principal.email == "alice@example.com"
+            return (
+                LLMJudge(
+                    llm=_ScriptedLLM([LLMResponse(text="{}")]),
+                    config=config,
+                    budget=budget,
+                    metadata=metadata,
+                ),
+                config,
+            )
+
+    config = JudgeConfig(
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        rubric=JudgeRubric(name="quality", version="3", dimensions={"helpfulness": "Be useful."}),
+        max_cost_per_case_usd=0.01,
+    )
+    record = _record().model_copy(
+        update={"spec": _record().spec.model_copy(update={"limits": SandboxLimits(max_cost_usd=0.1)})}
+    )
+    invoker = _Invoker()
+    run = await EvalRunner(invoker, EvalStore(None), judge_factory=_Factory(invoker)).run(
+        record,
+        [EvalCase(name="one", input="go", expect=EvalExpect(exact_output="expected"))],
+        triggered_by="alice@example.com",
+        scorers=["exact_match", "llm_judge"],
+        principal=Principal(uid="alice", email="alice@example.com", tenant_id="tenant-a"),
+        judge_config=config,
+    )
+
+    assert run.results[0].scores["exact_match"]["passed"] is True
+    assert run.results[0].scores["llm_judge"]["detail"]["error"] == "judge cost budget exhausted"
+    assert run.results[0].passed is False
+    assert run.judge_cost_usd == 0
+    assert run.judge == config.model_dump(mode="json")
+
+
+@pytest.mark.asyncio
+async def test_judge_calibration_reports_threshold_agreement_and_mean_absolute_error() -> None:
+    config = JudgeConfig(
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        rubric=JudgeRubric(
+            name="quality",
+            version="3",
+            dimensions={"helpfulness": "Be useful.", "groundedness": "Use the evidence."},
+        ),
+    )
+    response = LLMResponse(
+        text=json.dumps(
+            {
+                "dimensions": {
+                    "helpfulness": {"score": 0.8, "reasoning": "Actionable."},
+                    "groundedness": {"score": 0.4, "reasoning": "One unsupported claim."},
+                }
+            }
+        ),
+        usage=LLMUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+    )
+
+    class _Factory:
+        async def create(self, *, principal, config, budget, metadata):
+            del principal
+            return LLMJudge(llm=_ScriptedLLM([response]), config=config, budget=budget, metadata=metadata), config
+
+    run = await EvalRunner(
+        _runner(_ScriptedLLM([LLMResponse(text="answer")]))._invoker,
+        EvalStore(None),
+        judge_factory=_Factory(),
+    ).run(
+        _record(),
+        [
+            EvalCase(
+                name="labelled",
+                input="go",
+                human_scores={"helpfulness": 1.0, "groundedness": 0.2},
+            )
+        ],
+        triggered_by="alice@example.com",
+        scorers=["task_completion", "llm_judge"],
+        principal=Principal(uid="alice", email="alice@example.com", tenant_id="tenant-a"),
+        judge_config=config,
+    )
+
+    assert run.summary["calibration"] == {
+        "labelled_scores": 2,
+        "threshold_agreement": 1.0,
+        "mean_absolute_error": 0.2,
+    }
+    assert run.judge_cost_usd > 0

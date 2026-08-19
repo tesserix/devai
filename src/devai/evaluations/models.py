@@ -12,6 +12,14 @@ Name = Annotated[str, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9]
 Version = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
 _MAX_DATASET_CASE_BYTES = 1024 * 1024
 
+JudgeDimension = Literal[
+    "helpfulness",
+    "relevance",
+    "reasoning_quality",
+    "groundedness",
+    "completeness",
+]
+
 
 class EvaluationModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -37,6 +45,10 @@ class DatasetCase(EvaluationModel):
     max_cost_usd: float | None = Field(default=None, ge=0)
     context: dict[str, Any] = Field(default_factory=dict)
     tags: list[Name] = Field(default_factory=list, max_length=100)
+    human_scores: dict[JudgeDimension, Annotated[float, Field(ge=0, le=1)]] = Field(
+        default_factory=dict,
+        max_length=5,
+    )
 
     @model_validator(mode="after")
     def arguments_align_with_tools(self) -> DatasetCase:
@@ -62,6 +74,7 @@ class DatasetCase(EvaluationModel):
                     "max_latency_ms": self.max_latency_ms,
                     "max_cost_usd": self.max_cost_usd,
                 },
+                "human_scores": self.human_scores,
             }
         )
 
@@ -106,6 +119,22 @@ class EvalThresholds(EvaluationModel):
     cost_per_run_usd: float | None = Field(default=None, ge=0)
 
 
+class JudgeRubric(EvaluationModel):
+    name: Name
+    version: Version
+    dimensions: Annotated[dict[JudgeDimension, str], Field(min_length=1, max_length=5)]
+
+
+class JudgeConfig(EvaluationModel):
+    provider: Name
+    model: Annotated[str, Field(min_length=1, max_length=200)]
+    rubric: JudgeRubric
+    pass_threshold: float = Field(default=0.7, ge=0, le=1)
+    max_tokens: int = Field(default=800, ge=64, le=4096)
+    max_cost_per_case_usd: float = Field(default=0.05, gt=0, le=10)
+    timeout_seconds: float = Field(default=30, gt=0, le=60)
+
+
 class EvalSuiteCreate(EvaluationModel):
     name: Name
     version: Version
@@ -113,11 +142,14 @@ class EvalSuiteCreate(EvaluationModel):
     dataset: ArtifactVersionRef
     scorers: Annotated[list[Name], Field(min_length=1, max_length=50)]
     thresholds: EvalThresholds = Field(default_factory=EvalThresholds)
+    judge: JudgeConfig | None = None
 
     @model_validator(mode="after")
     def unique_scorers(self) -> EvalSuiteCreate:
         if len(self.scorers) != len(set(self.scorers)):
             raise ValueError("eval suite scorers must be unique")
+        if ("llm_judge" in self.scorers) != (self.judge is not None):
+            raise ValueError("llm_judge scorer requires exactly one pinned judge configuration")
         return self
 
 
@@ -128,6 +160,7 @@ class EvalSuite(EvaluationModel):
     dataset: ArtifactVersionRef
     scorers: list[str]
     thresholds: EvalThresholds
+    judge: JudgeConfig | None = None
     owner_scope: str
     created_at: str
 
@@ -138,6 +171,7 @@ class ResolvedEvaluation(EvaluationModel):
     suite: ArtifactVersionRef | None = None
     scorers: list[str] = Field(default_factory=list)
     thresholds: EvalThresholds = Field(default_factory=EvalThresholds)
+    judge: JudgeConfig | None = None
 
 
 class EvaluationRunCreate(EvaluationModel):
@@ -161,5 +195,8 @@ __all__ = [
     "EvalSuiteCreate",
     "EvalThresholds",
     "EvaluationRunCreate",
+    "JudgeConfig",
+    "JudgeDimension",
+    "JudgeRubric",
     "ResolvedEvaluation",
 ]

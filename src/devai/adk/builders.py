@@ -15,6 +15,7 @@ The ADK's job is to make catalog entries round-trip cleanly.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -22,6 +23,13 @@ from typing import Any
 _MCP_NAME_RE = re.compile(r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$")
 _MCP_SCHEMA_URL = "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json"
 _MCP_DESCRIPTION_MAX = 100
+_JUDGE_DIMENSIONS = {
+    "helpfulness",
+    "relevance",
+    "reasoning_quality",
+    "groundedness",
+    "completeness",
+}
 
 
 def _truncate(s: str, n: int) -> str:
@@ -388,6 +396,7 @@ class Dataset:
         tools_not_called: list[str] | None = None,
         max_total_tokens: int | None = None,
         max_latency_ms: int | None = None,
+        human_scores: dict[str, float] | None = None,
     ) -> Dataset:
         expect: dict[str, Any] = {}
         optional: dict[str, Any] = {
@@ -400,7 +409,15 @@ class Dataset:
             "max_latency_ms": max_latency_ms,
         }
         expect.update({key: value for key, value in optional.items() if value is not None})
-        self._cases.append({"name": name, "input": input, "expect": expect})
+        case: dict[str, Any] = {"name": name, "input": input, "expect": expect}
+        if human_scores is not None:
+            unknown = set(human_scores) - _JUDGE_DIMENSIONS
+            if unknown:
+                raise ValueError(f"unknown human judge dimension(s): {', '.join(sorted(unknown))}")
+            if any(score < 0 or score > 1 for score in human_scores.values()):
+                raise ValueError("human judge scores must be between 0 and 1")
+            case["humanScores"] = dict(human_scores)
+        self._cases.append(case)
         return self
 
     @property
@@ -417,6 +434,53 @@ class Dataset:
 
 
 @dataclass(slots=True)
+class Rubric:
+    """A versioned LLM-judge rubric published through the prompt catalog."""
+
+    _name: str
+    _version: str = "1"
+    _description: str = ""
+    _dimensions: dict[str, str] = field(default_factory=dict)
+
+    def version(self, value: str) -> Rubric:
+        self._version = str(value)
+        return self
+
+    def description(self, text: str) -> Rubric:
+        self._description = text
+        return self
+
+    def dimension(self, name: str, criteria: str) -> Rubric:
+        if name not in _JUDGE_DIMENSIONS:
+            raise ValueError(f"unknown judge dimension: {name!r}")
+        if not criteria.strip():
+            raise ValueError("judge dimension criteria must not be empty")
+        self._dimensions[name] = criteria.strip()
+        return self
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def as_spec(self) -> dict[str, Any]:
+        if not self._dimensions:
+            raise ValueError("judge rubric needs at least one dimension")
+        return {
+            "name": self._name,
+            "version": self._version,
+            "dimensions": dict(self._dimensions),
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self._name,
+            "version": self._version,
+            "description": self._description,
+            "content": json.dumps({"dimensions": self.as_spec()["dimensions"]}, sort_keys=True),
+        }
+
+
+@dataclass(slots=True)
 class EvalSuite:
     """A versioned gate over one immutable dataset version."""
 
@@ -427,6 +491,7 @@ class EvalSuite:
     _minimum_pass_rate: float = 1.0
     _scorers: list[str] = field(default_factory=list)
     _thresholds: dict[str, float] = field(default_factory=dict)
+    _judge: dict[str, Any] | None = None
 
     def version(self, value: str) -> EvalSuite:
         self._version = str(value)
@@ -480,6 +545,32 @@ class EvalSuite:
         }
         return self
 
+    def judge(
+        self,
+        provider: str,
+        model: str,
+        rubric: Rubric,
+        *,
+        pass_threshold: float = 0.7,
+        max_tokens: int = 800,
+        max_cost_per_case_usd: float = 0.05,
+        timeout_seconds: float = 30,
+    ) -> EvalSuite:
+        if not 0 <= pass_threshold <= 1:
+            raise ValueError("judge pass threshold must be between 0 and 1")
+        if max_tokens < 64 or max_cost_per_case_usd <= 0 or not 0 < timeout_seconds <= 60:
+            raise ValueError("judge limits must be positive and bounded")
+        self._judge = {
+            "provider": provider,
+            "model": model,
+            "rubric": rubric.as_spec(),
+            "passThreshold": pass_threshold,
+            "maxTokens": max_tokens,
+            "maxCostPerCaseUsd": max_cost_per_case_usd,
+            "timeoutSeconds": float(timeout_seconds),
+        }
+        return self
+
     @property
     def name(self) -> str:
         return self._name
@@ -498,4 +589,6 @@ class EvalSuite:
             body["scorers"] = list(self._scorers)
         if self._thresholds:
             body["thresholds"] = dict(self._thresholds)
+        if self._judge is not None:
+            body["judge"] = dict(self._judge)
         return body

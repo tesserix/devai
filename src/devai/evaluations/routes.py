@@ -171,6 +171,8 @@ async def run_evaluation(request: Request, body: EvaluationRunCreate) -> dict[st
             dataset_ref=resolved.dataset.model_dump(mode="json"),
             suite_ref=body.suite.model_dump(mode="json"),
             scorers=resolved.scorers,
+            principal=principal,
+            judge_config=resolved.judge,
         )
         return run.to_dict()
     except HTTPException:

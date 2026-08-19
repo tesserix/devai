@@ -52,7 +52,7 @@ Public surface:
     scaffold_prompt / scaffold_mcp      — write a starter YAML to disk
 """
 
-from devai.adk.builders import Agent, Dataset, EvalSuite, McpServer, Prompt, Skill
+from devai.adk.builders import Agent, Dataset, EvalSuite, McpServer, Prompt, Rubric, Skill
 from devai.adk.client import AdkAPIError, AdkError, SandboxClient
 from devai.adk.publisher import Publisher, PublishResult
 from devai.adk.scaffold import (
@@ -72,6 +72,7 @@ __all__ = [
     "Prompt",
     "PublishResult",
     "Publisher",
+    "Rubric",
     "Skill",
     "SandboxClient",
     "scaffold_agent",
