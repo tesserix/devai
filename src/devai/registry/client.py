@@ -105,6 +105,7 @@ class Agent:
     # `devai.io/runtime=kagent` marks an agent the kagent controller manages as
     # a long-lived Deployment — the dispatcher routes those over A2A.
     labels: dict[str, str] = field(default_factory=dict)
+    annotations: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -594,6 +595,8 @@ def _unwrap(item: dict[str, Any], key: str) -> dict[str, Any]:
             # reconciler selects on, so DevAI and the reconciler agree.
             if isinstance(meta.get("labels"), dict) and "labels" not in flat:
                 flat["labels"] = meta["labels"]
+            if isinstance(meta.get("annotations"), dict) and "annotations" not in flat:
+                flat["annotations"] = meta["annotations"]
         return flat
     return item
 
@@ -674,6 +677,7 @@ def _parse_agent(d: dict[str, Any]) -> Agent:
         mcp_servers=list(d.get("mcpServers") or []),
         a2a=dict(d.get("a2a") or {}),
         labels={str(k): str(v) for k, v in (d.get("labels") or {}).items()},
+        annotations={str(k): str(v) for k, v in (d.get("annotations") or {}).items()},
         raw=d,
     )
 

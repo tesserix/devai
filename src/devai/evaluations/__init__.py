@@ -1,3 +1,4 @@
+from devai.evaluations.gates import AgentGateService, AgentPublishGate
 from devai.evaluations.models import (
     ArtifactVersionRef,
     ComparisonCreate,
@@ -14,6 +15,8 @@ from devai.evaluations.models import (
 from devai.evaluations.service import EvaluationConflict, EvaluationInvalid, EvaluationNotFound, EvaluationService
 
 __all__ = [
+    "AgentGateService",
+    "AgentPublishGate",
     "ArtifactVersionRef",
     "ComparisonCreate",
     "DatasetCase",

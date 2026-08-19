@@ -110,6 +110,7 @@ const SPEC: Record<string, Field[]> = {
       children: [
         { path: "success", label: "Success rate", type: "number", min: 0, max: 1, step: 0.01 },
         { path: "safety", label: "Safety rate", type: "number", min: 0, max: 1, step: 0.01 },
+        { path: "hallucination", label: "Hallucination rate", type: "number", min: 0, max: 1, step: 0.01 },
         { path: "p95_latency_s", label: "P95 latency (s)", type: "number", min: 0.1, step: 0.1 },
         { path: "cost_per_run_usd", label: "Cost / run (USD)", type: "number", min: 0, step: 0.001 },
       ],
@@ -140,6 +141,16 @@ const SPEC: Record<string, Field[]> = {
       itemKind: "prompts",
       placeholder: "incident-responder-prompt-v1",
       help: "Choose a registry Prompt, or provide an inline system prompt below. One is required.",
+    },
+    {
+      path: "spec.evalSuite",
+      label: "Evaluation suite",
+      type: "group",
+      help: "Pin the immutable suite version that must pass before publication.",
+      children: [
+        { path: "ref", label: "Suite", type: "text", mono: true, required: true },
+        { path: "version", label: "Version", type: "text", mono: true, required: true },
+      ],
     },
     { path: "spec.systemPrompt", label: "System prompt", type: "textarea", placeholder: "You are an on-call SRE. …", help: "The agent's base instruction. References to Prompts below are available at runtime." },
     { path: "spec.skills", label: "Skills", type: "refList", itemKind: "skills", help: "Registry Skills this agent can perform." },
@@ -191,7 +202,13 @@ export function starter(kind: string): Record<string, unknown> {
       description: "",
       datasetRef: { ref: "", version: "" },
       scorers: [],
-      thresholds: { success: null, safety: null, p95_latency_s: null, cost_per_run_usd: null },
+      thresholds: {
+        success: null,
+        safety: null,
+        hallucination: null,
+        p95_latency_s: null,
+        cost_per_run_usd: null,
+      },
     },
     Workflow: { title: "", description: "", nodes: [], edges: [] },
     Blueprint: { title: "", description: "", nodes: [], edges: [] },
@@ -349,6 +366,18 @@ export function lintManifest(doc: unknown, expectedKind: string): LintIssue[] {
       if (!AGENT_RISK_LEVELS.has(String(spec.riskLevel ?? ""))) {
         err("spec.riskLevel must be one of low, medium, high, critical");
       }
+      const evalSuite = spec.evalSuite;
+      if (evalSuite != null) {
+        if (typeof evalSuite !== "object" || Array.isArray(evalSuite)) {
+          err("spec.evalSuite must be an object");
+        } else {
+          const ref = evalSuite as Record<string, unknown>;
+          if (typeof ref.ref !== "string" || !ref.ref.trim()) err("spec.evalSuite.ref is required");
+          if (typeof ref.version !== "string" || !ref.version.trim()) {
+            err("spec.evalSuite.version is required");
+          }
+        }
+      }
     }
     if (expectedKind === "Dataset") {
       if (!Array.isArray(spec.cases) || spec.cases.length === 0) {
@@ -397,7 +426,7 @@ export function lintManifest(doc: unknown, expectedKind: string): LintIssue[] {
         err("spec.thresholds must be an object");
       } else if (thresholds != null) {
         const values = thresholds as Record<string, unknown>;
-        for (const name of ["success", "safety"] as const) {
+        for (const name of ["success", "safety", "hallucination"] as const) {
           const value = values[name];
           if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)) {
             err(`spec.thresholds.${name} must be a number between 0 and 1`);

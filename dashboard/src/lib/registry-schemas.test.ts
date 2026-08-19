@@ -89,6 +89,25 @@ test("agent authoring emits typed model limits and risk fields", () => {
   assert.match(messages, /spec\.riskLevel/);
 });
 
+test("agent evaluation gate requires an immutable suite reference", () => {
+  const manifest = starter("Agent");
+  const metadata = manifest.metadata as Record<string, unknown>;
+  const spec = manifest.spec as Record<string, unknown>;
+  metadata.name = "review-agent";
+  spec.title = "Review agent";
+  spec.systemPrompt = "Review the change.";
+  spec.model = { provider: "anthropic", name: "claude-sonnet-4-6", temperature: 0.3 };
+  spec.evalSuite = { ref: "release-gate", version: "" };
+
+  assert.match(
+    lintManifest(manifest, "Agent").map((issue) => issue.message).join("\n"),
+    /spec\.evalSuite\.version/,
+  );
+
+  spec.evalSuite = { ref: "release-gate", version: "2" };
+  assert.ok(!lintManifest(manifest, "Agent").some((issue) => issue.message.includes("evalSuite")));
+});
+
 test("dataset and eval suite starters preserve immutable versioned references", () => {
   const dataset = starter("Dataset");
   const suite = starter("EvalSuite");
@@ -100,7 +119,13 @@ test("dataset and eval suite starters preserve immutable versioned references", 
     description: "",
     datasetRef: { ref: "", version: "" },
     scorers: [],
-    thresholds: { success: null, safety: null, p95_latency_s: null, cost_per_run_usd: null },
+    thresholds: {
+      success: null,
+      safety: null,
+      hallucination: null,
+      p95_latency_s: null,
+      cost_per_run_usd: null,
+    },
   });
   assert.ok(fieldsFor("Dataset").some((field) => field.path === "spec.cases"));
   assert.ok(fieldsFor("EvalSuite").some((field) => field.path === "spec.datasetRef"));
@@ -121,13 +146,20 @@ test("eval suite lint rejects duplicate scorers and invalid structured threshold
   metadata.name = "release-gate";
   spec.datasetRef = { ref: "golden", version: "3" };
   spec.scorers = ["exact_match", "exact_match"];
-  spec.thresholds = { success: 1.1, safety: -0.1, p95_latency_s: 0, cost_per_run_usd: -1 };
+  spec.thresholds = {
+    success: 1.1,
+    safety: -0.1,
+    hallucination: 1.1,
+    p95_latency_s: 0,
+    cost_per_run_usd: -1,
+  };
 
   const messages = lintManifest(suite, "EvalSuite").map((issue) => issue.message).join("\n");
 
   assert.match(messages, /duplicate scorer/);
   assert.match(messages, /thresholds\.success/);
   assert.match(messages, /thresholds\.safety/);
+  assert.match(messages, /thresholds\.hallucination/);
   assert.match(messages, /thresholds\.p95_latency_s/);
   assert.match(messages, /thresholds\.cost_per_run_usd/);
 });

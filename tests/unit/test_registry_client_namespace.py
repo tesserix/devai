@@ -63,7 +63,12 @@ def test_list_projects_metadata_visibility_for_authorization(monkeypatch) -> Non
     envelope = {
         "apiVersion": "registry.agentic.dev/v1alpha1",
         "kind": "Agent",
-        "metadata": {"name": "private-agent", "visibility": "private"},
+        "metadata": {
+            "name": "private-agent",
+            "visibility": "private",
+            "labels": {"devai.tesserix.app/lifecycle": "published"},
+            "annotations": {"devai.tesserix.app/eval-run-id": "eval-1"},
+        },
         "spec": {"description": "private"},
     }
     monkeypatch.setattr(
@@ -76,6 +81,8 @@ def test_list_projects_metadata_visibility_for_authorization(monkeypatch) -> Non
     agents = client.list_agents()
 
     assert agents[0].raw["visibility"] == "private"
+    assert agents[0].labels["devai.tesserix.app/lifecycle"] == "published"
+    assert agents[0].annotations["devai.tesserix.app/eval-run-id"] == "eval-1"
 
 
 def test_list_datasets_and_eval_suites_preserves_versioned_eval_contract(monkeypatch) -> None:

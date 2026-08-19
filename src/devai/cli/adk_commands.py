@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterator
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -175,35 +176,81 @@ def publish(
     target: Path = typer.Argument(..., help="YAML file or directory."),
     registry_url: str = typer.Option("", "--registry-url", help="Default: settings.registry_url."),
     token: str = typer.Option("", "--token"),
+    api_url: str = typer.Option("", "--api-url", help="DevAI API used for gated agent publication."),
+    session_cookie: str = typer.Option("", "--session-cookie"),
+    api_token: str = typer.Option("", "--api-token"),
+    eval_run_id: str = typer.Option("", "--eval-run-id"),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    override_reason: str = typer.Option("", "--override-reason"),
 ) -> None:
-    url = registry_url or settings.registry_url
-    if not url:
-        console.print("[red]no registry URL[/] — pass --registry-url or set DEVAI_REGISTRY_URL")
-        raise typer.Exit(code=1)
     files = list(_walk(target))
     if not files:
         console.print(f"[red]no YAML files under {target}[/]")
         raise typer.Exit(code=1)
 
-    pub = Publisher(registry_url=url, token=token)
+    url = registry_url or settings.registry_url
+    pub: Publisher | None = None
+    api_client: SandboxClient | None = None
+    failures = 0
     table = Table("kind", "name", "status")
-    for f in files:
-        doc = yaml.safe_load(f.read_text()) or {}
-        try:
-            builder = _builder_for(doc)
-        except Exception as e:  # noqa: BLE001
-            table.add_row("?", str(f), f"[red]parse: {e}[/]")
-            continue
-        result = pub.publish(builder)
-        color = "green" if result.ok else "red"
-        table.add_row(
-            result.kind,
-            result.name,
-            f"[{color}]{result.status}[/]" + (f" — {result.error}" if not result.ok else ""),
-        )
+    try:
+        for f in files:
+            doc = yaml.safe_load(f.read_text()) or {}
+            try:
+                builder = _builder_for(doc)
+            except Exception as e:  # noqa: BLE001
+                table.add_row("?", str(f), f"[red]parse: {e}[/]")
+                failures += 1
+                continue
+            if doc.get("kind") == "Agent":
+                if api_client is None:
+                    api_client = _new_sandbox_client(
+                        api_url=api_url,
+                        session_cookie=session_cookie,
+                        token=api_token,
+                    )
+                manifest = deepcopy(doc)
+                metadata = _mapping(manifest.get("metadata"))
+                manifest["metadata"] = metadata
+                annotations = _mapping(metadata.get("annotations"))
+                metadata["annotations"] = annotations
+                if eval_run_id:
+                    annotations["devai.tesserix.app/eval-run-id"] = eval_run_id
+                try:
+                    response = api_client.publish_agent(
+                        manifest,
+                        overwrite=overwrite,
+                        override_reason=override_reason,
+                    )
+                    gate = _mapping(response.get("gate"))
+                    status = str(gate.get("status") or "published")
+                    table.add_row("agent", builder.name, f"[green]{status}[/]")
+                except AdkError as error:
+                    table.add_row("agent", builder.name, f"[red]failed — {error}[/]")
+                    failures += 1
+                continue
+            if not url:
+                table.add_row(
+                    str(doc.get("kind") or "?"),
+                    builder.name,
+                    "[red]failed — pass --registry-url or set DEVAI_REGISTRY_URL[/]",
+                )
+                failures += 1
+                continue
+            if pub is None:
+                pub = Publisher(registry_url=url, token=token)
+            result = pub.publish(builder)
+            color = "green" if result.ok else "red"
+            table.add_row(
+                result.kind,
+                result.name,
+                f"[{color}]{result.status}[/]" + (f" — {result.error}" if not result.ok else ""),
+            )
+    finally:
+        if api_client is not None:
+            api_client.close()
     console.print(table)
-    summary = pub.summary()
-    if summary.failed:
+    if failures or (pub is not None and pub.summary().failed):
         raise typer.Exit(code=2)
 
 
@@ -395,6 +442,17 @@ def _suite_settings(path: Path, dataset: Path | None) -> tuple[Path, str, str, f
     raise ValueError(f"could not resolve Dataset/{name}@{version} beside {path}")
 
 
+def _suite_reference(path: Path) -> tuple[str, str]:
+    document = _load_yaml(path)
+    metadata = _mapping(document.get("metadata"))
+    spec = _mapping(document.get("spec"))
+    name = str(metadata.get("name") or "")
+    version = str(spec.get("version") or metadata.get("tag") or "")
+    if not name or not version:
+        raise ValueError("eval suite needs a name and immutable version")
+    return name, version
+
+
 def _inline_agent_evals(path: Path) -> tuple[str, list[dict[str, Any]]]:
     if not path.is_file():
         raise ValueError("pass --suite or --dataset when the agent argument is not a YAML file")
@@ -428,9 +486,14 @@ def test_agent(
         expected_version = ""
         dataset_path = dataset
         scorecard_name = agent
+        suite_reference: tuple[str, str] | None = None
+        cases: list[dict[str, Any]]
         if suite is not None:
             dataset_path, expected_name, expected_version, minimum_pass_rate = _suite_settings(suite, dataset)
-        if dataset_path is None:
+            suite_reference = _suite_reference(suite)
+        if suite_reference is not None:
+            cases = []
+        elif dataset_path is None:
             scorecard_name, cases = _inline_agent_evals(Path(agent))
         else:
             cases = _dataset_cases(
@@ -440,7 +503,10 @@ def test_agent(
             )
         client = _new_sandbox_client(api_url=api_url)
         try:
-            run = client.test(sandbox_id, cases)
+            if suite_reference is not None:
+                run = client.evaluate(sandbox_id, *suite_reference)
+            else:
+                run = client.test(sandbox_id, cases)
         finally:
             client.close()
     except (AdkError, OSError, ValueError) as error:
@@ -457,6 +523,8 @@ def test_agent(
         f"pass rate {float(summary.get('pass_rate') or 0) * 100:.1f}% · "
         f"cost ${float(summary.get('cost_usd') or 0):.4f} · p95 {int(summary.get('p95_latency_ms') or 0)} ms"
     )
+    if run.get("id"):
+        console.print(f"durable evaluation run [bold]{run['id']}[/]")
     if float(summary.get("pass_rate") or 0) < minimum_pass_rate:
         raise typer.Exit(code=2)
 
@@ -568,6 +636,9 @@ def _builder_for(doc: dict[str, Any]) -> Skill | Prompt | McpServer | Agent | Da
             suite_builder.thresholds(
                 success=float(thresholds["success"]) if thresholds.get("success") is not None else None,
                 safety=float(thresholds["safety"]) if thresholds.get("safety") is not None else None,
+                hallucination=(
+                    float(thresholds["hallucination"]) if thresholds.get("hallucination") is not None else None
+                ),
                 p95_latency_s=(
                     float(thresholds["p95_latency_s"]) if thresholds.get("p95_latency_s") is not None else None
                 ),

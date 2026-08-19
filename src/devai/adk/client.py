@@ -74,18 +74,58 @@ class SandboxClient:
     def test(self, sandbox_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
         return self._request_object("POST", f"/api/sandboxes/{sandbox_id}/evals", json={"cases": cases})
 
+    def evaluate(self, sandbox_id: str, suite_name: str, suite_version: str) -> dict[str, Any]:
+        return self._request_object(
+            "POST",
+            "/api/evaluations",
+            json={
+                "suite": {"name": suite_name, "version": suite_version},
+                "sandbox_id": sandbox_id,
+            },
+        )
+
+    def publish_agent(
+        self,
+        manifest: dict[str, Any],
+        *,
+        overwrite: bool = False,
+        override_reason: str = "",
+    ) -> dict[str, Any]:
+        headers = None
+        if override_reason:
+            headers = {
+                "x-devai-eval-gate-override": "true",
+                "x-devai-eval-gate-override-reason": override_reason,
+            }
+        path = "/api/registry/agents?overwrite=true" if overwrite else "/api/registry/agents"
+        return self._request_object("POST", path, json=manifest, headers=headers)
+
     def destroy(self, sandbox_id: str) -> dict[str, Any]:
         return self._request_object("DELETE", f"/api/sandboxes/{sandbox_id}")
 
-    def _request_object(self, method: str, path: str, *, json: dict[str, Any] | None = None) -> dict[str, Any]:
-        body = self._request(method, path, json=json)
+    def _request_object(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        body = self._request(method, path, json=json, headers=headers)
         if not isinstance(body, dict):
             raise AdkAPIError(502, "DevAI API response was not an object")
         return {str(key): value for key, value in body.items()}
 
-    def _request(self, method: str, path: str, *, json: dict[str, Any] | None = None) -> object:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> object:
         try:
-            response = self._http.request(method, path, json=json)
+            response = self._http.request(method, path, json=json, headers=headers)
         except httpx.HTTPError as error:
             raise AdkAPIError(0, str(error)) from error
         if response.status_code >= 400:
