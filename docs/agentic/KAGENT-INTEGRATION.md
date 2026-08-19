@@ -1,6 +1,6 @@
 # kagent integration — Substrate Actors over A2A
 
-> **Status (2026-08-20): implemented, default-off pending production readiness.**
+> **Status (2026-08-20): implemented, default-off after a NO-GO capacity decision.**
 > A registry agent labelled `devai.io/runtime=kagent` is reconciled as a kagent
 > `SandboxAgent` and dispatched through `/api/a2a-sandboxes/{namespace}/{agent}`.
 > Substrate multiplexes Actors in a gVisor WorkerPool instead of keeping one pod
@@ -26,12 +26,15 @@ and can wake scaled-to-zero Actors on first dispatch.
 | Cold start         | yes (Job scheduling, seconds)           | first dispatch wakes a scaled-to-zero Actor  |
 | Per-user LLM keys  | ✅ `PrincipalLLMResolver`               | ✅ ModelConfig `apiKeyPassthrough`          |
 | Multi-model + fallback | ✅ `role_llm_*` / resolver          | ✅ per-model variants + dispatch chain      |
-| Fits a 3-node cluster | ✅ always                            | subject to #70 measured capacity acceptance  |
+| Fits a 3-node cluster | ✅ always                            | ❌ not accepted in the current runtime        |
 
-**Why the switch remains off.** The production canary is accepted but is not yet
-ready, and the required 5/20/50 concurrency and cold-start measurements have not
-passed. Per-user keys, multi-provider selection, and fallback continue to work on
-the Job path through `PrincipalLLMResolver`, so keeping the switch off is safe.
+**Why the switch remains off.** #70 records a NO-GO for the current runtime. The
+production canary is accepted but is not ready, the WorkerPool is privileged and
+unbounded, and the required 5/20/50 concurrency and cold-start measurements cannot
+run. The unused `sandbox-gvisor` node pool has zero nodes and autoscaling disabled;
+the current nested-gVisor WorkerPool does not schedule onto it anyway. Per-user keys,
+multi-provider selection, and fallback continue to work on the Job path through
+`PrincipalLLMResolver`, so keeping the switch off is safe.
 
 ### 0a. Re-enabling kagent
 

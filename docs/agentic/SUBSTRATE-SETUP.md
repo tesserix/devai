@@ -1,6 +1,6 @@
 # Agent Substrate — production runbook
 
-> **Status (2026-08-19): deployed, user traffic disabled.** Substrate 0.0.8,
+> **Status (2026-08-20): NO-GO, user traffic disabled.** Substrate 0.0.8,
 > its CRDs, and the shared `kagent-default` WorkerPool are deployed through
 > Argo CD. The keyless `devai-substrate-canary` is accepted by kagent, but is
 > not ready because its golden ActorTemplate is assigned to a worker record for
@@ -35,6 +35,54 @@ gVisor boundary isolates Actors from one another, while the privileged worker
 remains a larger node-level blast radius. Do not describe the current topology
 as “one GKE Sandbox pod per Actor” or enable untrusted user code before #76
 proves the required tenant and workload-identity controls.
+
+## GO/NO-GO decision for the three-node budget
+
+The current decision for [#70](https://github.com/tesserix/devai/issues/70) is
+**NO-GO**. This is a measured safety decision, not a claim that the Actor model
+cannot work after its runtime and isolation dependencies mature.
+
+| Gate | Production evidence | Result |
+|---|---|---|
+| Control-plane readiness | Canary `Accepted=True`, `Ready=False`, `ActorTemplateNotReady` | Fail |
+| On-demand execution | No Actor can complete the keyless canary path | Fail |
+| Fixed worker budget | Worker is Kubernetes `BestEffort`: no CPU or memory request/limit | Fail |
+| Worker privilege | Substrate 0.0.8 generates a root, privileged worker with a hostPath | Fail |
+| 5/20/50 Actor load | Cannot be run while the golden Actor is not ready | Not measurable |
+| Cold-start latency | No successful idle-to-response sample exists | Not measurable |
+| Dedicated pool | `sandbox-gvisor` exists with zero nodes and autoscaling disabled | Not usable |
+| Three-node isolation | The worker currently shares an ordinary support node | Fail |
+
+The existing worker does not consume one pod per Actor, but that fact alone is
+not a capacity proof. Its missing resource request lets the scheduler treat it
+as free, and its missing memory limit gives it no enforceable ceiling. The
+current deployment also includes the Substrate control plane, six Valkey pods,
+RustFS, and one worker, so a per-Actor cost cannot be separated from a reliable
+fixed baseline yet.
+
+Substrate 0.0.15 removes privileged mode from the gVisor worker, adds explicit
+capabilities and authenticated tunnel identities, supports WorkerPool resource
+templates, and replaces Valkey with PostgreSQL. It is not currently a safe
+production upgrade: kagent 0.9.12 compiles against Substrate 0.0.6, the newest
+published kagent 0.10.0-rc3 compiles against 0.0.9, and only unreleased kagent
+`main` targets Substrate 0.0.15. The 0.0.15 chart also requires new signing
+pools, an authentication ConfigMap, pod-certificate projections, and a stateful
+Valkey-to-PostgreSQL replacement.
+
+Re-open the GO decision only when all of these are true:
+
+1. A published kagent release explicitly targets the selected hardened
+   Substrate release.
+2. The migration, signing-state bootstrap, and rollback are proven outside
+   production.
+3. The WorkerPool has enforceable CPU and memory requests/limits and the #76
+   network boundary is default-deny.
+4. The keyless canary is Ready and completes a wake-and-return invocation.
+5. The 5/20/50 Actor tests record worker CPU, memory, pod count, failures, and
+   p50/p95 cold-start latency without displacing a core DevAI workload.
+
+Until then, ephemeral Jobs remain the supported on-demand runtime and preserve
+the three-node budget with zero idle agent footprint.
 
 ## GitOps ownership
 
@@ -164,9 +212,9 @@ Before any repair:
 
 Do not paste Valkey payloads into an issue, pull request, log, or this runbook.
 
-Substrate 0.0.11 adds startup orphan-worker reconciliation, but also renames
-resources and upgrades Valkey. Treat that as a separate, reviewed migration;
-do not upgrade solely as an incident workaround.
+Later Substrate releases add startup orphan-worker reconciliation and replace
+Valkey with PostgreSQL. Treat that as a separate, reviewed migration; do not
+upgrade solely as an incident workaround.
 
 ## Read-only verification
 
@@ -251,11 +299,14 @@ Before an upgrade:
 
 ## Cost and capacity
 
-The current one-worker pool multiplexes Actors and does not create one
-Kubernetes pod or GKE node per Actor. Measure 5, 20, and 50 concurrent Actors
-before closing #70 or setting production quotas. Until those measurements
-exist, no supported concurrency or cost-per-Actor claim should be made.
+The current one-worker pool is intended to multiplex Actors and does not create
+one Kubernetes pod or GKE node per Actor. The WorkerPool currently has no
+resource request or limit, however, and the canary cannot reach Ready. Measure
+5, 20, and 50 concurrent Actors before changing the NO-GO decision or setting
+production quotas. Until those measurements exist, no supported concurrency or
+cost-per-Actor claim should be made.
 
-The dedicated `sandbox-gvisor` GKE node pool still exists, but the current
-WorkerPool does not schedule onto it. Removing or repurposing it is a separate
-production change and requires explicit approval.
+The dedicated `sandbox-gvisor` GKE node pool still exists with zero nodes and
+autoscaling disabled, but the current WorkerPool does not schedule onto it.
+Enabling, resizing, removing, or repurposing it is a separate production change
+and requires explicit approval.
