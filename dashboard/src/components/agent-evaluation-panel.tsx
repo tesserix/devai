@@ -14,6 +14,7 @@ import {
   type SandboxRecord,
 } from "@/lib/api";
 import { formatEvalCost } from "@/lib/eval-cost";
+import { evaluationMetricHelpTerm } from "@/lib/help-content";
 
 function refKey(ref: ArtifactVersionRef): string {
   return `${ref.name}@${ref.version}`;
@@ -133,19 +134,32 @@ export function AgentEvaluationPanel({
       {latest && (
         <div className="panel p-4">
           <div className="flex flex-wrap items-center gap-4 text-xs">
-            <span className={latest.summary.failed === 0 ? "text-emerald-300" : "text-red-300"}>
+            <span className={`inline-flex items-center gap-1 ${latest.summary.failed === 0 ? "text-emerald-300" : "text-red-300"}`}>
               {latest.summary.passed}/{latest.summary.cases} passed
+              <HelpPopover term="evaluation-pass-rate" />
             </span>
-            <span className="text-[var(--ink-300)]">P95 {latest.summary.p95_latency_ms} ms</span>
-            <span className="text-[var(--ink-300)]">{latest.summary.total_tokens} tokens</span>
-            <span className="text-[var(--ink-300)]">{formatEvalCost(latest.summary)}</span>
+            <span className="inline-flex items-center gap-1 text-[var(--ink-300)]">
+              P95 {latest.summary.p95_latency_ms} ms
+              <HelpPopover term="evaluation-p95-latency" />
+            </span>
+            <span className="inline-flex items-center gap-1 text-[var(--ink-300)]">
+              {latest.summary.total_tokens} tokens
+              <HelpPopover term="evaluation-tokens" />
+            </span>
+            <span className="inline-flex items-center gap-1 text-[var(--ink-300)]">
+              {formatEvalCost(latest.summary)}
+              <HelpPopover term="evaluation-cost" />
+            </span>
             <span className="ml-auto font-mono text-[var(--ink-500)]">{latest.id}</span>
           </div>
           {latest.summary.dimensions && Object.keys(latest.summary.dimensions).length > 0 && (
             <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {Object.entries(latest.summary.dimensions).map(([name, metric]) => (
                 <div key={name} className="rounded border border-[var(--surface-border)] p-2">
-                  <dt className="label-eyebrow">{name.replaceAll("_", " ")}</dt>
+                  <dt className="label-eyebrow flex items-center gap-1">
+                    {name.replaceAll("_", " ")}
+                    <HelpPopover term={evaluationMetricHelpTerm(name)} />
+                  </dt>
                   <dd className="mt-1 font-mono text-sm text-[var(--ink-100)]">
                     {(metric.average * 100).toFixed(1)}%
                   </dd>

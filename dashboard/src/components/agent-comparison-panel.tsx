@@ -7,6 +7,7 @@ import { HelpPopover } from "@/components/guidance";
 import { Select } from "@/components/ui/select";
 import { api, type EvaluationComparison, type EvaluationRun } from "@/lib/api";
 import { comparisonDeltaTone } from "@/lib/agent-workbench";
+import { evaluationMetricHelpTerm } from "@/lib/help-content";
 
 function runLabel(run: EvaluationRun): string {
   const version = run.configuration?.agent?.version ?? "unknown";
@@ -112,17 +113,34 @@ export function AgentComparisonPanel({
           <div>
             <div className="label-eyebrow">Trade-off summary</div>
             <p className="mt-1 text-sm text-[var(--ink-100)]">{comparison.summary}</p>
-            <p className="mt-1 text-xs text-[var(--ink-500)]">{comparison.caveat}</p>
+            <p className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--ink-500)]">
+              {comparison.caveat}
+              <HelpPopover term="evaluation-sample-size" />
+            </p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="text-[var(--ink-500)]">
-                <tr><th className="py-1">Metric</th><th>Baseline</th><th>Candidate</th><th>Delta</th></tr>
+                <tr>
+                  <th className="py-1">Metric</th>
+                  <th>Baseline</th>
+                  <th>Candidate</th>
+                  <th>
+                    <span className="inline-flex items-center gap-1">
+                      Delta <HelpPopover term="evaluation-delta" />
+                    </span>
+                  </th>
+                </tr>
               </thead>
               <tbody className="divide-y divide-[var(--surface-border)]">
                 {Object.entries(comparison.metrics).map(([name, metric]) => (
                   <tr key={name}>
-                    <td className="py-2 text-[var(--ink-100)]">{name.replaceAll("_", " ")}</td>
+                    <td className="py-2 text-[var(--ink-100)]">
+                      <span className="inline-flex items-center gap-1">
+                        {name.replaceAll("_", " ")}
+                        <HelpPopover term={evaluationMetricHelpTerm(name)} />
+                      </span>
+                    </td>
                     <td className="font-mono text-[var(--ink-300)]">{metric.baseline.toFixed(4)}</td>
                     <td className="font-mono text-[var(--ink-300)]">{metric.candidate.toFixed(4)}</td>
                     <td className={`font-mono ${
@@ -140,7 +158,10 @@ export function AgentComparisonPanel({
             </table>
           </div>
           <div>
-            <div className="label-eyebrow">Regressions ({comparison.regressions.length})</div>
+            <div className="label-eyebrow flex items-center gap-1">
+              Regressions ({comparison.regressions.length})
+              <HelpPopover term="evaluation-regression" />
+            </div>
             {comparison.regressions.length === 0 ? (
               <p className="mt-2 text-xs text-emerald-300">No formerly passing case regressed.</p>
             ) : (
