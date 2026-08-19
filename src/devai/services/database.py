@@ -1280,10 +1280,9 @@ class Database:
                     dataset["name"],
                     dataset["version"],
                 )
-                if resolved is None:
-                    raise RuntimeError("eval suite or its pinned dataset version no longer exists")
-                suite_id = resolved["suite_id"]
-                dataset_version_id = resolved["dataset_version_id"]
+                if resolved is not None:
+                    suite_id = resolved["suite_id"]
+                    dataset_version_id = resolved["dataset_version_id"]
             elif dataset:
                 resolved = await connection.fetchrow(
                     """SELECT dv.id AS dataset_version_id
@@ -1294,22 +1293,26 @@ class Database:
                     dataset["name"],
                     dataset["version"],
                 )
-                if resolved is None:
-                    raise RuntimeError("eval dataset version no longer exists")
-                dataset_version_id = resolved["dataset_version_id"]
+                if resolved is not None:
+                    dataset_version_id = resolved["dataset_version_id"]
             await connection.execute(
                 """INSERT INTO eval_runs
                          (id, owner_scope, tenant_id, user_id, sandbox_id, agent,
-                          dataset_version_id, suite_id, summary, created_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)""",
+                          configuration, dataset_version_id, suite_id, dataset_ref,
+                          suite_ref, summary, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9,
+                               $10::jsonb, $11::jsonb, $12::jsonb, $13)""",
                 run["id"],
                 owner_scope,
                 run.get("tenant_id") or "",
                 run.get("user_id") or "",
                 run["sandbox_id"],
                 run.get("agent") or "",
+                json.dumps(run.get("configuration") or {}),
                 dataset_version_id,
                 suite_id,
+                json.dumps(dataset) if dataset else None,
+                json.dumps(suite) if suite else None,
                 json.dumps(run.get("summary") or {}),
                 datetime.fromisoformat(str(run["created_at"])),
             )
@@ -1362,14 +1365,70 @@ class Database:
         )
         return [self._eval_run_record(row) for row in rows]
 
+    async def create_eval_comparison(self, **values: Any) -> dict[str, Any]:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                """INSERT INTO eval_comparisons
+                         (id, owner_scope, tenant_id, user_id, baseline_run_id,
+                          candidate_run_id, axes, result)
+                       SELECT $1, $2, $3, $4, baseline.id, candidate.id,
+                              $7::jsonb, $8::jsonb
+                         FROM eval_runs baseline
+                         JOIN eval_runs candidate ON candidate.id = $6
+                        WHERE baseline.id = $5
+                          AND baseline.owner_scope = $2
+                          AND candidate.owner_scope = $2
+                       ON CONFLICT (id) DO UPDATE
+                         SET result = eval_comparisons.result
+                       WHERE eval_comparisons.owner_scope = EXCLUDED.owner_scope
+                         AND eval_comparisons.baseline_run_id = EXCLUDED.baseline_run_id
+                         AND eval_comparisons.candidate_run_id = EXCLUDED.candidate_run_id
+                       RETURNING id, result, created_at""",
+                values["id"],
+                values["owner_scope"],
+                values.get("tenant_id") or "",
+                values.get("user_id") or "",
+                values["baseline_run_id"],
+                values["candidate_run_id"],
+                json.dumps(values.get("axes") or []),
+                json.dumps(values.get("result") or {}),
+            )
+        if row is None:
+            raise RuntimeError("owned evaluation runs not found")
+        result = dict(row)
+        if isinstance(result.get("result"), str):
+            result["result"] = json.loads(result["result"])
+        return result
+
+    async def get_eval_comparison(self, owner_scope: str, comparison_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT id, result, created_at
+                 FROM eval_comparisons
+                WHERE owner_scope = $1 AND id = $2""",
+            owner_scope,
+            comparison_id,
+        )
+        if row is None:
+            return None
+        result = dict(row)
+        if isinstance(result.get("result"), str):
+            result["result"] = json.loads(result["result"])
+        return result
+
     @staticmethod
     def _eval_run_select() -> str:
         return """SELECT r.id, r.owner_scope, r.tenant_id, r.user_id,
-                         r.sandbox_id, r.agent, r.created_at, r.summary,
-                         CASE WHEN dv.id IS NULL THEN NULL
-                              ELSE jsonb_build_object('name', d.name, 'version', dv.version) END AS dataset,
-                         CASE WHEN s.id IS NULL THEN NULL
-                              ELSE jsonb_build_object('name', s.name, 'version', s.version) END AS suite,
+                         r.sandbox_id, r.agent, r.configuration, r.created_at, r.summary,
+                         COALESCE(
+                           CASE WHEN dv.id IS NULL THEN NULL
+                                ELSE jsonb_build_object('name', d.name, 'version', dv.version) END,
+                           r.dataset_ref
+                         ) AS dataset,
+                         COALESCE(
+                           CASE WHEN s.id IS NULL THEN NULL
+                                ELSE jsonb_build_object('name', s.name, 'version', s.version) END,
+                           r.suite_ref
+                         ) AS suite,
                          COALESCE(
                            jsonb_agg(cr.result ORDER BY cr.case_index)
                              FILTER (WHERE cr.id IS NOT NULL),
@@ -1384,13 +1443,14 @@ class Database:
     @staticmethod
     def _eval_run_group() -> str:
         return """ GROUP BY r.id, r.owner_scope, r.tenant_id, r.user_id,
-                            r.sandbox_id, r.agent, r.created_at, r.summary,
+                            r.sandbox_id, r.agent, r.configuration, r.created_at, r.summary,
+                            r.dataset_ref, r.suite_ref,
                             dv.id, d.name, dv.version, s.id, s.name, s.version"""
 
     @staticmethod
     def _eval_run_record(row: Any) -> dict[str, Any]:
         result = dict(row)
-        for key in ("summary", "dataset", "suite", "results"):
+        for key in ("configuration", "summary", "dataset", "suite", "results"):
             value = result.get(key)
             if isinstance(value, str):
                 result[key] = json.loads(value)

@@ -112,6 +112,7 @@ class EvalRun:
     user_id: str = ""
     dataset_ref: dict[str, str] | None = None
     suite_ref: dict[str, str] | None = None
+    configuration: dict[str, Any] = field(default_factory=dict)
     judge: dict[str, Any] | None = None
     results: list[CaseResult] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -189,6 +190,7 @@ class EvalRun:
             "agent": self.agent,
             "dataset": self.dataset_ref,
             "suite": self.suite_ref,
+            "configuration": self.configuration,
             "judge": self.judge,
             "created_at": self.created_at,
             "results": [r.to_dict() for r in self.results],
@@ -218,6 +220,7 @@ class EvalRun:
             user_id=str(body.get("user_id") or ""),
             dataset_ref=body.get("dataset"),
             suite_ref=body.get("suite"),
+            configuration=body.get("configuration") or {},
             judge=body.get("judge"),
             results=results,
             created_at=str(body.get("created_at") or ""),
@@ -316,6 +319,7 @@ class EvalRunner:
             user_id=user_id,
             dataset_ref=dataset_ref,
             suite_ref=suite_ref,
+            configuration=record.spec.model_dump(mode="json"),
         )
         started = time.perf_counter()
         semaphore = asyncio.Semaphore(self._max_concurrency)

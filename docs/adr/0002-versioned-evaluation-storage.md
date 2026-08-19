@@ -31,6 +31,16 @@ keys plus all case results in one PostgreSQL transaction. Runs deliberately stor
 plain sandbox identifier rather than a sandbox foreign key, so sandbox destruction
 cannot cascade into evaluation history.
 
+Each run also snapshots the immutable sandbox configuration used for the run.
+Registry-backed built-in definitions retain their exact dataset and suite references
+when there is deliberately no user-owned foreign-key row. Comparisons persist two
+owned run identifiers, the requested axes, and the computed result in PostgreSQL.
+Both runs must belong to the authenticated `owner_scope` and reference the same
+immutable dataset version. The comparison identifier is a deterministic digest of
+owner, run pair, and axes, so retried creates are idempotent without another
+coordination system. Comparison rows restrict deletion of referenced run history and
+never cascade from sandbox lifecycle.
+
 The create path uploads the content-addressed object before committing its metadata.
 A crash or database failure can therefore leave a harmless unreferenced blob; it can
 never leave a committed dataset pointing at content that was not uploaded. A later

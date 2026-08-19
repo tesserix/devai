@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from devai.services.database import Database
@@ -157,6 +158,10 @@ async def test_eval_run_and_case_results_commit_together_with_exact_version_ids(
             "user_id": "alice",
             "sandbox_id": "sb-1",
             "agent": "refund-agent",
+            "configuration": {
+                "agent": {"name": "refund-agent", "version": "7"},
+                "model": {"provider": "anthropic", "model": "claude-sonnet-4"},
+            },
             "dataset": {"name": "golden", "version": "3"},
             "suite": {"name": "gate", "version": "2"},
             "created_at": "2026-08-19T00:00:00+00:00",
@@ -170,8 +175,38 @@ async def test_eval_run_and_case_results_commit_together_with_exact_version_ids(
     assert "s.name = $2 AND s.version = $3" in resolve_query
     assert resolve_args == ("tenant-a:alice", "gate", "2", "golden", "3")
     assert "INSERT INTO eval_runs" in pool.connection.execute_calls[0][0]
+    assert "configuration" in pool.connection.execute_calls[0][0]
+    assert json.loads(pool.connection.execute_calls[0][1][6])["agent"]["version"] == "7"
     assert pool.connection.execute_calls[0][1][1:4] == ("tenant-a:alice", "tenant-a", "alice")
     assert "INSERT INTO eval_case_results" in pool.connection.execute_calls[1][0]
+
+
+async def test_registry_backed_eval_run_persists_exact_refs_without_local_foreign_keys() -> None:
+    database, pool = _database([None])
+
+    await database.save_eval_run(
+        {
+            "id": "eval-built-in",
+            "owner_scope": "tenant-a:alice",
+            "tenant_id": "tenant-a",
+            "user_id": "alice",
+            "sandbox_id": "sb-1",
+            "agent": "engineering-manager",
+            "configuration": {},
+            "dataset": {"name": "engineering-manager-golden", "version": "1"},
+            "suite": {"name": "engineering-manager-golden-suite", "version": "1"},
+            "created_at": "2026-08-19T00:00:00+00:00",
+            "summary": {"cases": 4, "passed": 4},
+            "results": [],
+        }
+    )
+
+    query, args = pool.connection.execute_calls[0]
+    assert "dataset_ref" in query
+    assert "suite_ref" in query
+    assert args[7:9] == (None, None)
+    assert json.loads(args[9]) == {"name": "engineering-manager-golden", "version": "1"}
+    assert json.loads(args[10]) == {"name": "engineering-manager-golden-suite", "version": "1"}
 
 
 async def test_eval_run_reads_are_owner_scoped_in_the_query() -> None:
@@ -198,3 +233,54 @@ async def test_top_level_eval_run_lookup_scopes_the_id_in_sql() -> None:
     query, args = pool.fetchrow_calls[0]
     assert "r.owner_scope = $1 AND r.id = $2" in query
     assert args == ("tenant-a:alice", "eval-1")
+    assert "r.configuration" in query
+
+
+async def test_comparison_creation_scopes_both_runs_in_the_insert_query() -> None:
+    database, pool = _database(
+        [
+            {
+                "id": "cmp-1",
+                "result": {"id": "cmp-1"},
+                "created_at": "2026-08-19T12:00:00+00:00",
+            }
+        ]
+    )
+
+    row = await database.create_eval_comparison(
+        id="cmp-1",
+        owner_scope="tenant-a:alice",
+        tenant_id="tenant-a",
+        user_id="alice",
+        baseline_run_id="eval-baseline",
+        candidate_run_id="eval-candidate",
+        axes=["model"],
+        result={"id": "cmp-1"},
+    )
+
+    query, args = pool.connection.calls[0]
+    assert row is not None
+    assert "INSERT INTO eval_comparisons" in query
+    assert "baseline.owner_scope = $2" in query
+    assert "candidate.owner_scope = $2" in query
+    assert "eval_comparisons.owner_scope = EXCLUDED.owner_scope" in query
+    assert "eval_comparisons.baseline_run_id = EXCLUDED.baseline_run_id" in query
+    assert "eval_comparisons.candidate_run_id = EXCLUDED.candidate_run_id" in query
+    assert args[:6] == (
+        "cmp-1",
+        "tenant-a:alice",
+        "tenant-a",
+        "alice",
+        "eval-baseline",
+        "eval-candidate",
+    )
+
+
+async def test_comparison_reads_scope_the_id_in_sql() -> None:
+    database, pool = _database()
+
+    await database.get_eval_comparison("tenant-a:alice", "cmp-1")
+
+    query, args = pool.fetchrow_calls[0]
+    assert "owner_scope = $1 AND id = $2" in query
+    assert args == ("tenant-a:alice", "cmp-1")

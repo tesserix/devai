@@ -264,6 +264,11 @@ async def test_a_run_is_readable_afterwards_so_two_runs_can_be_compared() -> Non
 
     assert (await store.get("sb-1", run.id)) is not None
     assert [r.id for r in await store.list_for_sandbox("sb-1")] == [run.id]
+    assert run.configuration["agent"] == {"name": "release-notes-writer", "version": "v1"}
+    assert run.configuration["model"] == {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+    }
 
 
 @pytest.mark.asyncio
