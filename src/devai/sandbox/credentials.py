@@ -83,6 +83,9 @@ class SandboxMeteredLLMAdapter(LLMAdapter):
         remaining = self._max_tokens - self._tokens
         requested = request.max_tokens
         max_tokens = min(requested, remaining) if requested is not None else remaining
+        tenant_id, separator, user_id = self._owner.partition(":")
+        if not separator or self._owner.startswith("anon:"):
+            tenant_id, user_id = "", self._owner
         attributed = replace(
             request,
             max_tokens=max_tokens,
@@ -90,7 +93,8 @@ class SandboxMeteredLLMAdapter(LLMAdapter):
                 **dict(request.extra or {}),
                 "sandbox_id": self._sandbox_id,
                 "run_id": f"sandbox:{self._sandbox_id}",
-                "user_id": self._owner,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
             },
         )
         response = await self._inner.generate(attributed)

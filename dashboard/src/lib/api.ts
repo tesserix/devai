@@ -783,6 +783,7 @@ export const api = {
         summary: UsageRow;
         by_model: (UsageRow & { model: string; provider: string })[];
         by_user: (UsageRow & { user: string })[];
+        by_sandbox: (UsageRow & { sandbox_id: string; tenant_id: string; user_id: string })[];
         timeseries: (UsageRow & { day: string })[];
       }>(`/analytics/usage?days=${days}`),
     pricing: () =>

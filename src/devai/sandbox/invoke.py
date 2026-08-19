@@ -12,6 +12,7 @@ only in its boundaries, which is the whole point: what you test is what ships.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -72,7 +73,15 @@ class SandboxInvoker:
         )
         started = time.perf_counter()
         try:
-            result = await self._run(spec, record, gateway, message=message, triggered_by=triggered_by)
+            try:
+                async with asyncio.timeout(record.spec.limits.max_wall_clock_s):
+                    result = await self._run(spec, record, gateway, message=message, triggered_by=triggered_by)
+            except TimeoutError as exc:
+                from devai.sandbox.credentials import SandboxBudgetExceeded
+
+                raise SandboxBudgetExceeded(
+                    f"sandbox {record.id} exceeded its wall-clock budget ({record.spec.limits.max_wall_clock_s}s)"
+                ) from exc
             invocation.final_text = result.final_text
             invocation.ok = result.ok
             invocation.error = result.error or ""

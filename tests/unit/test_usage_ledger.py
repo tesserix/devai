@@ -48,3 +48,27 @@ async def test_same_subject_in_two_tenants_has_disjoint_cost_rollups():
     assert (await ledger.summary("shared-uid", "tenant-a"))["cost_usd"] == 1.25
     assert (await ledger.summary("shared-uid", "tenant-b"))["cost_usd"] == 2.5
     assert [row["tenant_id"] for row in await ledger.by_user("tenant-a")] == ["tenant-a"]
+
+
+async def test_sandbox_cost_rollups_are_tenant_and_user_scoped():
+    from devai.analytics.usage_ledger import UsageLedger
+
+    ledger = UsageLedger("")
+    ledger._redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    for sandbox_id, user_id, cost in (("sb-a", "alice", 1.25), ("sb-b", "bob", 2.5)):
+        await ledger.record(
+            day="2026-08-19",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            tokens_in=10,
+            tokens_out=5,
+            cost_usd=cost,
+            duration_ms=20,
+            tenant_id="tenant-a",
+            user_id=user_id,
+            sandbox_id=sandbox_id,
+        )
+
+    assert [row["sandbox_id"] for row in await ledger.by_sandbox("tenant-a", "alice")] == ["sb-a"]
+    assert {row["sandbox_id"] for row in await ledger.by_sandbox("tenant-a")} == {"sb-a", "sb-b"}
+    assert await ledger.by_sandbox("tenant-b") == []

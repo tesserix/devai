@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from devai.kit.versions import AdkVersionCatalogue, UnknownAdkVersion
 from devai.sandbox.models import SandboxRecord, SandboxSpec, SandboxStatus
+from devai.services.database import SandboxQuotaExceeded
 
 if TYPE_CHECKING:
     from devai.services.database import Database
@@ -46,7 +47,14 @@ class SandboxService:
         self._adk_catalogue = adk_catalogue
         self._reaper_task: asyncio.Task[None] | None = None
 
-    async def create(self, spec: SandboxSpec, *, owner: str) -> SandboxRecord:
+    async def create(
+        self,
+        spec: SandboxSpec,
+        *,
+        owner: str,
+        tenant_id: str = "",
+        user_id: str = "",
+    ) -> SandboxRecord:
         if not owner:
             raise SandboxError("a sandbox needs an owner")
         self._assert_refs_published(spec)
@@ -62,15 +70,22 @@ class SandboxService:
             expires_at=now + timedelta(seconds=spec.ttl_seconds),
             last_access_at=now,
         )
-        await self._db.create_sandbox(
-            sandbox_id=record.id,
-            owner=owner,
-            spec=spec.model_dump(mode="json"),
-            status=record.status.value,
-            created_at=record.created_at,
-            expires_at=record.expires_at,
-            last_access_at=record.last_access_at,
-        )
+        try:
+            await self._db.create_sandbox(
+                sandbox_id=record.id,
+                owner=owner,
+                spec=spec.model_dump(mode="json"),
+                status=record.status.value,
+                created_at=record.created_at,
+                expires_at=record.expires_at,
+                last_access_at=record.last_access_at,
+                tenant_id=tenant_id,
+                user_id=user_id or owner,
+                max_live_per_tenant=int(getattr(self._settings, "sandbox_max_live_per_tenant", 5) or 0),
+                monthly_cost_limit_usd=float(getattr(self._settings, "sandbox_monthly_cost_limit_usd", 100.0) or 0.0),
+            )
+        except SandboxQuotaExceeded as exc:
+            raise SandboxError(str(exc)) from exc
         logger.info("sandbox %s created for %s (agent=%s@%s)", record.id, owner, spec.agent.name, spec.agent.version)
         return await self._provision(record)
 

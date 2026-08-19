@@ -346,8 +346,9 @@ export default function AnalyticsPage() {
         </>
       )}
 
-      {/* LLM usage — per model and per user (the headline KPIs live above) */}
-      {tab === "cost" && usage?.enabled && (usage.by_model.length > 0 || usage.by_user.length > 0) && (
+      {/* LLM usage — per model, user and sandbox (the headline KPIs live above) */}
+      {tab === "cost" && usage?.enabled &&
+        (usage.by_model.length > 0 || usage.by_user.length > 0 || usage.by_sandbox.length > 0) && (
         <section className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="panel" style={{ padding: 16 }}>
@@ -424,6 +425,45 @@ export default function AnalyticsPage() {
               </p>
             </div>
           </div>
+          {usage.by_sandbox.length > 0 && (
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">By sandbox — bounded evaluation spend</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left" style={{ color: "var(--ink-soft)" }}>
+                      <th className="pb-2 font-normal">Sandbox</th>
+                      <th className="pb-2 font-normal">User</th>
+                      <th className="pb-2 font-normal text-right">Calls</th>
+                      <th className="pb-2 font-normal text-right">Tokens</th>
+                      <th className="pb-2 font-normal text-right">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usage.by_sandbox.map((sandbox) => (
+                      <tr
+                        key={`${sandbox.tenant_id}:${sandbox.sandbox_id}`}
+                        className="border-t"
+                        style={{ borderColor: "var(--surface-border)" }}
+                      >
+                        <td className="py-1.5 font-mono text-xs" style={{ color: "var(--ink-strong)" }}>
+                          {sandbox.sandbox_id}
+                        </td>
+                        <td className="py-1.5">{sandbox.user_id || "—"}</td>
+                        <td className="py-1.5 text-right">{fmtNum(sandbox.calls)}</td>
+                        <td className="py-1.5 text-right">
+                          {fmtNum(sandbox.tokens_in + sandbox.tokens_out)}
+                        </td>
+                        <td className="py-1.5 text-right" style={{ color: "var(--accent)" }}>
+                          {fmtUsd(sandbox.cost_usd)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
