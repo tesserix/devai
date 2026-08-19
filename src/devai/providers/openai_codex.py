@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
@@ -28,6 +30,7 @@ class CodexLiteProvider:
         from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
         from devai.services.tracing import wrap_openai_client
 
+        self._gateway_required = gateway_required(config)
         self.client = wrap_openai_client(
             AsyncOpenAI(
                 api_key=config.openai_api_key,
@@ -51,6 +54,10 @@ class CodexLiteProvider:
         }
         if response_format:
             kwargs["text"] = {"format": response_format}
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            kwargs["extra_headers"] = current_gateway_headers("openai")
 
         result = await self.client.responses.create(**kwargs)
         return result.output_text
@@ -64,7 +71,10 @@ class CodexSandboxProvider:
     """
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_required
+
         self.config = config
+        self._gateway_required = gateway_required(config)
         self._process: subprocess.Popen[bytes] | None = None
 
     async def run_in_sandbox(
@@ -87,11 +97,23 @@ class CodexSandboxProvider:
             prompt,
         ]
 
+        gateway_headers: dict[str, str] = {}
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            gateway_headers = current_gateway_headers("openai")
+
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, self._execute_codex, cmd, repo_url, branch)
+        result = await loop.run_in_executor(None, self._execute_codex, cmd, repo_url, branch, gateway_headers)
         return result
 
-    def _execute_codex(self, cmd: list[str], repo_url: str, branch: str) -> dict[str, Any]:
+    def _execute_codex(
+        self,
+        cmd: list[str],
+        repo_url: str,
+        branch: str,
+        gateway_headers: dict[str, str],
+    ) -> dict[str, Any]:
         """Execute Codex CLI synchronously (runs in executor thread)."""
         import tempfile
 
@@ -114,22 +136,57 @@ class CodexSandboxProvider:
             try:
                 from devai.adapters.llm.gateway_routing import gateway_base_url
 
+                base_url = gateway_base_url(
+                    self.config,
+                    "openai",
+                    getattr(self.config, "openai_base_url", ""),
+                )
+                environment = {
+                    "OPENAI_API_KEY": self.config.openai_api_key,
+                    "OPENAI_BASE_URL": base_url,
+                    "HOME": tmpdir,
+                    "PATH": "/usr/local/bin:/usr/bin:/bin",
+                }
+                if self._gateway_required:
+                    codex_home = Path(tmpdir) / ".codex"
+                    codex_home.mkdir()
+                    environment["CODEX_HOME"] = str(codex_home)
+                    header_environment = {
+                        "x-devai-tenant-id": "DEVAI_GATEWAY_TENANT_ID",
+                        "x-devai-user-id": "DEVAI_GATEWAY_USER_ID",
+                        "x-devai-run-id": "DEVAI_GATEWAY_RUN_ID",
+                        "x-devai-agent": "DEVAI_GATEWAY_AGENT",
+                        "x-devai-provider": "DEVAI_GATEWAY_PROVIDER",
+                    }
+                    mapped_headers = {
+                        header: env_name
+                        for header, env_name in header_environment.items()
+                        if gateway_headers.get(header)
+                    }
+                    environment.update(
+                        {env_name: gateway_headers[header] for header, env_name in mapped_headers.items()}
+                    )
+                    header_config = ", ".join(
+                        f"{json.dumps(header)} = {json.dumps(env_name)}" for header, env_name in mapped_headers.items()
+                    )
+                    config_toml = (
+                        f"model = {json.dumps(self.config.openai_model)}\n"
+                        'model_provider = "devai_gateway"\n\n'
+                        "[model_providers.devai_gateway]\n"
+                        'name = "DevAI Agentic Gateway"\n'
+                        f"base_url = {json.dumps(base_url)}\n"
+                        'env_key = "OPENAI_API_KEY"\n'
+                        f"env_http_headers = {{ {header_config} }}\n"
+                    )
+                    (codex_home / "config.toml").write_text(config_toml)
+
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
                     cwd=tmpdir,
                     timeout=600,  # 10 minute timeout
-                    env={
-                        "OPENAI_API_KEY": self.config.openai_api_key,
-                        "OPENAI_BASE_URL": gateway_base_url(
-                            self.config,
-                            "openai",
-                            getattr(self.config, "openai_base_url", ""),
-                        ),
-                        "HOME": tmpdir,
-                        "PATH": "/usr/local/bin:/usr/bin:/bin",
-                    },
+                    env=environment,
                 )
                 return {
                     "success": result.returncode == 0,

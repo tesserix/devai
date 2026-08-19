@@ -40,6 +40,7 @@ class NemoClawProvider:
     def __init__(self, config: Settings) -> None:
         from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
 
+        self._gateway_required = gateway_required(config)
         api_key = config.nemoclaw_api_key or "not-needed"
         base_url = config.nemoclaw_endpoint
 
@@ -215,6 +216,10 @@ class NemoClawProvider:
     @retry_async(max_attempts=2, base_delay=3.0, max_delay=30.0)
     async def _call_api_generate(self, **kwargs: Any) -> Any:
         """Single generation call with retry and circuit breaker."""
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            kwargs["extra_headers"] = current_gateway_headers("nemoclaw")
 
         async def _call() -> Any:
             return await asyncio.wait_for(
@@ -231,6 +236,11 @@ class NemoClawProvider:
         tools: list[dict[str, Any]],
     ) -> Any:
         """Chat completion with tools, retry, and circuit breaker."""
+        extra_headers = None
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            extra_headers = current_gateway_headers("nemoclaw")
 
         async def _call() -> Any:
             return await asyncio.wait_for(
@@ -240,6 +250,7 @@ class NemoClawProvider:
                     tools=tools if tools else None,
                     max_tokens=self.max_tokens,
                     temperature=0.2,
+                    extra_headers=extra_headers,
                 ),
                 timeout=API_CALL_TIMEOUT,
             )

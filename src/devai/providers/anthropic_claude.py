@@ -93,6 +93,7 @@ class ClaudeProvider:
         from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
         from devai.services.tracing import wrap_anthropic_client
 
+        self._gateway_required = gateway_required(config)
         self.client = wrap_anthropic_client(
             AsyncAnthropic(
                 api_key=config.anthropic_api_key,
@@ -358,6 +359,11 @@ class ClaudeProvider:
         await get_claude_rate_limiter().acquire(estimated_input_tokens)
 
         system_param, tools_param = self._cache_params(system_prompt, tools, messages)
+        extra_headers = None
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            extra_headers = current_gateway_headers("anthropic")
 
         async def _api_call() -> Message:
             return await asyncio.wait_for(
@@ -367,6 +373,7 @@ class ClaudeProvider:
                     system=system_param,
                     tools=tools_param,
                     messages=messages,
+                    extra_headers=extra_headers,
                 ),
                 timeout=API_CALL_TIMEOUT,
             )
@@ -383,6 +390,11 @@ class ClaudeProvider:
         # Same proactive throttle as the agent-loop path.
         estimated_input_tokens = estimate_token_count(system_prompt) + estimate_token_count(user_message)
         await get_claude_rate_limiter().acquire(estimated_input_tokens)
+        extra_headers = None
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            extra_headers = current_gateway_headers("anthropic")
 
         response = await asyncio.wait_for(
             self.client.messages.create(
@@ -390,6 +402,7 @@ class ClaudeProvider:
                 max_tokens=self.max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
+                extra_headers=extra_headers,
             ),
             timeout=API_CALL_TIMEOUT,
         )

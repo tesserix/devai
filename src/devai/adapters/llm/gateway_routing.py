@@ -49,4 +49,10 @@ def gateway_headers(extra: Mapping[str, Any] | None, *, provider: str) -> dict[s
     return {name: value for name, value in headers.items() if value}
 
 
-__all__ = ["gateway_base_url", "gateway_headers", "gateway_required"]
+def current_gateway_headers(provider: str) -> dict[str, str]:
+    from devai.services.agent_turns import get_turn_context
+
+    return gateway_headers(get_turn_context(), provider=provider)
+
+
+__all__ = ["current_gateway_headers", "gateway_base_url", "gateway_headers", "gateway_required"]
