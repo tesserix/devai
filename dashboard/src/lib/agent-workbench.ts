@@ -1,7 +1,13 @@
+import { sandboxPath } from "./api.ts";
+
 type AgentSandbox = {
   id: string;
   spec: { agent: { name: string; version: string } };
 };
+
+export function failedEvaluationWorkspacePath(passed: boolean, sandboxId: string): string | null {
+  return passed ? null : sandboxPath(sandboxId);
+}
 
 type CostedInvocation = {
   id: string;

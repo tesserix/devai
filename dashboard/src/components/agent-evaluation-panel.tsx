@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { CheckCircle2, FlaskConical, Play, XCircle } from "lucide-react";
 
 import { HelpPopover } from "@/components/guidance";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/api";
 import { formatEvalCost } from "@/lib/eval-cost";
 import { evaluationMetricHelpTerm } from "@/lib/help-content";
+import { failedEvaluationWorkspacePath } from "@/lib/agent-workbench";
 
 function refKey(ref: ArtifactVersionRef): string {
   return `${ref.name}@${ref.version}`;
@@ -168,30 +170,38 @@ export function AgentEvaluationPanel({
             </dl>
           )}
           <ul className="mt-3 divide-y divide-[var(--surface-border)]">
-            {latest.results.map((result) => (
-              <li key={result.name} className="flex items-start gap-2 py-2 text-xs">
-                {result.passed ? (
-                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                ) : (
-                  <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="text-[var(--ink-100)]">{result.name}</div>
-                  {result.failures.length > 0 && (
-                    <div className="font-mono text-[11px] text-red-300">{result.failures.join(" · ")}</div>
+            {latest.results.map((result) => {
+              const workspaceHref = failedEvaluationWorkspacePath(result.passed, sandbox.id);
+              return (
+                <li key={result.name} className="flex items-start gap-2 py-2 text-xs">
+                  {result.passed ? (
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                  ) : (
+                    <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                   )}
-                </div>
-                {result.invocation_id && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenTrace(result.invocation_id)}
-                    className="text-indigo-300 hover:underline"
-                  >
-                    Open trace
-                  </button>
-                )}
-              </li>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[var(--ink-100)]">{result.name}</div>
+                    {result.failures.length > 0 && (
+                      <div className="font-mono text-[11px] text-red-300">{result.failures.join(" · ")}</div>
+                    )}
+                  </div>
+                  {result.invocation_id && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenTrace(result.invocation_id)}
+                      className="text-indigo-300 hover:underline"
+                    >
+                      Open trace
+                    </button>
+                  )}
+                  {workspaceHref && (
+                    <Link href={workspaceHref} className="text-indigo-300 hover:underline">
+                      Open workspace
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
