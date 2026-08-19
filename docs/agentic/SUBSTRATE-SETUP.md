@@ -12,6 +12,10 @@ Context: tracking issues [#69](https://github.com/tesserix/devai/issues/69),
 [#71](https://github.com/tesserix/devai/issues/71), and
 [#76](https://github.com/tesserix/devai/issues/76).
 
+The security boundary, attacker model, invariants, and mandatory cross-tenant
+negative tests are defined in
+[SUBSTRATE-THREAT-MODEL.md](SUBSTRATE-THREAT-MODEL.md).
+
 ## Current architecture
 
 | Component | Current production state |

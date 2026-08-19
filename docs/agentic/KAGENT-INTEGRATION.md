@@ -8,6 +8,9 @@
 > readiness and cold-start acceptance in #70 and #76 pass. Any dispatch failure
 > transparently uses the existing ephemeral Job path.
 
+The security boundary and required cross-tenant proofs are defined in
+[SUBSTRATE-THREAT-MODEL.md](SUBSTRATE-THREAT-MODEL.md).
+
 ---
 
 ## 0. Execution model — Jobs (default) vs kagent (opt-in)
