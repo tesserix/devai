@@ -162,12 +162,10 @@ class JobRunnerStage(PipelineStage):
         # the runner did a second lookup that it then threw away.
         agent_profile = self._fetch_agent_profile(agent_name)
 
-        # kagent fast-path: an agent the controller manages as a long-lived
-        # Deployment (label `devai.io/runtime=kagent`) is reached over A2A
-        # instead of spawning an ephemeral Job. kagent is its own control
-        # plane, so this is checked BEFORE the Job runtime gate. Opt-in (needs
-        # `kagent_url`) and degrades to the Job path on any failure, so kagent
-        # is never a single point of failure.
+        # kagent fast-path: a labelled agent is reached through its Substrate
+        # SandboxAgent over A2A instead of spawning an ephemeral Job. kagent is
+        # its own control plane, so this is checked BEFORE the Job runtime gate.
+        # It remains opt-in and degrades to the Job path on any failure.
         if sandbox is None:
             kagent_result = await self._maybe_dispatch_kagent(task, agent_name, agent_profile)
             if kagent_result is not None:
@@ -323,7 +321,7 @@ class JobRunnerStage(PipelineStage):
             "labels": dict(getattr(agent_meta, "labels", {}) or {}),
         }
 
-    # ── kagent A2A dispatch (opt-in, long-lived agents) ──────────────
+    # ── kagent A2A dispatch (opt-in Substrate actors) ────────────────
 
     def _kagent_target(self, agent_name: str, profile: dict[str, Any] | None) -> str | None:
         """Return the kagent agent name to dispatch to, or None for the Job path.
@@ -350,7 +348,7 @@ class JobRunnerStage(PipelineStage):
         agent_name: str,
         profile: dict[str, Any] | None,
     ) -> StageResult | None:
-        """Dispatch to a kagent-managed agent over A2A, or None to use a Job.
+        """Dispatch to a kagent-managed SandboxAgent, or None to use a Job.
 
         Returns a StageResult only on a clean kagent dispatch. Any miss —
         kagent not configured, agent not kagent-managed, invalid name, or a
@@ -440,13 +438,14 @@ class JobRunnerStage(PipelineStage):
         self, client: Any, task: DevAITask, agent: str, message: str, namespace: str | None, api_key: str
     ) -> dict[str, Any] | None:
         """One A2A dispatch; returns the result, or None on transport error."""
-        from devai.agentic.kagent_client import KagentError
+        from devai.agentic.kagent_client import KagentDispatchTarget, KagentError
 
         try:
             result = await client.dispatch(
                 agent,
                 message,
                 namespace=namespace,
+                target=KagentDispatchTarget.SANDBOX_AGENT,
                 triggered_by=task.triggered_by or "",
                 trace_id=task.trace_id or "",
                 api_key=api_key,
@@ -468,7 +467,12 @@ class JobRunnerStage(PipelineStage):
             next_state=self._next_state(),
             message=f"{self._stage_name}: kagent agent {agent} completed",
             data={
-                f"{self._stage_name}_output": {"runtime": "kagent", "agent": agent, "text": extract_a2a_text(result)}
+                f"{self._stage_name}_output": {
+                    "runtime": "kagent",
+                    "execution_target": "substrate",
+                    "agent": agent,
+                    "text": extract_a2a_text(result),
+                }
             },
         )
 

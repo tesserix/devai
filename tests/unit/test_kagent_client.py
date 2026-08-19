@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from devai.agentic.kagent_client import KagentClient, KagentError, create_kagent_client
+from devai.agentic.kagent_client import KagentClient, KagentDispatchTarget, KagentError, create_kagent_client
 
 
 def test_a2a_url_and_request_shape():
@@ -23,6 +23,15 @@ def test_a2a_url_and_request_shape():
     assert msg["role"] == "user"
     assert msg["parts"] == [{"kind": "text", "text": "do the thing"}]
     assert msg["messageId"] == "m1"
+
+
+def test_a2a_url_targets_substrate_sandbox_agent():
+    c = KagentClient("http://kagent:8083/", namespace="kagent-system")
+
+    assert (
+        c.a2a_url("reviewer", target=KagentDispatchTarget.SANDBOX_AGENT)
+        == "http://kagent:8083/api/a2a-sandboxes/kagent-system/reviewer"
+    )
 
 
 def test_create_kagent_client_disabled_when_no_url():

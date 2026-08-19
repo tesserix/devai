@@ -1,10 +1,10 @@
-"""Dispatch tasks to kagent-managed agents over A2A (Agent2Agent).
+"""Dispatch tasks to kagent-managed runtimes over A2A (Agent2Agent).
 
-Long-lived agents that the kagent agent-sync (workstream G2) has reconciled into
-controller-managed Deployments are reachable through the kagent controller's A2A
-endpoint at ``{kagent_url}/api/a2a/{namespace}/{agent}``. This client speaks the
-standard A2A JSON-RPC ``message/send`` method so devai can hand a task to such an
-agent instead of dispatching an ephemeral Job.
+The kagent controller exposes classic Agents at ``/api/a2a/{namespace}/{agent}``
+and Substrate-backed SandboxAgents at
+``/api/a2a-sandboxes/{namespace}/{agent}``. This client speaks the standard A2A
+JSON-RPC ``message/send`` method so DevAI can hand a task to either target instead
+of dispatching an ephemeral Job.
 
 It is **additive and opt-in**: the Job runner stays the default execution path.
 A caller dispatches here only for agents explicitly marked kagent-managed, and
@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import logging
 import re
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# The registry label that marks an agent as kagent-managed (a long-lived,
-# controller-reconciled Deployment) rather than a per-run Job. The
+# The registry label that marks an agent as a kagent-managed Substrate Actor
+# rather than a per-run Job. The
 # kagent-agent-sync reconciler selects on the same label, so the reconciler
 # and the dispatcher agree on which agents kagent owns.
 RUNTIME_LABEL = "devai.io/runtime"
@@ -40,6 +41,11 @@ def _valid_k8s_name(value: str) -> bool:
 
 class KagentError(RuntimeError):
     """Raised when an A2A dispatch to a kagent agent fails."""
+
+
+class KagentDispatchTarget(StrEnum):
+    AGENT = "agent"
+    SANDBOX_AGENT = "sandbox_agent"
 
 
 class KagentClient:
@@ -63,13 +69,20 @@ class KagentClient:
         # identity instead of silently dropping it (see CODE-5/CODE-17).
         self._service_token = service_token
 
-    def a2a_url(self, agent: str, namespace: str | None = None) -> str:
+    def a2a_url(
+        self,
+        agent: str,
+        namespace: str | None = None,
+        *,
+        target: KagentDispatchTarget = KagentDispatchTarget.AGENT,
+    ) -> str:
         ns = namespace or self._namespace
         if not _valid_k8s_name(agent):
             raise KagentError(f"invalid kagent agent name {agent!r} (must be a DNS-1123 label)")
         if not _valid_k8s_name(ns):
             raise KagentError(f"invalid kagent namespace {ns!r} (must be a DNS-1123 label)")
-        return f"{self._base}/api/a2a/{ns}/{agent}"
+        route = "a2a-sandboxes" if target is KagentDispatchTarget.SANDBOX_AGENT else "a2a"
+        return f"{self._base}/api/{route}/{ns}/{agent}"
 
     @staticmethod
     def _build_request(message: str, message_id: str, request_id: str) -> dict[str, Any]:
@@ -93,13 +106,14 @@ class KagentClient:
         message: str,
         *,
         namespace: str | None = None,
+        target: KagentDispatchTarget = KagentDispatchTarget.AGENT,
         triggered_by: str = "",
         trace_id: str = "",
         api_key: str = "",
         request_id: str = "devai-dispatch",
         message_id: str = "devai-message",
-    ) -> dict[str, Any]:
-        """Send a task to a kagent agent; return the parsed A2A result.
+    ) -> Any:
+        """Send a task to a kagent runtime; return the parsed A2A result.
 
         Identity is forwarded on the same X-Forwarded-* headers the rest of the
         platform uses, so the kagent agent sees who triggered it. When
@@ -111,7 +125,7 @@ class KagentClient:
         """
         import httpx  # lazy — keeps cold-start light when kagent is unused
 
-        url = self.a2a_url(agent, namespace)
+        url = self.a2a_url(agent, namespace, target=target)
         payload = self._build_request(message, message_id, request_id)
         headers = {"Content-Type": "application/json"}
         # Stamp the shared secret so the forwarded identity is actually
@@ -204,6 +218,7 @@ __all__ = [
     "RUNTIME_KAGENT",
     "RUNTIME_LABEL",
     "KagentClient",
+    "KagentDispatchTarget",
     "KagentError",
     "create_kagent_client",
     "extract_a2a_text",
