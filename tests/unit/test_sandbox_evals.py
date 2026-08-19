@@ -14,7 +14,7 @@ import pytest
 from devai.adapters.llm.base import LLMAdapter, LLMResponse, LLMUsage, ToolCall
 from devai.config import Settings
 from devai.pipeline.interfaces import StageDeps
-from devai.sandbox.evals import EvalCase, EvalExpect, EvalRunner, EvalStore, grade
+from devai.sandbox.evals import CaseResult, EvalCase, EvalExpect, EvalRun, EvalRunner, EvalStore, grade
 from devai.sandbox.invoke import SandboxInvoker
 from devai.sandbox.models import AgentRef, ModelRef, SandboxRecord, SandboxSpec, SandboxStatus
 from devai.sandbox.trace import Invocation, TraceStep, TraceStore
@@ -150,6 +150,19 @@ def test_a_failed_invocation_fails_the_case_even_with_no_expectations() -> None:
     inv.error = "upstream 503"
 
     assert grade(EvalExpect(), inv) == ["run failed: upstream 503"]
+
+
+def test_eval_summary_reports_p95_wall_clock_across_cases() -> None:
+    run = EvalRun(
+        id="eval-1",
+        sandbox_id="sb-1",
+        results=[
+            CaseResult(name=f"case-{latency}", passed=True, totals={"wall_clock_ms": latency})
+            for latency in range(10, 201, 10)
+        ],
+    )
+
+    assert run.summary["p95_latency_ms"] == 190
 
 
 # ── running a suite ──────────────────────────────────────────────────

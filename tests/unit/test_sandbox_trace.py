@@ -10,6 +10,7 @@ import json
 
 import pytest
 
+from devai.adapters.object_store.noop import NoopObjectStoreAdapter
 from devai.sandbox.trace import Invocation, TraceStep, TraceStore
 
 
@@ -68,6 +69,7 @@ def test_totals_are_derived_from_the_steps() -> None:
     assert inv.totals["tool_calls"] == 1
     assert inv.totals["llm_calls"] == 1
     assert inv.totals["latency_ms"] == 903
+    assert inv.totals["wall_clock_ms"] == inv.wall_clock_ms
 
 
 def test_cost_totals_when_the_provider_reports_it() -> None:
@@ -144,3 +146,31 @@ async def test_the_stored_shape_is_json_the_dashboard_can_read() -> None:
     assert body["agent"] == "release_notes_writer"
     assert body["totals"]["total_tokens"] == 160
     assert body["steps"][2]["mode"] == "mock"
+
+
+async def test_large_trace_payloads_are_offloaded_to_the_object_store() -> None:
+    class _DurableObjectStore(NoopObjectStoreAdapter):
+        provider_name = "durable-test"
+
+    redis = _FakeRedis()
+    objects = _DurableObjectStore()
+    store = TraceStore(redis, object_store=objects, inline_limit_bytes=32)
+
+    await store.save(_invocation(message="x" * 500), ttl_seconds=60)
+
+    metadata = json.loads(redis.kv["devai:sandbox:sb-1:invocation:inv-1"])
+    assert set(metadata) == {"object_key"}
+    assert metadata["object_key"] == "sandbox-traces/sb-1/inv-1.json"
+    assert json.loads((await objects.get(metadata["object_key"])).decode())["message"] == "x" * 500
+    assert (await store.get("sb-1", "inv-1")).message == "x" * 500
+
+
+async def test_ephemeral_object_store_never_replaces_cross_replica_redis_storage() -> None:
+    redis = _FakeRedis()
+    store = TraceStore(redis, object_store=NoopObjectStoreAdapter(), inline_limit_bytes=32)
+
+    await store.save(_invocation(message="x" * 500), ttl_seconds=60)
+
+    stored = json.loads(redis.kv["devai:sandbox:sb-1:invocation:inv-1"])
+    assert stored["id"] == "inv-1"
+    assert "object_key" not in stored

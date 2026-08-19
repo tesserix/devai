@@ -6,6 +6,7 @@ pinned configuration, read what it actually did.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -14,6 +15,7 @@ import pytest
 from devai.adapters.llm.base import LLMAdapter, LLMResponse, LLMUsage, ToolCall
 from devai.config import Settings
 from devai.pipeline.interfaces import StageDeps
+from devai.sandbox.credentials import SandboxMeteredLLMAdapter
 from devai.sandbox.invoke import SandboxInvoker
 from devai.sandbox.models import (
     AgentRef,
@@ -108,12 +110,13 @@ class _GrantedSandboxLLM:
         )
 
 
-def _invoker(llm, *, registry=None, store=None) -> SandboxInvoker:
+def _invoker(llm, *, registry=None, store=None, telemetry=None) -> SandboxInvoker:
     return SandboxInvoker(
         specializations=registry if registry is not None else _Specs(_registry()),
         deps=StageDeps(config=Settings(), llm=llm),
         traces=store or TraceStore(None),
         credentials=_GrantedSandboxLLM(llm),  # type: ignore[arg-type]
+        telemetry=telemetry,
     )
 
 
@@ -153,6 +156,102 @@ async def test_a_tool_call_is_recorded_with_the_mode_that_served_it() -> None:
     assert [s.name for s in tool_steps] == ["scm_list_files"]
     assert tool_steps[0].mode == "mock"
     assert inv.totals["tool_calls"] == 1
+
+
+async def test_each_llm_call_is_traced_in_causal_order_with_attribution() -> None:
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(
+                text="I will inspect the files.",
+                tool_calls=[ToolCall(id="c1", name="scm_list_files", arguments={})],
+                usage=LLMUsage(prompt_tokens=12, completion_tokens=4),
+                model="claude-sonnet-4-20250514",
+                provider="anthropic",
+                latency_ms=17,
+            ),
+            LLMResponse(
+                text="done",
+                usage=LLMUsage(prompt_tokens=20, completion_tokens=3),
+                model="claude-sonnet-4-20250514",
+                provider="anthropic",
+                latency_ms=11,
+            ),
+        ]
+    )
+
+    inv = await _invoker(llm).invoke(_record(), message="go", triggered_by="sam@example.com")
+
+    assert [step.kind for step in inv.steps] == ["prompt", "prompt", "llm", "tool", "llm", "response"]
+    llm_steps = [step for step in inv.steps if step.kind == "llm"]
+    assert [step.output for step in llm_steps] == ["I will inspect the files.", "done"]
+    assert [(step.provider, step.name, step.prompt_version) for step in llm_steps] == [
+        ("anthropic", "claude-sonnet-4-20250514", "v1"),
+        ("anthropic", "claude-sonnet-4-20250514", "v1"),
+    ]
+    assert [(step.prompt_tokens, step.completion_tokens) for step in llm_steps] == [(12, 4), (20, 3)]
+    assert [step.latency_ms for step in llm_steps] == [17, 11]
+    assert all(step.cost_usd > 0 for step in llm_steps)
+
+
+async def test_provider_attribution_comes_from_the_immutable_sandbox_pin() -> None:
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(
+                text="done",
+                provider="inconsistent-upstream-label",
+                model="claude-sonnet-4-20250514",
+            )
+        ]
+    )
+
+    invocation = await _invoker(llm).invoke(
+        _record(),
+        message="go",
+        triggered_by="sam@example.com",
+    )
+
+    assert next(step for step in invocation.steps if step.kind == "llm").provider == "anthropic"
+
+
+async def test_the_full_trace_spine_is_mirrored_to_telemetry_without_payloads() -> None:
+    class _Telemetry:
+        def __init__(self) -> None:
+            self.spans: list[tuple[str, dict[str, object]]] = []
+
+        @contextmanager
+        def span(self, name, *, attributes=None):
+            self.spans.append((name, dict(attributes or {})))
+            yield None
+
+    telemetry = _Telemetry()
+    secret = "sk-ant-api03-never-export-this"
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(tool_calls=[ToolCall(id="c1", name="scm_list_files", arguments={})]),
+            LLMResponse(text=f"done without echoing {secret}"),
+        ]
+    )
+
+    await _invoker(llm, telemetry=telemetry).invoke(
+        _record(),
+        message=f"inspect; credential={secret}",
+        triggered_by="sam@example.com",
+    )
+
+    names = [name for name, _ in telemetry.spans]
+    assert names == [
+        "sandbox.invocation",
+        "sandbox.prompt",
+        "sandbox.prompt",
+        "sandbox.llm",
+        "sandbox.tool",
+        "sandbox.llm",
+        "sandbox.response",
+    ]
+    llm_attrs = [attrs for name, attrs in telemetry.spans if name == "sandbox.llm"]
+    assert all(attrs["provider"] == "anthropic" for attrs in llm_attrs)
+    assert all(attrs["prompt_version"] == "v1" for attrs in llm_attrs)
+    assert secret not in repr(telemetry.spans)
 
 
 async def test_a_side_effecting_tool_is_blocked_by_the_pinned_policy() -> None:
@@ -250,6 +349,41 @@ async def test_wall_clock_budget_stops_the_run_and_records_the_reason(monkeypatc
     assert invocation.steps[-1].error == invocation.error
 
 
+async def test_a_budget_crossing_keeps_the_call_usage_and_reason_in_the_trace() -> None:
+    inner = _ScriptedLLM(
+        [
+            LLMResponse(
+                text="too expensive",
+                usage=LLMUsage(prompt_tokens=8, completion_tokens=2, total_tokens=10),
+                model="claude-sonnet-4-20250514",
+                provider="anthropic",
+            )
+        ]
+    )
+    metered = SandboxMeteredLLMAdapter(
+        inner,
+        sandbox_id="sb-1",
+        owner="sam@example.com",
+        max_tokens=100,
+        max_cost_usd=0.1,
+        estimate_cost=lambda provider, model, prompt, completion: 0.2,
+    )
+
+    invocation = await _invoker(metered).invoke(
+        _record(),
+        message="go",
+        triggered_by="sam@example.com",
+    )
+
+    llm_step = next(step for step in invocation.steps if step.kind == "llm")
+    assert not invocation.ok
+    assert "cost budget" in invocation.error
+    assert llm_step.prompt_tokens == 8
+    assert llm_step.completion_tokens == 2
+    assert llm_step.cost_usd > 0
+    assert "cost budget" in llm_step.error
+
+
 async def test_provider_errors_are_redacted_before_logging_or_tracing(caplog) -> None:
     exposed = "sk-ant-api03-should-never-reach-a-trace"
 
@@ -269,6 +403,26 @@ async def test_provider_errors_are_redacted_before_logging_or_tracing(caplog) ->
     assert exposed not in invocation.error
     assert exposed not in caplog.text
     assert "Bearer ***" in invocation.error
+
+
+async def test_prompt_and_model_output_secrets_are_redacted_from_the_stored_trace() -> None:
+    exposed = "sk-ant-api03-should-never-be-persisted"
+    store = TraceStore(None)
+
+    invocation = await _invoker(
+        _ScriptedLLM([LLMResponse(text=f"The supplied token was {exposed}")]),
+        store=store,
+    ).invoke(
+        _record(),
+        message=f"Use {exposed}",
+        triggered_by="sam@example.com",
+    )
+    stored = await store.get("sb-1", invocation.id)
+
+    assert stored is not None
+    assert exposed not in __import__("json").dumps(stored.to_dict())
+    assert "***" in stored.message
+    assert "***" in stored.final_text
 
 
 async def test_a_sandbox_never_resolves_or_falls_back_to_principal_credentials() -> None:

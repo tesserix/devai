@@ -328,7 +328,16 @@ def create_app(
             from devai.sandbox.invoke import SandboxInvoker
             from devai.sandbox.trace import TraceStore
 
-            app.state.sandbox_traces = TraceStore(getattr(state, "redis", None))
+            sandbox_deps = _sandbox_stage_deps(app, config)
+            trace_object_store = (sandbox_deps.extra or {}).get("object_store")
+            if trace_object_store is None:
+                from devai.adapters.object_store import create_object_store_adapter
+
+                trace_object_store = create_object_store_adapter(config)
+            app.state.sandbox_traces = TraceStore(
+                getattr(state, "redis", None),
+                object_store=trace_object_store,
+            )
             sandbox_audit = None
             if app.state.sre_studio_db is not None:
 
@@ -348,7 +357,7 @@ def create_app(
             if spec_service is not None:
                 app.state.sandbox_invoker = SandboxInvoker(
                     specializations=spec_service,
-                    deps=_sandbox_stage_deps(app, config),
+                    deps=sandbox_deps,
                     traces=app.state.sandbox_traces,
                     credentials=SandboxCredentialResolver(
                         service=settings_service,
@@ -827,8 +836,10 @@ def create_app(
     # Sandbox routes (/api/sandboxes/*) — pinned, TTL-bounded agent
     # configurations. 503s until sandbox_service is wired (lifespan).
     from devai.sandbox.routes import router as sandbox_router
+    from devai.sandbox.routes import trace_router
 
     app.include_router(sandbox_router)
+    app.include_router(trace_router)
 
     # Runtime version picker (/api/adk/versions) — what a sandbox may pin to.
     from devai.kit.routes import router as adk_router

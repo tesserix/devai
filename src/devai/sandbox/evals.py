@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 import uuid
@@ -92,6 +93,10 @@ class EvalRun:
             "judge_cost_usd": round(self.judge_cost_usd, 6),
             "infrastructure_cost_usd": round(self.infrastructure_cost_usd, 6),
         }
+        case_latencies = sorted(
+            int(result.totals.get("wall_clock_ms", result.totals.get("latency_ms", 0))) for result in self.results
+        )
+        p95_latency_ms = case_latencies[max(0, math.ceil(len(case_latencies) * 0.95) - 1)] if case_latencies else 0
         return {
             "cases": total,
             "passed": passed,
@@ -101,6 +106,7 @@ class EvalRun:
             "cost_usd": round(sum(cost_breakdown.values()), 6),
             "cost_breakdown": cost_breakdown,
             "latency_ms": sum(int(r.totals.get("latency_ms", 0)) for r in self.results),
+            "p95_latency_ms": p95_latency_ms,
             "duration_ms": self.duration_ms,
         }
 

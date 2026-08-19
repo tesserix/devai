@@ -26,11 +26,14 @@ from devai.sandbox.trace import TraceStore
 from devai.sandbox.workspace_client import WorkspaceClient
 
 if TYPE_CHECKING:
+    from devai.sandbox.evals import EvalRunner
+    from devai.sandbox.invoke import SandboxInvoker
     from devai.sandbox.service import SandboxService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sandboxes", tags=["sandbox"])
+trace_router = APIRouter(prefix="/api/traces", tags=["sandbox"])
 
 
 def _service(request: Request) -> SandboxService:
@@ -322,8 +325,8 @@ async def workspace_files(request: Request, sandbox_id: str, operation: str, bod
     raise HTTPException(status_code=404, detail=f"unknown file operation {operation!r}")
 
 
-def _invoker(request: Request) -> Any:
-    inv = getattr(request.app.state, "sandbox_invoker", None)
+def _invoker(request: Request) -> SandboxInvoker:
+    inv: SandboxInvoker | None = getattr(request.app.state, "sandbox_invoker", None)
     if inv is None:
         raise HTTPException(status_code=503, detail="sandbox invoker unavailable")
     return inv
@@ -355,8 +358,8 @@ async def invoke_sandbox(request: Request, sandbox_id: str, body: dict[str, Any]
     return invocation.to_dict()
 
 
-def _evals(request: Request) -> Any:
-    runner = getattr(request.app.state, "sandbox_evals", None)
+def _evals(request: Request) -> EvalRunner:
+    runner: EvalRunner | None = getattr(request.app.state, "sandbox_evals", None)
     if runner is None:
         raise HTTPException(status_code=503, detail="sandbox checks unavailable")
     return runner
@@ -416,4 +419,13 @@ async def get_trace(request: Request, sandbox_id: str, invocation_id: str) -> di
     return invocation.to_dict()
 
 
-__all__ = ["router"]
+@trace_router.get("/{invocation_id}")
+async def get_trace_by_id(request: Request, invocation_id: str) -> dict[str, Any]:
+    invocation = await _traces(request).get_by_id(invocation_id)
+    if invocation is None:
+        raise HTTPException(status_code=404, detail=f"trace {invocation_id!r} not found")
+    await _sandbox_or_404(request, invocation.sandbox_id)
+    return invocation.to_dict()
+
+
+__all__ = ["router", "trace_router"]

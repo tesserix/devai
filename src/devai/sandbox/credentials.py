@@ -43,6 +43,10 @@ class SandboxCredentialError(RuntimeError):
 class SandboxBudgetExceeded(RuntimeError):
     """A sandbox LLM call crossed a declared token or cost ceiling."""
 
+    def __init__(self, message: str, *, response: LLMResponse | None = None) -> None:
+        super().__init__(message)
+        self.response = response
+
 
 class SandboxMeteredLLMAdapter(LLMAdapter):
     """Attribute and enforce one sandbox invocation's LLM allowance."""
@@ -111,12 +115,19 @@ class SandboxMeteredLLMAdapter(LLMAdapter):
                 "sandbox_id": self._sandbox_id,
                 "sandbox_tokens_used": self._tokens,
                 "sandbox_cost_usd": self._cost_usd,
+                "sandbox_call_cost_usd": max(0.0, cost),
             }
         )
         if self._tokens > self._max_tokens:
-            raise SandboxBudgetExceeded(f"sandbox {self._sandbox_id} exceeded its token budget")
+            raise SandboxBudgetExceeded(
+                f"sandbox {self._sandbox_id} exceeded its token budget",
+                response=response,
+            )
         if self._cost_usd > self._max_cost_usd:
-            raise SandboxBudgetExceeded(f"sandbox {self._sandbox_id} exceeded its cost budget")
+            raise SandboxBudgetExceeded(
+                f"sandbox {self._sandbox_id} exceeded its cost budget",
+                response=response,
+            )
         return response
 
     async def embed(self, texts: list[str], *, model: str = "") -> list[list[float]]:
