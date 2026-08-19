@@ -8,7 +8,7 @@ the long-standing gap where a YAML-only role could not run as a Job at all.
 
 from __future__ import annotations
 
-from devai.adapters.llm.base import LLMResponse
+from devai.adapters.llm.base import LLMResponse, LLMUsage
 from devai.config import Settings
 from devai.pipeline.interfaces import StageDeps
 from devai.specializations.loader import load_specialization_from_string
@@ -43,7 +43,10 @@ class _ScriptedLLM:
         self._text = text
 
     async def generate(self, request):  # noqa: ANN001
-        return LLMResponse(text=self._text)
+        return LLMResponse(
+            text=self._text,
+            usage=LLMUsage(prompt_tokens=7, completion_tokens=3),
+        )
 
 
 def _service(*specs: str) -> SpecializationService:
@@ -65,6 +68,14 @@ async def test_invoke_runs_yaml_spec_via_sdk():
     assert patch is not None
     assert patch["summary"] == "ran in a job"
     assert patch["ok"] is True
+    assert patch["final_text"] == '```json\n{"summary": "ran in a job"}\n```'
+    assert patch["usage"] == {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10,
+        "tool_calls": 0,
+        "turns": 1,
+    }
     # The raw text is surfaced under <name>_text for display/debug.
     assert "job_yaml_text" in patch
 

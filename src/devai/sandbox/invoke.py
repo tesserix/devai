@@ -77,6 +77,7 @@ class SandboxInvoker:
             sandbox_id=record.id,
             agent=spec.name,
             message=safe_message,
+            execution_backend="inline",
             steps=steps,
         )
         gateway = ToolGateway(

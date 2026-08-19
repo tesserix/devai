@@ -8,6 +8,7 @@ kagent is additive and must never be the reason a run fails.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,7 @@ import devai.agentic.kagent_client as kc
 from devai.pipeline.interfaces import StageDeps
 from devai.pipeline.stages.job_runner import JobRunnerStage
 from devai.pipeline.types import DevAITask
+from devai.sandbox.models import AgentRef, ModelRef, SandboxRecord, SandboxSpec, SandboxStatus
 from devai.settings.models import Connector, Scope
 
 
@@ -110,6 +112,34 @@ async def test_routes_to_kagent_when_labelled_and_configured(monkeypatch):
     assert _FakeKagentClient.last_call["namespace"] == "kagent-system"
     assert _FakeKagentClient.last_call["triggered_by"] == "alice@x.com"
     assert _FakeKagentClient.last_call["trace_id"] == "t-1"
+
+
+@pytest.mark.asyncio
+async def test_sandboxed_evaluation_never_bypasses_the_job_boundary_through_kagent(monkeypatch):
+    _FakeKagentClient.last_call = {}
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _FakeKagentClient())
+    deps = _deps(kagent_url="http://kagent:8083", agent_labels={"devai.io/runtime": "kagent"})
+    now = datetime.now(UTC)
+    record = SandboxRecord(
+        id="sb-1",
+        owner="tenant-a:alice",
+        spec=SandboxSpec(
+            agent=AgentRef(name="reviewer-agent", version="7"),
+            model=ModelRef(provider="anthropic", model="claude-sonnet-4"),
+        ),
+        status=SandboxStatus.READY,
+        created_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    stage = JobRunnerStage(
+        deps,
+        {"__stage_name": "evaluation", "agent": "reviewer-agent", "__sandbox": record.model_dump(mode="json")},
+    )
+
+    result = await stage.execute(DevAITask(intent="evaluate", triggered_by="alice@x.com"))
+
+    assert _FakeKagentClient.last_call == {}
+    assert "K8s runtime not available" in result.message
 
 
 @pytest.mark.asyncio

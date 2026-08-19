@@ -1336,6 +1336,14 @@ class Database:
         )
         return self._eval_run_record(row) if row else None
 
+    async def get_eval_run_by_id(self, owner_scope: str, run_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            self._eval_run_select() + " WHERE r.owner_scope = $1 AND r.id = $2" + self._eval_run_group(),
+            owner_scope,
+            run_id,
+        )
+        return self._eval_run_record(row) if row else None
+
     async def list_eval_runs(
         self,
         owner_scope: str,

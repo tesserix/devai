@@ -57,6 +57,7 @@ class Invocation:
     final_text: str = ""
     ok: bool = True
     error: str = ""
+    execution_backend: str = "inline"
     steps: list[TraceStep] = field(default_factory=list)
     wall_clock_ms: int = 0
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -85,6 +86,7 @@ class Invocation:
             "final_text": self.final_text,
             "ok": self.ok,
             "error": self.error,
+            "execution_backend": self.execution_backend,
             "created_at": self.created_at,
             "wall_clock_ms": self.wall_clock_ms,
             "steps": [s.to_dict() for s in self.steps],
@@ -103,6 +105,7 @@ class Invocation:
             final_text=str(body.get("final_text") or ""),
             ok=bool(body.get("ok", True)),
             error=str(body.get("error") or ""),
+            execution_backend=str(body.get("execution_backend") or "inline"),
             steps=steps,
             wall_clock_ms=int(body.get("wall_clock_ms") or (body.get("totals") or {}).get("wall_clock_ms") or 0),
             created_at=str(body.get("created_at") or ""),

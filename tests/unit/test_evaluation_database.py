@@ -188,3 +188,13 @@ async def test_eval_run_reads_are_owner_scoped_in_the_query() -> None:
     assert "r.owner_scope = $1" in list_query
     assert "r.sandbox_id = $2" in list_query
     assert list_args == ("tenant-a:alice", "sb-1", 20)
+
+
+async def test_top_level_eval_run_lookup_scopes_the_id_in_sql() -> None:
+    database, pool = _database()
+
+    await database.get_eval_run_by_id("tenant-a:alice", "eval-1")
+
+    query, args = pool.fetchrow_calls[0]
+    assert "r.owner_scope = $1 AND r.id = $2" in query
+    assert args == ("tenant-a:alice", "eval-1")

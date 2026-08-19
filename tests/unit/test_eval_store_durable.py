@@ -15,6 +15,12 @@ class _Database:
     async def get_eval_run(self, owner_scope: str, sandbox_id: str, run_id: str) -> dict[str, Any] | None:
         return self.runs.get((owner_scope, sandbox_id, run_id))
 
+    async def get_eval_run_by_id(self, owner_scope: str, run_id: str) -> dict[str, Any] | None:
+        return next(
+            (run for (owner, _, stored_id), run in self.runs.items() if owner == owner_scope and stored_id == run_id),
+            None,
+        )
+
     async def list_eval_runs(self, owner_scope: str, sandbox_id: str, *, limit: int) -> list[dict[str, Any]]:
         return [
             run for (owner, sandbox, _), run in self.runs.items() if owner == owner_scope and sandbox == sandbox_id

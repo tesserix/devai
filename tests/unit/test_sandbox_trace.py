@@ -48,6 +48,7 @@ def _invocation(**kw) -> Invocation:
         message=kw.get("message", "summarise the diff"),
         final_text=kw.get("final_text", "Here are the notes."),
         ok=kw.get("ok", True),
+        execution_backend=kw.get("execution_backend", "inline"),
         steps=kw.get(
             "steps",
             [
@@ -91,6 +92,7 @@ async def test_an_invocation_is_readable_after_it_is_stored() -> None:
 
     assert got is not None
     assert got.final_text == "Here are the notes."
+    assert got.execution_backend == "inline"
     assert [s.kind for s in got.steps] == ["prompt", "llm", "tool", "response"]
 
 

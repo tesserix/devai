@@ -153,6 +153,9 @@ class JobRunnerStage(PipelineStage):
 
     async def execute(self, task: DevAITask) -> StageResult:
         agent_name = str(self.config.get("agent", self._stage_name))
+        from devai.sandbox.job import apply_sandbox_boundary, sandbox_from_stage_config
+
+        sandbox = sandbox_from_stage_config(self.config)
         # Single round-trip to aregistry: pick the image AND capture the
         # full profile so we can pass it through the Job env. Avoids the
         # previous pattern where the dispatcher resolved the image and
@@ -165,9 +168,10 @@ class JobRunnerStage(PipelineStage):
         # plane, so this is checked BEFORE the Job runtime gate. Opt-in (needs
         # `kagent_url`) and degrades to the Job path on any failure, so kagent
         # is never a single point of failure.
-        kagent_result = await self._maybe_dispatch_kagent(task, agent_name, agent_profile)
-        if kagent_result is not None:
-            return kagent_result
+        if sandbox is None:
+            kagent_result = await self._maybe_dispatch_kagent(task, agent_name, agent_profile)
+            if kagent_result is not None:
+                return kagent_result
 
         runtime = self._runtime()
         watcher = self._watcher()
@@ -179,7 +183,6 @@ class JobRunnerStage(PipelineStage):
         blueprint = task.blueprint or ""
 
         from devai.runtime import RunnerJobInputs, build_job_spec
-        from devai.sandbox.job import apply_sandbox_boundary, sandbox_from_stage_config
 
         # Agent control-plane URLs are read off settings so deployments
         # can flip them per environment. Empty = "no gateway, talk direct".
@@ -203,7 +206,6 @@ class JobRunnerStage(PipelineStage):
         )
         job_spec = build_job_spec(runtime.config, inputs)
         # Same Job, tightened edges — set when an eval dispatches into a sandbox.
-        sandbox = sandbox_from_stage_config(self.config)
         if sandbox is not None:
             job_spec = apply_sandbox_boundary(job_spec, sandbox)
         job_name = job_spec["metadata"]["name"]

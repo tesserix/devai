@@ -59,6 +59,7 @@ class AgentRunResult:
     tool_calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    trace_steps: list[dict[str, Any]] = field(default_factory=list)
     stub: bool = False
     error: str = ""
 
@@ -129,18 +130,20 @@ class AgentRunner:
         # Tests / callers may inject a dispatcher via deps.extra; otherwise
         # build the real one with this run's rich tool context.
         dispatcher = (self.deps.extra or {}).get("tool_dispatcher")
+        gateway = None
         if dispatcher is None:
             # In a sandbox pod the env carries the pinned tool modes; outside
             # one `from_env` returns None and dispatch is unchanged.
             from devai.sandbox.gateway import ToolGateway
             from devai.tools.dispatch import ToolDispatcher
 
+            gateway = ToolGateway.from_env(os.environ)
             dispatcher = ToolDispatcher(
                 scm,
                 dry_run=getattr(task, "dry_run", False),
                 triggered_by=task.triggered_by or "",
                 tool_context=ctx,
-                gateway=ToolGateway.from_env(os.environ),
+                gateway=gateway,
             )
         tools = dispatcher.build_tool_specs(list(spec.allowed_tools))
 
@@ -198,6 +201,19 @@ class AgentRunner:
                 # a dry run → "[dry-run] blocked". It never raises, so a tool
                 # failure is reported to the model instead of killing the loop.
                 output = await dispatcher.execute(tc.name, dict(tc.arguments))
+                if gateway is not None and gateway.records:
+                    record = gateway.records[-1]
+                    result.trace_steps.append(
+                        {
+                            "kind": "tool",
+                            "name": record.tool,
+                            "input": record.arguments,
+                            "output": record.response,
+                            "mode": record.mode.value,
+                            "error": record.error or "",
+                            "latency_ms": record.latency_ms,
+                        }
+                    )
                 messages.append(
                     LLMMessage(
                         role=LLMRole.TOOL,

@@ -13,6 +13,7 @@ seen.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -28,13 +29,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from devai.sandbox.trace import Invocation
 
 if TYPE_CHECKING:
-    from devai.sandbox.invoke import SandboxInvoker
     from devai.sandbox.models import SandboxRecord
 
 logger = logging.getLogger(__name__)
 
 _PREFIX = "devai:sandbox"
+_GLOBAL_PREFIX = "devai:evaluation"
 _DEFAULT_MAX_CASES = 50
+
+
+class EvaluationInvoker(Protocol):
+    async def invoke(self, record: SandboxRecord, *, message: str, triggered_by: str) -> Invocation: ...
 
 
 class EvalExpect(BaseModel):
@@ -43,10 +48,13 @@ class EvalExpect(BaseModel):
     contains: list[str] = Field(default_factory=list)
     not_contains: list[str] = Field(default_factory=list)
     matches: str = ""
+    exact_output: str | None = None
+    json_schema: dict[str, Any] | None = None
     tools_called: list[str] = Field(default_factory=list)
     tools_not_called: list[str] = Field(default_factory=list)
     max_total_tokens: int | None = None
     max_latency_ms: int | None = None
+    max_cost_usd: float | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -65,11 +73,15 @@ class CaseResult:
     passed: bool
     failures: list[str] = field(default_factory=list)
     invocation_id: str = ""
+    execution_backend: str = ""
     final_text: str = ""
     totals: dict[str, Any] = field(default_factory=dict)
+    scores: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        body = asdict(self)
+        body["trace_url"] = f"/api/traces/{self.invocation_id}" if self.invocation_id else None
+        return body
 
 
 @dataclass(slots=True)
@@ -102,6 +114,18 @@ class EvalRun:
             int(result.totals.get("wall_clock_ms", result.totals.get("latency_ms", 0))) for result in self.results
         )
         p95_latency_ms = case_latencies[max(0, math.ceil(len(case_latencies) * 0.95) - 1)] if case_latencies else 0
+        dimensions: dict[str, dict[str, Any]] = {}
+        score_names = dict.fromkeys(name for result in self.results for name in result.scores)
+        for name in score_names:
+            scores = [result.scores[name] for result in self.results if name in result.scores]
+            passed_scores = sum(1 for score in scores if score["passed"])
+            dimensions[name] = {
+                "average": round(sum(float(score["score"]) for score in scores) / len(scores), 6),
+                "passed": passed_scores,
+                "failed": len(scores) - passed_scores,
+                "pass_rate": round(passed_scores / len(scores), 4),
+                "unit": scores[0]["unit"],
+            }
         return {
             "cases": total,
             "passed": passed,
@@ -113,6 +137,7 @@ class EvalRun:
             "latency_ms": sum(int(r.totals.get("latency_ms", 0)) for r in self.results),
             "p95_latency_ms": p95_latency_ms,
             "duration_ms": self.duration_ms,
+            "dimensions": dimensions,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -191,10 +216,18 @@ def grade(expect: EvalExpect, invocation: Invocation) -> list[str]:
 
 
 class EvalRunner:
-    def __init__(self, invoker: SandboxInvoker, store: EvalStore, *, max_cases: int = _DEFAULT_MAX_CASES) -> None:
+    def __init__(
+        self,
+        invoker: EvaluationInvoker,
+        store: EvalStore,
+        *,
+        max_cases: int = _DEFAULT_MAX_CASES,
+        max_concurrency: int = 4,
+    ) -> None:
         self._invoker = invoker
         self._store = store
         self._max_cases = max(1, max_cases)
+        self._max_concurrency = max(1, max_concurrency)
 
     @property
     def store(self) -> EvalStore:
@@ -211,13 +244,16 @@ class EvalRunner:
         user_id: str = "",
         dataset_ref: dict[str, str] | None = None,
         suite_ref: dict[str, str] | None = None,
+        scorers: list[str] | None = None,
     ) -> EvalRun:
-        """Every case, in order. Cases run sequentially so a suite cannot burst
-        past the provider's rate limit and score itself on 429s."""
+        """Run every case with bounded fan-out and preserve dataset order."""
+        from devai.evaluations.scorers import bind
+
         if not cases:
             raise ValueError("a suite needs at least one case")
         if len(cases) > self._max_cases:
             raise ValueError(f"tenant dataset quota is {self._max_cases} cases per eval run")
+        bound_scorers = bind(scorers or [])
 
         run = EvalRun(
             id=f"eval-{uuid.uuid4().hex[:12]}",
@@ -230,29 +266,85 @@ class EvalRunner:
             suite_ref=suite_ref,
         )
         started = time.perf_counter()
-        for case in cases:
-            run.results.append(await self._one(record, case, triggered_by=triggered_by))
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+        results: list[CaseResult | None] = [None] * len(cases)
+
+        async def run_case(index: int, case: EvalCase) -> None:
+            async with semaphore:
+                results[index] = await self._one(
+                    record,
+                    case,
+                    triggered_by=triggered_by,
+                    scorers=bound_scorers,
+                )
+
+        async with asyncio.TaskGroup() as group:
+            for index, case in enumerate(cases):
+                group.create_task(run_case(index, case))
+        run.results = [result for result in results if result is not None]
         run.duration_ms = int((time.perf_counter() - started) * 1000)
 
         await self._store.save(run, ttl_seconds=self._ttl(record))
         return run
 
-    async def _one(self, record: SandboxRecord, case: EvalCase, *, triggered_by: str) -> CaseResult:
+    async def _one(
+        self,
+        record: SandboxRecord,
+        case: EvalCase,
+        *,
+        triggered_by: str,
+        scorers: list[Any],
+    ) -> CaseResult:
         try:
             invocation = await self._invoker.invoke(record, message=case.input, triggered_by=triggered_by)
         except Exception as e:  # noqa: BLE001 — one broken case is a red case, not a dead suite
             logger.warning("eval case %s could not run", case.name, exc_info=True)
-            return CaseResult(name=case.name, passed=False, failures=[f"could not run: {e}"])
+            return CaseResult(
+                name=case.name,
+                passed=False,
+                failures=[f"could not run: {e}"],
+                scores=self._score(case, None, scorers),
+            )
 
-        failures = grade(case.expect, invocation)
+        scores = self._score(case, invocation, scorers)
+        if scores:
+            failures = [
+                f"{name}: {score['detail'].get('error', 'failed')}"
+                for name, score in scores.items()
+                if not score["passed"]
+            ]
+        else:
+            failures = grade(case.expect, invocation)
         return CaseResult(
             name=case.name,
             passed=not failures,
             failures=failures,
             invocation_id=invocation.id,
+            execution_backend=invocation.execution_backend,
             final_text=invocation.final_text,
             totals=invocation.totals,
+            scores=scores,
         )
+
+    @staticmethod
+    def _score(case: EvalCase, invocation: Invocation | None, scorers: list[Any]) -> dict[str, dict[str, Any]]:
+        from devai.evaluations.scorers import ScorerContext, ScorerResult
+
+        results: dict[str, dict[str, Any]] = {}
+        context = ScorerContext(invocation=invocation, expect=case.expect)
+        for scorer in scorers:
+            try:
+                result = scorer.score(context)
+            except Exception:  # noqa: BLE001 — one broken scorer is a failed dimension
+                logger.warning("eval scorer %s failed", scorer.name, exc_info=True)
+                result = ScorerResult(
+                    name=scorer.name,
+                    score=0.0,
+                    passed=False,
+                    detail={"error": "scorer failed"},
+                )
+            results[scorer.name] = result.to_dict()
+        return results
 
     def _ttl(self, record: SandboxRecord) -> int:
         remaining = int((record.expires_at - datetime.now(UTC)).total_seconds())
@@ -263,6 +355,8 @@ class EvalRunDatabase(Protocol):
     async def save_eval_run(self, run: dict[str, Any]) -> None: ...
 
     async def get_eval_run(self, owner_scope: str, sandbox_id: str, run_id: str) -> dict[str, Any] | None: ...
+
+    async def get_eval_run_by_id(self, owner_scope: str, run_id: str) -> dict[str, Any] | None: ...
 
     async def list_eval_runs(
         self,
@@ -288,19 +382,26 @@ class EvalStore:
     def _index_key(self, sandbox_id: str) -> str:
         return f"{_PREFIX}:{sandbox_id}:evalruns"
 
+    def _global_key(self, run_id: str) -> str:
+        return f"{_GLOBAL_PREFIX}:{run_id}"
+
     async def save(self, run: EvalRun, *, ttl_seconds: int) -> None:
         if self._database is not None:
             await self._database.save_eval_run(run.to_storage_dict())
             return
         key = self._key(run.sandbox_id, run.id)
         index = self._index_key(run.sandbox_id)
-        body = json.dumps(run.to_dict())
+        global_key = self._global_key(run.id)
+        body = json.dumps(run.to_storage_dict())
+        locator = json.dumps({"sandbox_id": run.sandbox_id, "owner_scope": run.owner_scope})
         if self._redis is None:
             self._local[key] = body
+            self._local[global_key] = locator
             self._local_index.setdefault(index, []).insert(0, run.id)
             return
         try:
             await self._redis.set(key, body, ex=ttl_seconds)
+            await self._redis.set(global_key, locator, ex=ttl_seconds)
             await self._redis.lpush(index, run.id)
             await self._redis.expire(index, ttl_seconds)
         except Exception:  # noqa: BLE001 — a lost result must not fail the suite
@@ -317,6 +418,23 @@ class EvalStore:
             logger.warning("sandbox evals: read failed for %s", run_id, exc_info=True)
             return None
         return _decode(body)
+
+    async def get_by_id(self, owner_scope: str, run_id: str) -> EvalRun | None:
+        if self._database is not None:
+            stored = await self._database.get_eval_run_by_id(owner_scope, run_id)
+            return EvalRun.from_dict(stored) if stored else None
+        try:
+            key = self._global_key(run_id)
+            locator = self._local.get(key) if self._redis is None else await self._redis.get(key)
+            if isinstance(locator, bytes):
+                locator = locator.decode()
+            metadata = json.loads(locator) if locator else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            logger.warning("sandbox evals: global lookup failed for %s", run_id, exc_info=True)
+            return None
+        if metadata.get("owner_scope") != owner_scope:
+            return None
+        return await self.get(str(metadata.get("sandbox_id") or ""), run_id, owner_scope=owner_scope)
 
     async def list_for_sandbox(
         self,

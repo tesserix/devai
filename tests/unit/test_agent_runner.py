@@ -81,7 +81,8 @@ async def test_no_tool_path_parses_and_validates_handover():
 
 
 @pytest.mark.asyncio
-async def test_tool_loop_dispatches_and_threads_result_back():
+async def test_tool_loop_dispatches_and_threads_result_back(monkeypatch):
+    monkeypatch.setenv("DEVAI_SANDBOX_TOOL_MODE", "real")
     spec = Specialization(
         name="reader",
         allowed_tools=["read_file"],
@@ -105,6 +106,17 @@ async def test_tool_loop_dispatches_and_threads_result_back():
     run = await AgentRunner(deps).run(spec, _task())
 
     assert run.tool_calls == 1
+    assert [{key: value for key, value in step.items() if key != "latency_ms"} for step in run.trace_steps] == [
+        {
+            "kind": "tool",
+            "name": "read_file",
+            "input": {"path": "main.py"},
+            "output": "print('hello from main.py')",
+            "mode": "real",
+            "error": "",
+        }
+    ]
+    assert run.trace_steps[0]["latency_ms"] >= 0
     assert run.turns == 2
     assert run.patch == {"summary": "read main.py"}
     # the SCM tool actually executed with repo defaulted from the task

@@ -376,11 +376,20 @@ def create_app(
                     ),
                 )
                 if app.state.sre_studio_db is not None:
+                    from devai.evaluations.job import JobEvaluationInvoker
+
+                    evaluation_invoker = JobEvaluationInvoker(
+                        deps=sandbox_deps,
+                        traces=app.state.sandbox_traces,
+                        fallback=app.state.sandbox_invoker,
+                    )
                     app.state.sandbox_evals = EvalRunner(
-                        app.state.sandbox_invoker,
+                        evaluation_invoker,
                         EvalStore(None, database=app.state.sre_studio_db),
                         max_cases=int(getattr(config, "sandbox_max_eval_cases_per_run", 50) or 50),
+                        max_concurrency=int(getattr(config, "sandbox_eval_max_concurrency", 4) or 4),
                     )
+                    logger.info("Evaluation runner ready (backend=%s)", evaluation_invoker.execution_backend)
                 logger.info("Sandbox invoker ready")
         except Exception:
             logger.exception("Sandbox invoker failed to start — invoke API will 503")
