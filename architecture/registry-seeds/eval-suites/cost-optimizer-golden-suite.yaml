@@ -1,18 +1,18 @@
 apiVersion: registry.solo.io/v1alpha1
 kind: EvalSuite
 metadata:
-  name: release-promoter-golden
+  name: cost-optimizer-golden-suite
   namespace: devai
   tag: "1"
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: evals
-    devai.io/agent: release-promoter-agent
+    devai.io/agent: cost-optimizer-agent
 spec:
-  description: Version-pinned golden gate for release-promoter-agent.
+  description: Version-pinned golden gate for cost-optimizer-agent.
   datasetRef:
-    ref: release-promoter-golden
+    ref: cost-optimizer-golden
     version: "1"
   minimumPassRate: 0.75
   scorers:

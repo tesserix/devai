@@ -1,18 +1,18 @@
 apiVersion: registry.solo.io/v1alpha1
 kind: EvalSuite
 metadata:
-  name: db-engineer-golden
+  name: qa-tester-golden-suite
   namespace: devai
   tag: "1"
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: evals
-    devai.io/agent: db-engineer-agent
+    devai.io/agent: qa-tester-agent
 spec:
-  description: Version-pinned golden gate for db-engineer-agent.
+  description: Version-pinned golden gate for qa-tester-agent.
   datasetRef:
-    ref: db-engineer-golden
+    ref: qa-tester-golden
     version: "1"
   minimumPassRate: 0.75
   scorers:
