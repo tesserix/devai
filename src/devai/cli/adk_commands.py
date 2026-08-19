@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
@@ -48,6 +49,7 @@ from devai.adk import (
     scaffold_skill,
 )
 from devai.config import settings
+from devai.services.redact import scrub_structure
 
 adk_app = typer.Typer(
     name="adk",
@@ -279,6 +281,7 @@ def _sandbox_spec_from_agent(
     *,
     llm_connector: str,
     confirmed: bool,
+    agent_version: str = "",
 ) -> dict[str, Any]:
     document = _load_yaml(path)
     if document.get("kind") != "Agent":
@@ -286,7 +289,7 @@ def _sandbox_spec_from_agent(
     spec = _mapping(document.get("spec"))
     metadata = _mapping(document.get("metadata"))
     name = str(metadata.get("name") or spec.get("name") or "")
-    version = str(spec.get("version") or "")
+    version = agent_version or str(spec.get("version") or metadata.get("tag") or "")
     llm = _mapping(spec.get("llm"))
     provider = str(llm.get("provider") or spec.get("modelProvider") or "")
     model = str(llm.get("model") or spec.get("modelName") or "")
@@ -310,6 +313,9 @@ def _sandbox_spec_from_agent(
 @sandbox_app.command("create")
 def sandbox_create(
     agent: Path = typer.Argument(..., help="Unpublished Agent YAML to sandbox."),
+    agent_version: str = typer.Option("", "--agent-version"),
+    suite: Path | None = typer.Option(None, "--suite"),
+    tool_mode: str = typer.Option("", "--tool-mode"),
     llm_connector: str = typer.Option("", "--llm-connector"),
     confirm_llm_connector: bool = typer.Option(False, "--confirm-llm-connector"),
     api_url: str = typer.Option("", "--api-url"),
@@ -324,7 +330,15 @@ def sandbox_create(
             agent,
             llm_connector=llm_connector,
             confirmed=confirm_llm_connector,
+            agent_version=agent_version,
         )
+        if suite is not None:
+            _, dataset_name, dataset_version, _ = _suite_settings(suite, None)
+            body["dataset"] = {"ref": dataset_name, "version": dataset_version}
+        if tool_mode:
+            if tool_mode not in {"mock", "replay", "block", "real"}:
+                raise ValueError("--tool-mode must be mock, replay, block, or real")
+            body["tools"] = {"default_mode": tool_mode, "overrides": {}}
         client = _new_sandbox_client(api_url=api_url)
         try:
             created = client.create(body)
@@ -356,6 +370,37 @@ def sandbox_invoke(
         raise typer.Exit(code=2) from error
     console.print(str(invocation.get("final_text") or ""))
     console.print(f"[dim]trace {invocation.get('id', '')}[/]")
+
+
+@sandbox_app.command("wait")
+def sandbox_wait(
+    sandbox_id: str = typer.Argument(...),
+    timeout: float = typer.Option(300.0, "--timeout", min=0.1),
+    interval: float = typer.Option(2.0, "--interval", min=0.0),
+    api_url: str = typer.Option("", "--api-url"),
+) -> None:
+    """Wait for a sandbox to become ready, fail, or exceed a bounded timeout."""
+    deadline = time.monotonic() + timeout
+    client = _new_sandbox_client(api_url=api_url)
+    try:
+        while True:
+            record = client.get(sandbox_id)
+            status = str(record.get("status") or "")
+            if status == "ready":
+                console.print(f"[green]ready[/] {sandbox_id}")
+                return
+            if status in {"failed", "destroyed"}:
+                console.print(f"[red]{status}[/] {sandbox_id}")
+                raise typer.Exit(code=2)
+            if time.monotonic() >= deadline:
+                console.print(f"[red]timed out waiting for {sandbox_id}[/]")
+                raise typer.Exit(code=2)
+            time.sleep(interval)
+    except AdkError as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=2) from error
+    finally:
+        client.close()
 
 
 @sandbox_app.command("traces")
@@ -475,6 +520,8 @@ def test_agent(
     suite: Path | None = typer.Option(None, "--suite"),
     dataset: Path | None = typer.Option(None, "--dataset"),
     api_url: str = typer.Option("", "--api-url"),
+    output: str = typer.Option("table", "--output"),
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Run a saved dataset and return non-zero when any case fails."""
     if not sandbox_id:
@@ -512,6 +559,14 @@ def test_agent(
     except (AdkError, OSError, ValueError) as error:
         console.print(f"[red]{error}[/]")
         raise typer.Exit(code=2) from error
+
+    run = scrub_structure(run)
+    if json_output or output == "json":
+        console.print_json(json.dumps(run))
+        summary = run.get("summary") or {}
+        if float(summary.get("pass_rate") or 0) < minimum_pass_rate:
+            raise typer.Exit(code=2)
+        return
 
     summary = run.get("summary") or {}
     table = Table("case", "result", "failure", title=f"{scorecard_name} evaluation")

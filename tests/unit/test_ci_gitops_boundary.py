@@ -4,6 +4,7 @@ import pytest
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 BUILD_WORKFLOWS = (
+    ".github/workflows/agent-evals.yaml",
     ".github/workflows/auth-bff-build.yaml",
     ".github/workflows/ci.yaml",
     ".github/workflows/dashboard-build.yaml",
