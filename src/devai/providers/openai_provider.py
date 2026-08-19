@@ -24,6 +24,7 @@ class OpenAIProvider:
         from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
 
         self._config = config
+        self._gateway_required = gateway_required(config)
         self.client = AsyncOpenAI(
             api_key=config.openai_api_key,
             base_url=gateway_base_url(config, "openai", getattr(config, "openai_base_url", "")),
@@ -71,6 +72,10 @@ class OpenAIProvider:
             kwargs["temperature"] = temperature
         if response_format:
             kwargs["response_format"] = response_format
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            kwargs["extra_headers"] = current_gateway_headers("openai")
 
         try:
             response = await self.client.chat.completions.create(**kwargs)

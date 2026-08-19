@@ -70,6 +70,7 @@ class GroqProvider:
         from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
 
         self._config = config
+        self._gateway_required = gateway_required(config)
         api_key = config.groq_api_key
         if not api_key:
             api_key = self._fetch_from_gcp(config.gcp_secret_groq_api_key)
@@ -118,6 +119,10 @@ class GroqProvider:
         }
         if response_format:
             kwargs["response_format"] = response_format
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            kwargs["extra_headers"] = current_gateway_headers("groq")
 
         try:
             response = await self.client.chat.completions.create(**kwargs)

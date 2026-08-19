@@ -29,6 +29,7 @@ class GeminiProvider:
         from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
 
         self._config = config
+        self._gateway_required = gateway_required(config)
         api_key = config.gemini_api_key
         if not api_key:
             api_key = self._fetch_from_gcp(config.gcp_secret_gemini_api_key)
@@ -93,6 +94,8 @@ class GeminiProvider:
 
         try:
             if self._gateway_client is not None:
+                from devai.adapters.llm.gateway_routing import current_gateway_headers
+
                 messages: list[ChatCompletionMessageParam] = []
                 if system:
                     messages.append({"role": "system", "content": system})
@@ -102,6 +105,7 @@ class GeminiProvider:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    extra_headers=current_gateway_headers("gemini"),
                 )
                 return gateway_response.choices[0].message.content or ""
             if self._client is None:
