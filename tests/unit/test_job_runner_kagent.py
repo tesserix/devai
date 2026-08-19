@@ -1,6 +1,6 @@
-"""kagent routing in JobRunnerStage.
+"""Substrate routing in JobRunnerStage.
 
-A pipeline stage routes to a kagent-managed agent over A2A (instead of spawning
+A pipeline stage routes to a kagent-managed SandboxAgent over A2A (instead of spawning
 a K8s Job) when the agent's registry record carries `devai.io/runtime=kagent`
 AND `kagent_url` is configured. Every miss must fall back to the Job path —
 kagent is additive and must never be the reason a run fails.
@@ -106,9 +106,11 @@ async def test_routes_to_kagent_when_labelled_and_configured(monkeypatch):
 
     out = result.data["review_code_output"]
     assert out["runtime"] == "kagent"
+    assert out["execution_target"] == "substrate"
     assert out["text"] == "looks good"
     # The hyphenated CR name is used, and identity is forwarded.
     assert _FakeKagentClient.last_call["agent"] == "reviewer-agent"
+    assert _FakeKagentClient.last_call["target"] is kc.KagentDispatchTarget.SANDBOX_AGENT
     assert _FakeKagentClient.last_call["namespace"] == "kagent-system"
     assert _FakeKagentClient.last_call["triggered_by"] == "alice@x.com"
     assert _FakeKagentClient.last_call["trace_id"] == "t-1"

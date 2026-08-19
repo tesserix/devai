@@ -681,16 +681,16 @@ class Settings(BaseSettings):
     #
     # kagent_url points at the kagent controller's A2A endpoint. When set (and
     # kagent_enabled), an agent labelled `devai.io/runtime=kagent` is dispatched
-    # over A2A to its long-lived kagent Deployment instead of a one-shot Job.
+    # over A2A to its Substrate SandboxAgent instead of a one-shot Job.
     agentgateway_url: str = ""
     # Operator-only health probes use the controller metrics endpoint, not the
     # MCP data-plane URL above. AI gateway probes fall back to the LLM base URL.
     agentgateway_controller_url: str = ""
     ai_gateway_url: str = ""
     kagent_url: str = ""
-    # Namespace the kagent controller serves A2A agents under
-    # ({kagent_url}/api/a2a/{namespace}/{agent}); matches the kagent-agent-sync
-    # targetNamespace. Only consulted when dispatching to a kagent-managed agent.
+    # Namespace the kagent controller serves SandboxAgents under
+    # ({kagent_url}/api/a2a-sandboxes/{namespace}/{agent}); matches the
+    # kagent-agent-sync targetNamespace. Only consulted for kagent dispatch.
     kagent_default_namespace: str = "kagent-system"
     # Master switch for kagent A2A dispatch (binds DEVAI_KAGENT_ENABLED). Default
     # OFF — every agent runs as a K8s Job even if labelled kagent. Turn it on
@@ -701,7 +701,7 @@ class Settings(BaseSettings):
     # Per-user keys for kagent. When kagent_passthrough is true, the kagent
     # ModelConfig is set to `apiKeyPassthrough` (no shared secret) and DevAI
     # forwards the TRIGGERING USER's own LLM key as the A2A Bearer token, so a
-    # standing kagent agent runs on each user's own key (reusing the same
+    # shared Substrate actor runs on each user's own key (reusing the same
     # per-user connector overlay as the Job path). A user with no own key for
     # `kagent_model_provider` falls back to the Job path. False = shared-key
     # ModelConfig (no Bearer forwarded). kagent_model_provider names the
