@@ -143,13 +143,16 @@ def _workspace_env(record: SandboxRecord) -> list[dict[str, Any]]:
     if not record.spec.workspace:
         return []
     namespace = os.environ.get("DEVAI_NAMESPACE") or "devai"
-    return [
+    env: list[dict[str, Any]] = [
         {"name": "DEVAI_SANDBOX_WORKSPACE", "value": workspace_service_host(record.id, namespace=namespace)},
         {
             "name": "DEVAI_SANDBOX_WORKSPACE_TOKEN",
             "valueFrom": {"secretKeyRef": {"name": f"devai-sandbox-ws-{record.id}", "key": "token"}},
         },
     ]
+    if record.spec.browser:
+        env.append({"name": "DEVAI_SANDBOX_BROWSER", "value": "true"})
+    return env
 
 
 def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:

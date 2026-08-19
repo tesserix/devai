@@ -1,0 +1,27 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-browser-click
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: browser_click
+spec:
+  displayName: Browser Click
+  description: Click an element in the sandbox browser by selector.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      selector:
+        type: string
+    required:
+    - selector
+  tags: [sandbox, mcp-tool, browser]

@@ -129,6 +129,9 @@ class SandboxSpec(_Pinned):
     repo: RepoRef | None = None
     # Run an IDE in the workspace pod so a person can take the run over.
     ide: bool = False
+    # Run Chromium in the workspace, driven by agents over CDP and observable
+    # by people through the authenticated noVNC proxy.
+    browser: bool = False
     # Hosts this run may reach on top of the platform allowlist, e.g. a private
     # package index. Additions are recorded so "what could it reach" is answerable.
     allow_domains: list[str] = Field(default_factory=list)
@@ -139,6 +142,12 @@ class SandboxSpec(_Pinned):
     # `model` shadows pydantic's protected namespace; the field name is part of
     # the published contract, so silence the warning rather than rename it.
     model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
+
+    @model_validator(mode="after")
+    def browser_needs_workspace(self) -> SandboxSpec:
+        if self.browser and not self.workspace:
+            raise ValueError("browser requires workspace=true")
+        return self
 
 
 class SandboxRecord(BaseModel):

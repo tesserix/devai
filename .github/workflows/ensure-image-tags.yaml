@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
-          IMAGES="devai devai-sre devai-dashboard devai-sre-dashboard devai-auth-bff devai-runner devai-mcp-bridge"
+          IMAGES="devai devai-sre devai-dashboard devai-sre-dashboard devai-auth-bff devai-runner devai-browser devai-mcp-bridge"
           for img in $IMAGES; do
             REPO="${REGISTRY}/${OWNER_REPO}/${img}"
             if crane manifest "${REPO}:latest" >/dev/null 2>&1; then

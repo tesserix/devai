@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { EvalPanel, type EvalCase } from "@/components/eval-panel";
 import { SandboxConsole } from "@/components/sandbox-console";
+import { sandboxBrowserDesktopPath } from "@/lib/sandbox-browser";
 
 type Snapshot = {
   captured_at?: string;
@@ -26,6 +27,7 @@ type Sandbox = {
     model: { provider: string; model: string };
     adk_version?: string | null;
     ide?: boolean;
+    browser?: boolean;
     repo?: { url: string; ref: string } | null;
   };
 };
@@ -95,16 +97,28 @@ export default function SandboxPage({ params }: { params: Promise<{ id: string }
             </p>
           )}
         </div>
-        {live && sandbox?.spec.ide && (
-          <a
-            href={`${base}/ide/`}
-            target="_blank"
-            rel="noreferrer"
-            className="btn-secondary !py-1 !px-2 !text-xs"
-          >
-            <ExternalLink className="w-3 h-3" /> Open in editor
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          {live && sandbox?.spec.browser && (
+            <a
+              href={sandboxBrowserDesktopPath(id)}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-secondary !py-1 !px-2 !text-xs"
+            >
+              <ExternalLink className="w-3 h-3" /> Open browser
+            </a>
+          )}
+          {live && sandbox?.spec.ide && (
+            <a
+              href={`${base}/ide/`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-secondary !py-1 !px-2 !text-xs"
+            >
+              <ExternalLink className="w-3 h-3" /> Open in editor
+            </a>
+          )}
+        </div>
       </header>
 
       {error && (

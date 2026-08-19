@@ -50,3 +50,27 @@ RUN pip install --upgrade pip \
 USER 1000
 WORKDIR /devai/work
 ENTRYPOINT ["/usr/bin/tini", "--", "python", "-m", "devai.runner.entrypoint"]
+
+# Browser workspaces opt into a separate image. Chromium and the desktop stack
+# never inflate ordinary runner Jobs, while both targets keep the same DevAI
+# package and main-<sha> release tag.
+FROM base AS browser
+USER root
+ENV DISPLAY=:99 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        fluxbox \
+        fonts-liberation \
+        novnc \
+        websockify \
+        x11vnc \
+        xvfb \
+    && python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod -R a+rX /ms-playwright
+USER 1000
+
+# Keep the slim runner as the default target for local builds that do not name
+# one explicitly; CI names both targets.
+FROM base AS runner
