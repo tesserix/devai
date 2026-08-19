@@ -431,6 +431,9 @@ class _CLIClient:
     def invoke(self, sandbox_id: str, message: str) -> dict[str, Any]:
         return {"id": "inv-cli", "sandbox_id": sandbox_id, "final_text": message.upper()}
 
+    def get(self, sandbox_id: str) -> dict[str, Any]:
+        return {"id": sandbox_id, "status": "ready"}
+
     def traces(self, sandbox_id: str) -> list[dict[str, Any]]:
         return [{"id": "inv-cli", "sandbox_id": sandbox_id}]
 
@@ -510,6 +513,128 @@ def test_cli_sandbox_create_builds_a_draft_spec(tmp_path: Path, monkeypatch: pyt
     assert fake.created["agent"] == {"name": "reviewer", "version": "7"}
     assert fake.created["credentials"] == {"llm_connector": "personal-anthropic", "confirmed": True}
     assert fake.created["draft"]["metadata"]["name"] == "reviewer"
+
+
+def test_cli_sandbox_create_pins_an_unpublished_agent_to_the_candidate_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _write_artifact(
+        tmp_path,
+        "agents",
+        "reviewer",
+        "Agent",
+        {"llm": {"provider": "anthropic", "model": "claude"}},
+    )
+    fake = _CLIClient()
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: fake)
+
+    result = CliRunner().invoke(
+        adk_app,
+        ["sandbox", "create", str(agent), "--agent-version", "commit-a1b2c3", "--output", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.created is not None
+    assert fake.created["agent"]["version"] == "commit-a1b2c3"
+
+
+def test_cli_sandbox_create_pins_the_suite_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = _write_artifact(
+        tmp_path,
+        "agents",
+        "reviewer",
+        "Agent",
+        {"llm": {"provider": "anthropic", "model": "claude"}},
+    )
+    _write_artifact(
+        tmp_path,
+        "datasets",
+        "smoke",
+        "Dataset",
+        {"version": "3", "cases": [{"name": "ok", "input": "go"}]},
+    )
+    suite = _write_artifact(
+        tmp_path,
+        "eval-suites",
+        "release-gate",
+        "EvalSuite",
+        {"version": "1", "datasetRef": {"ref": "smoke", "version": "3"}},
+    )
+    fake = _CLIClient()
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: fake)
+
+    result = CliRunner().invoke(
+        adk_app,
+        [
+            "sandbox",
+            "create",
+            str(agent),
+            "--agent-version",
+            "commit-a1b2c3",
+            "--suite",
+            str(suite),
+            "--output",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.created is not None
+    assert fake.created["dataset"] == {"ref": "smoke", "version": "3"}
+
+
+def test_cli_sandbox_create_can_force_a_safe_ci_tool_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = _write_artifact(
+        tmp_path,
+        "agents",
+        "reviewer",
+        "Agent",
+        {
+            "llm": {"provider": "anthropic", "model": "claude"},
+            "sandbox": {"tools": {"default_mode": "real", "overrides": {"scm_merge": "real"}}},
+        },
+    )
+    fake = _CLIClient()
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: fake)
+
+    result = CliRunner().invoke(
+        adk_app,
+        [
+            "sandbox",
+            "create",
+            str(agent),
+            "--agent-version",
+            "commit-a1b2c3",
+            "--tool-mode",
+            "mock",
+            "--output",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.created is not None
+    assert fake.created["tools"] == {"default_mode": "mock", "overrides": {}}
+
+
+def test_cli_sandbox_wait_stops_when_the_sandbox_is_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    class ProvisioningClient(_CLIClient):
+        statuses = iter(("pending", "provisioning", "ready"))
+
+        def get(self, sandbox_id: str) -> dict[str, Any]:
+            return {"id": sandbox_id, "status": next(self.statuses)}
+
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: ProvisioningClient())
+    monkeypatch.setattr("devai.cli.adk_commands.time.sleep", lambda _: None)
+
+    result = CliRunner().invoke(
+        adk_app,
+        ["sandbox", "wait", "sbx-cli", "--timeout", "1", "--interval", "0"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "ready" in result.output
 
 
 def test_cli_agent_publish_uses_owner_scoped_api_and_attaches_eval_run(
@@ -595,6 +720,37 @@ def test_cli_adk_test_resolves_suite_dataset_and_applies_threshold(
     assert "bad" in result.output
     assert "50.0%" in result.output
     assert "eval-durable" in result.output
+
+
+def test_cli_adk_test_emits_redacted_machine_readable_scorecard(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SecretResultClient(_CLIClient):
+        def test(self, sandbox_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
+            run = super().test(sandbox_id, cases)
+            run["results"][0]["failures"] = ["provider returned sk-ant-super-secret-value"]
+            return run
+
+    dataset = _write_artifact(
+        tmp_path,
+        "datasets",
+        "smoke",
+        "Dataset",
+        {"version": "1", "cases": [{"name": "bad", "input": "go", "expect": {"contains": ["ok"]}}]},
+    )
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: SecretResultClient())
+
+    result = CliRunner().invoke(
+        adk_app,
+        ["test", "reviewer", "--sandbox-id", "sbx-cli", "--dataset", str(dataset), "--json"],
+    )
+
+    assert result.exit_code == 2
+    scorecard = json.loads(result.output)
+    assert scorecard["summary"]["pass_rate"] == 0.5
+    assert scorecard["results"][0]["failures"] == ["provider returned sk-ant-***"]
+    assert "super-secret-value" not in result.output
 
 
 def test_cli_adk_test_uses_inline_agent_evals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
