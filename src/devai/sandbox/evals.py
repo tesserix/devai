@@ -22,9 +22,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from devai.sandbox.trace import Invocation
 
@@ -52,11 +52,19 @@ class EvalExpect(BaseModel):
     json_schema: dict[str, Any] | None = None
     tools_called: list[str] = Field(default_factory=list)
     tools_not_called: list[str] = Field(default_factory=list)
+    tool_order: Literal["ordered", "unordered"] = "ordered"
+    tool_arguments: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
     max_total_tokens: int | None = None
     max_latency_ms: int | None = None
     max_cost_usd: float | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def arguments_align_with_tools(self) -> EvalExpect:
+        if self.tool_arguments and len(self.tool_arguments) != len(self.tools_called):
+            raise ValueError("tool_arguments must align one-to-one with tools_called")
+        return self
 
 
 class EvalCase(BaseModel):
@@ -309,7 +317,7 @@ class EvalRunner:
         scores = self._score(case, invocation, scorers)
         if scores:
             failures = [
-                f"{name}: {score['detail'].get('error', 'failed')}"
+                f"{name}: {score['detail'].get('failure') or score['detail'].get('error', 'failed')}"
                 for name, score in scores.items()
                 if not score["passed"]
             ]

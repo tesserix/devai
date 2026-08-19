@@ -163,3 +163,18 @@ async def test_resolving_a_suite_records_and_loads_the_exact_dataset_version() -
     assert resolved.cases[0].name == "refund-happy-path"
     assert resolved.cases[0].expect.tools_called == ["customer_search", "eligibility_check", "refund"]
     assert resolved.cases[0].expect.tools_not_called == ["delete_resource"]
+
+
+def test_dataset_case_carries_tool_order_and_arguments_into_the_scorer_contract() -> None:
+    case = DatasetCase(
+        id="refund",
+        input="Refund order 4471",
+        expected_tools=["customer_search", "refund"],
+        expected_tool_arguments=[{"customer_id": "c-17"}, {"order_id": "4471"}],
+        tool_order="unordered",
+    )
+
+    eval_case = case.as_eval_case()
+
+    assert eval_case.expect.tool_order == "unordered"
+    assert eval_case.expect.tool_arguments == [{"customer_id": "c-17"}, {"order_id": "4471"}]

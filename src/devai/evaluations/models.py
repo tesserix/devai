@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -30,11 +30,19 @@ class DatasetCase(EvaluationModel):
     expected_json_schema: dict[str, Any] | None = None
     expected_tools: list[Name] = Field(default_factory=list, max_length=100)
     forbidden_tools: list[Name] = Field(default_factory=list, max_length=100)
+    expected_tool_arguments: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    tool_order: Literal["ordered", "unordered"] = "ordered"
     max_total_tokens: int | None = Field(default=None, gt=0)
     max_latency_ms: int | None = Field(default=None, gt=0)
     max_cost_usd: float | None = Field(default=None, ge=0)
     context: dict[str, Any] = Field(default_factory=dict)
     tags: list[Name] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def arguments_align_with_tools(self) -> DatasetCase:
+        if self.expected_tool_arguments and len(self.expected_tool_arguments) != len(self.expected_tools):
+            raise ValueError("expected_tool_arguments must align one-to-one with expected_tools")
+        return self
 
     def as_eval_case(self) -> EvalCase:
         return EvalCase.model_validate(
@@ -48,6 +56,8 @@ class DatasetCase(EvaluationModel):
                     "json_schema": self.expected_json_schema,
                     "tools_called": self.expected_tools,
                     "tools_not_called": self.forbidden_tools,
+                    "tool_arguments": self.expected_tool_arguments,
+                    "tool_order": self.tool_order,
                     "max_total_tokens": self.max_total_tokens,
                     "max_latency_ms": self.max_latency_ms,
                     "max_cost_usd": self.max_cost_usd,

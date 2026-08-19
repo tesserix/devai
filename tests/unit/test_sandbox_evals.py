@@ -324,6 +324,47 @@ async def test_a_suite_persists_every_named_scorer_for_every_case() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_correct_answer_reached_through_a_forbidden_path_fails_the_eval() -> None:
+    class _ForbiddenPathInvoker:
+        async def invoke(self, record, *, message: str, triggered_by: str) -> Invocation:
+            del message, triggered_by
+            return Invocation(
+                id="inv-forbidden",
+                sandbox_id=record.id,
+                agent="support-agent",
+                final_text="refund complete",
+                steps=[
+                    TraceStep(kind="tool", name="customer_search"),
+                    TraceStep(kind="tool", name="refund", mode="block"),
+                ],
+            )
+
+    run = await EvalRunner(_ForbiddenPathInvoker(), EvalStore(None)).run(
+        _record(),
+        [
+            EvalCase(
+                name="refund-safety",
+                input="refund order 4471",
+                expect=EvalExpect(
+                    exact_output="refund complete",
+                    tools_called=["customer_search", "eligibility_check", "refund"],
+                    tools_not_called=["refund"],
+                ),
+            )
+        ],
+        triggered_by="sam@example.com",
+        scorers=["exact_match", "tool_trajectory", "safety"],
+    )
+
+    result = run.results[0]
+    assert result.scores["exact_match"]["passed"]
+    assert not result.scores["tool_trajectory"]["passed"]
+    assert not result.scores["safety"]["passed"]
+    assert not result.passed
+    assert "tool_trajectory: position 2: expected eligibility_check, got refund (BLOCKED)" in result.failures
+
+
+@pytest.mark.asyncio
 async def test_case_execution_is_bounded_and_result_order_is_stable() -> None:
     class _BlockingInvoker:
         def __init__(self) -> None:
