@@ -1,18 +1,18 @@
 apiVersion: registry.solo.io/v1alpha1
 kind: EvalSuite
 metadata:
-  name: qa-tester-golden
+  name: release-promoter-golden-suite
   namespace: devai
   tag: "1"
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: evals
-    devai.io/agent: qa-tester-agent
+    devai.io/agent: release-promoter-agent
 spec:
-  description: Version-pinned golden gate for qa-tester-agent.
+  description: Version-pinned golden gate for release-promoter-agent.
   datasetRef:
-    ref: qa-tester-golden
+    ref: release-promoter-golden
     version: "1"
   minimumPassRate: 0.75
   scorers:

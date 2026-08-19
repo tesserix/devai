@@ -1,18 +1,18 @@
 apiVersion: registry.solo.io/v1alpha1
 kind: EvalSuite
 metadata:
-  name: code-remediator-golden
+  name: db-engineer-golden-suite
   namespace: devai
   tag: "1"
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: evals
-    devai.io/agent: code-remediator-agent
+    devai.io/agent: db-engineer-agent
 spec:
-  description: Version-pinned golden gate for code-remediator-agent.
+  description: Version-pinned golden gate for db-engineer-agent.
   datasetRef:
-    ref: code-remediator-golden
+    ref: db-engineer-golden
     version: "1"
   minimumPassRate: 0.75
   scorers:

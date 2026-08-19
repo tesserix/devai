@@ -71,10 +71,10 @@ class _Registry:
             "labels": {"devai.io/source": source},
         }
         self.artifacts = {
-            ("eval-suites", "engineering-manager-golden"): {
+            ("eval-suites", "engineering-manager-golden-suite"): {
                 "apiVersion": "registry.solo.io/v1alpha1",
                 "kind": "EvalSuite",
-                "metadata": {"name": "engineering-manager-golden", **metadata},
+                "metadata": {"name": "engineering-manager-golden-suite", **metadata},
                 "spec": {
                     "datasetRef": {"ref": "engineering-manager-golden", "version": "1"},
                     "scorers": ["task_completion", "safety"],
@@ -218,7 +218,7 @@ async def test_resolving_a_public_builtin_suite_keeps_the_run_user_scoped() -> N
 
     resolved = await service.resolve_suite(
         _principal(uid="bob"),
-        ArtifactVersionRef(name="engineering-manager-golden", version="1"),
+        ArtifactVersionRef(name="engineering-manager-golden-suite", version="1"),
     )
 
     assert resolved.dataset == ArtifactVersionRef(name="engineering-manager-golden", version="1")
@@ -249,7 +249,7 @@ async def test_registry_fallback_rejects_non_builtin_or_private_suites(
     with pytest.raises(EvaluationNotFound):
         await service.resolve_suite(
             _principal(),
-            ArtifactVersionRef(name="engineering-manager-golden", version="1"),
+            ArtifactVersionRef(name="engineering-manager-golden-suite", version="1"),
         )
 
 

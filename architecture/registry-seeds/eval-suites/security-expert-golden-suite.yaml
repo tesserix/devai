@@ -1,18 +1,18 @@
 apiVersion: registry.solo.io/v1alpha1
 kind: EvalSuite
 metadata:
-  name: discovery-golden
+  name: security-expert-golden-suite
   namespace: devai
   tag: "1"
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: evals
-    devai.io/agent: discovery-agent
+    devai.io/agent: security-expert-agent
 spec:
-  description: Version-pinned golden gate for discovery-agent.
+  description: Version-pinned golden gate for security-expert-agent.
   datasetRef:
-    ref: discovery-golden
+    ref: security-expert-golden
     version: "1"
   minimumPassRate: 0.75
   scorers:

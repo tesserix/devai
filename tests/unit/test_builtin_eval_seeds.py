@@ -31,10 +31,13 @@ def _load(path: Path) -> dict[str, Any]:
 
 def test_builtin_agents_have_versioned_public_golden_datasets_and_suites() -> None:
     dataset_files = sorted((SEEDS / "datasets").glob("*-golden.yaml"))
-    suite_files = sorted((SEEDS / "eval-suites").glob("*-golden.yaml"))
+    suite_files = sorted((SEEDS / "eval-suites").glob("*-golden-suite.yaml"))
 
     assert {path.stem.removesuffix("-golden") for path in dataset_files} == BUILTIN_AGENTS
-    assert {path.stem.removesuffix("-golden") for path in suite_files} == BUILTIN_AGENTS
+    assert {path.stem.removesuffix("-golden-suite") for path in suite_files} == BUILTIN_AGENTS
+    assert {_load(path)["metadata"]["name"] for path in dataset_files}.isdisjoint(
+        {_load(path)["metadata"]["name"] for path in suite_files}
+    )
 
     for path in dataset_files:
         agent = path.stem.removesuffix("-golden")
@@ -51,7 +54,7 @@ def test_builtin_agents_have_versioned_public_golden_datasets_and_suites() -> No
         assert [EvalCase.model_validate(case).name for case in cases] == sorted(CASE_KINDS)
 
     for path in suite_files:
-        agent = path.stem.removesuffix("-golden")
+        agent = path.stem.removesuffix("-golden-suite")
         body = _load(path)
         metadata = body["metadata"]
         spec = body["spec"]
@@ -83,7 +86,7 @@ def test_builtin_agents_have_versioned_public_golden_datasets_and_suites() -> No
 def test_builtin_eval_suite_references_resolve_metadata_tag_versions() -> None:
     targets = [
         *(SEEDS / "datasets").glob("*-golden.yaml"),
-        *(SEEDS / "eval-suites").glob("*-golden.yaml"),
+        *(SEEDS / "eval-suites").glob("*-golden-suite.yaml"),
     ]
 
     assert validate_artifacts(targets, deep=True, catalog_roots=[SEEDS]) == []

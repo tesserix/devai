@@ -1,18 +1,18 @@
 apiVersion: registry.solo.io/v1alpha1
 kind: EvalSuite
 metadata:
-  name: cost-optimizer-golden
+  name: incident-responder-golden-suite
   namespace: devai
   tag: "1"
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: evals
-    devai.io/agent: cost-optimizer-agent
+    devai.io/agent: incident-responder-agent
 spec:
-  description: Version-pinned golden gate for cost-optimizer-agent.
+  description: Version-pinned golden gate for incident-responder-agent.
   datasetRef:
-    ref: cost-optimizer-golden
+    ref: incident-responder-golden
     version: "1"
   minimumPassRate: 0.75
   scorers:
