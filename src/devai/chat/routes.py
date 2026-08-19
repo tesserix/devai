@@ -159,4 +159,4 @@ async def chat_websocket(websocket: WebSocket) -> None:
             await websocket.send_json({"type": "done"})
 
     except WebSocketDisconnect:
-        agent.clear_session(session_id)
+        agent.clear_session(session_id, principal=principal)
