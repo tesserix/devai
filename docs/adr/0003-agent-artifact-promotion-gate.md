@@ -54,9 +54,9 @@ never accepted from the manifest.
   for Agent artifacts is introduced later, its promotion step must call this same DevAI
   decision boundary rather than reimplementing gate logic.
 
-This route supplies the Test decision required by the planned #75 agent lifecycle
-harness. Build and Security remain separate #75 stages; they do not weaken or bypass this
-evaluation decision.
+This route supplies the Test decision in the #75 agent lifecycle harness. The
+same trusted boundary now performs the separate Build and Security stages; they
+do not weaken or bypass this evaluation decision.
 
 ## Failure behavior
 

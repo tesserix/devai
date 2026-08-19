@@ -168,6 +168,39 @@ class AgentGateService:
             }
         )
 
+    async def approve_risk(
+        self,
+        principal: Principal,
+        *,
+        agent_name: str,
+        risk_level: str,
+        reason: str,
+    ) -> str:
+        if not {"admin", "platform-admin"}.intersection(principal.roles):
+            raise PermissionError("admin role required for a risk gate approval")
+        cleaned_reason = reason.strip()
+        if not cleaned_reason:
+            raise ValueError("approval reason is required")
+        if len(cleaned_reason) > 1000:
+            raise ValueError("approval reason must not exceed 1000 characters")
+        if risk_level not in {"high", "critical"}:
+            raise ValueError("risk approval applies only to high or critical agents")
+        if self._audit is None:
+            raise RuntimeError("durable audit storage unavailable")
+        approver = principal.user_scope_id
+        if not approver:
+            raise PermissionError("verified approver identity required")
+        await self._audit(
+            action="agent.risk_gate.approve",
+            actor=approver,
+            actor_type="user",
+            agent_name=agent_name,
+            entity_type="agent",
+            entity_ref=agent_name,
+            details={"risk_level": risk_level, "reason": cleaned_reason},
+        )
+        return approver
+
     @staticmethod
     def _manifest_gate(manifest: dict[str, Any]) -> tuple[str, ArtifactVersionRef]:
         metadata = manifest.get("metadata")

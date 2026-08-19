@@ -13,7 +13,9 @@ import { useToast } from "@/components/toast";
 import {
   AGENT_LIFECYCLE_STAGES,
   agentLifecycle,
+  gateAllowsAdminOverride,
   gateFailureMessages,
+  lifecycleGateFromError,
   type AgentGateResult,
 } from "@/lib/agent-lifecycle";
 import { api } from "@/lib/api";
@@ -299,9 +301,10 @@ export default function AgentStudioPage() {
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        if (body?.detail?.code === "agent_evaluation_gate_blocked" && body.detail.gate) {
-          setGate(body.detail.gate as AgentGateResult);
-          setError("Publication blocked by the evaluation gate.");
+        const blockedGate = lifecycleGateFromError(body);
+        if (blockedGate) {
+          setGate(blockedGate);
+          setError("Publication blocked by the agent lifecycle gate.");
           return;
         }
         throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
@@ -677,34 +680,42 @@ export default function AgentStudioPage() {
                 </div>
               )}
 
-              {gate?.status === "blocked" && (
+              {(gate?.status === "blocked" || gate?.status === "approval_required") && (
                 <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 space-y-2">
-                  <p className="text-xs font-medium text-red-200">Evaluation gate blocked publication</p>
+                  <p className="text-xs font-medium text-red-200">
+                    {gate.status === "approval_required"
+                      ? "Human approval required before publication"
+                      : "Agent lifecycle gate blocked publication"}
+                  </p>
                   <ul className="list-disc pl-4 text-xs text-red-300 font-mono">
                     {gateFailureMessages(gate).map((failure) => (
                       <li key={failure}>{failure}</li>
                     ))}
                   </ul>
-                  <label htmlFor="gate-override-reason" className="label-eyebrow">
-                    Admin override reason
-                  </label>
-                  <textarea
-                    id="gate-override-reason"
-                    value={overrideReason}
-                    onChange={(event) => setOverrideReason(event.target.value)}
-                    maxLength={1000}
-                    rows={2}
-                    placeholder="Required, audited, and stamped on the published version."
-                    className={`${field} font-mono`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => publish(Boolean(conflict), true)}
-                    disabled={busy || !overrideReason.trim()}
-                    className="btn-secondary !py-1.5 !px-3 !text-xs text-amber-200 disabled:opacity-50"
-                  >
-                    Publish with audited admin override
-                  </button>
+                  {gateAllowsAdminOverride(gate) && (
+                    <>
+                      <label htmlFor="gate-override-reason" className="label-eyebrow">
+                        Admin approval reason
+                      </label>
+                      <textarea
+                        id="gate-override-reason"
+                        value={overrideReason}
+                        onChange={(event) => setOverrideReason(event.target.value)}
+                        maxLength={1000}
+                        rows={2}
+                        placeholder="Required, audited, and stamped on the published version."
+                        className={`${field} font-mono`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => publish(Boolean(conflict), true)}
+                        disabled={busy || !overrideReason.trim()}
+                        className="btn-secondary !py-1.5 !px-3 !text-xs text-amber-200 disabled:opacity-50"
+                      >
+                        Publish with audited admin approval
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
