@@ -13,7 +13,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSocket
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, WebSocket
 from pydantic import ValidationError
 
 from devai.identity import Principal, extract_principal
@@ -368,36 +368,91 @@ def _evals(request: Request) -> EvalRunner:
 @router.post("/{sandbox_id}/evals")
 async def run_evals(request: Request, sandbox_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """Run the saved checks against this sandbox and answer with the scorecard."""
+    from devai.evaluations.models import ArtifactVersionRef
+    from devai.evaluations.service import EvaluationError, EvaluationNotFound
     from devai.sandbox.evals import EvalCase
 
     owner, is_admin = await _read_scope(request)
+    principal = await _resolve_principal(request)
     record = await _service(request).get(sandbox_id, owner=owner, is_admin=is_admin)
     if record is None:
         raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
     runner = _evals(request)
+    sources = sum(("cases" in body, body.get("dataset") is not None, body.get("suite") is not None))
+    if sources != 1:
+        raise HTTPException(status_code=422, detail="provide exactly one of cases, dataset, or suite")
+    dataset_ref = None
+    suite_ref = None
     try:
-        cases = [EvalCase.model_validate(c) for c in body.get("cases") or []]
+        if "cases" in body:
+            cases = [EvalCase.model_validate(c) for c in body.get("cases") or []]
+        else:
+            if principal is None:
+                raise HTTPException(status_code=401, detail="authentication required")
+            evaluations = getattr(request.app.state, "evaluation_service", None)
+            if evaluations is None:
+                raise HTTPException(status_code=503, detail="evaluation storage unavailable")
+            if body.get("dataset") is not None:
+                requested = ArtifactVersionRef.model_validate(body["dataset"])
+                resolved = await evaluations.resolve_dataset(principal, requested)
+            else:
+                requested = ArtifactVersionRef.model_validate(body["suite"])
+                resolved = await evaluations.resolve_suite(principal, requested)
+            cases = resolved.cases
+            dataset_ref = resolved.dataset.model_dump(mode="json")
+            suite_ref = resolved.suite.model_dump(mode="json") if resolved.suite else None
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=f"invalid case: {e.errors()[0]['msg']}") from e
+    except EvaluationNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except EvaluationError as e:
+        logger.warning("evaluation source unavailable", exc_info=True)
+        raise HTTPException(status_code=503, detail="evaluation storage unavailable") from e
     await _service(request).touch(sandbox_id)
     try:
-        run = await runner.run(record, cases, triggered_by=owner or record.owner)
+        run = await runner.run(
+            record,
+            cases,
+            triggered_by=owner or record.owner,
+            owner_scope=owner or record.owner,
+            tenant_id=str(getattr(principal, "tenant_id", "") or ""),
+            user_id=str(getattr(principal, "uid", "") or getattr(principal, "email", "") or owner),
+            dataset_ref=dataset_ref,
+            suite_ref=suite_ref,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 — durable storage failure must be explicit
+        logger.exception("durable eval result write failed")
+        raise HTTPException(status_code=503, detail="evaluation storage unavailable") from e
     return run.to_dict()
 
 
 @router.get("/{sandbox_id}/evals")
-async def list_evals(request: Request, sandbox_id: str, limit: int = 20) -> list[dict[str, Any]]:
+async def list_evals(
+    request: Request,
+    sandbox_id: str,
+    limit: int = Query(20, ge=1, le=200),
+) -> list[dict[str, Any]]:
     await _sandbox_or_404(request, sandbox_id)
-    found = await _evals(request).store.list_for_sandbox(sandbox_id, limit=limit)
+    owner, _ = await _read_scope(request)
+    try:
+        found = await _evals(request).store.list_for_sandbox(sandbox_id, limit=limit, owner_scope=owner)
+    except Exception as e:  # noqa: BLE001 — durable reads fail closed at the request boundary
+        logger.exception("durable eval history read failed")
+        raise HTTPException(status_code=503, detail="evaluation storage unavailable") from e
     return [run.to_dict() for run in found]
 
 
 @router.get("/{sandbox_id}/evals/{run_id}")
 async def get_eval_run(request: Request, sandbox_id: str, run_id: str) -> dict[str, Any]:
     await _sandbox_or_404(request, sandbox_id)
-    run = await _evals(request).store.get(sandbox_id, run_id)
+    owner, _ = await _read_scope(request)
+    try:
+        run = await _evals(request).store.get(sandbox_id, run_id, owner_scope=owner)
+    except Exception as e:  # noqa: BLE001 — durable reads fail closed at the request boundary
+        logger.exception("durable eval history read failed")
+        raise HTTPException(status_code=503, detail="evaluation storage unavailable") from e
     if run is None:
         raise HTTPException(status_code=404, detail=f"check run {run_id!r} not found")
     return run.to_dict()

@@ -17,7 +17,7 @@ import logging
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -25,6 +25,8 @@ from devai.authz import require_principal
 from devai.identity import extract_principal
 from devai.registry.client import (
     Agent,
+    Dataset,
+    EvalSuite,
     McpServer,
     Prompt,
     RegistryClient,
@@ -45,7 +47,7 @@ _RUNTIME_LABEL = "devai.io/runtime"
 _MODEL_PROVIDERS = frozenset({"anthropic", "claude", "openai", "google", "gemini", "vertex", "vertex_gemini", "groq"})
 _RISK_LEVELS = frozenset({"low", "medium", "high", "critical"})
 
-type RegistryItem = Skill | Prompt | McpServer | Agent
+type RegistryItem = Skill | Prompt | McpServer | Agent | Dataset | EvalSuite
 
 
 def _agent_contract_errors(body: dict[str, Any]) -> list[str]:
@@ -109,10 +111,10 @@ def _client(request: Request) -> RegistryClient:
             status_code=503,
             detail="registry client not configured — set DEVAI_REGISTRY_URL",
         )
-    return client
+    return cast("RegistryClient", client)
 
 
-def _to_dict(item: Skill | Prompt | McpServer | Agent) -> dict[str, Any]:
+def _to_dict(item: RegistryItem) -> dict[str, Any]:
     """Convert dataclass → dict, dropping the raw passthrough field.
 
     `raw` is useful for stage code that wants the full record but ugly
@@ -140,7 +142,7 @@ def _owner_id(principal: Principal | None) -> str:
     return hashlib.sha256(scope.encode()).hexdigest()[:32]
 
 
-def _labels(item: Skill | Prompt | McpServer | Agent | dict[str, Any]) -> dict[str, str]:
+def _labels(item: RegistryItem | dict[str, Any]) -> dict[str, str]:
     if isinstance(item, dict):
         metadata = item.get("metadata")
         raw_labels = metadata.get("labels") if isinstance(metadata, dict) else None
@@ -153,7 +155,7 @@ def _labels(item: Skill | Prompt | McpServer | Agent | dict[str, Any]) -> dict[s
     return {str(key): str(value) for key, value in raw_labels.items()}
 
 
-def _visibility(item: Skill | Prompt | McpServer | Agent | dict[str, Any]) -> str:
+def _visibility(item: RegistryItem | dict[str, Any]) -> str:
     if isinstance(item, dict):
         metadata = item.get("metadata")
         value = metadata.get("visibility") if isinstance(metadata, dict) else ""
@@ -162,7 +164,7 @@ def _visibility(item: Skill | Prompt | McpServer | Agent | dict[str, Any]) -> st
     return str(value or "").strip().lower()
 
 
-def _visible(item: Skill | Prompt | McpServer | Agent, principal: Principal | None) -> bool:
+def _visible(item: RegistryItem, principal: Principal | None) -> bool:
     owner = _labels(item).get(_OWNER_LABEL, "")
     if owner:
         return owner == _owner_id(principal)
@@ -206,17 +208,21 @@ async def registry_health(request: Request) -> dict[str, Any]:
 async def registry_counts(request: Request) -> dict[str, int]:
     client = _client(request)
     try:
-        skills, prompts, servers, agents = await asyncio.gather(
+        skills, prompts, servers, agents, datasets, eval_suites = await asyncio.gather(
             _visible_items(request, client.list_skills),
             _visible_items(request, client.list_prompts),
             _visible_items(request, client.list_mcp_servers),
             _visible_items(request, client.list_agents),
+            _visible_items(request, client.list_datasets),
+            _visible_items(request, client.list_eval_suites),
         )
         return {
             "skills": len(skills),
             "prompts": len(prompts),
             "mcp_servers": len(servers),
             "agents": len(agents),
+            "datasets": len(datasets),
+            "eval_suites": len(eval_suites),
         }
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -323,6 +329,26 @@ async def get_agent(request: Request, name: str) -> dict[str, Any]:
     return _to_dict(item)
 
 
+@router.get("/datasets")
+async def list_datasets(request: Request) -> list[dict[str, Any]]:
+    client = _client(request)
+    try:
+        items = await _visible_items(request, client.list_datasets)
+        return [_to_dict(item) for item in items]
+    except RegistryError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/eval-suites")
+async def list_eval_suites(request: Request) -> list[dict[str, Any]]:
+    client = _client(request)
+    try:
+        items = await _visible_items(request, client.list_eval_suites)
+        return [_to_dict(item) for item in items]
+    except RegistryError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
 @router.get("/agents/{name}/manifest")
 async def get_owned_agent_manifest(request: Request, name: str) -> dict[str, Any]:
     """Return an editable manifest only to the agent's authenticated owner."""
@@ -369,6 +395,8 @@ _PUBLISH_METHOD: dict[str, str] = {
     "mcp-servers": "publish_mcp_server",
     "servers": "publish_mcp_server",
     "agents": "publish_agent",
+    "datasets": "publish_dataset",
+    "eval-suites": "publish_eval_suite",
     "blueprints": "publish_blueprint",
     "workflows": "publish_workflow",
     "tools": "publish_tool",

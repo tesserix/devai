@@ -76,3 +76,68 @@ def test_list_projects_metadata_visibility_for_authorization(monkeypatch) -> Non
     agents = client.list_agents()
 
     assert agents[0].raw["visibility"] == "private"
+
+
+def test_list_datasets_and_eval_suites_preserves_versioned_eval_contract(monkeypatch) -> None:
+    def request(method: str, url: str, **_: object) -> httpx.Response:
+        if "/datasets" in url:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "kind": "Dataset",
+                        "metadata": {"name": "golden", "tag": "3"},
+                        "spec": {"description": "Golden cases", "cases": [{"id": "refund"}]},
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "kind": "EvalSuite",
+                    "metadata": {"name": "release-gate", "tag": "2"},
+                    "spec": {
+                        "description": "Release gate",
+                        "datasetRef": {"ref": "golden", "version": "3"},
+                        "scorers": ["exact_match", "tool_trajectory"],
+                        "thresholds": {"success": 0.95},
+                    },
+                }
+            ],
+        )
+
+    monkeypatch.setattr(httpx, "request", request)
+    client = RegistryClient(base_url="http://reg:12121", namespace="devai")
+
+    dataset = client.list_datasets()[0]
+    suite = client.list_eval_suites()[0]
+
+    assert (dataset.name, dataset.version, dataset.case_count) == ("golden", "3", 1)
+    assert suite.dataset_ref == {"ref": "golden", "version": "3"}
+    assert suite.scorers == ["exact_match", "tool_trajectory"]
+    assert suite.thresholds == {"success": 0.95}
+
+
+def test_eval_publish_accepts_full_manifest_without_double_enveloping(monkeypatch) -> None:
+    bodies: list[dict[str, object]] = []
+
+    def request(method: str, url: str, **kwargs: object) -> httpx.Response:
+        del method, url
+        import json
+
+        bodies.append(json.loads(str(kwargs["content"])))
+        return httpx.Response(201, json={})
+
+    monkeypatch.setattr(httpx, "request", request)
+    client = RegistryClient(base_url="http://reg:12121", namespace="devai")
+    manifest = {
+        "apiVersion": "registry.agentic.dev/v1alpha1",
+        "kind": "Dataset",
+        "metadata": {"name": "golden", "tag": "3", "namespace": "devai"},
+        "spec": {"cases": []},
+    }
+
+    client.publish_dataset(manifest)
+
+    assert bodies == [manifest]

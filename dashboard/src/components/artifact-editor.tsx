@@ -268,6 +268,17 @@ export default function ArtifactEditor({
                   />
                 );
               }
+              if (f.type === "objectList") {
+                const value = getPath(doc, f.path);
+                return (
+                  <ObjectListInput
+                    key={f.path}
+                    f={f}
+                    value={Array.isArray(value) ? value : []}
+                    onChange={(next) => onFieldVal(f.path, next)}
+                  />
+                );
+              }
               if (f.type === "group") {
                 return (
                   <div key={f.path}>
@@ -645,6 +656,65 @@ function RefListInput({ f, value, onChange }: { f: Field; value: unknown[]; onCh
           {f.help}
         </p>
       )}
+    </div>
+  );
+}
+
+function ObjectListInput({ f, value, onChange }: { f: Field; value: unknown[]; onChange: (v: unknown[]) => void }) {
+  const entries = value.map((item) =>
+    item != null && typeof item === "object" && !Array.isArray(item) ? (item as Doc) : {},
+  );
+
+  function add() {
+    const next = Object.fromEntries((f.children ?? []).map((child) => [child.path, child.type === "number" ? null : ""]));
+    onChange([...entries, next]);
+  }
+
+  function update(index: number, path: string, next: unknown) {
+    onChange(entries.map((entry, current) => (current === index ? setPath(entry, path, next) : entry)));
+  }
+
+  function remove(index: number) {
+    onChange(entries.filter((_, current) => current !== index));
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <label className="text-[12px] font-medium" style={{ color: "var(--ink-soft)" }}>
+          {f.label} {f.required && <span style={{ color: "var(--error-ink)" }}>*</span>}
+        </label>
+        <button type="button" className="btn-secondary" style={{ padding: "4px 8px", fontSize: 11 }} onClick={add}>
+          <Plus className="w-3 h-3" /> Add
+        </button>
+      </div>
+      {f.help && <p className="text-[11px] mb-2" style={{ color: "var(--ink-muted)" }}>{f.help}</p>}
+      <div className="space-y-3">
+        {entries.map((entry, index) => (
+          <div
+            key={String(entry.id || index)}
+            className="rounded-md p-3"
+            style={{ background: "var(--surface-muted)", border: "1px solid var(--border-subtle)" }}
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <span className="label-eyebrow">{f.label.replace(/s$/, "")} {index + 1}</span>
+              <button type="button" className="btn-ghost" style={{ padding: 4 }} onClick={() => remove(index)} aria-label={`Remove ${f.label} ${index + 1}`}>
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {(f.children ?? []).map((child) => (
+                <FieldInput
+                  key={child.path}
+                  f={child}
+                  value={String(getPath(entry, child.path) ?? "")}
+                  onChange={(next) => update(index, child.path, next)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
