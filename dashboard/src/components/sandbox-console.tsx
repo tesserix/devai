@@ -3,12 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Send } from "lucide-react";
 
+import { traceLatencyMs, traceStepBadges } from "@/lib/sandbox-trace";
+
 export type TraceStep = {
   kind: string;
   name: string;
   input?: unknown;
   output?: unknown;
   mode?: string;
+  provider?: string;
+  prompt_version?: string;
   prompt_tokens: number;
   completion_tokens: number;
   cost_usd: number;
@@ -31,6 +35,7 @@ export type Invocation = {
     total_tokens: number;
     cost_usd: number;
     latency_ms: number;
+    wall_clock_ms?: number;
     llm_calls: number;
     tool_calls: number;
     blocked_tool_calls: number;
@@ -53,6 +58,7 @@ function text(value: unknown): string {
 function Step({ step }: { step: TraceStep }) {
   const [open, setOpen] = useState(false);
   const body = [text(step.input), text(step.output), step.error ?? ""].filter(Boolean).join("\n\n");
+  const badges = traceStepBadges(step);
   return (
     <li className="border-b border-[var(--surface-border)] last:border-0">
       <button
@@ -64,6 +70,11 @@ function Step({ step }: { step: TraceStep }) {
         <span className={`font-mono uppercase ${KIND_COLOR[step.kind] ?? ""}`}>{step.kind}</span>
         <span className="font-mono text-[var(--ink-100)] truncate">{step.name}</span>
         {step.mode && <span className="label-eyebrow">{step.mode}</span>}
+        {badges.map((badge) => (
+          <span key={badge} className="label-eyebrow">
+            {badge}
+          </span>
+        ))}
         <span className="ml-auto flex items-center gap-3 text-[var(--ink-500)] shrink-0">
           {step.prompt_tokens + step.completion_tokens > 0 && (
             <span>
@@ -86,7 +97,7 @@ function Step({ step }: { step: TraceStep }) {
 function Totals({ totals }: { totals: Invocation["totals"] }) {
   const cells: [string, string][] = [
     ["Tokens", `${totals.total_tokens}`],
-    ["Latency", `${totals.latency_ms} ms`],
+    ["Wall clock", `${traceLatencyMs(totals)} ms`],
     ["Cost", `$${totals.cost_usd.toFixed(4)}`],
     ["LLM calls", `${totals.llm_calls}`],
     ["Tool calls", `${totals.tool_calls}`],
