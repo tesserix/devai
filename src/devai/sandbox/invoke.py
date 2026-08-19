@@ -85,12 +85,20 @@ class SandboxInvoker:
             invocation.final_text = result.final_text
             invocation.ok = result.ok
             invocation.error = result.error or ""
+            from devai.analytics.pricing import estimate_cost
+
             steps.append(
                 TraceStep(
                     kind="llm",
                     name=record.spec.model.model,
                     prompt_tokens=result.prompt_tokens,
                     completion_tokens=result.completion_tokens,
+                    cost_usd=estimate_cost(
+                        record.spec.model.provider,
+                        record.spec.model.model,
+                        result.prompt_tokens,
+                        result.completion_tokens,
+                    ),
                     latency_ms=int((time.perf_counter() - started) * 1000),
                     error=result.error or "",
                 )

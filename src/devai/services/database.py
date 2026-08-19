@@ -697,7 +697,9 @@ class Database:
         stage: str = "",
         agent_name: str = "",
         triggered_by: str = "",
-        detail: dict | None = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        detail: dict[str, Any] | None = None,
     ) -> None:
         """Persist one quality eval (review/security/tests → 0..1 score).
 
@@ -705,6 +707,11 @@ class Database:
         swallowed so capturing an eval never breaks a run.
         """
         try:
+            scoped_detail = dict(detail or {})
+            if tenant_id:
+                scoped_detail["tenant_id"] = tenant_id
+            if user_id:
+                scoped_detail["user_id"] = user_id
             await self.pool.execute(
                 """INSERT INTO agent_evals
                    (run_id, stage, agent_name, evaluator, score, passed, triggered_by, detail)
@@ -716,23 +723,28 @@ class Database:
                 float(max(0.0, min(1.0, score))),
                 bool(passed),
                 triggered_by,
-                json.dumps(detail or {}),
+                json.dumps(scoped_detail),
             )
         except Exception:  # noqa: BLE001
             logger.debug("record_eval failed (evaluator=%s)", evaluator, exc_info=True)
 
-    async def analytics_evals(self, days: int = 30, user: str = "") -> dict[str, Any]:
-        """Eval summary + by-evaluator + recent, optionally scoped to a user.
-
-        When ``user`` is set, only that user's runs are included — this is
-        what makes the Evals analytics tenant-isolated.
-        """
+    async def analytics_evals(
+        self,
+        days: int = 30,
+        *,
+        tenant_id: str = "",
+        user_id: str = "",
+    ) -> dict[str, Any]:
+        """Eval summary scoped to a tenant and, for non-admins, one subject."""
         try:
             where = "created_at >= NOW() - make_interval(days => $1)"
             args: list[Any] = [days]
-            if user:
-                where += " AND triggered_by = $2"
-                args.append(user)
+            if tenant_id:
+                args.append(tenant_id)
+                where += f" AND detail->>'tenant_id' = ${len(args)}"
+            if user_id:
+                args.append(user_id)
+                where += f" AND detail->>'user_id' = ${len(args)}"
             summary = await self.pool.fetchrow(
                 f"""SELECT COUNT(*)::int AS evals,
                            COALESCE(AVG(score), 0)::float AS avg_score,

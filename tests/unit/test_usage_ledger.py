@@ -72,3 +72,74 @@ async def test_sandbox_cost_rollups_are_tenant_and_user_scoped():
     assert [row["sandbox_id"] for row in await ledger.by_sandbox("tenant-a", "alice")] == ["sb-a"]
     assert {row["sandbox_id"] for row in await ledger.by_sandbox("tenant-a")} == {"sb-a", "sb-b"}
     assert await ledger.by_sandbox("tenant-b") == []
+
+
+async def test_monthly_sandbox_spend_alert_is_delivered_once_per_tenant():
+    from devai.analytics.usage_ledger import UsageLedger
+
+    alerts = []
+
+    async def deliver(event):
+        alerts.append(event)
+
+    ledger = UsageLedger(
+        "",
+        sandbox_monthly_cost_limit_usd=10.0,
+        sandbox_spend_alert_ratio=0.8,
+        alert_sink=deliver,
+    )
+    ledger._redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    for cost in (4.0, 4.0, 1.0):
+        await ledger.record(
+            day="2026-08-19",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            tokens_in=10,
+            tokens_out=5,
+            cost_usd=cost,
+            duration_ms=20,
+            tenant_id="tenant-a",
+            user_id="alice",
+            sandbox_id="sb-a",
+        )
+
+    assert len(alerts) == 1
+    assert alerts[0] == {
+        "action": "sandbox_monthly_spend_threshold",
+        "tenant_id": "tenant-a",
+        "month": "2026-08",
+        "spent_usd": 8.0,
+        "limit_usd": 10.0,
+        "threshold_ratio": 0.8,
+    }
+
+
+async def test_non_sandbox_usage_does_not_draw_down_the_sandbox_alert_counter():
+    from devai.analytics.usage_ledger import UsageLedger
+
+    alerts = []
+
+    async def deliver(event):
+        alerts.append(event)
+
+    ledger = UsageLedger(
+        "",
+        sandbox_monthly_cost_limit_usd=1.0,
+        sandbox_spend_alert_ratio=0.8,
+        alert_sink=deliver,
+    )
+    ledger._redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+    await ledger.record(
+        day="2026-08-19",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        tokens_in=10,
+        tokens_out=5,
+        cost_usd=1.0,
+        duration_ms=20,
+        tenant_id="tenant-a",
+        user_id="alice",
+    )
+
+    assert alerts == []

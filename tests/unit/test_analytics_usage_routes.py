@@ -45,6 +45,10 @@ class _Database:
         self.calls.append(("agents", days, tenant_id, user_id))
         return []
 
+    async def analytics_evals(self, days: int, *, tenant_id: str = "", user_id: str = ""):
+        self.calls.append(("evals", days, tenant_id, user_id))
+        return {"summary": {"evals": 1, "avg_score": 1.0, "pass_rate": 1.0}, "by_evaluator": [], "recent": []}
+
 
 def _app(principal: Principal | None, monkeypatch) -> FastAPI:
     app = FastAPI()
@@ -72,6 +76,7 @@ def test_usage_rejects_unauthenticated_instead_of_reading_global_namespace(monke
     assert client.get("/api/analytics/usage/recent").status_code == 401
     assert client.get("/api/analytics/llm/cost").status_code == 401
     assert client.get("/api/analytics/agents").status_code == 401
+    assert client.get("/api/analytics/evals").status_code == 401
 
 
 def test_user_usage_is_scoped_by_tenant_and_subject(monkeypatch):
@@ -111,3 +116,28 @@ def test_postgres_cost_and_agent_rollups_receive_the_same_principal_scope(monkey
         ("timeseries", 7, "tenant-a", "shared-uid"),
         ("agents", 7, "tenant-a", "shared-uid"),
     ]
+
+
+def test_eval_rollups_receive_the_same_tenant_and_subject_scope(monkeypatch):
+    app = _app(Principal(email="same@example.com", uid="shared-uid", tenant_id="tenant-a"), monkeypatch)
+    client = TestClient(app)
+
+    response = client.get("/api/analytics/evals?days=7")
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == "me"
+    assert app.state.analytics_db.calls == [("evals", 7, "tenant-a", "shared-uid")]
+
+
+def test_tenant_admin_eval_rollup_is_tenant_scoped(monkeypatch):
+    app = _app(
+        Principal(email="admin@example.com", uid="admin-uid", tenant_id="tenant-a", roles=["admin"]),
+        monkeypatch,
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/analytics/evals?days=7")
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == "tenant"
+    assert app.state.analytics_db.calls == [("evals", 7, "tenant-a", "")]

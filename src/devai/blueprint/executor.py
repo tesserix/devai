@@ -198,6 +198,7 @@ def _record_stage_evals(spec: StageSpec, task: DevAITask, data: dict[str, Any] |
             db = await get_global_db()
             if db is None:
                 return
+            principal = task.principal or {}
             for evaluator, score, passed in evals:
                 await db.record_eval(
                     run_id=task.id,
@@ -207,6 +208,8 @@ def _record_stage_evals(spec: StageSpec, task: DevAITask, data: dict[str, Any] |
                     stage=spec.name,
                     agent_name=spec.resolved_agent() or "",
                     triggered_by=task.triggered_by or "",
+                    tenant_id=str(principal.get("tenant_id") or ""),
+                    user_id=str(principal.get("uid") or task.triggered_by or ""),
                 )
         except Exception:  # noqa: BLE001 — eval capture is best-effort
             logger.debug("eval persistence failed for stage %s", spec.name, exc_info=True)

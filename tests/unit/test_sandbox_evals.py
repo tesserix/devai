@@ -66,7 +66,7 @@ def _record() -> SandboxRecord:
     )
 
 
-def _runner(llm) -> EvalRunner:
+def _runner(llm, **kwargs) -> EvalRunner:
     registry = SpecializationRegistry()
     registry.register(load_specialization_from_string(_SPEC_YAML))
     invoker = SandboxInvoker(
@@ -75,7 +75,7 @@ def _runner(llm) -> EvalRunner:
         traces=TraceStore(None),
         credentials=_GrantedSandboxLLM(llm),
     )
-    return EvalRunner(invoker, EvalStore(None))
+    return EvalRunner(invoker, EvalStore(None), **kwargs)
 
 
 def _invocation(**kw) -> Invocation:
@@ -171,6 +171,12 @@ async def test_a_suite_runs_every_case_and_summarises_the_outcome() -> None:
     assert run.summary["failed"] == 1
     assert run.summary["pass_rate"] == 0.5
     assert run.summary["total_tokens"] == 20
+    assert run.summary["cost_breakdown"] == {
+        "agent_cost_usd": pytest.approx(0.00006),
+        "judge_cost_usd": 0.0,
+        "infrastructure_cost_usd": 0.0,
+    }
+    assert run.summary["cost_usd"] == pytest.approx(0.00006)
 
 
 @pytest.mark.asyncio
@@ -204,6 +210,14 @@ async def test_a_broken_case_fails_without_taking_the_suite_down() -> None:
 async def test_a_suite_needs_at_least_one_case() -> None:
     with pytest.raises(ValueError, match="at least one case"):
         await _runner(_ScriptedLLM([])).run(_record(), [], triggered_by="sam@example.com")
+
+
+@pytest.mark.asyncio
+async def test_a_suite_refuses_more_cases_than_the_configured_tenant_limit() -> None:
+    cases = [EvalCase(name="c1", input="go"), EvalCase(name="c2", input="go")]
+
+    with pytest.raises(ValueError, match="tenant dataset quota.*1 case"):
+        await _runner(_ScriptedLLM([]), max_cases=1).run(_record(), cases, triggered_by="sam@example.com")
 
 
 @pytest.mark.asyncio
