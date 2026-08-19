@@ -8,6 +8,165 @@ export interface PipelineRun {
   agents: Record<string, { status: string; error?: string; updated_at?: number }>;
 }
 
+export type SandboxStatus = "pending" | "provisioning" | "ready" | "destroying" | "destroyed" | "failed";
+export type SandboxToolMode = "real" | "mock" | "replay" | "block";
+
+export interface ArtifactVersionRef {
+  name: string;
+  version: string;
+}
+
+export interface SandboxSpec {
+  agent: ArtifactVersionRef;
+  model: { provider: string; model: string };
+  prompt?: { ref: string; version: string } | null;
+  dataset?: { ref: string; version: string } | null;
+  adk_version?: string | null;
+  draft?: Record<string, unknown> | null;
+  tools: { default_mode: SandboxToolMode; overrides?: Record<string, SandboxToolMode> };
+  limits: { max_tokens: number; max_cost_usd: number; max_wall_clock_s: number };
+  credentials?: { llm_connector: string; confirmed: boolean };
+  ttl_seconds: number;
+  workspace?: boolean;
+  repo?: { url: string; ref: string; scope: string } | null;
+  ide?: boolean;
+  allow_domains?: string[];
+  allow_scopes?: string[];
+}
+
+export interface SandboxRecord {
+  id: string;
+  owner: string;
+  spec: SandboxSpec;
+  status: SandboxStatus;
+  created_at: string;
+  expires_at: string;
+  last_access_at?: string | null;
+  detail?: Record<string, unknown>;
+}
+
+export interface TraceStep {
+  kind: string;
+  name: string;
+  input?: unknown;
+  output?: unknown;
+  mode?: string;
+  provider?: string;
+  prompt_version?: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+  latency_ms: number;
+  error?: string;
+}
+
+export interface SandboxInvocation {
+  id: string;
+  sandbox_id?: string;
+  agent: string;
+  message: string;
+  final_text: string;
+  ok: boolean;
+  error?: string;
+  created_at: string;
+  steps: TraceStep[];
+  totals: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd: number;
+    latency_ms: number;
+    wall_clock_ms?: number;
+    llm_calls: number;
+    tool_calls: number;
+    blocked_tool_calls: number;
+    steps: number;
+  };
+}
+
+export interface EvaluationDataset {
+  name: string;
+  version: string;
+  description: string;
+  case_count: number;
+  content_hash: string;
+  created_at: string;
+}
+
+export interface EvaluationSuite {
+  name: string;
+  version: string;
+  description: string;
+  dataset: ArtifactVersionRef;
+  scorers: string[];
+  thresholds: Record<string, number | null>;
+  created_at: string;
+}
+
+export interface EvaluationCaseResult {
+  name: string;
+  passed: boolean;
+  failures: string[];
+  invocation_id: string;
+  trace_url?: string | null;
+  final_text: string;
+  totals: Partial<SandboxInvocation["totals"]>;
+  scores?: Record<string, { score: number; passed: boolean; unit: string; detail: Record<string, unknown> }>;
+}
+
+export interface EvaluationRun {
+  id: string;
+  sandbox_id: string;
+  agent: string;
+  dataset?: ArtifactVersionRef | null;
+  suite?: ArtifactVersionRef | null;
+  configuration: SandboxSpec;
+  created_at: string;
+  results: EvaluationCaseResult[];
+  summary: {
+    cases: number;
+    passed: number;
+    failed: number;
+    pass_rate: number;
+    total_tokens: number;
+    cost_usd: number;
+    cost_breakdown?: {
+      agent_cost_usd: number;
+      judge_cost_usd: number;
+      infrastructure_cost_usd: number;
+    };
+    p95_latency_ms: number;
+    duration_ms: number;
+    dimensions?: Record<string, { average: number; passed: number; failed: number; pass_rate: number; unit: string }>;
+  };
+}
+
+export type ComparisonAxisName = "prompt_version" | "model" | "agent_version" | "tool_config";
+
+export interface EvaluationComparison {
+  id: string;
+  baseline_run_id: string;
+  candidate_run_id: string;
+  dataset: Record<string, string>;
+  metrics: Record<string, { baseline: number; candidate: number; delta: number; percent_delta?: number | null }>;
+  axes: Record<string, { baseline: unknown; candidate: unknown; changed: boolean }>;
+  changed_cases: ComparisonCase[];
+  regressions: ComparisonCase[];
+  newly_passing: ComparisonCase[];
+  sample_size: number;
+  caveat: string;
+  summary: string;
+  created_at: string;
+}
+
+export interface ComparisonCase {
+  case_id: string;
+  baseline_passed: boolean;
+  candidate_passed: boolean;
+  baseline_trace_url?: string | null;
+  candidate_trace_url?: string | null;
+}
+
 export interface A2AMessage {
   id: string;
   from_agent: string;
@@ -146,6 +305,22 @@ export function registryAgentManifestPath(name: string): string {
 
 export function registryArtifactPath(plural: string, name: string): string {
   return `/registry/${encodeURIComponent(plural)}/${encodeURIComponent(name)}`;
+}
+
+export function sandboxPath(id: string): string {
+  return `/sandboxes/${encodeURIComponent(id)}`;
+}
+
+export function sandboxTracesPath(id: string, limit = 50): string {
+  return `${sandboxPath(id)}/traces?limit=${Math.max(1, Math.min(limit, 200))}`;
+}
+
+export function evaluationRunPath(id: string): string {
+  return `/evaluations/${encodeURIComponent(id)}`;
+}
+
+export function comparisonPath(id: string): string {
+  return `/comparisons/${encodeURIComponent(id)}`;
 }
 
 // Turn a failed response into a short, human-readable message. Crucially, this
@@ -639,6 +814,49 @@ export const api = {
       `/scm/onboarded/reconcile${org ? `?org=${encodeURIComponent(org)}` : ""}`,
       { method: "POST" }
     ),
+
+  // ── Agent sandbox workbench ──────────────────────────────────────
+  // Every backend lookup is scoped to the verified principal. The client sends
+  // object IDs only; owner, tenant, role, and connector secrets never come from
+  // browser state.
+  listSandboxes: () => apiFetch<SandboxRecord[]>("/sandboxes"),
+  getSandbox: (id: string) => apiFetch<SandboxRecord>(sandboxPath(id)),
+  createSandbox: (input: Partial<SandboxSpec> & Pick<SandboxSpec, "agent" | "model">) =>
+    apiFetch<SandboxRecord>("/sandboxes", { method: "POST", body: JSON.stringify(input) }),
+  destroySandbox: (id: string) =>
+    apiFetch<{ destroyed: string }>(sandboxPath(id), { method: "DELETE" }),
+  invokeSandbox: (id: string, message: string) =>
+    apiFetch<SandboxInvocation>(`${sandboxPath(id)}/invoke`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+  listSandboxTraces: (id: string, limit = 50) =>
+    apiFetch<SandboxInvocation[]>(sandboxTracesPath(id, limit)),
+  getTrace: (id: string) => apiFetch<SandboxInvocation>(`/traces/${encodeURIComponent(id)}`),
+  listEvaluationDatasets: () => apiFetch<EvaluationDataset[]>("/evaluations/datasets"),
+  listEvaluationSuites: () => apiFetch<EvaluationSuite[]>("/evaluations/suites"),
+  runEvaluation: (input: {
+    suite: ArtifactVersionRef;
+    sandbox_id?: string;
+    sandbox?: SandboxSpec;
+  }) => apiFetch<EvaluationRun>("/evaluations", { method: "POST", body: JSON.stringify(input) }),
+  getEvaluationRun: (id: string) => apiFetch<EvaluationRun>(evaluationRunPath(id)),
+  listSandboxEvaluations: (id: string, limit = 20) =>
+    apiFetch<EvaluationRun[]>(`${sandboxPath(id)}/evals?limit=${Math.max(1, Math.min(limit, 200))}`),
+  runSandboxEvaluation: (
+    id: string,
+    source: { dataset: ArtifactVersionRef } | { suite: ArtifactVersionRef },
+  ) =>
+    apiFetch<EvaluationRun>(`${sandboxPath(id)}/evals`, {
+      method: "POST",
+      body: JSON.stringify(source),
+    }),
+  createComparison: (input: {
+    baseline_run_id: string;
+    candidate_run_id: string;
+    axes?: ComparisonAxisName[];
+  }) => apiFetch<EvaluationComparison>("/comparisons", { method: "POST", body: JSON.stringify(input) }),
+  getComparison: (id: string) => apiFetch<EvaluationComparison>(comparisonPath(id)),
 
   // ── Catalog (tools available to pick when authoring an agent) ──────
   listCatalogTools: (category?: string) =>

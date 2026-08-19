@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { Select } from "@/components/ui/select";
-import { api, type SettingsConnector } from "@/lib/api";
+import { api, type EvaluationDataset, type RegistryItem, type SettingsConnector } from "@/lib/api";
 import {
   canonicalSandboxProvider,
   sandboxLlmConnectorOptions,
@@ -17,6 +17,8 @@ type RegistryAgent = {
   description?: string;
   model_provider: string;
   model_name: string;
+  tools?: unknown[];
+  prompts?: unknown[];
 };
 
 const TOOL_MODES = [
@@ -26,22 +28,42 @@ const TOOL_MODES = [
   { value: "real", label: "Real", description: "Calls reach the actual system." },
 ];
 
+function referenceName(reference: unknown): string {
+  if (typeof reference === "string") return reference;
+  if (reference && typeof reference === "object") {
+    const value = reference as Record<string, unknown>;
+    return String(value.name ?? value.ref ?? "");
+  }
+  return "";
+}
+
+function versionKey(item: { name: string; version?: string }): string {
+  return `${item.name}@${item.version || "latest"}`;
+}
+
 export function SandboxCreateDialog({
   open,
   onClose,
   onCreated,
+  initialAgent,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (id: string) => void;
+  initialAgent?: string;
 }) {
   const [agents, setAgents] = useState<RegistryAgent[]>([]);
+  const [prompts, setPrompts] = useState<RegistryItem[]>([]);
+  const [datasets, setDatasets] = useState<EvaluationDataset[]>([]);
   const [versions, setVersions] = useState<string[]>([]);
   const [agent, setAgent] = useState("");
   const [provider, setProvider] = useState("anthropic");
   const [model, setModel] = useState("claude-sonnet-4-20250514");
   const [adkVersion, setAdkVersion] = useState("");
   const [toolMode, setToolMode] = useState("mock");
+  const [toolOverrides, setToolOverrides] = useState<Record<string, string>>({});
+  const [promptKey, setPromptKey] = useState("");
+  const [datasetKey, setDatasetKey] = useState("");
   const [connectorOptions, setConnectorOptions] = useState<SandboxConnectorOption[]>([]);
   const [llmConnector, setLlmConnector] = useState("");
   const [connectorConfirmed, setConnectorConfirmed] = useState(false);
@@ -56,7 +78,13 @@ export function SandboxCreateDialog({
       .then((r) => (r.ok ? r.json() : []))
       .then((data: RegistryAgent[]) => {
         setAgents(data);
-        if (data.length > 0) setAgent((a) => a || data[0].name);
+        if (data.length > 0) {
+          setAgent((current) =>
+            initialAgent && data.some((candidate) => candidate.name === initialAgent)
+              ? initialAgent
+              : current || data[0].name,
+          );
+        }
       })
       .catch(() => setAgents([]));
     // The picker offers the latest few runtime releases; the first is the default.
@@ -78,7 +106,9 @@ export function SandboxCreateDialog({
         setConnectorOptions([]);
         setLlmConnector("");
       });
-  }, [open]);
+    api.listRegistryPrompts().then(setPrompts).catch(() => setPrompts([]));
+    api.listEvaluationDatasets().then(setDatasets).catch(() => setDatasets([]));
+  }, [initialAgent, open]);
 
   // Pinning an agent pre-fills the model it was published with — still editable,
   // because comparing the same agent across models is the point of a sandbox.
@@ -94,7 +124,11 @@ export function SandboxCreateDialog({
       compatible.some((option) => option.value === current) ? current : compatible[0]?.value || "",
     );
     setConnectorConfirmed(false);
-  }, [agent, agents, connectorOptions]);
+    setToolOverrides({});
+    const preferredPrompt = referenceName(chosen.prompts?.[0]);
+    const matchingPrompt = prompts.find((prompt) => prompt.name === preferredPrompt);
+    setPromptKey(matchingPrompt ? versionKey(matchingPrompt) : "");
+  }, [agent, agents, connectorOptions, prompts]);
 
   const agentOptions = useMemo(
     () =>
@@ -113,6 +147,9 @@ export function SandboxCreateDialog({
   const compatibleConnectorOptions = connectorOptions.filter(
     (option) => option.provider === canonicalSandboxProvider(provider),
   );
+  const selectedPrompt = prompts.find((prompt) => versionKey(prompt) === promptKey);
+  const selectedDataset = datasets.find((dataset) => versionKey(dataset) === datasetKey);
+  const selectedTools = (selected?.tools ?? []).map(referenceName).filter(Boolean);
 
   async function create() {
     setBusy(true);
@@ -127,7 +164,9 @@ export function SandboxCreateDialog({
           model: { provider, model },
           credentials: { llm_connector: llmConnector, confirmed: connectorConfirmed },
           adk_version: adkVersion || null,
-          tools: { default_mode: toolMode },
+          prompt: selectedPrompt ? { ref: selectedPrompt.name, version: selectedPrompt.version || "latest" } : null,
+          dataset: selectedDataset ? { ref: selectedDataset.name, version: selectedDataset.version } : null,
+          tools: { default_mode: toolMode, overrides: toolOverrides },
           ttl_seconds: Math.round(ttlHours * 3600),
         }),
       });
@@ -196,6 +235,47 @@ export function SandboxCreateDialog({
               setConnectorConfirmed(false);
             }}
           />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="sb-prompt" className="label-eyebrow">Prompt version</label>
+              <Select
+                id="sb-prompt"
+                value={promptKey}
+                onChange={setPromptKey}
+                options={[
+                  { value: "", label: "Agent default", description: "Use the prompt pinned by the Agent artifact" },
+                  ...prompts.map((prompt) => ({
+                    value: versionKey(prompt),
+                    label: versionKey(prompt),
+                    description: prompt.description,
+                  })),
+                ]}
+                searchable
+                mono
+                ariaLabel="Prompt version"
+              />
+            </div>
+            <div>
+              <label htmlFor="sb-dataset" className="label-eyebrow">Dataset version</label>
+              <Select
+                id="sb-dataset"
+                value={datasetKey}
+                onChange={setDatasetKey}
+                options={[
+                  { value: "", label: "No dataset", description: "Attach one later when running an evaluation" },
+                  ...datasets.map((dataset) => ({
+                    value: versionKey(dataset),
+                    label: versionKey(dataset),
+                    description: `${dataset.case_count} cases · ${dataset.description}`,
+                  })),
+                ]}
+                searchable
+                mono
+                ariaLabel="Dataset version"
+              />
+            </div>
+          </div>
 
           <div>
             <label htmlFor="sb-llm-connector" className="label-eyebrow">
@@ -274,6 +354,36 @@ export function SandboxCreateDialog({
               Tools
             </label>
             <Select id="sb-tools" value={toolMode} onChange={setToolMode} options={TOOL_MODES} ariaLabel="Tool mode" />
+            {selectedTools.length > 0 && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {selectedTools.map((tool) => (
+                  <div key={tool}>
+                    <label htmlFor={`sb-tool-${tool}`} className="text-[11px] font-mono text-[var(--ink-500)]">
+                      {tool}
+                    </label>
+                    <Select
+                      id={`sb-tool-${tool}`}
+                      value={toolOverrides[tool] ?? ""}
+                      onChange={(mode) =>
+                        setToolOverrides((current) => {
+                          if (!mode) {
+                            const next = { ...current };
+                            delete next[tool];
+                            return next;
+                          }
+                          return { ...current, [tool]: mode };
+                        })
+                      }
+                      options={[
+                        { value: "", label: `Default (${toolMode})` },
+                        ...TOOL_MODES,
+                      ]}
+                      ariaLabel={`${tool} mode`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {error && (

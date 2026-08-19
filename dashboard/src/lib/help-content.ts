@@ -99,6 +99,19 @@ export const GUIDANCE: Record<string, GuidanceEntry> = {
     ],
   },
 
+  "agent-workbench": {
+    id: "agent-workbench",
+    title: "Develop an agent without touching the cluster",
+    body: [
+      "A sandbox pins one agent version, model, tool policy, budget and expiry. Playground turns and evaluation cases run through that same isolated configuration, so a comparison is about the agent change rather than a moving dependency.",
+      "Start in Playground, inspect the exact model and tool steps under Traces, run a versioned dataset under Evaluations, then compare the durable run with your production baseline. Destroying the sandbox removes its runtime but keeps the evidence.",
+    ],
+    links: [
+      { label: "Manage evaluation artifacts", href: "/registry" },
+      { label: "See all sandboxes", href: "/sandboxes" },
+    ],
+  },
+
   skills: {
     id: "skills",
     title: "Skills: reusable know-how",
@@ -418,6 +431,32 @@ export const HELP_TERMS: Record<string, HelpTerm> = {
     label: "Checkpoint",
     summary:
       "A checkpoint is a git SHA captured during a run. It marks a point you can roll the working tree back to.",
+  },
+
+  sandbox: {
+    term: "sandbox",
+    label: "Agent sandbox",
+    summary:
+      "An ephemeral, owner-scoped runtime with a pinned agent, model, prompt, dataset, tool policy, token/cost budget and TTL. It uses your explicitly selected user connector through AgentGateway; credentials are not mounted into the sandbox.",
+    points: [
+      "Mock or block side-effecting tools unless real access is explicitly selected.",
+      "The runtime expires automatically and can be destroyed at any time.",
+      "Traces and evaluation results are durable and remain after destruction.",
+    ],
+  },
+
+  evaluation: {
+    term: "evaluation",
+    label: "Agent evaluation",
+    summary:
+      "A versioned dataset of cases run against one pinned sandbox, scored for expected output, tool trajectory, safety, groundedness, latency, tokens and cost. A failing score links to the trace that explains it.",
+  },
+
+  "evaluation-comparison": {
+    term: "evaluation-comparison",
+    label: "Evaluation comparison",
+    summary:
+      "A baseline and candidate evaluation run over the same immutable dataset. DevAI shows metric deltas, newly passing cases and exact regressions; it refuses comparisons whose dataset versions differ.",
   },
 
   onboarding: {

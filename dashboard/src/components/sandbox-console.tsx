@@ -3,45 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Send } from "lucide-react";
 
+import { api, type SandboxInvocation, type TraceStep } from "@/lib/api";
 import { traceLatencyMs, traceStepBadges } from "@/lib/sandbox-trace";
-
-export type TraceStep = {
-  kind: string;
-  name: string;
-  input?: unknown;
-  output?: unknown;
-  mode?: string;
-  provider?: string;
-  prompt_version?: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_usd: number;
-  latency_ms: number;
-  error?: string;
-};
-
-export type Invocation = {
-  id: string;
-  agent: string;
-  message: string;
-  final_text: string;
-  ok: boolean;
-  error?: string;
-  created_at: string;
-  steps: TraceStep[];
-  totals: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-    cost_usd: number;
-    latency_ms: number;
-    wall_clock_ms?: number;
-    llm_calls: number;
-    tool_calls: number;
-    blocked_tool_calls: number;
-    steps: number;
-  };
-};
 
 const KIND_COLOR: Record<string, string> = {
   prompt: "text-[var(--ink-500)]",
@@ -94,7 +57,7 @@ function Step({ step }: { step: TraceStep }) {
   );
 }
 
-function Totals({ totals }: { totals: Invocation["totals"] }) {
+function Totals({ totals }: { totals: SandboxInvocation["totals"] }) {
   const cells: [string, string][] = [
     ["Tokens", `${totals.total_tokens}`],
     ["Wall clock", `${traceLatencyMs(totals)} ms`],
@@ -115,17 +78,71 @@ function Totals({ totals }: { totals: Invocation["totals"] }) {
   );
 }
 
-export function SandboxConsole({ sandboxId, live }: { sandboxId: string; live: boolean }) {
-  const base = `/api/sandboxes/${encodeURIComponent(sandboxId)}`;
-  const [traces, setTraces] = useState<Invocation[]>([]);
+export function SandboxTraceList({
+  traces,
+  focusedTraceId,
+}: {
+  traces: SandboxInvocation[];
+  focusedTraceId?: string | null;
+}) {
+  if (traces.length === 0) {
+    return (
+      <p className="px-4 py-4 text-sm text-[var(--ink-500)]">
+        No traces yet. Every turn records the prompt, model calls, tools, latency, tokens, and cost.
+      </p>
+    );
+  }
+  const ordered = focusedTraceId
+    ? [...traces].sort((left, right) => Number(right.id === focusedTraceId) - Number(left.id === focusedTraceId))
+    : traces;
+  return (
+    <div className="divide-y divide-[var(--surface-border)]">
+      {ordered.map((trace) => (
+        <article
+          key={trace.id}
+          id={`trace-${trace.id}`}
+          className={trace.id === focusedTraceId ? "bg-indigo-500/5 ring-1 ring-inset ring-indigo-500/30" : ""}
+        >
+          <div className="px-4 py-2 flex items-baseline justify-between gap-3">
+            <span className="text-sm text-[var(--ink-100)] truncate">{trace.message}</span>
+            <span className="text-[11px] font-mono text-[var(--ink-500)] shrink-0">
+              {trace.ok ? trace.id : `${trace.id} · failed`}
+            </span>
+          </div>
+          <p className="px-4 pb-2 text-sm text-[var(--ink-50)] whitespace-pre-wrap">
+            {trace.final_text || trace.error}
+          </p>
+          <Totals totals={trace.totals} />
+          <ul>
+            {trace.steps.map((step, index) => (
+              <Step key={`${trace.id}-${index}`} step={step} />
+            ))}
+          </ul>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export function SandboxConsole({
+  sandboxId,
+  live,
+  onTracesChange,
+}: {
+  sandboxId: string;
+  live: boolean;
+  onTracesChange?: (traces: SandboxInvocation[]) => void;
+}) {
+  const [traces, setTraces] = useState<SandboxInvocation[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadTraces = useCallback(async () => {
-    const res = await fetch(`${base}/traces`, { credentials: "include" });
-    if (res.ok) setTraces((await res.json()) as Invocation[]);
-  }, [base]);
+    const found = await api.listSandboxTraces(sandboxId);
+    setTraces(found);
+    onTracesChange?.(found);
+  }, [onTracesChange, sandboxId]);
 
   useEffect(() => {
     loadTraces().catch(() => setTraces([]));
@@ -136,16 +153,13 @@ export function SandboxConsole({ sandboxId, live }: { sandboxId: string; live: b
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${base}/invoke`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
+      const body = await api.invokeSandbox(sandboxId, message);
       setMessage("");
-      setTraces((prev) => [body as Invocation, ...prev]);
+      setTraces((previous) => {
+        const next = [body, ...previous];
+        onTracesChange?.(next);
+        return next;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -183,33 +197,7 @@ export function SandboxConsole({ sandboxId, live }: { sandboxId: string; live: b
         </div>
       )}
 
-      {traces.length === 0 ? (
-        <p className="px-4 pb-4 text-sm text-[var(--ink-500)]">
-          No turns yet. Every turn records the prompt, the model call, each tool call and what it cost.
-        </p>
-      ) : (
-        <div className="divide-y divide-[var(--surface-border)]">
-          {traces.map((t) => (
-            <article key={t.id}>
-              <div className="px-4 py-2 flex items-baseline justify-between gap-3">
-                <span className="text-sm text-[var(--ink-100)] truncate">{t.message}</span>
-                <span className="text-[11px] font-mono text-[var(--ink-500)] shrink-0">
-                  {t.ok ? t.id : `${t.id} · failed`}
-                </span>
-              </div>
-              <p className="px-4 pb-2 text-sm text-[var(--ink-50)] whitespace-pre-wrap">
-                {t.final_text || t.error}
-              </p>
-              <Totals totals={t.totals} />
-              <ul>
-                {t.steps.map((s, i) => (
-                  <Step key={`${t.id}-${i}`} step={s} />
-                ))}
-              </ul>
-            </article>
-          ))}
-        </div>
-      )}
+      <SandboxTraceList traces={traces} />
     </section>
   );
 }
