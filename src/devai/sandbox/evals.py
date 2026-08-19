@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PREFIX = "devai:sandbox"
-_MAX_CASES = 50
+_DEFAULT_MAX_CASES = 50
 
 
 class EvalExpect(BaseModel):
@@ -79,18 +79,27 @@ class EvalRun:
     results: list[CaseResult] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     duration_ms: int = 0
+    judge_cost_usd: float = 0.0
+    infrastructure_cost_usd: float = 0.0
 
     @property
     def summary(self) -> dict[str, Any]:
         passed = sum(1 for r in self.results if r.passed)
         total = len(self.results)
+        agent_cost_usd = round(sum(float(r.totals.get("cost_usd", 0.0)) for r in self.results), 6)
+        cost_breakdown = {
+            "agent_cost_usd": agent_cost_usd,
+            "judge_cost_usd": round(self.judge_cost_usd, 6),
+            "infrastructure_cost_usd": round(self.infrastructure_cost_usd, 6),
+        }
         return {
             "cases": total,
             "passed": passed,
             "failed": total - passed,
             "pass_rate": round(passed / total, 4) if total else 0.0,
             "total_tokens": sum(int(r.totals.get("total_tokens", 0)) for r in self.results),
-            "cost_usd": round(sum(float(r.totals.get("cost_usd", 0.0)) for r in self.results), 6),
+            "cost_usd": round(sum(cost_breakdown.values()), 6),
+            "cost_breakdown": cost_breakdown,
             "latency_ms": sum(int(r.totals.get("latency_ms", 0)) for r in self.results),
             "duration_ms": self.duration_ms,
         }
@@ -109,13 +118,17 @@ class EvalRun:
     def from_dict(cls, body: dict[str, Any]) -> EvalRun:
         known = set(CaseResult.__slots__)
         results = [CaseResult(**{k: v for k, v in r.items() if k in known}) for r in body.get("results") or []]
+        summary = body.get("summary") or {}
+        cost_breakdown = summary.get("cost_breakdown") or {}
         return cls(
             id=str(body.get("id") or ""),
             sandbox_id=str(body.get("sandbox_id") or ""),
             agent=str(body.get("agent") or ""),
             results=results,
             created_at=str(body.get("created_at") or ""),
-            duration_ms=int((body.get("summary") or {}).get("duration_ms") or 0),
+            duration_ms=int(summary.get("duration_ms") or 0),
+            judge_cost_usd=float(cost_breakdown.get("judge_cost_usd") or 0.0),
+            infrastructure_cost_usd=float(cost_breakdown.get("infrastructure_cost_usd") or 0.0),
         )
 
 
@@ -152,9 +165,10 @@ def grade(expect: EvalExpect, invocation: Invocation) -> list[str]:
 
 
 class EvalRunner:
-    def __init__(self, invoker: SandboxInvoker, store: EvalStore) -> None:
+    def __init__(self, invoker: SandboxInvoker, store: EvalStore, *, max_cases: int = _DEFAULT_MAX_CASES) -> None:
         self._invoker = invoker
         self._store = store
+        self._max_cases = max(1, max_cases)
 
     @property
     def store(self) -> EvalStore:
@@ -165,8 +179,8 @@ class EvalRunner:
         past the provider's rate limit and score itself on 429s."""
         if not cases:
             raise ValueError("a suite needs at least one case")
-        if len(cases) > _MAX_CASES:
-            raise ValueError(f"a suite is capped at {_MAX_CASES} cases")
+        if len(cases) > self._max_cases:
+            raise ValueError(f"tenant dataset quota is {self._max_cases} cases per eval run")
 
         run = EvalRun(id=f"eval-{uuid.uuid4().hex[:12]}", sandbox_id=record.id, agent=record.spec.agent.name)
         started = time.perf_counter()

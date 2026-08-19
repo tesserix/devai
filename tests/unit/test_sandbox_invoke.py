@@ -136,6 +136,7 @@ async def test_the_llm_step_carries_the_tokens_the_metrics_are_built_from() -> N
 
     assert inv.totals["total_tokens"] == 160
     assert inv.totals["llm_calls"] == 1
+    assert inv.totals["cost_usd"] == pytest.approx(0.00096)
 
 
 async def test_a_tool_call_is_recorded_with_the_mode_that_served_it() -> None:

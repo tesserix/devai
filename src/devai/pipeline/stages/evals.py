@@ -80,12 +80,15 @@ class EvaluateStage(PipelineStage):
 
             db = await get_global_db()
             if db is not None:
+                principal = task.principal or {}
                 await db.record_eval(
                     run_id=task.id,
                     evaluator=self._evaluator,
                     score=score,
                     passed=passed,
                     triggered_by=getattr(task, "triggered_by", "") or "",
+                    tenant_id=str(principal.get("tenant_id") or ""),
+                    user_id=str(principal.get("uid") or task.triggered_by or ""),
                     detail=breakdown,
                 )
         except Exception:  # noqa: BLE001 — capturing an eval never breaks a run

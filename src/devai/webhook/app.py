@@ -7,7 +7,7 @@ import logging
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
@@ -356,7 +356,9 @@ def create_app(
                     ),
                 )
                 app.state.sandbox_evals = EvalRunner(
-                    app.state.sandbox_invoker, EvalStore(getattr(state, "redis", None))
+                    app.state.sandbox_invoker,
+                    EvalStore(getattr(state, "redis", None)),
+                    max_cases=int(getattr(config, "sandbox_max_eval_cases_per_run", 50) or 50),
                 )
                 logger.info("Sandbox invoker ready")
         except Exception:
@@ -691,7 +693,25 @@ def create_app(
     try:
         from devai.analytics.usage_ledger import UsageLedger, set_global_ledger
 
-        app.state.usage_ledger = UsageLedger(getattr(config, "redis_url", "") or "")
+        async def _sandbox_spend_alert(event: dict[str, Any]) -> None:
+            database = getattr(app.state, "sre_studio_db", None)
+            if database is None:
+                return
+            await database.audit(
+                action=str(event["action"]),
+                actor="system:usage-ledger",
+                actor_type="system",
+                entity_type="tenant",
+                entity_ref=str(event["tenant_id"]),
+                details={key: value for key, value in event.items() if key not in {"action", "tenant_id"}},
+            )
+
+        app.state.usage_ledger = UsageLedger(
+            getattr(config, "redis_url", "") or "",
+            sandbox_monthly_cost_limit_usd=float(getattr(config, "sandbox_monthly_cost_limit_usd", 100.0) or 0.0),
+            sandbox_spend_alert_ratio=float(getattr(config, "sandbox_spend_alert_ratio", 0.8) or 0.0),
+            alert_sink=_sandbox_spend_alert,
+        )
         set_global_ledger(app.state.usage_ledger)
     except Exception:  # noqa: BLE001
         logger.exception("usage ledger init failed — analytics cost views may be empty")

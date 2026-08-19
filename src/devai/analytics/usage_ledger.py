@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,9 @@ _USERS = "devai:usage:users"  # legacy tenantless user set
 _IDENTITIES = "devai:usage:identities"
 _SANDBOXES = "devai:usage:sandboxes"
 _RECENT_MAX = 300
+_MONTH_TTL_SECONDS = 62 * 24 * 60 * 60
+
+SpendAlertSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 def _ns(user: str = "", *, tenant: str = "") -> str:
@@ -54,9 +58,19 @@ def _hash_text(values: dict[Any, Any]) -> dict[str, Any]:
 class UsageLedger:
     """Redis-backed usage accumulator. Best-effort: never raises."""
 
-    def __init__(self, redis_url: str) -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        *,
+        sandbox_monthly_cost_limit_usd: float = 0.0,
+        sandbox_spend_alert_ratio: float = 0.8,
+        alert_sink: SpendAlertSink | None = None,
+    ) -> None:
         self._url = redis_url
         self._redis: Any = None
+        self._sandbox_monthly_cost_limit_usd = max(0.0, sandbox_monthly_cost_limit_usd)
+        self._sandbox_spend_alert_ratio = min(1.0, max(0.0, sandbox_spend_alert_ratio))
+        self._alert_sink = alert_sink
 
     async def _client(self) -> Any:
         if self._redis is None and self._url:
@@ -157,8 +171,41 @@ class UsageLedger:
                 pipe.lpush(f"{_ns(user, tenant=tenant)}recent", rec)
                 pipe.ltrim(f"{_ns(user, tenant=tenant)}recent", 0, _RECENT_MAX - 1)
             await pipe.execute()
+            if sandbox and tenant and cost_u:
+                await self._maybe_alert_sandbox_spend(client, tenant=tenant, day=day, cost_micro=cost_u)
         except Exception:  # noqa: BLE001
             logger.debug("usage ledger: record failed", exc_info=True)
+
+    async def _maybe_alert_sandbox_spend(self, client: Any, *, tenant: str, day: str, cost_micro: int) -> None:
+        limit_usd = self._sandbox_monthly_cost_limit_usd
+        ratio = self._sandbox_spend_alert_ratio
+        if limit_usd <= 0 or ratio <= 0:
+            return
+        month = day[:7]
+        spend_key = f"{_ns(tenant=tenant)}sandbox-spend:{month}"
+        spent_micro = int(await client.incrby(spend_key, cost_micro))
+        await client.expire(spend_key, _MONTH_TTL_SECONDS)
+        if spent_micro < _micro(limit_usd * ratio):
+            return
+        marker_key = f"{spend_key}:alert:{ratio:.4f}"
+        if not await client.set(marker_key, "1", ex=_MONTH_TTL_SECONDS, nx=True):
+            return
+        event = {
+            "action": "sandbox_monthly_spend_threshold",
+            "tenant_id": tenant,
+            "month": month,
+            "spent_usd": _from_micro(spent_micro),
+            "limit_usd": round(limit_usd, 6),
+            "threshold_ratio": ratio,
+        }
+        logger.warning(
+            "sandbox monthly spend threshold reached for tenant %s: $%.6f of $%.6f",
+            tenant,
+            event["spent_usd"],
+            limit_usd,
+        )
+        if self._alert_sink is not None:
+            await self._alert_sink(event)
 
     # ── reads (analytics) ─────────────────────────────────────────────
 

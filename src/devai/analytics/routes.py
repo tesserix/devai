@@ -229,9 +229,13 @@ async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[s
             "recent": [],
             "scope": "none",
         }
-    scope_user, is_admin = await _usage_scope(request)
-    out = await db.analytics_evals(days, scope_user)
-    out["scope"] = "all" if is_admin else "me"
+    scope_tenant, scope_user, can_list_users = await _usage_scope(request)
+    out: dict[str, Any] = await db.analytics_evals(
+        days,
+        tenant_id=scope_tenant,
+        user_id="" if can_list_users else scope_user,
+    )
+    out["scope"] = "all" if can_list_users and not scope_tenant else ("tenant" if can_list_users else "me")
     return out
 
 
