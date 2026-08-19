@@ -452,6 +452,99 @@ export const HELP_TERMS: Record<string, HelpTerm> = {
       "A versioned dataset of cases run against one pinned sandbox, scored for expected output, tool trajectory, safety, groundedness, latency, tokens and cost. A failing score links to the trace that explains it.",
   },
 
+  "evaluation-pass-rate": {
+    term: "evaluation-pass-rate",
+    label: "Pass rate",
+    summary:
+      "The share of dataset cases that met every configured scorer and threshold; one failed required dimension makes that case fail.",
+    points: ["Read the failing case trace before changing the agent—the percentage only tells you where to look."],
+  },
+
+  "evaluation-deterministic-score": {
+    term: "evaluation-deterministic-score",
+    label: "Deterministic score",
+    summary:
+      "A direct check of an observable result, such as exact or regex output, valid JSON, task completion, or an expected tool call.",
+    points: ["These checks are fast and repeatable because no judge model is involved."],
+  },
+
+  "evaluation-scorer-dimension": {
+    term: "evaluation-scorer-dimension",
+    label: "Scorer dimension",
+    summary:
+      "The average 0–100% score for one configured quality dimension across all cases; its threshold, not the average alone, determines which cases pass.",
+    points: ["A high average can hide one important failure, so open the case-level trace."],
+  },
+
+  "evaluation-groundedness": {
+    term: "evaluation-groundedness",
+    label: "Groundedness",
+    summary:
+      "A judge-model score for how well factual claims are supported by the evidence supplied to the agent, rather than invented or assumed.",
+    points: ["Treat it as model-graded evidence, then inspect the trace and cited context for a failing case."],
+  },
+
+  "evaluation-safety-score": {
+    term: "evaluation-safety-score",
+    label: "Safety score",
+    summary:
+      "The share of cases without a forbidden, blocked, or policy-violating tool attempt; a blocked attempt still counts because intent matters.",
+    points: ["Safety is normally a hard gate: one unsafe case should block promotion."],
+  },
+
+  "evaluation-trajectory-score": {
+    term: "evaluation-trajectory-score",
+    label: "Tool trajectory",
+    summary:
+      "Whether the agent chose the expected tools, arguments, and order without redundant calls, and recovered safely when a tool failed.",
+    points: ["Trajectory can fail even when the final prose looks correct because the path produced unsafe or incorrect side effects."],
+  },
+
+  "evaluation-p95-latency": {
+    term: "evaluation-p95-latency",
+    label: "P95 latency",
+    summary:
+      "The case latency at the 95th percentile: about 95% of cases completed this quickly or faster, while the slowest tail may take longer.",
+    points: ["Small datasets make percentiles coarse; compare repeated runs before treating a small delta as real."],
+  },
+
+  "evaluation-tokens": {
+    term: "evaluation-tokens",
+    label: "Total tokens",
+    summary:
+      "All model input and output tokens consumed by the evaluation cases, used to spot prompt growth, loops, and likely cost changes.",
+    points: ["Judge-model tokens are reflected in attributed cost and may be reported separately from the agent's own usage."],
+  },
+
+  "evaluation-cost": {
+    term: "evaluation-cost",
+    label: "Attributed evaluation cost",
+    summary:
+      "The recorded evaluation spend split into agent model calls, judge model calls, and sandbox infrastructure so costs are not hidden or double-counted.",
+    points: ["This is owner-scoped usage for the pinned connector and sandbox configuration."],
+  },
+
+  "evaluation-delta": {
+    term: "evaluation-delta",
+    label: "Candidate delta",
+    summary:
+      "Candidate minus baseline for the same immutable dataset; higher is better for quality scores, while lower is better for latency, tokens, and cost.",
+  },
+
+  "evaluation-regression": {
+    term: "evaluation-regression",
+    label: "Regression",
+    summary:
+      "A case that passed in the baseline run but fails in the candidate run; open its candidate trace to find the first meaningful divergence.",
+  },
+
+  "evaluation-sample-size": {
+    term: "evaluation-sample-size",
+    label: "Sample-size caveat",
+    summary:
+      "One paired run shows directional change, not statistical certainty; small suites and non-deterministic models need repeated runs before promotion.",
+  },
+
   "evaluation-comparison": {
     term: "evaluation-comparison",
     label: "Evaluation comparison",
@@ -474,4 +567,29 @@ export function getGuidance(id: string): GuidanceEntry | undefined {
 
 export function getHelpTerm(term: string): HelpTerm | undefined {
   return HELP_TERMS[term];
+}
+
+const EVALUATION_METRIC_TERMS: Record<string, string> = {
+  success: "evaluation-pass-rate",
+  pass_rate: "evaluation-pass-rate",
+  p95_latency_ms: "evaluation-p95-latency",
+  latency: "evaluation-p95-latency",
+  total_tokens: "evaluation-tokens",
+  tokens: "evaluation-tokens",
+  cost_usd: "evaluation-cost",
+  cost: "evaluation-cost",
+  exact_match: "evaluation-deterministic-score",
+  regex: "evaluation-deterministic-score",
+  json_schema: "evaluation-deterministic-score",
+  expected_tool_call: "evaluation-deterministic-score",
+  task_completion: "evaluation-deterministic-score",
+  tool_trajectory: "evaluation-trajectory-score",
+  safety: "evaluation-safety-score",
+  groundedness: "evaluation-groundedness",
+  hallucination: "evaluation-groundedness",
+};
+
+/** Resolve a runtime scorer/summary key to help that remains useful for custom dimensions. */
+export function evaluationMetricHelpTerm(metric: string): string {
+  return EVALUATION_METRIC_TERMS[metric.toLowerCase()] ?? "evaluation-scorer-dimension";
 }
