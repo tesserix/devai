@@ -4,9 +4,15 @@ import test from "node:test";
 import {
   agentSandboxes,
   comparisonDeltaTone,
+  failedEvaluationWorkspacePath,
   sandboxBudget,
   sandboxRemainingSeconds,
 } from "./agent-workbench.ts";
+
+test("only failed evaluation cases link to their encoded workspace", () => {
+  assert.equal(failedEvaluationWorkspacePath(false, "sandbox /?#"), "/sandboxes/sandbox%20%2F%3F%23");
+  assert.equal(failedEvaluationWorkspacePath(true, "sandbox-id"), null);
+});
 
 test("agent workbench includes only sandboxes for the selected agent", () => {
   assert.deepEqual(
