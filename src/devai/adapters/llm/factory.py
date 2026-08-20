@@ -229,7 +229,7 @@ def resolve_llm_tier(settings: Any, tier: str) -> tuple[str, str]:
     return (getattr(settings, "llm_provider", "noop") or "noop").lower(), ""
 
 
-def create_llm_chain(settings: Any) -> LLMAdapter:
+def create_llm_chain(settings: Any, *, primary_adapter: LLMAdapter | None = None) -> LLMAdapter:
     """The default adapter wrapped with the configured runtime fallbacks.
 
     ``DEVAI_LLM_FALLBACK_PROVIDER`` is an ordered, comma-separated list of
@@ -242,8 +242,11 @@ def create_llm_chain(settings: Any) -> LLMAdapter:
     Links that are unconfigured (no key), unknown, or duplicates of an
     earlier link are skipped with a log — a half-configured chain still
     yields the best chain available rather than nothing.
+
+    ``primary_adapter`` keeps per-user model policy inside the provider chain,
+    so same-provider model fallback runs before cross-provider fallback.
     """
-    primary = create_llm_adapter(settings)
+    primary = primary_adapter or create_llm_adapter(settings)
     raw = getattr(settings, "llm_fallback_provider", "") or ""
     chain: list[LLMAdapter] = [primary]
     seen = {primary.provider_name}
@@ -277,13 +280,21 @@ _ROLE_CHAIN_CACHE_MAX = 256
 # and their API key — would silently serve every other tenant.
 _ROLE_CRED_ATTRS = (
     "llm_provider",
+    "llm_authorized_providers",
     "anthropic_api_key",
     "anthropic_base_url",
     "openai_api_key",
+    "openai_base_url",
+    "openai_organization",
     "groq_api_key",
+    "groq_base_url",
     "openrouter_api_key",
     "vertex_project",
     "vertex_location",
+    "vertex_api_key",
+    "vertex_base_url",
+    "llm_gateway_api_key",
+    "llm_gateway_base_url",
     "llm_role_chain_provider",
     "llm_fallback_provider",
 )

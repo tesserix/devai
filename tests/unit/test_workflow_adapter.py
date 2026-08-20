@@ -242,6 +242,7 @@ async def test_temporal_connect_failure_keeps_local_fallback_when_not_strict(mon
 
 @pytest.mark.asyncio
 async def test_temporal_already_started_reuses_the_scoped_workflow():
+    from temporalio.common import WorkflowIDReusePolicy
     from temporalio.exceptions import WorkflowAlreadyStartedError
 
     task = DevAITask(
@@ -256,8 +257,10 @@ async def test_temporal_already_started_reuses_the_scoped_workflow():
 
     class Client:
         requested_id = ""
+        requested_policy = None
 
         async def start_workflow(self, *_args, **kwargs):
+            self.requested_policy = kwargs.get("id_reuse_policy")
             raise WorkflowAlreadyStartedError(kwargs["id"], "BlueprintWorkflow")
 
         def get_workflow_handle(self, workflow_id):
@@ -271,6 +274,32 @@ async def test_temporal_already_started_reuses_the_scoped_workflow():
     await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
 
     assert client.requested_id == expected_id
+    assert client.requested_policy == WorkflowIDReusePolicy.REJECT_DUPLICATE
+
+
+@pytest.mark.asyncio
+async def test_temporal_result_updates_the_original_queued_task():
+    task = DevAITask(blueprint="t-linear")
+    completed = DevAITask.from_dict(task.to_dict())
+    completed.stages_completed = ["a", "b"]
+    completed.transition(TaskState.COMPLETED)
+
+    class Handle:
+        async def result(self):
+            return task_to_dict(completed)
+
+    class Client:
+        async def start_workflow(self, *_args, **_kwargs):
+            return Handle()
+
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=NoopWorkflowAdapter())
+    adapter._client = Client()
+
+    result = await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert result is task
+    assert task.state == TaskState.COMPLETED
+    assert task.stages_completed == ["a", "b"]
 
 
 @pytest.mark.asyncio

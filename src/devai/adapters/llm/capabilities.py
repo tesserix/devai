@@ -113,6 +113,14 @@ def ordered_providers(settings: Any, prefer: str | None = None) -> list[str]:
     """
     from devai.adapters.llm.factory import llm_registry
 
+    authorized_raw = getattr(settings, "llm_authorized_providers", None)
+    if isinstance(authorized_raw, str):
+        authorized = [p.strip().lower() for p in authorized_raw.split(",") if p.strip()]
+    elif authorized_raw is not None:
+        authorized = [str(p).strip().lower() for p in authorized_raw if str(p).strip()]
+    else:
+        authorized = []
+
     order: list[str] = []
     if prefer:
         order.append(prefer.lower())
@@ -121,6 +129,10 @@ def ordered_providers(settings: Any, prefer: str | None = None) -> list[str]:
     if gw:
         order.append(gw)
     order += [n.strip().lower() for n in str(getattr(settings, "llm_fallback_provider", "") or "").split(",")]
+    if authorized_raw is not None:
+        order += authorized
+        allowed = set(authorized)
+        order = [p for p in order if p in allowed]
     out: list[str] = []
     seen: set[str] = set()
     for p in order:

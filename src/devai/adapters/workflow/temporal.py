@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from dataclasses import fields
 from typing import TYPE_CHECKING, Any
 
 from devai.pipeline.types import TaskState
@@ -97,12 +98,14 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
 
         workflow_id = workflow_id_for_task(task)
         try:
+            from temporalio.common import WorkflowIDReusePolicy
             from temporalio.exceptions import WorkflowAlreadyStartedError
 
             handle = await client.start_workflow(
                 "BlueprintWorkflow",
                 payload,
                 id=workflow_id,
+                id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
                 task_queue=task_queue,
             )
         except WorkflowAlreadyStartedError:
@@ -121,7 +124,10 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
             task.transition(TaskState.STAGE_FAILED)
             return task
 
-        return task_from_dict(result)
+        completed = task_from_dict(result)
+        for field in fields(task):
+            setattr(task, field.name, getattr(completed, field.name))
+        return task
 
     async def signal(
         self,

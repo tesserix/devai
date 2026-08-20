@@ -15,9 +15,11 @@ These prove the Phase-1 foundation without touching any live execution path:
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from devai.adapters.llm.base import LLMResponse, LLMUsage
+from devai.adapters.llm.base import LLMResponse, LLMUsage, ToolCall
 from devai.agentruntime import (
     Agent,
     AgentDispatcher,
@@ -164,6 +166,186 @@ async def test_legacy_agent_require_deps_false_builds_in_a_jobless_context():
     result = await legacy.run(RunContext(task=_task(), deps=_deps()))
     assert result.stub is False
     assert result.handover == {"ran": True}
+
+
+@pytest.mark.asyncio
+async def test_legacy_requirements_agent_uses_resolved_user_llm():
+    from devai.agents.requirements_analyst import RequirementsAnalystAgent
+    from devai.config import Settings
+
+    llm = FakeLLMAdapter(
+        [
+            LLMResponse(
+                text=('{"requirements":[{"title":"Check health"}],"gaps":[],"overall_assessment":"ready"}'),
+                provider="vertex_gemini",
+            )
+        ]
+    )
+    config = Settings(
+        llm_provider="vertex_gemini",
+        llm_require_user_connector=True,
+        openai_api_key="",
+        anthropic_api_key="",
+        vertex_project="user-project",
+        vertex_api_key="vertex-user-key",
+    )
+    legacy = LegacyAgent.from_class(RequirementsAnalystAgent, require_deps=False)
+
+    result = await legacy.run(RunContext(task=_task(), deps=_deps(), llm=llm, config=config))
+
+    assert result.ok is True
+    assert result.handover["analyzed_requirements"] == [{"title": "Check health"}]
+    assert len(llm.requests) == 1
+    assert llm.requests[0].response_format == {"type": "json_object"}
+
+
+class _LegacyGeminiAgent:
+    name = "legacy_gemini"
+
+    def __init__(self, scm, state_manager, config, event_bus) -> None:  # noqa: ANN001
+        from devai.providers.gemini_provider import GeminiProvider
+
+        self.provider = GeminiProvider(config)
+
+    async def run(self, state):  # noqa: ANN001
+        return {"text": await self.provider.generate("detect stack", system="be concise")}
+
+
+class _LegacyClaudeAgent:
+    name = "legacy_claude"
+
+    def __init__(self, scm, state_manager, config, event_bus) -> None:  # noqa: ANN001
+        from devai.providers.anthropic_claude import ClaudeProvider
+
+        self.provider = ClaudeProvider(config)
+
+    async def run(self, state):  # noqa: ANN001
+        return {"text": await self.provider.generate("be concise", "review this")}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent_cls", [_LegacyGeminiAgent, _LegacyClaudeAgent])
+async def test_other_legacy_provider_facades_use_resolved_user_llm(agent_cls):  # noqa: ANN001
+    from devai.config import Settings
+
+    llm = FakeLLMAdapter([LLMResponse(text="dynamic-ok", provider="vertex_gemini")])
+    config = Settings(
+        llm_provider="vertex_gemini",
+        llm_require_user_connector=True,
+        openai_api_key="",
+        anthropic_api_key="",
+        gemini_api_key="",
+        vertex_project="user-project",
+        vertex_api_key="vertex-user-key",
+    )
+    legacy = LegacyAgent.from_class(agent_cls, require_deps=False)
+
+    result = await legacy.run(RunContext(task=_task(), deps=_deps(), llm=llm, config=config))
+
+    assert result.handover["text"] == "dynamic-ok"
+    assert len(llm.requests) == 1
+
+
+class _LegacyClaudeToolAgent:
+    name = "legacy_claude_tool"
+
+    def __init__(self, scm, state_manager, config, event_bus) -> None:  # noqa: ANN001
+        from devai.providers.anthropic_claude import ClaudeProvider
+
+        self.provider = ClaudeProvider(config)
+
+    async def run(self, state):  # noqa: ANN001
+        calls = []
+
+        async def execute(name, arguments):  # noqa: ANN001
+            calls.append((name, arguments))
+            return "healthy"
+
+        text = await self.provider.run_agent_loop(
+            "Inspect without changing anything.",
+            "Check the API.",
+            [
+                {
+                    "name": "read_status",
+                    "description": "Read service status",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"service": {"type": "string"}},
+                    },
+                }
+            ],
+            execute,
+            max_iterations=3,
+        )
+        return {"text": text, "calls": calls}
+
+
+@pytest.mark.asyncio
+async def test_legacy_claude_tool_loop_uses_resolved_user_llm():
+    from devai.config import Settings
+
+    llm = FakeLLMAdapter(
+        [
+            LLMResponse(
+                tool_calls=[ToolCall(id="tool-1", name="read_status", arguments={"service": "api"})],
+                finish_reason="tool_use",
+                provider="vertex_gemini",
+            ),
+            LLMResponse(text="API is healthy", finish_reason="stop", provider="vertex_gemini"),
+        ]
+    )
+    config = Settings(
+        llm_provider="vertex_gemini",
+        llm_require_user_connector=True,
+        anthropic_api_key="",
+        vertex_project="user-project",
+        vertex_api_key="vertex-user-key",
+        claude_session_iterations=3,
+        claude_max_sessions=1,
+    )
+    legacy = LegacyAgent.from_class(_LegacyClaudeToolAgent, require_deps=False)
+
+    result = await legacy.run(RunContext(task=_task(), deps=_deps(), llm=llm, config=config))
+
+    assert result.handover["text"] == "API is healthy"
+    assert result.handover["calls"] == [("read_status", {"service": "api"})]
+    assert len(llm.requests) == 2
+    assert llm.requests[0].tools[0].name == "read_status"
+    assert any(message.tool_call_id == "tool-1" for message in llm.requests[1].messages)
+
+
+class _LegacyOpenAIAgent:
+    name = "legacy_openai"
+
+    def __init__(self, scm, state_manager, config, event_bus) -> None:  # noqa: ANN001
+        from devai.providers.openai_provider import OpenAIProvider
+
+        self.provider = OpenAIProvider(config)
+
+    async def run(self, state):  # noqa: ANN001
+        await asyncio.sleep(0)
+        return {"text": await self.provider.generate("identify caller")}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_legacy_runs_keep_user_llm_adapters_isolated():
+    from devai.config import Settings
+
+    config = Settings(llm_provider="vertex_gemini", openai_api_key="")
+    first_llm = FakeLLMAdapter([LLMResponse(text="tenant-a")])
+    second_llm = FakeLLMAdapter([LLMResponse(text="tenant-b")])
+    first = LegacyAgent.from_class(_LegacyOpenAIAgent, require_deps=False)
+    second = LegacyAgent.from_class(_LegacyOpenAIAgent, require_deps=False)
+
+    first_result, second_result = await asyncio.gather(
+        first.run(RunContext(task=_task(), deps=_deps(), llm=first_llm, config=config)),
+        second.run(RunContext(task=_task(), deps=_deps(), llm=second_llm, config=config)),
+    )
+
+    assert first_result.handover["text"] == "tenant-a"
+    assert second_result.handover["text"] == "tenant-b"
+    assert len(first_llm.requests) == 1
+    assert len(second_llm.requests) == 1
 
 
 # ─── SpecAgent ───────────────────────────────────────────────────────────────

@@ -34,7 +34,7 @@ def _llm_attrs() -> set[str]:
     if spec is None:  # pragma: no cover - catalog always has llm
         return set()
     attrs = {f.settings_attr for f in spec.fields}
-    attrs.add(spec.provider_attr)
+    attrs.update({spec.provider_attr, "llm_authorized_providers", "llm_fallback_provider"})
     return attrs
 
 
@@ -86,10 +86,10 @@ class PrincipalLLMResolver:
             if cached is not None:
                 return cached
 
-            from devai.adapters.llm.factory import create_llm_adapter
+            from devai.adapters.llm.factory import create_llm_adapter, create_llm_chain
 
-            adapter = create_llm_adapter(overlay)
-            if adapter.provider_name == "noop" and getattr(overlay, "llm_provider", "") != "noop":
+            primary = create_llm_adapter(overlay)
+            if primary.provider_name == "noop" and getattr(overlay, "llm_provider", "") != "noop":
                 # The user's config is incomplete/broken — better to run on
                 # the platform default than to silently answer with Noop.
                 logger.warning(
@@ -104,7 +104,7 @@ class PrincipalLLMResolver:
             if enabled:
                 from devai.adapters.llm.fallback import ModelAllowlistLLMAdapter
 
-                adapter = ModelAllowlistLLMAdapter(adapter, list(enabled))
+                primary = ModelAllowlistLLMAdapter(primary, list(enabled))
 
             # The user's chosen fallback MODEL (same provider): retried before
             # the cross-provider chain when the primary model errors.
@@ -112,7 +112,9 @@ class PrincipalLLMResolver:
             if fb_model:
                 from devai.adapters.llm.fallback import ModelFallbackLLMAdapter
 
-                adapter = ModelFallbackLLMAdapter(adapter, fb_model)
+                primary = ModelFallbackLLMAdapter(primary, fb_model)
+
+            adapter = create_llm_chain(overlay, primary_adapter=primary)
 
             # Runtime resilience: unless strict per-user isolation is on,
             # chain the platform default behind the user's provider so an

@@ -17,6 +17,7 @@ from devai.providers.groq_provider import _fetch_secret_via_adapter
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionMessageParam
 
+    from devai.adapters.llm.base import LLMAdapter
     from devai.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -27,15 +28,20 @@ class GeminiProvider:
 
     def __init__(self, config: Settings) -> None:
         from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+        from devai.adapters.llm.legacy_bridge import current_legacy_llm
 
         self._config = config
         self._gateway_required = gateway_required(config)
+        self._resolved_llm: LLMAdapter | None = current_legacy_llm()
+        self._model_name = config.gemini_model
+        self._gateway_client = None
+        self._client: genai.Client | None = None
+        if self._resolved_llm is not None:
+            return
         api_key = config.gemini_api_key
         if not api_key:
             api_key = self._fetch_from_gcp(config.gcp_secret_gemini_api_key)
 
-        self._gateway_client = None
-        self._client: genai.Client | None = None
         if gateway_required(config):
             from openai import AsyncOpenAI
 
@@ -46,7 +52,6 @@ class GeminiProvider:
             )
         else:
             self._client = genai.Client(api_key=api_key)
-        self._model_name = config.gemini_model
 
     def _fetch_from_gcp(self, secret_name: str) -> str:
         """Fetch the API key via the secrets adapter (GCP SM SDK + Workload Identity).
@@ -69,6 +74,22 @@ class GeminiProvider:
         response_format: dict[str, Any] | None = None,
     ) -> str:
         """Generate a response using Google Gemini."""
+        resolved_llm: LLMAdapter | None = getattr(self, "_resolved_llm", None)
+        if resolved_llm is not None:
+            from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+            response = await resolved_llm.generate(
+                LLMRequest(
+                    system=system,
+                    messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    response_format=response_format,
+                )
+            )
+            if response.finish_reason == "error":
+                raise RuntimeError("all authorized LLM providers failed")
+            return response.text
         # A user whose LLM connector pins a non-Gemini provider gets THEIR
         # provider, not the platform Gemini key — the connector choice wins
         # over this agent's hardcoded preference.
