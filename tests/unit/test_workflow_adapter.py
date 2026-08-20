@@ -8,6 +8,7 @@ provider selection degrades gracefully. The Temporal path's deterministic logic
 
 from __future__ import annotations
 
+import base64
 import builtins
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from devai.adapters.workflow import (
     NoopWorkflowAdapter,
     create_workflow_adapter,
 )
+from devai.adapters.workflow.temporal import TemporalWorkflowAdapter, workflow_id_for_task
 from devai.blueprint.executor import BlueprintExecutor
 from devai.blueprint.loader import (
     StageSpec,
@@ -27,6 +29,7 @@ from devai.blueprint.loader import (
 from devai.blueprint.planner import should_continue_on_failure, topological_levels
 from devai.blueprint.registry import StageRegistry
 from devai.config import Settings
+from devai.orchestration.payload_codec import EncryptedPayloadCodec, temporal_data_converter
 from devai.orchestration.serde import (
     blueprint_from_dict,
     blueprint_to_dict,
@@ -170,6 +173,127 @@ def test_factory_temporal_without_sdk_degrades(monkeypatch):
     ex = BlueprintExecutor(_registry(), StageDeps(config=settings))
     adapter = create_workflow_adapter(settings, executor=ex)
     assert isinstance(adapter, InProcWorkflowAdapter)
+
+
+def test_temporal_workflow_id_is_opaque_and_principal_scoped():
+    first = DevAITask(
+        id="same-task",
+        principal={"tenant_id": "tenant-a", "uid": "user-1", "email": "a@example.test"},
+    )
+    second = DevAITask(
+        id="same-task",
+        principal={"tenant_id": "tenant-b", "uid": "user-1", "email": "b@example.test"},
+    )
+
+    first_id = workflow_id_for_task(first)
+    second_id = workflow_id_for_task(second)
+
+    assert first_id != second_id
+    assert first_id.endswith("-same-task")
+    assert "tenant-a" not in first_id
+    assert "a@example.test" not in first_id
+
+
+class _RecordingFallback(NoopWorkflowAdapter):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_blueprint(self, blueprint, task):
+        self.calls += 1
+        return task
+
+
+@pytest.mark.asyncio
+async def test_temporal_connect_failure_does_not_replay_in_fail_closed_mode(monkeypatch):
+    fallback = _RecordingFallback()
+    adapter = TemporalWorkflowAdapter(
+        Settings(temporal_fail_closed=True),
+        fallback=fallback,
+    )
+
+    async def fail_connect():
+        raise ConnectionError("unavailable")
+
+    monkeypatch.setattr(adapter, "_ensure_client", fail_connect)
+    task = DevAITask(blueprint="t-linear")
+    result = await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert result is task
+    assert result.state == TaskState.STAGE_FAILED
+    assert result.error == "durable workflow backend unavailable"
+    assert fallback.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_temporal_connect_failure_keeps_local_fallback_when_not_strict(monkeypatch):
+    fallback = _RecordingFallback()
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=fallback)
+
+    async def fail_connect():
+        raise ConnectionError("unavailable")
+
+    monkeypatch.setattr(adapter, "_ensure_client", fail_connect)
+    task = DevAITask(blueprint="t-linear")
+    result = await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert result is task
+    assert fallback.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_temporal_already_started_reuses_the_scoped_workflow():
+    from temporalio.exceptions import WorkflowAlreadyStartedError
+
+    task = DevAITask(
+        blueprint="t-linear",
+        principal={"tenant_id": "tenant-a", "uid": "user-1"},
+    )
+    expected_id = workflow_id_for_task(task)
+
+    class Handle:
+        async def result(self):
+            return task_to_dict(task)
+
+    class Client:
+        requested_id = ""
+
+        async def start_workflow(self, *_args, **kwargs):
+            raise WorkflowAlreadyStartedError(kwargs["id"], "BlueprintWorkflow")
+
+        def get_workflow_handle(self, workflow_id):
+            self.requested_id = workflow_id
+            return Handle()
+
+    client = Client()
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=NoopWorkflowAdapter())
+    adapter._client = client
+
+    await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert client.requested_id == expected_id
+
+
+@pytest.mark.asyncio
+async def test_temporal_payload_codec_roundtrip_hides_plaintext():
+    from temporalio.api.common.v1 import Payload
+
+    key = base64.b64encode(b"k" * 32).decode()
+    codec = EncryptedPayloadCodec.from_base64(key)
+    original = Payload(metadata={"encoding": b"json/plain"}, data=b"secret@example.test")
+
+    encoded = await codec.encode([original])
+    assert b"secret@example.test" not in encoded[0].data
+    assert encoded[0].metadata["encoding"] == b"binary/encrypted"
+
+    decoded = await codec.decode(encoded)
+    assert decoded == [original]
+
+
+def test_temporal_payload_encryption_key_is_required_when_configured():
+    with pytest.raises(ValueError, match="payload encryption key is required"):
+        temporal_data_converter(
+            Settings(temporal_payload_encryption_required=True),
+        )
 
 
 # ── inproc execution = executor behaviour ──────────────────────────────────
