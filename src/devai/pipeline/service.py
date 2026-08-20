@@ -840,12 +840,13 @@ class PipelineService:
     async def delete_run(self, task_id: str) -> bool:
         """Remove a run entirely — from the in-memory pipeline (stopping it
         first), the pipeline-task store, and the legacy orchestrator store —
-        plus its control flag. Idempotent; safe on zombie / unknown runs."""
+        while retaining the stop flag until its TTL. Idempotent; safe on zombie
+        / unknown runs and runs owned by another replica."""
+        try:
+            await self.set_run_control(task_id, "stopped")
+        except Exception:  # noqa: BLE001
+            logger.debug("stop-before-delete failed for %s", task_id, exc_info=True)
         if self._pipeline is not None and self._pipeline.get_task(task_id) is not None:
-            try:
-                await self.set_run_control(task_id, "stopped")
-            except Exception:  # noqa: BLE001
-                logger.debug("stop-before-delete failed for %s", task_id, exc_info=True)
             self._pipeline.remove_task(task_id)
         sm = self.state_manager
         if sm is not None:
@@ -865,12 +866,6 @@ class PipelineService:
                         await fn(task_id)
                     except Exception:  # noqa: BLE001
                         logger.warning("%s failed for %s", method, task_id, exc_info=True)
-            ctrl = getattr(sm, "set_pipeline_control", None)
-            if ctrl is not None:
-                try:
-                    await ctrl(task_id, "")
-                except Exception:  # noqa: BLE001
-                    logger.debug("clear control flag failed for %s", task_id, exc_info=True)
         return True
 
     async def resume_from_failure(self, task_id: str) -> dict[str, Any]:
