@@ -199,6 +199,7 @@ class StateManager:
     PIPELINE_PROCESSING_KEY = "devai:pipeline:processing"
     PIPELINE_ACTIVE_KEY = "devai:pipeline:active"
     PIPELINE_CLAIM_KEY = "devai:pipeline:claim:{task_id}"
+    PIPELINE_DELETED_KEY = "devai:pipeline:deleted:{task_id}"
 
     async def persist_task(self, task_dict: dict[str, Any], *, ttl: int | None = None, force: bool = False) -> None:
         """Write a DevAITask dict to Redis, last-writer-wins by `updated_at`.
@@ -215,9 +216,10 @@ class StateManager:
         regardless of the order persists actually land. The recent /
         by_blueprint / by_repo indices are updated only when we write.
 
-        ``force=True`` bypasses BOTH guards — used exclusively by the
-        deliberate resume-from-failure path, which legitimately moves a
-        terminal run back to ``queued``.
+        ``force=True`` bypasses the ordering and terminal-state guards — used
+        exclusively by the deliberate resume-from-failure path, which
+        legitimately moves a terminal run back to ``queued``. It never
+        bypasses a deletion tombstone.
         """
         task_id = task_dict.get("id")
         if not task_id:
@@ -230,11 +232,16 @@ class StateManager:
         incoming_ts = float(task_dict.get("updated_at") or 0.0)
         payload = json.dumps(task_dict)
         key = self.PIPELINE_TASK_KEY.format(task_id=task_id)
+        deleted_key = self.PIPELINE_DELETED_KEY.format(task_id=task_id)
 
         async with self.redis.pipeline() as pipe:
             while True:
                 try:
-                    await pipe.watch(key)
+                    await pipe.watch(key, deleted_key)
+                    if await pipe.exists(deleted_key):
+                        await pipe.unwatch()
+                        logger.info("persist_task: dropping write for deleted run %s", task_id)
+                        return
                     current = await pipe.get(key)  # immediate read under WATCH
                     if current and not force:
                         try:
@@ -351,11 +358,22 @@ class StateManager:
         return [json.loads(v) for v in values if v]
 
     async def delete_pipeline_task(self, task_id: str) -> None:
-        """Remove a task from all indices."""
+        """Tombstone a task and remove its snapshot and queue state.
+
+        The tombstone closes the race with periodic orphan reconciliation and
+        late worker persists. Without it, either can recreate a run after this
+        method returns and make a successful dashboard delete reappear.
+        """
         task = await self.get_pipeline_task(task_id)
         pipe = self.redis.pipeline()
+        pipe.set(self.PIPELINE_DELETED_KEY.format(task_id=task_id), "1", ex=self.result_ttl)
         pipe.delete(self.PIPELINE_TASK_KEY.format(task_id=task_id))
         pipe.zrem(self.PIPELINE_RECENT_KEY, task_id)
+        pipe.lrem(self.PIPELINE_QUEUE_KEY, 0, task_id)
+        pipe.lrem(self.PIPELINE_PROCESSING_KEY, 0, task_id)
+        pipe.srem(self.PIPELINE_ACTIVE_KEY, task_id)
+        pipe.delete(self.PIPELINE_CLAIM_KEY.format(task_id=task_id))
+        pipe.delete(f"devai:pipeline:released:{task_id}")
         if task:
             bp = task.get("blueprint")
             repo = task.get("repo")
@@ -372,10 +390,21 @@ class StateManager:
         active (queued or processing). The SADD guard is what makes this safe
         to call from every replica on boot — only the first call enqueues.
         """
-        added = await self.redis.sadd(self.PIPELINE_ACTIVE_KEY, task_id)
-        if added:
-            await self.redis.lpush(self.PIPELINE_QUEUE_KEY, task_id)
-        return bool(added)
+        deleted_key = self.PIPELINE_DELETED_KEY.format(task_id=task_id)
+        async with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    await pipe.watch(deleted_key, self.PIPELINE_ACTIVE_KEY)
+                    if await pipe.exists(deleted_key) or await pipe.sismember(self.PIPELINE_ACTIVE_KEY, task_id):
+                        await pipe.unwatch()
+                        return False
+                    pipe.multi()
+                    pipe.sadd(self.PIPELINE_ACTIVE_KEY, task_id)
+                    pipe.lpush(self.PIPELINE_QUEUE_KEY, task_id)
+                    await pipe.execute()
+                    return True
+                except WatchError:
+                    continue
 
     async def claim_next_task(self, worker_id: str, *, claim_ttl: int = 180) -> str | None:
         """Atomically move the next queued task to the processing list and
@@ -388,16 +417,24 @@ class StateManager:
         claim key (refreshed by `heartbeat_task`) lets the reaper tell a live
         owner from a dead one.
         """
-        task_id = await self.redis.lmove(
-            self.PIPELINE_QUEUE_KEY,
-            self.PIPELINE_PROCESSING_KEY,
-            "RIGHT",
-            "LEFT",
-        )
-        if task_id is None:
-            return None
-        await self.redis.set(self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl)
-        return task_id
+        while True:
+            task_id = await self.redis.lmove(
+                self.PIPELINE_QUEUE_KEY,
+                self.PIPELINE_PROCESSING_KEY,
+                "RIGHT",
+                "LEFT",
+            )
+            if task_id is None:
+                return None
+            deleted_key = self.PIPELINE_DELETED_KEY.format(task_id=task_id)
+            if await self.redis.exists(deleted_key):
+                await self.ack_task(task_id)
+                continue
+            await self.redis.set(self.PIPELINE_CLAIM_KEY.format(task_id=task_id), worker_id, ex=claim_ttl)
+            if await self.redis.exists(deleted_key):
+                await self.ack_task(task_id)
+                continue
+            return task_id
 
     async def heartbeat_task(self, task_id: str, worker_id: str, *, claim_ttl: int = 180) -> None:
         """Refresh the liveness claim on a task we're executing. Called on a

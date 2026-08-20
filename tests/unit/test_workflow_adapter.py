@@ -521,6 +521,35 @@ async def test_service_set_run_control_sets_flag_and_signals():
     assert svc._pipeline.signals == [("t1", "stop", None)]  # type: ignore[attr-defined]
 
 
+class _FakeDeleteSM(_FakeSMControl):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deleted: list[tuple[str, str]] = []
+
+    async def ack_task(self, task_id: str) -> None:
+        self.deleted.append(("ack", task_id))
+
+    async def delete_pipeline_task(self, task_id: str) -> None:
+        self.deleted.append(("pipeline", task_id))
+
+    async def delete_run(self, task_id: str) -> None:
+        self.deleted.append(("legacy", task_id))
+
+
+@pytest.mark.asyncio
+async def test_service_delete_stops_remote_executor_and_keeps_stop_flag():
+    from devai.pipeline.service import PipelineService
+
+    svc = PipelineService(Settings())
+    svc.state_manager = _FakeDeleteSM()
+    svc._pipeline = _FakePipelineSig()  # type: ignore[assignment]
+
+    assert await svc.delete_run("t1") is True
+    assert svc.state_manager.controls == [("t1", "stopped")]
+    assert svc._pipeline.signals == [("t1", "stop", None)]  # type: ignore[attr-defined]
+    assert svc.state_manager.deleted == [("ack", "t1"), ("pipeline", "t1"), ("legacy", "t1")]
+
+
 @pytest.mark.asyncio
 async def test_service_approve_gate_signals_workflow():
     from devai.pipeline.service import PipelineService
