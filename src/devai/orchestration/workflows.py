@@ -197,6 +197,7 @@ class BlueprintWorkflow:
             run_stage_activity,
             args=[spec.stage, spec.name, dict(spec.config), task_snapshot],
             start_to_close_timeout=timedelta(seconds=timeout),
+            heartbeat_timeout=timedelta(seconds=min(30, max(1, timeout // 3))),
             retry_policy=RetryPolicy(maximum_attempts=self._max_attempts),
         )
 

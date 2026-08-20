@@ -415,8 +415,16 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     temporal_task_queue: str = "devai"
     temporal_tls_enabled: bool = False
+    temporal_fail_closed: bool = False
+    temporal_payload_encryption_required: bool = False
+    temporal_payload_encryption_key: str = ""
     temporal_max_concurrent_activities: int = 50
     temporal_max_stage_attempts: int = 3  # per-stage Activity RetryPolicy
+    temporal_worker_dependencies_required: bool = False
+    temporal_worker_versioning_enabled: bool = False
+    temporal_worker_deployment_name: str = "devai"
+    temporal_worker_build_id: str = ""
+    temporal_worker_graceful_shutdown_seconds: int = 60
 
     # --- LangSmith ---
     langchain_tracing_v2: str = ""  # Set to "true" to enable
