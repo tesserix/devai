@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: deployment-inspector-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: deployment-inspector
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: deployment-inspector
-  promptRef: deployment-inspector-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: 0.1
-    maxTokens: null
-  limits:
-    maxTurns: 20
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: engineer
+  title: Deployment Inspector
+  description: "Inspects workload rollout health \u2014 stuck or partial rollouts, replica mismatches,\
+    \ autoscaler saturation, image drift, and recent deploy-correlated regressions. Read-only; surfaces\
+    \ what changed and whether it looks healthy."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/deployment-inspector
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: deployment-inspector
+    name: Deployment Inspector
+    description: "Inspects workload rollout health \u2014 stuck or partial rollouts, replica mismatches,\
+      \ autoscaler saturation, image drift, and recent deploy-correlated regressions. Read-only; surfaces\
+      \ what changed and whether it looks healthy."
+    tags:
+    - sre
+    - low
+    - devai

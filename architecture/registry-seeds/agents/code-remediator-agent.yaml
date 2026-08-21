@@ -1,26 +1,50 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: code-remediator-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: code-remediator
+    devai.io/risk-level: medium
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: code-remediator
-  promptRef: code-remediator-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: 0.2
-    maxTokens: null
-  limits:
-    maxTurns: 40
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: medium
-  roleColor: engineer
+  title: Code Remediator
+  description: "Bridges a production root cause to the codebase. When the root cause is a code defect\
+    \ (not just a config/capacity issue), it reads the affected service's repository, confirms the bug\
+    \ in source, opens a fix pull request on a branch, and files a classified, priority-labelled tracking\
+    \ issue. It never merges and never deploys \u2014 humans review the PR."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/code-remediator
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: code-remediator
+    name: Code Remediator
+    description: "Bridges a production root cause to the codebase. When the root cause is a code defect\
+      \ (not just a config/capacity issue), it reads the affected service's repository, confirms the bug\
+      \ in source, opens a fix pull request on a branch, and files a classified, priority-labelled tracking\
+      \ issue. It never merges and never deploys \u2014 humans review the PR."
+    tags:
+    - sre
+    - medium
+    - devai

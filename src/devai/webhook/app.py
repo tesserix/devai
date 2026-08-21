@@ -805,6 +805,11 @@ def create_app(
 
     app.include_router(registry_router)
 
+    # Authenticated Agent2Agent server endpoint for the specialization catalog.
+    from devai.a2a.routes import router as a2a_router
+
+    app.include_router(a2a_router)
+
     # Agentic control-plane status (/api/agentic/status + smoke probes).
     # Backs the dashboard's Gateway panel; one endpoint aggregates the
     # health of registry / agentgateway / ai-gateway / kagent.

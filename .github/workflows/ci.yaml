@@ -47,7 +47,12 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - run: pip install -e ".[dev]"
+      - name: Install DevAI with Tesserix ADK
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.PKG_READ_TOKEN }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/
+        run: pip install -e ".[dev,kit]"
 
       - name: Ruff lint
         run: ruff check src/ tests/
@@ -68,7 +73,12 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - run: pip install -e ".[dev]"
+      - name: Install DevAI with Tesserix ADK
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.PKG_READ_TOKEN }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/
+        run: pip install -e ".[dev,kit]"
 
       - name: Type check
         run: mypy src/devai/ --ignore-missing-imports
@@ -127,8 +137,6 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          secrets: |
-            gh_token=${{ secrets.PKG_READ_TOKEN }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}

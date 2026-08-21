@@ -1,26 +1,46 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: perf-monitor-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: perf-monitor
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: perf-monitor
-  promptRef: perf-monitor-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 25
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.sre.agents.perf_monitor.PerfMonitorAgent
-  riskLevel: low
-  roleColor: admin
+  title: Performance Monitor
+  description: Queries Prometheus for latency, throughput, error rate, and saturation SLIs for every app
+    discovered. Flags any app breaching its SLO budget.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/perf-monitor
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: perf-monitor
+    name: Performance Monitor
+    description: Queries Prometheus for latency, throughput, error rate, and saturation SLIs for every
+      app discovered. Flags any app breaching its SLO budget.
+    tags:
+    - sre
+    - low
+    - devai

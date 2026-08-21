@@ -15,9 +15,10 @@ spec:
     dev workloads.'
   category: sre
   tools:
-  - gcp_billing_query
-  - kubectl_get
-  - prometheus_query
+  - gcp_get_billing_summary
+  - k8s_get_resource_usage
+  - k8s_get_deployments
+  - prom_query
   handoverSchema:
     findings:
       type: array

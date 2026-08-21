@@ -9,17 +9,6 @@ from devai.adk.validation import validate_artifacts
 from devai.sandbox.evals import EvalCase
 
 SEEDS = Path("architecture/registry-seeds")
-BUILTIN_AGENTS = {
-    "engineering-manager",
-    "code-remediator",
-    "db-engineer",
-    "security-expert",
-    "qa-tester",
-    "release-promoter",
-    "incident-responder",
-    "discovery",
-    "cost-optimizer",
-}
 CASE_KINDS = {"happy-path", "prompt-injection", "tool-failure", "should-refuse"}
 
 
@@ -29,12 +18,13 @@ def _load(path: Path) -> dict[str, Any]:
     return body
 
 
-def test_builtin_agents_have_versioned_public_golden_datasets_and_suites() -> None:
+def test_all_agents_have_versioned_public_golden_datasets_and_suites() -> None:
     dataset_files = sorted((SEEDS / "datasets").glob("*-golden.yaml"))
     suite_files = sorted((SEEDS / "eval-suites").glob("*-golden-suite.yaml"))
+    agent_names = {path.stem.removesuffix("-agent") for path in (SEEDS / "agents").glob("*-agent.yaml")}
 
-    assert {path.stem.removesuffix("-golden") for path in dataset_files} == BUILTIN_AGENTS
-    assert {path.stem.removesuffix("-golden-suite") for path in suite_files} == BUILTIN_AGENTS
+    assert {path.stem.removesuffix("-golden") for path in dataset_files} == agent_names
+    assert {path.stem.removesuffix("-golden-suite") for path in suite_files} == agent_names
     assert {_load(path)["metadata"]["name"] for path in dataset_files}.isdisjoint(
         {_load(path)["metadata"]["name"] for path in suite_files}
     )

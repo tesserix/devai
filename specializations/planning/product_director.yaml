@@ -5,6 +5,7 @@ description: >-
   stories. Each story has acceptance criteria, priority, labels, and is
   sized for 1-3 days of work.
 category: planning
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: o3

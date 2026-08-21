@@ -6,6 +6,7 @@ description: >-
   code — files findings, doesn't fix them. Blocks pipeline on
   CRITICAL/HIGH findings.
 category: review
+runtime: tesserix_adk
 
 llm_provider: claude
 llm_model: claude-sonnet-4-20250514

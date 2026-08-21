@@ -14,8 +14,8 @@ spec:
     discovered. Flags any app breaching its SLO budget.
   category: sre
   tools:
-  - prometheus_query
-  - prometheus_query_range
+  - prom_query
+  - prom_query_range
   handoverSchema:
     findings:
       type: array

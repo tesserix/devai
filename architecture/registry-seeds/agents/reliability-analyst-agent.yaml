@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: reliability-analyst-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: reliability-analyst
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: reliability-analyst
-  promptRef: reliability-analyst-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: 0.1
-    maxTokens: null
-  limits:
-    maxTurns: 24
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: engineer
+  title: Reliability Analyst
+  description: "Evaluates service reliability against SLOs using Prometheus \u2014 request success rate,\
+    \ latency percentiles, and error-budget burn. Produces an SLO scorecard per service and flags budgets\
+    \ that are nearly exhausted. Read-only."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/reliability-analyst
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: reliability-analyst
+    name: Reliability Analyst
+    description: "Evaluates service reliability against SLOs using Prometheus \u2014 request success rate,\
+      \ latency percentiles, and error-budget burn. Produces an SLO scorecard per service and flags budgets\
+      \ that are nearly exhausted. Read-only."
+    tags:
+    - sre
+    - low
+    - devai

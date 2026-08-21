@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: negotiator-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: specialist
     devai.io/skill: negotiator
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: negotiator
-  promptRef: negotiator-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: 0.3
-    maxTokens: null
-  limits:
-    maxTurns: 12
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: product
+  title: Requirement Negotiator
+  description: "Multi-turn clarifying Q&A with the user. Used when intake decided \"clarify\" \u2014 the\
+    \ negotiator asks one question at a time, waits for the user's answer, and continues until requirements\
+    \ are concrete enough to proceed. Parks the task between turns."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/negotiator
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: negotiator
+    name: Requirement Negotiator
+    description: "Multi-turn clarifying Q&A with the user. Used when intake decided \"clarify\" \u2014\
+      \ the negotiator asks one question at a time, waits for the user's answer, and continues until requirements\
+      \ are concrete enough to proceed. Parks the task between turns."
+    tags:
+    - specialist
+    - low
+    - devai

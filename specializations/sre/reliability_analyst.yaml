@@ -6,6 +6,7 @@ description: >-
   SLO scorecard per service and flags budgets that are nearly exhausted.
   Read-only.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1
