@@ -6,6 +6,7 @@ description: >-
   introduced via ORM models. Hard-gates the pipeline on destructive
   changes (drops, type narrows).
 category: coding
+runtime: tesserix_adk
 
 llm_provider: claude
 llm_model: claude-sonnet-4-20250514

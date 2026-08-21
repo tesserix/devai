@@ -504,8 +504,8 @@ async def stop(request: Request, task_id: str) -> dict[str, Any]:
 @router.delete("/runs/{task_id}")
 async def delete_run(request: Request, task_id: str) -> dict[str, Any]:
     """Delete a run — stops it if live, then removes it from the pipeline-task
-    store, the legacy orchestrator store, and clears its control flag. Lets the
-    dashboard clean up old / zombie runs."""
+    store and the legacy orchestrator store while retaining a bounded stop
+    tombstone. Lets the dashboard clean up old / zombie runs."""
     svc = _service(request)
     task = await svc.get_task(task_id)
     if task is None:

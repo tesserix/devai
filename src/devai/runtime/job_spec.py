@@ -102,10 +102,10 @@ _GIT_CLONE_SCRIPT = (
     # cache in the cloned config, and reset the remote to a bare URL.
     'git -C /work remote set-url origin "https://github.com/${REPO}.git" || true; '
     "git -C /work config --unset-all credential.helper 2>/dev/null || true; "
-    "chown -R 1000:1000 /work"
+    "chown -R 10001:10001 /work"
 )
 
-_GIT_CLONE_SCRIPT_IF_MISSING = "test -d /work/.git || { " + _GIT_CLONE_SCRIPT + "; }; chown -R 1000:1000 /work"
+_GIT_CLONE_SCRIPT_IF_MISSING = "test -d /work/.git || { " + _GIT_CLONE_SCRIPT + "; }; chown -R 10001:10001 /work"
 
 
 def _dns_safe(value: str, *, max_len: int = 63) -> str:

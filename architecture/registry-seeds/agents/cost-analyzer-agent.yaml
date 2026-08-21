@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: cost-analyzer-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: cost-analyzer
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: cost-analyzer
-  promptRef: cost-analyzer-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 25
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.sre.agents.cost_analyzer.CostAnalyzerAgent
-  riskLevel: low
-  roleColor: admin
+  title: Cost Analyzer
+  description: 'Reads GCP billing + cluster resource requests/limits and surfaces cost-savings opportunities:
+    oversized requests, idle deployments, unused PVCs, expensive regions, prod-class hardware running
+    dev workloads.'
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/cost-analyzer
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: cost-analyzer
+    name: Cost Analyzer
+    description: 'Reads GCP billing + cluster resource requests/limits and surfaces cost-savings opportunities:
+      oversized requests, idle deployments, unused PVCs, expensive regions, prod-class hardware running
+      dev workloads.'
+    tags:
+    - sre
+    - low
+    - devai

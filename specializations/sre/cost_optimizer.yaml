@@ -6,6 +6,7 @@ description: >-
   insights — and quantifies the monthly saving for each. Read-only;
   proposes, never applies.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

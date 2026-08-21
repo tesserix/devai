@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: staff-reviewer-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: review
     devai.io/skill: staff-reviewer
+    devai.io/risk-level: medium
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: staff-reviewer
-  promptRef: staff-reviewer-prompt-v1
-  llm:
-    provider: openai
-    model: o3
-    temperature: 0.2
-    maxTokens: null
-  limits:
-    maxTurns: 80
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.staff_reviewer.StaffReviewerAgent
-  riskLevel: medium
-  roleColor: engineer
+  title: Staff Code Reviewer
+  description: 'Final review gate before merge. Checks: code quality, story completeness against acceptance
+    criteria, scope (no creep), performance, security, error handling, testability. Loops up to 3 iterations
+    on changes_requested then escalates to human.'
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/staff-reviewer
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: staff-reviewer
+    name: Staff Code Reviewer
+    description: 'Final review gate before merge. Checks: code quality, story completeness against acceptance
+      criteria, scope (no creep), performance, security, error handling, testability. Loops up to 3 iterations
+      on changes_requested then escalates to human.'
+    tags:
+    - review
+    - medium
+    - devai

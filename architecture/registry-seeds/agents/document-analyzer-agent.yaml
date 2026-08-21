@@ -1,42 +1,46 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: document-analyzer-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: planning
     devai.io/skill: document-analyzer
-    # NOTE: no devai.io/runtime label → this agent runs on the DEFAULT path: an
-    # ephemeral K8s Job per run (spins up when the pipeline calls it, terminates
-    # after). That's the right fit for a 3-node cluster — zero standing pods.
-    # kagent (a long-lived, always-warm Deployment) is opt-in: add
-    # `devai.io/runtime: kagent` to an agent ONLY when it's hit constantly and
-    # cold-start hurts AND there's node headroom for a standing pod.
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: document-analyzer
-  promptRef: document-analyzer-prompt-v1
-  # systemPrompt is what the kagent export renders into the kagent Agent CR's
-  # spec.systemMessage (kagent requires it to be non-empty). The DevAI Job/inline
-  # path ignores it — there the python_class above drives the agent — so this only
-  # shapes how the agent behaves when it runs inside kagent.
-  systemPrompt: >-
-    You are DevAI's Document Analyzer. Given requirement documents, an issue, or a
-    PR description, extract the key functional and non-functional requirements,
-    constraints, and acceptance criteria, and summarize them concisely for the
-    downstream planning agents. Be precise; never invent requirements that are not
-    stated in the source.
-  llm:
-    provider: gemini
-    model: gemini-3.1-pro-preview
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 30
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.document_analyzer.DocumentAnalyzerAgent
-  riskLevel: low
-  roleColor: product
+  title: Document Analyzer
+  description: Ingest PDFs, URLs, OpenAPI specs, architecture diagrams. Extract every functional + non-functional
+    requirement, plus any tech-stack hints buried in the input. Output is consumed by requirements_analyst.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/document-analyzer
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: document-analyzer
+    name: Document Analyzer
+    description: Ingest PDFs, URLs, OpenAPI specs, architecture diagrams. Extract every functional + non-functional
+      requirement, plus any tech-stack hints buried in the input. Output is consumed by requirements_analyst.
+    tags:
+    - planning
+    - low
+    - devai

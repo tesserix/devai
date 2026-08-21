@@ -6,6 +6,7 @@ description: >-
   approval. It plans; the Incident Responder executes. Read-only with
   respect to the cluster.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: claude
 llm_model: claude-sonnet-4-20250514

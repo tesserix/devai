@@ -31,9 +31,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SPECS_DIR = REPO_ROOT / "specializations"
 SEEDS_DIR = REPO_ROOT / "architecture" / "registry-seeds"
 
-API_VERSION = "registry.solo.io/v1alpha1"
+CATALOG_API_VERSION = "registry.solo.io/v1alpha1"
+AGENT_API_VERSION = "registry.agentic.dev/v1alpha1"
 NAMESPACE = "devai"
 SOURCE_LABEL = "devai"
+A2A_BASE_URL = "http://devai-api.devai.svc.cluster.local:8080/a2a/v1"
 # Seeds are public so they show in the (logged-in) aregistry marketplace, not
 # just DevAI's own authenticated reads. aregistry defaults an unset visibility
 # to "private", which CanRead hides from anyone outside the owning tenant.
@@ -56,7 +58,7 @@ def _skill_doc(spec: dict[str, Any]) -> dict[str, Any]:
     name = _kebab(spec["name"])
     category = spec.get("category", "specialist")
     return {
-        "apiVersion": API_VERSION,
+        "apiVersion": CATALOG_API_VERSION,
         "kind": "Skill",
         "metadata": {
             "name": name,
@@ -83,43 +85,58 @@ def _skill_doc(spec: dict[str, Any]) -> dict[str, Any]:
 
 def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
     name = _kebab(spec["name"])
-    legacy_class = spec.get("legacy_python_class") or ""
+    category = str(spec.get("category") or "specialist")
+    risk = str(spec.get("risk_level") or "medium")
+    title = str(spec.get("display_name") or name.replace("-", " ").title())
+    description = str(spec.get("description") or "").strip()
+    version = str((spec.get("metadata") or {}).get("version") or "1.0.0")
     return {
-        "apiVersion": API_VERSION,
+        "apiVersion": AGENT_API_VERSION,
         "kind": "Agent",
         "metadata": {
             "name": f"{name}-agent",
             "namespace": NAMESPACE,
+            "tenantId": NAMESPACE,
+            "tag": version,
             "visibility": VISIBILITY,
             "labels": {
                 "devai.io/source": SOURCE_LABEL,
-                "devai.io/category": spec.get("category", "specialist"),
+                "devai.io/category": category,
                 "devai.io/skill": name,
+                "devai.io/risk-level": risk,
+                "ai.tesserix.dev/runtime": "tesserix-adk",
+                "ai.tesserix.dev/provider-policy": "user-connectors",
             },
         },
         "spec": {
-            "skill": name,
-            "promptRef": f"{name}-prompt-v1",
-            "llm": {
-                "provider": spec.get("llm_provider", "auto"),
-                "model": spec.get("llm_model") or "",
-                "temperature": spec.get("temperature"),
-                "maxTokens": spec.get("max_tokens"),
+            "title": title,
+            "description": description,
+            "model": {
+                "provider": "devai-user-routing",
+                "name": "dynamic",
             },
-            "limits": {
-                "maxTurns": spec.get("max_turns", 50),
-                "timeoutSeconds": spec.get("timeout_seconds", 900),
+            "a2a": {
+                "url": f"{A2A_BASE_URL}/{name}",
+                "preferredTransport": "JSONRPC",
+                "provider": {
+                    "organization": "Tesserix",
+                    "url": "https://tesserix.app",
+                },
+                "capabilities": {
+                    "streaming": False,
+                    "pushNotifications": False,
+                },
+                "defaultInputModes": ["application/json", "text/plain"],
+                "defaultOutputModes": ["application/json", "text/plain"],
             },
-            "runtime": {
-                # When legacy_python_class is set the agent runs inside the
-                # DevAI api/sre pods (call the Python class). Otherwise the
-                # agent is YAML-only and the SpecializationRunner will
-                # execute it against the LLM provider when it ships.
-                "kind": "python_class" if legacy_class else "yaml_only",
-                "pythonClass": legacy_class or None,
-            },
-            "riskLevel": spec.get("risk_level", "medium"),
-            "roleColor": spec.get("role_color", "engineer"),
+            "skills": [
+                {
+                    "id": name,
+                    "name": title,
+                    "description": description,
+                    "tags": [category, risk, "devai"],
+                }
+            ],
         },
     }
 
@@ -128,7 +145,7 @@ def _prompt_doc(spec: dict[str, Any]) -> dict[str, Any]:
     name = _kebab(spec["name"])
     prompt = spec.get("system_prompt") or ""
     return {
-        "apiVersion": API_VERSION,
+        "apiVersion": CATALOG_API_VERSION,
         "kind": "Prompt",
         "metadata": {
             "name": f"{name}-prompt-v1",

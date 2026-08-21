@@ -6,6 +6,7 @@ description: >-
   memory as either episodic or semantic memories. Closes the
   learning loop.
 category: specialist
+runtime: tesserix_adk
 
 llm_provider: groq
 llm_model: llama-3.3-70b-versatile

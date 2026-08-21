@@ -353,8 +353,11 @@ async def test_concurrent_legacy_runs_keep_user_llm_adapters_isolated():
 
 @pytest.mark.asyncio
 async def test_spec_agent_runs_yaml_tool_loop():
+    from devai.specializations import AgentRuntime
+
     spec = Specialization(
         name="summarizer",
+        runtime=AgentRuntime.TESSERIX_ADK,
         handover_schema={"summary": HandoverField(name="summary", type="string", required=True)},
     )
     llm = FakeLLMAdapter([LLMResponse(text='```json\n{"summary": "did it"}\n```', usage=LLMUsage(prompt_tokens=7))])
@@ -368,6 +371,8 @@ async def test_spec_agent_runs_yaml_tool_loop():
     assert result.output_key == "summarizer_output"
     assert result.turns == 1
     assert result.prompt_tokens == 7
+    assert result.trace_steps[0]["runtime"] == "tesserix-adk"
+    assert llm.requests[0].response_format == {"type": "json_object"}
 
 
 @pytest.mark.asyncio
@@ -378,6 +383,25 @@ async def test_spec_agent_routes_legacy_class_through_legacy_agent():
     result = await SpecAgent(spec).run(RunContext(task=_task(), deps=_deps()))
     assert result.stub is True
     assert result.ok is False
+
+
+@pytest.mark.asyncio
+async def test_spec_agent_routes_migrated_legacy_definition_through_tesserix_adk():
+    from devai.specializations import AgentRuntime
+
+    spec = Specialization(
+        name="bridged",
+        legacy_python_class="devai.nope.Missing",
+        runtime=AgentRuntime.TESSERIX_ADK,
+        handover_schema={"summary": HandoverField(name="summary", type="string")},
+    )
+    llm = FakeLLMAdapter([LLMResponse(text='{"summary":"migrated"}')])
+
+    result = await SpecAgent(spec).run(RunContext(task=_task(), deps=_deps(llm)))
+
+    assert result.ok is True
+    assert result.handover == {"summary": "migrated"}
+    assert result.trace_steps[0]["runtime"] == "tesserix-adk"
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ description: >-
   the run as healthy. Routing only — read-only live-state checks (alerts,
   cluster health) ground the decision; it issues no cluster changes itself.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: o3

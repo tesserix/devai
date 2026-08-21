@@ -1,26 +1,47 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: requirements-analyst-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: planning
     devai.io/skill: requirements-analyst
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: requirements-analyst
-  promptRef: requirements-analyst-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: 0.3
-    maxTokens: null
-  limits:
-    maxTurns: 25
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.requirements_analyst.RequirementsAnalystAgent
-  riskLevel: low
-  roleColor: product
+  title: Requirements Analyst
+  description: Take raw, unstructured requirements and produce a typed list of refined requirements with
+    acceptance criteria, gaps, and assumptions. Output is consumed by product_director (epic + stories).
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/requirements-analyst
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: requirements-analyst
+    name: Requirements Analyst
+    description: Take raw, unstructured requirements and produce a typed list of refined requirements
+      with acceptance criteria, gaps, and assumptions. Output is consumed by product_director (epic +
+      stories).
+    tags:
+    - planning
+    - low
+    - devai

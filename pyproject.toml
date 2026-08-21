@@ -98,7 +98,7 @@ docs = [
 # The agent runtime. A direct reference because the kit repo is private and
 # publishes to GitHub releases rather than PyPI, so installing it needs a token.
 kit = [
-    "tesserix-adk @ git+https://github.com/tesserix/agent-development-kit@v0.2.0",
+    "tesserix-adk @ git+https://github.com/tesserix/agent-development-kit@v0.51.0",
 ]
 dev = [
     "pytest>=9.1.1",

@@ -1,26 +1,52 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: sre-orchestrator-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: sre-orchestrator
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: sre-orchestrator
-  promptRef: sre-orchestrator-prompt-v1
-  llm:
-    provider: openai
-    model: o3
-    temperature: 0.2
-    maxTokens: null
-  limits:
-    maxTurns: 12
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: admin
+  title: SRE Orchestrator
+  description: "Mid-run decision gate for SRE blueprints. After the specialists report and root cause\
+    \ is hypothesised, the orchestrator inspects severity, blast radius, and confidence and decides what\
+    \ happens next: auto- remediate (safe actions only), plan-and-escalate to a human, or close the run\
+    \ as healthy. Routing only \u2014 read-only live-state checks (alerts, cluster health) ground the\
+    \ decision; it issues no cluster changes itself."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/sre-orchestrator
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: sre-orchestrator
+    name: SRE Orchestrator
+    description: "Mid-run decision gate for SRE blueprints. After the specialists report and root cause\
+      \ is hypothesised, the orchestrator inspects severity, blast radius, and confidence and decides\
+      \ what happens next: auto- remediate (safe actions only), plan-and-escalate to a human, or close\
+      \ the run as healthy. Routing only \u2014 read-only live-state checks (alerts, cluster health) ground\
+      \ the decision; it issues no cluster changes itself."
+    tags:
+    - orchestration
+    - low
+    - devai

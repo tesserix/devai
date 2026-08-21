@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: release-manager-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: release-manager
+    devai.io/risk-level: critical
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: release-manager
-  promptRef: release-manager-prompt-v1
-  llm:
-    provider: groq
-    model: llama-3.3-70b-versatile
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 30
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.release_manager.ReleaseManagerAgent
-  riskLevel: critical
-  roleColor: admin
+  title: Release Manager
+  description: Merge story PRs in dependency order, close the epic, trigger deployment (ArgoCD or direct
+    kubectl), and post the release report. Final stage in the ALM pipeline. Hard-gated by risk_level=critical
+    in production.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/release-manager
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: release-manager
+    name: Release Manager
+    description: Merge story PRs in dependency order, close the epic, trigger deployment (ArgoCD or direct
+      kubectl), and post the release report. Final stage in the ALM pipeline. Hard-gated by risk_level=critical
+      in production.
+    tags:
+    - orchestration
+    - critical
+    - devai

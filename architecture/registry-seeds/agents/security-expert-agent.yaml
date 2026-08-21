@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: security-expert-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: review
     devai.io/skill: security-expert
+    devai.io/risk-level: high
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: security-expert
-  promptRef: security-expert-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: null
-    maxTokens: 8192
-  limits:
-    maxTurns: 80
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.security_expert.SecurityExpertAgent
-  riskLevel: high
-  roleColor: security
+  title: Principal Security Engineer
+  description: "Hard security gate. Runs SAST + SCA + secret detection + container scan + OWASP Top 10\
+    \ against the PR diff. READ-ONLY on application code \u2014 files findings, doesn't fix them. Blocks\
+    \ pipeline on CRITICAL/HIGH findings."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/security-expert
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: security-expert
+    name: Principal Security Engineer
+    description: "Hard security gate. Runs SAST + SCA + secret detection + container scan + OWASP Top\
+      \ 10 against the PR diff. READ-ONLY on application code \u2014 files findings, doesn't fix them.\
+      \ Blocks pipeline on CRITICAL/HIGH findings."
+    tags:
+    - review
+    - high
+    - devai

@@ -1,26 +1,48 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: capacity-planner-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: capacity-planner
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: capacity-planner
-  promptRef: capacity-planner-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 20
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.sre.agents.capacity_planner.CapacityPlannerAgent
-  riskLevel: low
-  roleColor: admin
+  title: Capacity Planner
+  description: Forecasts when each app will hit its current resource ceiling at the current growth rate.
+    Recommends HPA / VPA / cluster-autoscaler tweaks. Runs the long-tail (7-day, 30-day) trend analysis
+    the other monitors don't cover.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/capacity-planner
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: capacity-planner
+    name: Capacity Planner
+    description: Forecasts when each app will hit its current resource ceiling at the current growth rate.
+      Recommends HPA / VPA / cluster-autoscaler tweaks. Runs the long-tail (7-day, 30-day) trend analysis
+      the other monitors don't cover.
+    tags:
+    - sre
+    - low
+    - devai

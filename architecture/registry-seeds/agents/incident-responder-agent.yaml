@@ -1,26 +1,47 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: incident-responder-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: incident-responder
+    devai.io/risk-level: high
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: incident-responder
-  promptRef: incident-responder-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 30
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.sre.agents.incident_responder.IncidentResponderAgent
-  riskLevel: high
-  roleColor: admin
+  title: Incident Responder
+  description: Final SRE stage. Reads correlated findings from the parallel monitor fan-out and decides
+    whether to create an incident, remediate automatically (where safe), or escalate to a human via PagerDuty/Slack.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/incident-responder
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: incident-responder
+    name: Incident Responder
+    description: Final SRE stage. Reads correlated findings from the parallel monitor fan-out and decides
+      whether to create an incident, remediate automatically (where safe), or escalate to a human via
+      PagerDuty/Slack.
+    tags:
+    - sre
+    - high
+    - devai
