@@ -21,3 +21,10 @@ def test_main_ci_installs_the_adk_extra_fail_closed() -> None:
 
     assert workflow.count('pip install -e ".[dev,kit]"') == 2
     assert workflow.count("GIT_CONFIG_KEY_0") == 2
+
+
+def test_sre_ci_installs_the_adk_extra_fail_closed() -> None:
+    workflow = Path(".github/workflows/sre-build.yaml").read_text()
+
+    assert workflow.count('pip install -e ".[dev,kit]"') == 2
+    assert workflow.count("GIT_CONFIG_KEY_0") == 2

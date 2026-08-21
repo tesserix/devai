@@ -45,7 +45,12 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - run: pip install -e ".[dev]"
+      - name: Install DevAI with Tesserix ADK
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.PKG_READ_TOKEN }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/
+        run: pip install -e ".[dev,kit]"
 
       - name: Ruff lint SRE module
         run: ruff check src/devai/sre/
@@ -66,7 +71,12 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - run: pip install -e ".[dev]"
+      - name: Install DevAI with Tesserix ADK
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.PKG_READ_TOKEN }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/
+        run: pip install -e ".[dev,kit]"
 
       - name: Run SRE tests
         run: pytest tests/ -v --tb=short -k "sre" --cov=devai.sre --cov-report=term-missing
