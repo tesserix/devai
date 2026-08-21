@@ -89,11 +89,38 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  live_config:
+    name: Detect live evaluation configuration
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    outputs:
+      enabled: ${{ steps.detect.outputs.enabled }}
+    env:
+      DEVAI_API_URL: ${{ vars.DEVAI_CI_API_URL }}
+      DEVAI_SESSION_COOKIE: ${{ secrets.DEVAI_CI_SESSION_COOKIE }}
+      DEVAI_CI_LLM_CONNECTOR: ${{ vars.DEVAI_CI_LLM_CONNECTOR }}
+    steps:
+      - name: Detect complete owner-scoped configuration
+        id: detect
+        run: |
+          enabled=false
+          if [[ -n "$DEVAI_API_URL" && -n "$DEVAI_SESSION_COOKIE" && -n "$DEVAI_CI_LLM_CONNECTOR" ]]; then
+            enabled=true
+            echo "::add-mask::$DEVAI_SESSION_COOKIE"
+          fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          if [[ "$enabled" == 'true' ]]; then
+            echo 'Live Agent evaluations are configured.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Live Agent evaluations are skipped; owner-scoped CI credentials are incomplete.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   evaluate:
     name: Evaluate ${{ matrix.agent }}
-    needs: impact
+    needs: [impact, live_config]
     if: >-
       needs.impact.outputs.has_evals == 'true' &&
+      needs.live_config.outputs.enabled == 'true' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     strategy:
@@ -229,7 +256,7 @@ jobs:
 
   scorecard:
     name: Agent evaluation scorecard
-    needs: [impact, evaluate]
+    needs: [impact, live_config, evaluate]
     if: >-
       always() && needs.impact.outputs.has_evals == 'true' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -238,6 +265,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Download candidate evidence
+        if: needs.live_config.outputs.enabled == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: agent-eval-*
@@ -248,17 +276,22 @@ jobs:
         id: scorecard
         env:
           EVALUATE_RESULT: ${{ needs.evaluate.result }}
+          LIVE_EVALS_ENABLED: ${{ needs.live_config.outputs.enabled }}
         run: |
           {
             echo '<!-- devai-agent-evals -->'
             echo '## DevAI Agent evaluation scorecard'
             echo
-            find scorecards -name '*-comparison.md' -type f -print0 \
-              | sort -z \
-              | xargs -0 -r cat
+            if [[ "$LIVE_EVALS_ENABLED" == 'true' ]]; then
+              find scorecards -name '*-comparison.md' -type f -print0 \
+                | sort -z \
+                | xargs -0 -r cat
+            else
+              echo '> Live evaluations skipped because owner-scoped CI credentials are not configured. Artifact ownership validation passed.'
+            fi
           } > scorecard.md
           failed=false
-          if [[ "$EVALUATE_RESULT" != 'success' ]]; then
+          if [[ "$LIVE_EVALS_ENABLED" == 'true' && "$EVALUATE_RESULT" != 'success' ]]; then
             failed=true
             {
               echo
