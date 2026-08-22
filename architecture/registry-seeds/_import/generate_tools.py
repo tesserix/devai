@@ -34,16 +34,27 @@ def _title(name: str) -> str:
 
 def _load_tool_schemas() -> dict[str, dict]:
     """Import devai's tool modules and dump {name: {description, parameters}}."""
-    from devai.tools import registry as R
-    for m in ("scm_tools", "github_tools", "file_tools", "document_tools",
-              "checkpoint_tools", "shell_tools", "web_tools", "security_tools",
-              "validation_tools", "gitops_tools", "dispatch"):
+    from devai.tools import registry as tool_registry
+
+    for m in (
+        "scm_tools",
+        "github_tools",
+        "file_tools",
+        "document_tools",
+        "checkpoint_tools",
+        "shell_tools",
+        "web_tools",
+        "security_tools",
+        "validation_tools",
+        "gitops_tools",
+        "dispatch",
+    ):
         try:
             importlib.import_module(f"devai.tools.{m}")
         except Exception:  # noqa: BLE001 — best-effort; missing dep just means fewer schemas
             pass
     out: dict[str, dict] = {}
-    for name, rt in getattr(R, "_REGISTRY", {}).items():
+    for name, rt in getattr(tool_registry, "_REGISTRY", {}).items():
         spec = getattr(rt, "spec", rt)
         out[name] = {
             "description": getattr(rt, "description", "") or getattr(spec, "description", ""),
@@ -75,9 +86,23 @@ def _domain(tool: str, server_short: str) -> str:
 
 
 def _risk(tool: str) -> str:
-    hot = ("commit", "merge", "create_pr", "create_pull", "create_branch", "close_issue",
-           "dispatch", "scan", "sbom", "delete", "rollback", "promote", "sync",
-           "reconcile", "suspend")
+    hot = (
+        "commit",
+        "merge",
+        "create_pr",
+        "create_pull",
+        "create_branch",
+        "close_issue",
+        "dispatch",
+        "scan",
+        "sbom",
+        "delete",
+        "rollback",
+        "promote",
+        "sync",
+        "reconcile",
+        "suspend",
+    )
     return "medium" if any(h in tool for h in hot) else "low"
 
 
