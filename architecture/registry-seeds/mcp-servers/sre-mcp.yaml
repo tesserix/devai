@@ -14,6 +14,11 @@ spec:
     \ status, cost analysis. Exposed via the SRE service."
   endpoint: http://devai-sre.devai.svc.cluster.local:8090/mcp/sre
   authMode: jwt
+  credentialRef:
+    secretName: devai-mcp-upstream
+    key: token
+    header: Authorization
+    prefix: 'Bearer '
   tools:
   - sre_runtime_list
   - sre_runtime_status

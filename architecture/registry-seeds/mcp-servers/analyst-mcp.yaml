@@ -15,6 +15,11 @@ spec:
     (security:llm-, ux:llm-) so dedupe by (file, rule, line) doesn't collide tool output with model output.
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/analyst
   authMode: jwt
+  credentialRef:
+    secretName: devai-mcp-upstream
+    key: token
+    header: Authorization
+    prefix: 'Bearer '
   tools:
   - security_scan_sast
   - security_scan_dependencies

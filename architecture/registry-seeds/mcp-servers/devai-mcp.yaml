@@ -14,6 +14,11 @@ spec:
     \ Same surface the chat agent exposes via tools today."
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/devai
   authMode: jwt
+  credentialRef:
+    secretName: devai-mcp-upstream
+    key: token
+    header: Authorization
+    prefix: 'Bearer '
   tools:
   - devai_pipeline_dispatch
   - devai_pipeline_list_runs
