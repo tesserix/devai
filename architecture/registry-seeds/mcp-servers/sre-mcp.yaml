@@ -13,6 +13,13 @@ spec:
   description: "SRE observability + remediation tools \u2014 kubectl wrappers, Prometheus queries, ArgoCD\
     \ status, cost analysis. Exposed via the SRE service."
   endpoint: http://devai-sre.devai.svc.cluster.local:8090/mcp/sre
+  serviceSelector:
+    namespaces:
+      matchLabels:
+        kubernetes.io/metadata.name: devai
+    services:
+      matchLabels:
+        mcp.tesserix.app/server: sre-mcp
   authMode: jwt
   credentialRef:
     secretName: devai-mcp-upstream
