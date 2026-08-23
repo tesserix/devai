@@ -15,7 +15,7 @@ from devai.adapters.llm.base import LLMResponse, LLMUsage
 from devai.crews.loader import load_seed_crews
 from devai.crews.models import CrewMember, CrewSpec
 from devai.pipeline.interfaces import StageDeps
-from devai.pipeline.stages.crew_runner import crew_runner_stage
+from devai.pipeline.stages.crew_runner import crew_runner_stage, select_crew
 from devai.pipeline.types import DevAITask
 from devai.specializations.base import Specialization
 
@@ -152,3 +152,71 @@ async def test_crew_runner_no_crew_resolved():
     stage = crew_runner_stage(deps, {})
     result = await stage.execute(DevAITask(intent="x"))
     assert result.data.get("crew_error") == "no_crew"
+
+
+# ── dynamic crew selection ──────────────────────────────────────────────
+
+
+def _real_seeds():
+    return load_seed_crews(REPO_ROOT / "crews")
+
+
+@pytest.mark.parametrize(
+    ("intent", "expected"),
+    [
+        ("add a health endpoint and a test for it", "backend_crew"),
+        ("make the drawer component match our brand in tailwind", "frontend_crew"),
+        ("investigate the latency spike on the checkout pods", "sre_crew"),
+    ],
+)
+def test_select_crew_routes_by_intent(intent: str, expected: str):
+    picked = select_crew(DevAITask(intent=intent, repo="tesserix/test-repo"), _real_seeds())
+    assert picked.name == expected
+
+
+def test_select_crew_falls_back_to_default_never_sre():
+    """A signal-free intent must land on a build crew, not the SRE crew."""
+    picked = select_crew(DevAITask(intent="just do the thing"), _real_seeds(), default_crew="backend_crew")
+    assert picked.name == "backend_crew"
+
+    # With no configured default, the crew tagged `default` wins.
+    picked = select_crew(DevAITask(intent="just do the thing"), _real_seeds())
+    assert "sre" not in picked.tags
+
+
+def test_select_crew_uses_tech_stack_signal():
+    task = DevAITask(intent="ship the thing", agent_context={"tech_stack": "react, tailwind"})
+    assert select_crew(task, _real_seeds()).name == "frontend_crew"
+
+
+def test_select_crew_with_no_seeds_is_none():
+    assert select_crew(DevAITask(intent="x"), {}) is None
+
+
+@pytest.mark.asyncio
+async def test_crew_runner_picks_a_crew_dynamically():
+    """`Dynamic` in the composer must resolve a real crew, not silently no-op."""
+    llm = FakeLLMAdapter([LLMResponse(text='```json\n{"summary": "done"}\n```')] * 6)
+    deps = StageDeps(
+        config=None,
+        llm=llm,
+        extra={"seed_crews": _real_seeds(), "specialization_registry": FakeSpecRegistry()},
+    )
+    stage = crew_runner_stage(deps, {})  # no config.crew, no task.crew_id
+    task = DevAITask(intent="add a REST endpoint to the orders service", repo="tesserix/test-repo")
+
+    result = await stage.execute(task)
+
+    assert result.data["crew_output"]["crew"] == "backend_crew"
+    assert result.data["crew_output"]["assignments"]
+    assert result.data.get("ok") is not False
+
+
+@pytest.mark.asyncio
+async def test_crew_runner_no_crew_is_a_failure_not_a_silent_pass():
+    deps = StageDeps(config=None, llm=None, extra={"seed_crews": {}})
+    result = await crew_runner_stage(deps, {}).execute(DevAITask(intent="x"))
+    # ok=False is what the executor reads to honor `on_failure` (a run that
+    # built nothing must not report DONE).
+    assert result.data["ok"] is False
+    assert result.data["crew_error"] == "no_crew"

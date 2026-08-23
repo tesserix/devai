@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowUpRight, Send, Terminal, Users, Wifi, WifiOff } from "lucide-react";
+import { ArrowUpRight, CircleAlert, Send, Terminal, Users, Wifi, WifiOff } from "lucide-react";
 import Link from "next/link";
 import {
   api,
@@ -36,6 +36,10 @@ import { Select } from "@/components/ui/select";
  *           dropped connection backfills missed frames, and the terminal/spinner
  *           are driven off an explicit run-state poll rather than guessing from
  *           a single "post-report" frame.
+ * DASH-14 — the composer states plainly what it needs before Run is armed, and
+ *           a dispatch never disappears: a status strip (state · stage · elapsed ·
+ *           open-run link) stays pinned in the composer card and the live area
+ *           scrolls itself into view.
  */
 
 const SSE_REPLAY = 50; // frames the server replays on (re-)connect
@@ -82,6 +86,12 @@ function ComposeInner() {
   const [runState, setRunState] = useState<RunState | null>(null);
   const [conn, setConn] = useState<Conn>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  // Dispatch feedback: when the run started (for the elapsed clock) and where
+  // the live area is, so a Run always lands somewhere visible.
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const liveRef = useRef<HTMLDivElement>(null);
 
   // Last server event id seen on this stream — fed back on reconnect so the
   // server can backfill anything emitted while we were disconnected.
@@ -229,6 +239,14 @@ function ComposeInner() {
     };
   }, [taskId, running]);
 
+  // Elapsed clock — only ticks while a run is in flight.
+  useEffect(() => {
+    if (!running || startedAt === null) return;
+    setNowMs(Date.now());
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [running, startedAt]);
+
   const parseContextRefs = useCallback(
     (text: string): ContextRef[] => {
       const refs: ContextRef[] = [];
@@ -250,19 +268,17 @@ function ComposeInner() {
   );
 
   async function run() {
-    if (!intent.trim() || !repo.trim()) {
-      setError("Intent and repo are required.");
-      return;
-    }
-    if (!blueprint) {
-      setError("Pick a blueprint to run.");
+    if (missing.length || !blueprint) {
+      setError(`Add ${joinList(missing)} to run.`);
       return;
     }
     setError(null);
     setRunning(true);
     setRunState("queued");
+    setStartedAt(Date.now());
     setEvents([]);
     setCheckpoints([]);
+    setTaskId(null);
     lastEventIdRef.current = "";
     try {
       const result = await api.dispatchCompose({
@@ -278,10 +294,17 @@ function ComposeInner() {
         label: "composer",
       });
       setTaskId(result.task_id);
+      // Never leave the user staring at the composer wondering if anything
+      // happened — bring the live terminal to them.
+      window.setTimeout(
+        () => liveRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        60,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setRunning(false);
       setRunState(null);
+      setStartedAt(null);
     }
   }
 
@@ -291,6 +314,18 @@ function ComposeInner() {
   }
 
   const selectedCrew = crews.find((c) => c.id === crewId);
+
+  // What the composer still needs before Run means anything. Shown up front
+  // rather than only after a failed click.
+  const missing = [
+    !intent.trim() ? "what you want done" : null,
+    !repo.trim() ? "a repo" : null,
+    !blueprint ? "a blueprint" : null,
+  ].filter((x): x is string => x !== null);
+
+  // Plain-language "where the run is right now", from the newest staged frame.
+  const currentStage = [...events].reverse().find((e) => e.stage)?.stage ?? null;
+  const dispatched = running || taskId !== null;
 
   return (
     <div className="w-full p-6">
@@ -316,6 +351,15 @@ function ComposeInner() {
           className="rounded-xl border p-4"
           style={{ background: "var(--surface)", borderColor: "var(--border-subtle)" }}
         >
+          <div className="mb-2 flex items-baseline gap-2">
+            <span className="text-xs font-semibold" style={{ color: "var(--ink-strong)" }}>
+              1 · What should the crew do?
+            </span>
+            <span className="text-[11px]" style={{ color: "var(--ink-muted)" }}>
+              Plain English — e.g. “add a health endpoint and a test for it”.
+            </span>
+          </div>
+
           <MentionInput
             value={intent}
             onChange={setIntent}
@@ -325,7 +369,7 @@ function ComposeInner() {
 
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex flex-col text-xs" style={{ color: "var(--ink-muted)" }}>
-              Repo
+              2 · Repo
               <RepoPicker value={repo} onChange={setRepo} className="mt-1 w-56" />
             </label>
 
@@ -372,19 +416,74 @@ function ComposeInner() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={run}
-              disabled={running || !blueprint}
-              className="btn-primary ml-auto !py-2"
-            >
-              <Send size={15} />
-              {running ? "Running…" : "Run"}
-            </button>
+            <div className="ml-auto flex flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={run}
+                disabled={running || missing.length > 0}
+                title={missing.length ? `Add ${joinList(missing)} first` : "Dispatch the crew"}
+                className="btn-primary !py-2"
+              >
+                <Send size={15} />
+                {running ? "Running…" : "Run"}
+              </button>
+              {missing.length > 0 && !running && (
+                <span className="text-[11px]" style={{ color: "var(--ink-muted)" }}>
+                  Add {joinList(missing)} to run.
+                </span>
+              )}
+            </div>
           </div>
 
+          {/* Dispatch status — stays in the composer card so the run is never
+              silent, even if the user doesn't scroll to the terminal. */}
+          {dispatched && (
+            <div
+              className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border px-3 py-2 text-xs"
+              style={{ borderColor: "var(--border-subtle)", background: "var(--surface-muted)" }}
+            >
+              {runState ? (
+                <RunStateBadge state={runState} />
+              ) : (
+                <span style={{ color: "var(--ink-muted)" }}>Dispatching…</span>
+              )}
+              <span style={{ color: "var(--ink)" }}>
+                {taskId
+                  ? currentStage
+                    ? `Working on ${currentStage}`
+                    : running
+                      ? "Crew is starting up…"
+                      : "Run finished"
+                  : "Sending the task to the crew…"}
+              </span>
+              {startedAt !== null && (
+                <span className="font-mono" style={{ color: "var(--ink-muted)" }}>
+                  {fmtElapsed((running ? nowMs : Math.max(nowMs, startedAt)) - startedAt)}
+                </span>
+              )}
+              {taskId && (
+                <>
+                  <span className="font-mono" style={{ color: "var(--ink-muted)" }}>
+                    {taskId.slice(0, 8)}
+                  </span>
+                  <Link
+                    href={`/runs/${taskId}`}
+                    className="ml-auto inline-flex items-center gap-1 font-medium hover:underline"
+                    style={{ color: "var(--accent)" }}
+                  >
+                    Open full run <ArrowUpRight className="w-3 h-3" />
+                  </Link>
+                </>
+              )}
+            </div>
+          )}
+
           {error && (
-            <p className="mt-2 text-xs" style={{ color: "var(--error)" }}>
+            <p
+              className="mt-2 inline-flex items-center gap-1.5 text-xs"
+              style={{ color: "var(--error)" }}
+            >
+              <CircleAlert className="w-3.5 h-3.5 shrink-0" aria-hidden />
               {error}
             </p>
           )}
@@ -408,7 +507,7 @@ function ComposeInner() {
 
       {/* Live work area — only mounts once a run is dispatched, so the page
           isn't a giant empty terminal void before you hit Run. */}
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+      <div ref={liveRef} className="mt-5 scroll-mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
         {/* Left: live terminal while running, friendly placeholder while idle. */}
         <div className="flex min-w-0 flex-col">
           {taskId ? (
@@ -518,6 +617,23 @@ function ComposeInner() {
       </div>
     </div>
   );
+}
+
+/** "a repo and a blueprint" — human list joining for the missing-fields hint. */
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** Elapsed run time as m:ss (or h:mm:ss past an hour). */
+function fmtElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
 }
 
 /**
