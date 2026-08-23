@@ -135,3 +135,30 @@ async def test_model_fallback_retries_other_model_on_error():
     resp = await a.generate(LLMRequest(model="primary"))
     assert resp.text == "ok-on-fallback"
     assert resp.extra.get("model_fallback") is True
+
+
+@pytest.mark.asyncio
+async def test_same_provider_model_fallback_runs_before_next_provider():
+    from devai.adapters.llm.factory import create_llm_chain
+    from devai.adapters.llm.fallback import ModelFallbackLLMAdapter
+
+    class _Primary(LLMAdapter):
+        provider_name = "vertex_gemini"
+        default_model = "primary"
+
+        async def generate(self, request: LLMRequest) -> LLMResponse:
+            if (request.model or self.default_model) == "primary":
+                return LLMResponse(text="", finish_reason="error", provider=self.provider_name)
+            return LLMResponse(text="same-provider-ok", finish_reason="stop", provider=self.provider_name)
+
+    class _Settings:
+        llm_fallback_provider = "groq"
+        groq_api_key = "gsk_test"
+
+    primary = ModelFallbackLLMAdapter(_Primary(), "secondary")
+    chain = create_llm_chain(_Settings(), primary_adapter=primary)
+    response = await chain.generate(LLMRequest(model="primary"))
+
+    assert response.text == "same-provider-ok"
+    assert response.provider == "vertex_gemini"
+    assert response.extra.get("model_fallback") is True

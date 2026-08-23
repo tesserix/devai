@@ -15,8 +15,9 @@ spec:
     the other monitors don't cover.
   category: sre
   tools:
-  - prometheus_query_range
-  - kubectl_get
+  - prom_query_range
+  - k8s_get_deployments
+  - k8s_get_resource_usage
   handoverSchema:
     findings:
       type: array

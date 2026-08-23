@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from devai.specializations import (
+    AgentRuntime,
     HandoverField,
     LLMProvider,
     RiskLevel,
@@ -76,6 +77,7 @@ allowed_tools:
   - scm_create_issue
 max_turns: 25
 timeout: 10m
+runtime: tesserix_adk
 context_keys:
   - requirements
   - previous_output
@@ -105,6 +107,7 @@ metadata:
     assert spec.max_tokens == 4096
     assert spec.max_turns == 25
     assert spec.timeout_seconds == 600  # 10m
+    assert spec.runtime is AgentRuntime.TESSERIX_ADK
     assert spec.risk_level == RiskLevel.HIGH
     assert spec.output_key == "my_output"
     assert spec.handover_schema["title"].type == "string"
@@ -165,7 +168,18 @@ def test_loader_duration_parsing():
 
 def test_catalog_loads_every_shipped_spec():
     specs = discover_specializations(SPECS_DIR)
-    assert len(specs) >= 20, f"expected at least 20 specs, got {len(specs)}"
+    assert len(specs) == 40
+
+
+def test_catalog_routes_every_shipped_agent_through_tesserix_adk():
+    specs = discover_specializations(SPECS_DIR)
+
+    assert {spec.runtime for spec in specs.values()} == {AgentRuntime.TESSERIX_ADK}
+
+
+def test_legacy_runtime_requires_a_python_class() -> None:
+    with pytest.raises(ValueError, match="legacy runtime requires legacy_python_class"):
+        Specialization(name="invalid_legacy", runtime=AgentRuntime.LEGACY)
 
 
 def test_catalog_has_expected_role_names():

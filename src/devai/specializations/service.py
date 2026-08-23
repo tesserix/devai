@@ -210,7 +210,7 @@ class SpecializationService:
         built from ``config``, no Redis) is constructed.
         """
         spec = self.get_full(agent_name)
-        if spec is None or spec.legacy_python_class:
+        if spec is None or spec.uses_legacy_runtime:
             return None
 
         run_deps = deps if deps is not None else self._build_runner_deps()
@@ -268,13 +268,25 @@ class SpecializationService:
         """Project the runner's ALMState-shaped slice onto a DevAITask."""
         from devai.pipeline.types import DevAITask
 
-        reserved = {"run_id", "requirements", "repo_full_name", "blueprint", "trigger_actor", "trace_id"}
+        principal = state.get("principal")
+        reserved = {
+            "run_id",
+            "requirements",
+            "repo_full_name",
+            "blueprint",
+            "trigger_actor",
+            "principal",
+            "team_id",
+            "trace_id",
+        }
         task = DevAITask(
             id=str(state.get("run_id") or ""),
             intent=str(state.get("requirements") or ""),
             repo=str(state.get("repo_full_name") or ""),
             blueprint=str(state.get("blueprint") or ""),
             triggered_by=str(state.get("trigger_actor") or ""),
+            principal=dict(principal) if isinstance(principal, dict) else None,
+            team_id=str(state.get("team_id") or ""),
             trace_id=str(state.get("trace_id") or ""),
         )
         # Everything else (stage_config, agent_profile, mcp_endpoints, …) becomes

@@ -151,6 +151,9 @@ async def build_overlay(
     overrides: dict[str, Any] = {}
     override_scopes: dict[str, Scope] = {}
     mcp_servers: list[dict[str, Any]] = []
+    llm_authorized_providers: list[str] = []
+    llm_provider_scopes: dict[str, Scope] = {}
+    llm_secret_fields: set[str] = set()
 
     def set_override(name: str, value: Any, scope: Scope) -> None:
         overrides[name] = value
@@ -160,6 +163,20 @@ async def build_overlay(
         spec = CONNECTOR_BY_KEY.get(connector_key)
         if spec is None:
             continue
+
+        if connector_key == "llm":
+            provider = c.provider.strip().lower()
+            if provider and provider != "noop":
+                if provider not in llm_authorized_providers:
+                    llm_authorized_providers.append(provider)
+                llm_provider_scopes[provider] = c.scope
+            for fld in spec.fields:
+                if fld.secret and fld.key in c.secret_refs:
+                    llm_secret_fields.add(fld.key)
+                    if fld.provider:
+                        if fld.provider not in llm_authorized_providers:
+                            llm_authorized_providers.append(fld.provider)
+                        llm_provider_scopes[fld.provider] = c.scope
 
         # MCP is multi + special: collect into the mcp_servers list.
         if connector_key == "mcp":
@@ -235,6 +252,26 @@ async def build_overlay(
             fb_model = c.prefs.get("fallback_model")
             if isinstance(fb_model, str) and fb_model.strip():
                 set_override("llm_user_fallback_model", fb_model.strip(), c.scope)
+
+    if llm_authorized_providers:
+        llm_spec = CONNECTOR_BY_KEY["llm"]
+        primary = str(overrides.get(llm_spec.provider_attr, "") or "").strip().lower()
+        if primary not in llm_authorized_providers:
+            primary = llm_authorized_providers[0]
+            set_override(llm_spec.provider_attr, primary, llm_provider_scopes[primary])
+        ordered = [primary, *(p for p in llm_authorized_providers if p != primary)]
+        primary_scope = llm_provider_scopes[primary]
+        set_override("llm_authorized_providers", tuple(ordered), primary_scope)
+        set_override("llm_fallback_provider", ",".join(ordered[1:]), primary_scope)
+
+        # An explicitly connected provider must never inherit a platform key
+        # merely because its own optional credential was omitted (for example,
+        # Vertex routed through the gateway). Shadow absent connector secrets;
+        # the provider then either uses its configured keyless path or fails
+        # closed as unconfigured.
+        for fld in llm_spec.fields:
+            if fld.secret and fld.provider in ordered and fld.key not in llm_secret_fields:
+                set_override(fld.settings_attr, "", llm_provider_scopes[fld.provider])
 
     return PrincipalSettingsOverlay(
         base_settings,

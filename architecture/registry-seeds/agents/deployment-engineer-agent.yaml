@@ -1,26 +1,50 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: deployment-engineer-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: deployment-engineer
+    devai.io/risk-level: high
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: deployment-engineer
-  promptRef: deployment-engineer-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 30
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: high
-  roleColor: admin
+  title: Deployment Engineer
+  description: 'GitOps deployment specialist. Owns the moment between "merged" and "serving traffic":
+    verifies the Argo CD app (or Flux Kustomization/ HelmRelease) picked up the new revision, watches
+    sync + health converge, diagnoses stuck or degraded rollouts from controller conditions, and rolls
+    back when the new revision cannot become healthy. Fluent in both Argo CD and Flux semantics.'
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/deployment-engineer
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: deployment-engineer
+    name: Deployment Engineer
+    description: 'GitOps deployment specialist. Owns the moment between "merged" and "serving traffic":
+      verifies the Argo CD app (or Flux Kustomization/ HelmRelease) picked up the new revision, watches
+      sync + health converge, diagnoses stuck or degraded rollouts from controller conditions, and rolls
+      back when the new revision cannot become healthy. Fluent in both Argo CD and Flux semantics.'
+    tags:
+    - orchestration
+    - high
+    - devai

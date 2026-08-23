@@ -8,6 +8,7 @@ description: >-
   the Promotion to completion, and halts the train (never skips a stage)
   on any failure.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: claude
 llm_model: claude-sonnet-4-20250514

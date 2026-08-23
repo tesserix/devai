@@ -6,6 +6,7 @@ description: >-
   delegation plan (which roles run, in what order, with what depends_on).
   The orchestrator_pre stage hands off to it.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: o3

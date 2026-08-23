@@ -6,6 +6,7 @@ description: >-
   deployment target, and coding patterns. Output drives the
   skill_profile_name selection.
 category: planning
+runtime: tesserix_adk
 
 llm_provider: gemini
 llm_model: gemini-3.1-pro-preview

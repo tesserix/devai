@@ -93,6 +93,11 @@ async def test_invoke_returns_none_for_unknown_agent():
 
 
 def test_task_from_state_maps_fields_and_context():
+    principal = {
+        "email": "u@example.com",
+        "uid": "user-1",
+        "tenant_id": "tenant-a",
+    }
     task = SpecializationService._task_from_state(
         {
             "run_id": "devai-abc",
@@ -101,6 +106,8 @@ def test_task_from_state_maps_fields_and_context():
             "trigger_actor": "u@example.com",
             "trace_id": "t1",
             "blueprint": "alm-pipeline",
+            "principal": principal,
+            "team_id": "team-a",
             "upstream_output": "PRIOR",  # non-reserved → handover context
         }
     )
@@ -108,6 +115,10 @@ def test_task_from_state_maps_fields_and_context():
     assert task.intent == "ship it"
     assert task.repo == "o/r"
     assert task.triggered_by == "u@example.com"
+    assert task.principal == principal
+    assert task.team_id == "team-a"
     assert task.agent_context["upstream_output"] == "PRIOR"
     # Reserved keys don't leak into the handover bag.
     assert "requirements" not in task.agent_context
+    assert "principal" not in task.agent_context
+    assert "team_id" not in task.agent_context

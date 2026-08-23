@@ -7,6 +7,7 @@ description: >-
   request on a branch, and files a classified, priority-labelled tracking
   issue. It never merges and never deploys — humans review the PR.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: claude
 llm_model: claude-sonnet-4-20250514

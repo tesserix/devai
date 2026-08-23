@@ -18,7 +18,6 @@ spec:
   - scm_get_file_content
   - scm_commit_file
   - run_playwright_test
-  - validate_e2e_cypress
   - validate_unit_tests
   handoverSchema:
     test_total:

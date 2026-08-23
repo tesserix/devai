@@ -1,26 +1,52 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: sre-supervisor-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.0
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: sre-supervisor
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: sre-supervisor
-  promptRef: sre-supervisor-prompt-v1
-  llm:
-    provider: openai
-    model: o3
-    temperature: 0.3
-    maxTokens: null
-  limits:
-    maxTurns: 20
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: admin
+  title: SRE Supervisor
+  description: "Senior SRE / incident commander that plans a monitoring or incident run before any agent\
+    \ investigates. Reads the discovered cluster topology and the run intent, then produces a delegation\
+    \ plan: which SRE specialists to dispatch, in what order, against which namespaces, and what each\
+    \ should focus on. Pure planning \u2014 never touches the cluster. The multi-agent SRE blueprints\
+    \ hand off to it first."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/sre-supervisor
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - id: sre-supervisor
+    name: SRE Supervisor
+    description: "Senior SRE / incident commander that plans a monitoring or incident run before any agent\
+      \ investigates. Reads the discovered cluster topology and the run intent, then produces a delegation\
+      \ plan: which SRE specialists to dispatch, in what order, against which namespaces, and what each\
+      \ should focus on. Pure planning \u2014 never touches the cluster. The multi-agent SRE blueprints\
+      \ hand off to it first."
+    tags:
+    - orchestration
+    - low
+    - devai

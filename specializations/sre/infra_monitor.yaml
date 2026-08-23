@@ -5,6 +5,7 @@ description: >-
   flapping deployments, restart counts, OOMKills, PVC pressure. Outputs
   findings consumed by the correlate stage.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

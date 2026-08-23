@@ -53,7 +53,7 @@ class SpecAgent:
     async def run(self, ctx: RunContext) -> AgentResult:
         # Bridge mode: the spec names an existing Python class. Reuse the one
         # LegacyAgent shim so there is a single construction + mapping path.
-        if self.spec.legacy_python_class:
+        if self.spec.uses_legacy_runtime:
             legacy = LegacyAgent.from_dotted(
                 self.spec.legacy_python_class,
                 name=self.spec.name,

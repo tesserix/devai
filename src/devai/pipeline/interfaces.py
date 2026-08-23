@@ -235,10 +235,11 @@ class StageDeps:
             except Exception:  # noqa: BLE001
                 settings, has_own = self.config, False
 
-        chain = role_llm_or(settings, role, self.llm)
+        strict = bool(getattr(self.config, "llm_require_user_connector", False))
+        chain = role_llm_or(settings, role, None if has_own and strict else self.llm)
         if has_own or not is_human or self.llm_resolver is None:
             return chain
-        if bool(getattr(self.config, "llm_require_user_connector", False)):
+        if strict:
             budget = int(getattr(self.config, "llm_trial_token_budget", 0) or 0)
             if budget > 0 and chain is not None:
                 from devai.settings.trial import TrialLLMAdapter, get_trial_meter

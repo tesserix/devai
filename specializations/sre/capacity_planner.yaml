@@ -6,6 +6,7 @@ description: >-
   tweaks. Runs the long-tail (7-day, 30-day) trend analysis the other
   monitors don't cover.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

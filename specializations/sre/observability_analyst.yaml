@@ -7,6 +7,7 @@ description: >-
   discovers which sources are connected, queries metrics/logs/alerts
   across one or many, and reports a cross-source health picture. Read-only.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1
