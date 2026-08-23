@@ -107,7 +107,7 @@ def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
     risk = str(spec.get("risk_level") or "medium")
     title = str(spec.get("display_name") or name.replace("-", " ").title())
     description = str(spec.get("description") or "").strip()
-    version = str((spec.get("metadata") or {}).get("version") or "1.0.0")
+    version = str((spec.get("metadata") or {}).get("version") or "1.0.1")
     return {
         "apiVersion": AGENT_API_VERSION,
         "kind": "Agent",

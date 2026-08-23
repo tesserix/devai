@@ -26,7 +26,7 @@ def test_agent_seed_uses_current_a2a_schema_and_dynamic_user_routing() -> None:
 
     assert manifest["apiVersion"] == "registry.agentic.dev/v1alpha1"
     assert manifest["metadata"]["tenantId"] == "devai"
-    assert manifest["metadata"]["tag"] == "1.0.0"
+    assert manifest["metadata"]["tag"] == "1.0.1"
     assert manifest["metadata"]["labels"]["ai.tesserix.dev/runtime"] == "tesserix-adk"
     assert manifest["spec"]["model"] == {"provider": "devai-user-routing", "name": "dynamic"}
     assert manifest["spec"]["a2a"]["url"].endswith("/a2a/v1/requirements-analyst")
