@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: reflector
-    name: Post-Run Reflector
-    description: Runs AFTER a pipeline task terminates. Reviews what happened (success or failure), extracts
-      lessons, and writes them to agent memory as either episodic or semantic memories. Closes the learning
-      loop.
-    tags:
-    - specialist
-    - low
-    - devai
+  - reflector
+  prompts:
+  - reflector-prompt-v1
+  promptRef: reflector-prompt-v1

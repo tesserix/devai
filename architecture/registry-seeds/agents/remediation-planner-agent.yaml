@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: remediation-planner
-    name: Remediation Planner
-    description: "Turns a root-cause hypothesis into a concrete, ordered remediation plan \u2014 separating\
-      \ safe auto-remediations from changes that need human approval. It plans; the Incident Responder\
-      \ executes. Read-only with respect to the cluster."
-    tags:
-    - sre
-    - medium
-    - devai
+  - remediation-planner
+  prompts:
+  - remediation-planner-prompt-v1
+  promptRef: remediation-planner-prompt-v1

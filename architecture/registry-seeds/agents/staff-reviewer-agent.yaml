@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: staff-reviewer
-    name: Staff Code Reviewer
-    description: 'Final review gate before merge. Checks: code quality, story completeness against acceptance
-      criteria, scope (no creep), performance, security, error handling, testability. Loops up to 3 iterations
-      on changes_requested then escalates to human.'
-    tags:
-    - review
-    - medium
-    - devai
+  - staff-reviewer
+  prompts:
+  - staff-reviewer-prompt-v1
+  promptRef: staff-reviewer-prompt-v1

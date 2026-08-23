@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: prototyper
-    name: Prototype Builder
-    description: Bolt-style fast prototyping role. Scaffolds a Vite + React 19 + Tailwind + shadcn UI
-      from a screenshot / description, commits + pushes + opens PR before polishing. Used by the `prototype.yaml`
-      blueprint.
-    tags:
-    - specialist
-    - low
-    - devai
+  - prototyper
+  prompts:
+  - prototyper-prompt-v1
+  promptRef: prototyper-prompt-v1

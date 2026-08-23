@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from devai.authz import require_principal
+from devai.specializations.service import AgentNotAdmittedError, AgentUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -70,17 +71,35 @@ def _normalize_agent_name(name: str) -> str | None:
     return normalized.removesuffix("-agent").replace("-", "_")
 
 
+@router.post("/capabilities/{capability}")
+async def send_capability_message(capability: str, body: A2ARequest, request: Request) -> dict[str, object]:
+    return await _send_message(capability, body, request)
+
+
 @router.post("/{agent_name}")
 async def send_message(agent_name: str, body: A2ARequest, request: Request) -> dict[str, object]:
+    return await _send_message(agent_name, body, request)
+
+
+async def _send_message(requested_name: str, body: A2ARequest, request: Request) -> dict[str, object]:
     principal = await require_principal(request)
-    normalized_name = _normalize_agent_name(agent_name)
+    normalized_name = _normalize_agent_name(requested_name)
     service = getattr(request.app.state, "specialization_service", None)
     if normalized_name is None or service is None:
         raise HTTPException(status_code=404, detail="agent not found")
-    spec = service.get_full(normalized_name)
-    if spec is None:
-        raise HTTPException(status_code=404, detail="agent not found")
-    if spec.risk_level.needs_human_gate:
+
+    try:
+        bundle = await service.resolve_governed(normalized_name)
+    except AgentNotAdmittedError:
+        raise HTTPException(status_code=404, detail="agent not found") from None
+    except AgentUnavailableError as exc:
+        logger.warning(
+            "A2A governed admission failed capability=%s error_type=%s",
+            normalized_name,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=503, detail="agent composition unavailable") from None
+    if bundle.spec.risk_level.needs_human_gate:
         raise HTTPException(status_code=409, detail="agent requires workflow approval")
 
     deps = getattr(getattr(request.app.state, "pipeline_service", None), "stage_deps", None)
@@ -98,9 +117,16 @@ async def send_message(agent_name: str, body: A2ARequest, request: Request) -> d
         "trace_id": trace_id,
     }
     try:
-        patch = await service.invoke(normalized_name, state, deps=deps)
+        patch = await service.invoke_bundle(bundle, state, deps=deps)
+    except AgentUnavailableError as exc:
+        logger.warning(
+            "A2A governed execution unavailable agent=%s error_type=%s",
+            bundle.agent_name,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=503, detail="agent execution unavailable") from None
     except Exception:  # noqa: BLE001 -- HTTP boundary must return a stable, generic error
-        logger.exception("A2A agent invocation failed agent=%s trace_id=%s", normalized_name, trace_id)
+        logger.exception("A2A agent invocation failed agent=%s trace_id=%s", bundle.agent_name, trace_id)
         raise HTTPException(status_code=500, detail="agent invocation failed") from None
     if patch is None:
         raise HTTPException(status_code=404, detail="agent not found")
@@ -113,10 +139,11 @@ async def send_message(agent_name: str, body: A2ARequest, request: Request) -> d
             "id": run_id,
             "contextId": body.params.message.context_id or run_id,
             "status": {"state": "completed"},
+            "metadata": {"governance": bundle.snapshot()},
             "artifacts": [
                 {
                     "artifactId": uuid.uuid4().hex,
-                    "name": f"{normalized_name}-result",
+                    "name": f"{bundle.agent_name}-result",
                     "parts": [{"kind": "text", "text": artifact_text}],
                 }
             ],

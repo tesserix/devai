@@ -664,3 +664,36 @@ def test_role_chain_adapts_to_connected_providers(monkeypatch):
         assert getattr(second, "_model", "") == "llama-3.3-70b-versatile"
     finally:
         factory._ROLE_CHAIN_CACHE.clear()
+
+
+def test_role_chain_cache_separates_required_gateway_policy(monkeypatch):
+    from devai.adapters.llm import factory
+    from devai.config import Settings
+
+    class _Fake:
+        provider_name = "anthropic"
+        default_model = ""
+
+        def __init__(self, gateway_routed: bool) -> None:
+            self.gateway_routed = gateway_routed
+
+    def fake_create(settings, provider=None):
+        del provider
+        return _Fake(settings.llm_gateway_required)
+
+    monkeypatch.setattr(factory, "create_llm_adapter", fake_create)
+    factory._ROLE_CHAIN_CACHE.clear()
+    try:
+        common = {
+            "llm_provider": "anthropic",
+            "llm_gateway_base_url": "http://ai-gateway:8080",
+            "anthropic_base_url": "https://api.anthropic.com",
+        }
+        direct = factory.create_role_llm(Settings(**common, llm_gateway_required=False), "dev_api")
+        governed = factory.create_role_llm(Settings(**common, llm_gateway_required=True), "dev_api")
+
+        assert direct is not governed
+        assert direct._chain[0]._inner.gateway_routed is False
+        assert governed._chain[0]._inner.gateway_routed is True
+    finally:
+        factory._ROLE_CHAIN_CACHE.clear()

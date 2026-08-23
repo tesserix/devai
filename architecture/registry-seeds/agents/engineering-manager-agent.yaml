@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: engineering-manager
-    name: Engineering Manager
-    description: Create per-story technical implementation plans. Each plan declares the files to create/modify,
-      the approach, dependencies on other stories, and the estimated complexity. Output drives the collaborative
-      parallel implementation model.
-    tags:
-    - planning
-    - medium
-    - devai
+  - engineering-manager
+  prompts:
+  - engineering-manager-prompt-v1
+  promptRef: engineering-manager-prompt-v1

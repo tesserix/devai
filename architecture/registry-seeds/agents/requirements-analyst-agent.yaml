@@ -36,12 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: requirements-analyst
-    name: Requirements Analyst
-    description: Take raw, unstructured requirements and produce a typed list of refined requirements
-      with acceptance criteria, gaps, and assumptions. Output is consumed by product_director (epic +
-      stories).
-    tags:
-    - planning
-    - low
-    - devai
+  - requirements-analyst
+  prompts:
+  - requirements-analyst-prompt-v1
+  promptRef: requirements-analyst-prompt-v1

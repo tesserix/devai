@@ -36,11 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: perf-monitor
-    name: Performance Monitor
-    description: Queries Prometheus for latency, throughput, error rate, and saturation SLIs for every
-      app discovered. Flags any app breaching its SLO budget.
-    tags:
-    - sre
-    - low
-    - devai
+  - perf-monitor
+  prompts:
+  - perf-monitor-prompt-v1
+  promptRef: perf-monitor-prompt-v1

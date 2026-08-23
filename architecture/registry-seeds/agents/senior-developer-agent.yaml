@@ -36,12 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: senior-developer
-    name: Senior Software Engineer
-    description: Implement ONE user story on its own feature branch. Read the story plan, follow repo
-      conventions, write code + co-located unit tests, validate compile/lint/test, open a PR linked to
-      the story issue.
-    tags:
-    - coding
-    - medium
-    - devai
+  - senior-developer
+  prompts:
+  - senior-developer-prompt-v1
+  promptRef: senior-developer-prompt-v1

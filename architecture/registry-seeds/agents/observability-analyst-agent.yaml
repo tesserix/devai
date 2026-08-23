@@ -38,13 +38,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: observability-analyst
-    name: Observability Analyst
-    description: "Pulls signal from the tenant's connected observability backends \u2014 Datadog, New\
-      \ Relic, CloudWatch, Azure Monitor, Prometheus, Elasticsearch, Grafana \u2014 through one vendor-neutral\
-      \ fan-out tool. It discovers which sources are connected, queries metrics/logs/alerts across one\
-      \ or many, and reports a cross-source health picture. Read-only."
-    tags:
-    - sre
-    - low
-    - devai
+  - observability-analyst
+  prompts:
+  - observability-analyst-prompt-v1
+  promptRef: observability-analyst-prompt-v1

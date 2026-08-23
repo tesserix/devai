@@ -38,13 +38,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: root-cause-analyst
-    name: Root Cause Analyst
-    description: "Synthesis role. Reads every specialist's findings plus the correlated finding set and\
-      \ produces a single ranked root-cause hypothesis with a causal chain and confidence. Primarily reasoning\
-      \ over prior outputs, with read-only evidence tools (logs, events, metrics) to verify a causal chain\
-      \ before committing to it \u2014 changes nothing."
-    tags:
-    - sre
-    - low
-    - devai
+  - root-cause-analyst
+  prompts:
+  - root-cause-analyst-prompt-v1
+  promptRef: root-cause-analyst-prompt-v1

@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: reliability-analyst
-    name: Reliability Analyst
-    description: "Evaluates service reliability against SLOs using Prometheus \u2014 request success rate,\
-      \ latency percentiles, and error-budget burn. Produces an SLO scorecard per service and flags budgets\
-      \ that are nearly exhausted. Read-only."
-    tags:
-    - sre
-    - low
-    - devai
+  - reliability-analyst
+  prompts:
+  - reliability-analyst-prompt-v1
+  promptRef: reliability-analyst-prompt-v1

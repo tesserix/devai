@@ -36,11 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: log-analyzer
-    name: Log Analyzer
-    description: Scans recent logs from every app for error spikes, exception patterns, and security signals
-      (auth failures, scrapers, port scans). Correlates timestamps with metric anomalies from perf_monitor.
-    tags:
-    - sre
-    - low
-    - devai
+  - log-analyzer
+  prompts:
+  - log-analyzer-prompt-v1
+  promptRef: log-analyzer-prompt-v1

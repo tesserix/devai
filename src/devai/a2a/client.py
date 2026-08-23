@@ -1,11 +1,8 @@
 """A2A runtime client — discover an agent via the registry, fetch its Agent
-Card, and invoke it over the A2A protocol.
+Card, and invoke it over the A2A protocol through the approved AI Gateway.
 
-The registry is used only for discovery + card fetch. The actual agent call
-goes straight to the card's ``url`` (the agent's own A2A endpoint), so the
-registry never sits on the request path. JSON-RPC 2.0 (``message/send``) is the
-default transport; gRPC / HTTP+JSON agents are recognised but routed through
-their declared ``url`` the same way.
+The signed card contributes only its A2A path. Its host is never dialed: the
+gateway origin is configured by DevAI and remains the outbound trust boundary.
 """
 
 from __future__ import annotations
@@ -81,8 +78,8 @@ class A2AClient:
     """Thin, dependency-light A2A consumer for the orchestrator.
 
     Holds a reference to a :class:`RegistryClient` for discovery/card fetch and
-    talks JSON-RPC directly to each agent's advertised ``url``. ``httpx`` is
-    imported lazily so a pod that never makes an A2A call pays nothing.
+    talks JSON-RPC through the configured gateway. ``httpx`` is imported lazily
+    so a pod that never makes an A2A call pays nothing.
     """
 
     def __init__(
@@ -90,6 +87,7 @@ class A2AClient:
         registry: RegistryClient,
         *,
         namespace: str = "",
+        gateway_base_url: str = "",
         token: str = "",
         timeout_seconds: float = 30.0,
         verify_cards: bool = True,
@@ -97,6 +95,10 @@ class A2AClient:
     ) -> None:
         self._registry = registry
         self._namespace = namespace
+        gateway = urlparse(gateway_base_url.strip())
+        self._gateway_origin = (
+            f"{gateway.scheme}://{gateway.netloc}" if gateway.scheme in {"http", "https"} and gateway.netloc else ""
+        )
         self._token = token
         self._timeout = timeout_seconds
         # Security posture (see verify.py). verify_cards=True is the safe
@@ -143,9 +145,14 @@ class A2AClient:
         return cards
 
     def find_for_capability(self, capability: str, *, namespace: str = "") -> AgentCard | None:
-        """Return the first agent card advertising a matching capability, or
-        None. Used by the orchestrator to route a sub-task to a peer agent."""
+        """Return the only agent advertising a capability.
+
+        Ambiguity fails closed so a newly published duplicate cannot silently
+        replace the product's previous routing choice.
+        """
         matches = self.discover(capability, namespace=namespace)
+        if len(matches) > 1:
+            raise A2AError(f"a2a: ambiguous capability {capability!r}")
         return matches[0] if matches else None
 
     # -- trust checks ------------------------------------------------------- #
@@ -182,6 +189,8 @@ class A2AClient:
         """
         if not card.url:
             raise A2AError(f"a2a: agent {card.name!r} card has no service url to call")
+        if not self._gateway_origin:
+            raise A2AError("a2a: gateway is not configured")
         # Fail closed: verify the registry signature + allowlist the URL BEFORE
         # we send anything to it.
         self.verify(card)
@@ -200,12 +209,20 @@ class A2AClient:
         if metadata:
             message["metadata"] = metadata
 
-        result = self._rpc(card.url, "message/send", {"message": message})
+        result = self._rpc(self._gateway_url(card.url), "message/send", {"message": message})
         return result
+
+    def _gateway_url(self, card_url: str) -> str:
+        parsed = urlparse(card_url)
+        path = parsed.path
+        segments = path.split("/")
+        if not path.startswith("/a2a/") or ".." in segments or path.startswith("//"):
+            raise A2AError("a2a: card does not publish an approved A2A path")
+        return f"{self._gateway_origin}{path}"
 
     def _rpc(self, url: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            import httpx  # type: ignore[import-untyped]
+            import httpx
         except ImportError as e:  # pragma: no cover
             raise A2AError(f"a2a: httpx not installed: {e}") from e
 
@@ -221,15 +238,17 @@ class A2AClient:
         try:
             r = httpx.post(url, headers=headers, content=json.dumps(payload), timeout=self._timeout)
         except httpx.HTTPError as e:
-            raise A2AError(f"a2a: network error calling {url}: {e}") from e
+            raise A2AError("a2a: gateway network error") from e
         if r.status_code >= 400:
-            raise A2AError(f"a2a: {r.status_code} from {url}: {r.text[:200]}")
+            raise A2AError(f"a2a: gateway returned {r.status_code}")
         try:
             body = r.json()
         except json.JSONDecodeError as e:
-            raise A2AError(f"a2a: invalid JSON-RPC response from {url}: {e}") from e
+            raise A2AError("a2a: gateway returned invalid JSON-RPC") from e
         if isinstance(body, dict) and body.get("error"):
-            raise A2AError(f"a2a: agent error from {url}: {body['error']}")
+            error = body["error"]
+            code = error.get("code") if isinstance(error, dict) else "unknown"
+            raise A2AError(f"a2a: agent returned error code {code}")
         result = body.get("result") if isinstance(body, dict) else None
         return result if isinstance(result, dict) else {"result": result}
 
@@ -243,13 +262,15 @@ def create_a2a_client(settings: Settings, registry: RegistryClient | None) -> A2
     """
     if registry is None:
         return None
-    namespace = getattr(settings, "scm_organization", "") or getattr(settings, "github_org", "") or ""
-    token = getattr(settings, "registry_token", "") or ""
+    namespace = getattr(settings, "registry_default_tenant", "") or ""
+    token = getattr(settings, "llm_gateway_api_key", "") or ""
+    gateway_base_url = getattr(settings, "llm_gateway_base_url", "") or ""
     verify_cards = bool(getattr(settings, "a2a_secure", True))
     suffixes = list(getattr(settings, "a2a_allowed_url_suffixes", None) or _DEFAULT_URL_SUFFIXES)
     return A2AClient(
         registry,
         namespace=namespace,
+        gateway_base_url=gateway_base_url,
         token=token,
         verify_cards=verify_cards,
         allowed_url_suffixes=suffixes,

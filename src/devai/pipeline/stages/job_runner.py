@@ -161,7 +161,7 @@ class JobRunnerStage(PipelineStage):
         # full profile so we can pass it through the Job env. Avoids the
         # previous pattern where the dispatcher resolved the image and
         # the runner did a second lookup that it then threw away.
-        agent_profile = self._fetch_agent_profile(agent_name)
+        agent_profile = await self._fetch_agent_profile(agent_name)
 
         # kagent fast-path: a labelled agent is reached through its Substrate
         # SandboxAgent over A2A instead of spawning an ephemeral Job. kagent is
@@ -286,26 +286,49 @@ class JobRunnerStage(PipelineStage):
         extra = self.deps.extra or {}
         return extra.get("job_watcher")
 
-    def _fetch_agent_profile(self, agent_name: str) -> dict[str, Any] | None:
+    async def _fetch_agent_profile(self, agent_name: str) -> dict[str, Any] | None:
         """Pull the canonical aregistry record for this agent.
 
-        Returns ``{image, skills, prompts, mcp_servers, model_provider,
-        model_name}`` or None if aregistry isn't configured or doesn't
-        know the agent. Bounded by RegistryClient's 30 s TTL cache, so
-        the dispatcher path stays sub-millisecond on warm cache.
-
-        Defensive — never raises. A registry miss must not block a
-        pipeline run; the runner falls back to local YAML in that case.
+        Mandatory gateway mode performs a fresh Registry composition
+        resolution and fails before Job or kagent dispatch on any miss. Local
+        development retains the legacy best-effort profile lookup.
         """
         registry = (self.deps.extra or {}).get("registry_client") if self.deps.extra else None
+        governed = bool(getattr(self.deps.config, "llm_gateway_required", False))
+        if governed and not str(getattr(self.deps.config, "llm_gateway_base_url", "") or "").strip():
+            raise RuntimeError("governed agent composition unavailable")
         if registry is None:
+            if governed:
+                raise RuntimeError("governed agent composition unavailable")
             return None
-        try:
-            agent_meta = registry.get_agent(agent_name)
-        except Exception:  # noqa: BLE001
-            logger.debug("registry.get_agent(%s) failed", agent_name, exc_info=True)
-            return None
+        if governed:
+            canonical = f"{agent_name.strip().lower().removesuffix('-agent').replace('_', '-')}-agent"
+            try:
+                resolution = await asyncio.to_thread(registry.resolve_agent, canonical)
+            except Exception as exc:  # noqa: BLE001 -- dependency details stay internal
+                logger.warning(
+                    "governed Job agent resolution failed agent=%s error_type=%s",
+                    canonical,
+                    type(exc).__name__,
+                )
+                raise RuntimeError("governed agent composition unavailable") from None
+            if resolution.agent.name != canonical or resolution.unresolved:
+                raise RuntimeError("governed agent composition unavailable")
+            if (
+                resolution.resolved.get("mcpServers")
+                and not str(getattr(self.deps.config, "agentgateway_url", "") or "").strip()
+            ):
+                raise RuntimeError("governed agent composition unavailable")
+            agent_meta = resolution.agent
+        else:
+            try:
+                agent_meta = await asyncio.to_thread(registry.get_agent, agent_name)
+            except Exception:  # noqa: BLE001
+                logger.debug("registry.get_agent(%s) failed", agent_name, exc_info=True)
+                return None
         if agent_meta is None:
+            if governed:
+                raise RuntimeError("governed agent composition unavailable")
             return None
         return {
             "name": getattr(agent_meta, "name", agent_name),

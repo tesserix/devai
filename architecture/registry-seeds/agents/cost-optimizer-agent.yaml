@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: cost-optimizer
-    name: Cost Optimizer
-    description: "Finds concrete cloud savings \u2014 oversized or idle workloads, orphaned disks/IPs,\
-      \ low-utilisation Cloud SQL/compute, and Recommender cost insights \u2014 and quantifies the monthly\
-      \ saving for each. Read-only; proposes, never applies."
-    tags:
-    - sre
-    - low
-    - devai
+  - cost-optimizer
+  prompts:
+  - cost-optimizer-prompt-v1
+  promptRef: cost-optimizer-prompt-v1

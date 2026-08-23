@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: orchestrator
-    name: Pipeline Orchestrator
-    description: "Mid-pipeline coordinator. At every quality-gate stage (review, security, tests) the\
-      \ orchestrator inspects the role's output and decides whether to advance, loop back to senior_developer,\
-      \ or escalate to a human. Pure decision-making \u2014 no code edits."
-    tags:
-    - orchestration
-    - low
-    - devai
+  - orchestrator
+  prompts:
+  - orchestrator-prompt-v1
+  promptRef: orchestrator-prompt-v1

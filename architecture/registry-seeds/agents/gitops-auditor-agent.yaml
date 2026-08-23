@@ -38,13 +38,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: gitops-auditor
-    name: GitOps Auditor
-    description: "Read-only GitOps hygiene sweep across all three controllers. Finds Argo CD apps OutOfSync/Degraded\
-      \ or stuck mid-operation, Flux objects that are suspended, not Ready, or pinned to stale revisions,\
-      \ failing Flux sources, and Kargo stages with failed promotions or freight that stopped flowing.\
-      \ Issues no mutations \u2014 it reports drift with evidence so the responder or a human can act."
-    tags:
-    - sre
-    - low
-    - devai
+  - gitops-auditor
+  prompts:
+  - gitops-auditor-prompt-v1
+  promptRef: gitops-auditor-prompt-v1
