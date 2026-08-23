@@ -5,8 +5,9 @@
 > `SandboxAgent` and dispatched through `/api/a2a-sandboxes/{namespace}/{agent}`.
 > Substrate multiplexes Actors in a gVisor WorkerPool instead of keeping one pod
 > per agent. Production stays behind `DEVAI_KAGENT_ENABLED=false` until the
-> readiness and cold-start acceptance in #70 and #76 pass. Any dispatch failure
-> transparently uses the existing ephemeral Job path.
+> readiness and cold-start acceptance in #70 and #76 pass. A failure known to
+> occur before kagent accepts a request uses the existing ephemeral Job path.
+> An accepted or ambiguous dispatch fails closed to prevent duplicate tool calls.
 
 The security boundary and required cross-tenant proofs are defined in
 [SUBSTRATE-THREAT-MODEL.md](SUBSTRATE-THREAT-MODEL.md).
@@ -28,7 +29,8 @@ and can wake scaled-to-zero Actors on first dispatch.
 | Idle footprint     | **zero**                                | shared WorkerPool; no pod per agent          |
 | Cold start         | yes (Job scheduling, seconds)           | first dispatch wakes a scaled-to-zero Actor  |
 | Per-user LLM keys  | ✅ `PrincipalLLMResolver`               | ✅ ModelConfig `apiKeyPassthrough`          |
-| Multi-model + fallback | ✅ `role_llm_*` / resolver          | ✅ per-model variants + dispatch chain      |
+| Multi-model selection | ✅ `role_llm_*` / resolver          | ✅ bounded per-model variants                |
+| Failure fallback      | ✅ provider chain                   | pre-acceptance only; never replay accepted work |
 | Fits a 3-node cluster | ✅ always                            | ❌ not accepted in the current runtime        |
 
 **Why the switch remains off.** #70 records a NO-GO for the current runtime. The
@@ -47,6 +49,35 @@ multi-provider selection, and fallback continue to work on the Job path through
    its `SandboxAgent`, `RemoteMCPServer`, and model variants.
 3. Turn on the scoped Settings switch only after the canary is `Ready=True`.
 
+### 0b. DevAI sandbox capability matrix
+
+A DevAI `SandboxSpec` and a kagent `SandboxAgent` are not equivalent. The runtime
+label is sufficient for ordinary registry-agent dispatch, but it must not be used
+as a blanket default for sandbox sessions until the blocked rows below have a
+sandbox-scoped implementation.
+
+| `SandboxSpec` capability | Current kagent mapping | Status |
+|---|---|---|
+| immutable agent + model pins | Static registry export and ModelConfig variant | Adaptable, not sandbox-scoped |
+| prompt version | Static `systemMessage` | Adaptable, not per-sandbox |
+| dataset version | None | Blocked |
+| ADK runtime version | Controller-owned runtime image | Blocked |
+| unpublished draft Agent | Registry export requires a published Agent | Blocked |
+| tool `real/mock/replay/block` modes | Static MCP references only | Blocked |
+| token, cost, wall-clock limits | DevAI sandbox ledger is not enforced inside Actor dispatch | Blocked |
+| confirmed personal LLM connector | `apiKeyPassthrough` for the caller's USER-scoped key | Partial |
+| TTL create/teardown | Standing reconciled Actor lifecycle | Blocked |
+| workspace + pinned repo | No per-sandbox workspace contract | Blocked |
+| IDE and browser | None | Blocked |
+| extra egress domains | Static cluster policy, not a per-sandbox grant | Blocked |
+| credential scopes | No equivalent per-run tool credential grant | Blocked |
+
+The required lifecycle is: create an Actor from the immutable sandbox record,
+wait for `Accepted=True` and `Ready=True`, dispatch with a deterministic sandbox/run
+idempotency key, and tear it down at TTL. A Job may be selected before Actor
+acceptance; after possible acceptance, the run must surface an uncertain outcome
+instead of executing the same work elsewhere.
+
 ---
 
 ## 1. The end-to-end chain
@@ -61,8 +92,8 @@ RECONCILE            kagent-agent-sync CronJob (*/5)  → applies managed CRs
 CONTROLLER (kagent)  reconciles SandboxAgent → Substrate Actor
    │                 {kagent_url}/api/a2a-sandboxes/{ns}/{agent}
 DISPATCH (DevAI)     JobRunnerStage._maybe_dispatch_kagent → KagentClient (A2A)
-                     …when the kagent switch is ON; else a K8s Job. Degrades to
-                     Job on any kagent error (never a SPOF).
+                     …when the kagent switch is ON; else a K8s Job. Uses a Job
+                     only before acceptance; ambiguous dispatches fail closed.
 ```
 
 NATS and Substrate operate at different layers and compose. The optional NATS
@@ -74,7 +105,7 @@ Turning either feature off does not silently enable the other.
 
 - **DevAI side** (this repo) — routing + the dynamic switch. Done & live.
   - `src/devai/pipeline/stages/job_runner.py::_maybe_dispatch_kagent` — routes a
-    labelled agent over A2A; falls back to a Job on any error.
+    labelled agent over A2A; falls back only on a definite pre-acceptance error.
   - `src/devai/agentic/kagent_client.py` — A2A `message/send` client + `extract_a2a_text`.
   - `src/devai/registry/client.py` — surfaces `metadata.labels` on the Agent model.
   - The **switch**: a `kagent` Settings connector (`on`/`off` → `kagent_enabled`),
@@ -296,7 +327,8 @@ which A's run forwards B's key.
 ## 8. Multi-provider, multi-model & fallback (roadmap)
 
 **Goal:** a user picks their provider(s) + model(s) in Settings (OpenAI, Vertex,
-Anthropic, …) and kagent uses them, with fallback — just like the Job path.
+Anthropic, …) and kagent uses the matching bounded variant. Unlike the Job path,
+an accepted Actor task is not replayed against a fallback provider.
 
 **What already exists (reuse, don't rebuild):**
 - The LLM connector carries `provider`, per-provider model fields, `enabled_models`
@@ -312,7 +344,7 @@ Anthropic, …) and kagent uses them, with fallback — just like the Job path.
 provider/model** — only the *key* varies per request (passthrough). So per-user
 provider/model means **pre-provisioned ModelConfig variants**, not free-form.
 
-**Design — a bounded ModelConfig catalog + provider/model-aware dispatch + fallback:**
+**Design — a bounded ModelConfig catalog + provider/model-aware dispatch:**
 
 ```
 Settings (per user)            kagent (pre-provisioned, passthrough)        DevAI dispatch
@@ -321,23 +353,25 @@ provider: openai               kagent-anthropic-sonnet-4-5  ┐               1.
 model: gpt-4.1                 kagent-openai-gpt-4-1        ├ one Agent      +fallback from the overlay
 enabled_models: [...]          kagent-vertex-gemini-2-5     ┘ variant each   2. pick the matching variant
 fallback_model: claude-…                                                    3. forward user key (Bearer)
-                                                                            4. on failure → next (fallback)
+                                                                            4. never replay accepted work
 ```
 
 - The agent-sync renders **one agent variant per catalog ModelConfig** (e.g.
   `document-analyzer-agent`, `…-openai`, `…-vertex`), each an `apiKeyPassthrough`
   ModelConfig for that provider+model. The catalog is **bounded** — the platform's
   offered models, not per-user — so no explosion.
-- DevAI's `_maybe_dispatch_kagent` resolves the user's `(provider, model)` + fallback
-  from the overlay, dispatches to the matching variant with the user's key, and on a
-  provider/model error **re-dispatches to the fallback** variant.
+- DevAI's `_maybe_dispatch_kagent` resolves the user's `(provider, model)` and
+  ordered alternatives from the overlay, then dispatches to the matching variant
+  with the user's key. It may select another variant only after a definite
+  pre-connection rejection. A returned failure, timeout, 5xx, invalid response,
+  or JSON-RPC error is not replayed because tools may already have run.
 - **Settings UI:** surface which providers/models kagent supports (the catalog ∩
   `/settings/models/{provider}` for the user) so users only enable what they have a
   key for.
 
 **Phasing:** Phase 1 (done) — single Anthropic passthrough, per-user key. Phase 2 —
-per-**provider** catalog (anthropic/openai/vertex) + provider-aware dispatch + fallback
-across providers (bounded). Phase 3 — per-(provider, model) granularity honoring
+per-**provider** catalog (anthropic/openai/vertex) + provider-aware selection across
+a bounded set. Phase 3 — per-(provider, model) granularity honoring
 `enabled_models`/`fallback_model`, + the Settings UI catalog. Full *arbitrary* per-user
 model is impractical (ModelConfig/agent explosion) — the bounded catalog is the sweet
 spot.
