@@ -99,6 +99,7 @@ async def require_principal(request: Request) -> Principal:
 
 __all__ = ["enforce_auth", "needs_auth_check", "require_principal"]
 
+
 async def resolve_principal(request: Request) -> Principal | None:
     """Resolve the caller, gated by the ``require_auth`` flag.
 
