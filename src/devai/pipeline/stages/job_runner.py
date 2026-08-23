@@ -72,11 +72,12 @@ _KAGENT_PROVIDER_MODEL_ATTR: dict[str, str] = {
 
 
 def _a2a_failed(result: dict[str, Any] | None) -> bool:
-    """True when an A2A result reports a failure (so we should fall back).
+    """True when an accepted A2A result reports an execution failure.
 
     A transport-OK dispatch can still carry an LLM failure — kagent sets
     ``status.state=failed`` and/or ``metadata.kagent_error_code`` (bad key, bad
-    model, rate limit). Treat either as a failure for the fallback chain.
+    model, rate limit). The caller must not replay an accepted task because tool
+    side effects may already have occurred.
     """
     if not isinstance(result, dict):
         return True
@@ -165,7 +166,8 @@ class JobRunnerStage(PipelineStage):
         # kagent fast-path: a labelled agent is reached through its Substrate
         # SandboxAgent over A2A instead of spawning an ephemeral Job. kagent is
         # its own control plane, so this is checked BEFORE the Job runtime gate.
-        # It remains opt-in and degrades to the Job path on any failure.
+        # It remains opt-in. Only failures known to precede acceptance degrade
+        # to the Job path; ambiguous or accepted outcomes fail closed.
         if sandbox is None:
             kagent_result = await self._maybe_dispatch_kagent(task, agent_name, agent_profile)
             if kagent_result is not None:
@@ -350,13 +352,13 @@ class JobRunnerStage(PipelineStage):
     ) -> StageResult | None:
         """Dispatch to a kagent-managed SandboxAgent, or None to use a Job.
 
-        Returns a StageResult only on a clean kagent dispatch. Any miss —
-        kagent not configured, agent not kagent-managed, invalid name, or a
-        transport/JSON-RPC error — returns None so ``execute`` falls through to
-        the Job path. kagent is additive; it must never be the reason a run
-        fails when a Job would have worked.
+        Returns a StageResult only on a clean kagent dispatch. Configuration
+        misses and definite pre-connection rejection fall through to the Job
+        path. Once kagent may have accepted a task, errors fail closed because
+        replaying it could execute tools twice.
         """
         from devai.agentic.kagent_client import (
+            KagentDispatchOutcomeUncertain,
             create_kagent_client,
         )
 
@@ -393,8 +395,12 @@ class JobRunnerStage(PipelineStage):
         # Shared-key mode (no passthrough): dispatch to the bare agent, no Bearer.
         if not bool(getattr(settings, "kagent_passthrough", False)):
             result = await self._kagent_dispatch_one(client, task, target, message, namespace, "")
-            if result is None or _a2a_failed(result):
+            if result is None:
                 return None
+            if _a2a_failed(result):
+                raise KagentDispatchOutcomeUncertain(
+                    f"kagent accepted dispatch to {target!r} but reported an execution failure"
+                )
             return self._kagent_result(target, result, namespace)
 
         # Passthrough mode: forward each user's OWN key. Isolation guardrails:
@@ -412,8 +418,8 @@ class JobRunnerStage(PipelineStage):
         # Ordered (suffix, provider) chain — the user's chosen (provider, model)
         # first, then their fallback_model, then the rest of the catalog they
         # hold a key for. Each entry maps to a variant `<agent>-<suffix>` on its
-        # passthrough ModelConfig. Fall to the next on a transport error OR an LLM
-        # failure (bad key, bad model, rate limit). Exhausted → Job path.
+        # passthrough ModelConfig. Only a definite pre-connection rejection may
+        # try the next target; an accepted failure may already have run tools.
         for suffix, provider in self._kagent_variant_chain(settings):
             key = self._kagent_user_key(settings, provider)
             if not key:
@@ -423,12 +429,9 @@ class JobRunnerStage(PipelineStage):
             if result is None:
                 continue
             if _a2a_failed(result):
-                logger.warning(
-                    "stage %s: kagent variant %s returned an LLM failure — trying next",
-                    self._stage_name,
-                    variant,
+                raise KagentDispatchOutcomeUncertain(
+                    f"kagent accepted dispatch to {variant!r} but reported an execution failure"
                 )
-                continue
             return self._kagent_result(variant, result, namespace)
 
         logger.info("stage %s: no working kagent variant for %s — using Job path", self._stage_name, email)
@@ -438,7 +441,7 @@ class JobRunnerStage(PipelineStage):
         self, client: Any, task: DevAITask, agent: str, message: str, namespace: str | None, api_key: str
     ) -> dict[str, Any] | None:
         """One A2A dispatch; returns the result, or None on transport error."""
-        from devai.agentic.kagent_client import KagentDispatchTarget, KagentError
+        from devai.agentic.kagent_client import KagentDispatchOutcomeUncertain, KagentDispatchTarget, KagentError
 
         try:
             result = await client.dispatch(
@@ -449,10 +452,17 @@ class JobRunnerStage(PipelineStage):
                 triggered_by=task.triggered_by or "",
                 trace_id=task.trace_id or "",
                 api_key=api_key,
-                request_id=f"{task.id}:{self._stage_name}",
-                message_id=f"{task.id}:{self._stage_name}",
+                request_id=f"{task.id}:{self._stage_name}:{agent}",
+                message_id=f"{task.id}:{self._stage_name}:{agent}",
             )
             return result if isinstance(result, dict) else None
+        except KagentDispatchOutcomeUncertain:
+            logger.error(
+                "stage %s: kagent dispatch to %s has an uncertain outcome; refusing Job fallback",
+                self._stage_name,
+                agent,
+            )
+            raise
         except KagentError:
             logger.warning("stage %s: kagent dispatch to %s failed", self._stage_name, agent, exc_info=True)
             return None

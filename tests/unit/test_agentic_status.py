@@ -7,6 +7,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import devai.agentic.kagent_client as kagent_client_module
 import devai.agentic.routes as routes
 import devai.agentic.status as status_module
 from devai.agentic.status import AgenticStatus, ComponentStatus, fetch_agentic_status
@@ -90,3 +91,48 @@ def test_ai_gateway_is_reachable_when_listener_returns_404(monkeypatch: Any) -> 
     assert snapshot.agentgateway.reachable is True
     assert snapshot.ai_gateway.reachable is True
     assert "http://ai-gateway.agentgateway-system.svc.cluster.local:8080/" in requested
+
+
+def test_kagent_dispatch_uses_request_scoped_a2a_ids(monkeypatch: Any) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class Client:
+        async def dispatch(self, agent: str, message: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"agent": agent, "message": message, **kwargs})
+            return {"status": {"state": "completed"}}
+
+    monkeypatch.setattr(kagent_client_module, "create_kagent_client", lambda _: Client())
+    app = FastAPI()
+    app.state.config = SimpleNamespace(require_auth=False)
+    app.include_router(routes.router)
+
+    response = TestClient(app).post(
+        "/api/agentic/kagent/reviewer/dispatch",
+        headers={"x-request-id": "request-123"},
+        json={"message": "review this", "namespace": "kagent-system"},
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["request_id"] == "request-123:kagent:kagent-system:reviewer"
+    assert calls[0]["message_id"] == "request-123:kagent:kagent-system:reviewer"
+
+
+def test_kagent_dispatch_surfaces_uncertain_outcome_without_remote_detail(monkeypatch: Any) -> None:
+    class Client:
+        async def dispatch(self, agent: str, message: str, **kwargs: Any) -> dict[str, Any]:
+            raise kagent_client_module.KagentDispatchOutcomeUncertain("secret remote body")
+
+    monkeypatch.setattr(kagent_client_module, "create_kagent_client", lambda _: Client())
+    app = FastAPI()
+    app.state.config = SimpleNamespace(require_auth=False)
+    app.include_router(routes.router)
+
+    response = TestClient(app).post(
+        "/api/agentic/kagent/reviewer/dispatch",
+        headers={"x-request-id": "request-123"},
+        json={"message": "review this", "namespace": "kagent-system"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "kagent_dispatch_outcome_uncertain"
+    assert "secret remote body" not in response.text

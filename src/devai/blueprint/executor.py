@@ -455,7 +455,9 @@ class BlueprintExecutor:
             # re-runs. When recovery exhausts its rounds (or is rejected),
             # the runbook documents everything tried for the human.
             error, failure_state = payload
-            if heal_rounds_left > 0 and await self._heal_stage(spec, task, str(error), _ev):
+            # "unsafe" skips recovery too: healing re-runs the stage, which is
+            # exactly what an uncertain outcome forbids.
+            if outcome != "unsafe" and heal_rounds_left > 0 and await self._heal_stage(spec, task, str(error), _ev):
                 heal_rounds_left -= 1
                 max_attempts = 1  # one healed attempt per recovery round
                 continue
@@ -593,8 +595,10 @@ class BlueprintExecutor:
         """Run the stage with transient retries.
 
         Returns ``("ok", result)``, ``("stopped", None)`` (task already
-        CANCELLED + event emitted), or ``("failed", (error, TaskState))``
-        when every attempt failed — the caller decides recovery/on_failure.
+        CANCELLED + event emitted), ``("failed", (error, TaskState))`` when
+        every attempt failed — the caller decides recovery/on_failure — or
+        ``("unsafe", (error, TaskState))`` for a failure that must not be
+        re-run at all, which also skips recovery.
         """
         for attempt in range(1, max_attempts + 1):
             try:
@@ -631,6 +635,11 @@ class BlueprintExecutor:
                 if attempt >= max_attempts:
                     return ("failed", (err, TaskState.AGENT_TIMEOUT))
             except Exception as e:  # noqa: BLE001 — we want to catch all stage errors
+                # A stage that may already have taken effect must not be
+                # re-run — replaying it can execute its tools twice (ADR-0004).
+                if getattr(e, "retry_unsafe", False):
+                    logger.error("stage %s: outcome uncertain — refusing to replay", spec.name)
+                    return ("unsafe", (str(e), TaskState.STAGE_FAILED))
                 logger.exception("stage %s raised (attempt %d/%d)", spec.name, attempt, max_attempts)
                 if attempt >= max_attempts:
                     return ("failed", (str(e), TaskState.STAGE_FAILED))

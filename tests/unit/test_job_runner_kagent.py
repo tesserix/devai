@@ -2,8 +2,8 @@
 
 A pipeline stage routes to a kagent-managed SandboxAgent over A2A (instead of spawning
 a K8s Job) when the agent's registry record carries `devai.io/runtime=kagent`
-AND `kagent_url` is configured. Every miss must fall back to the Job path —
-kagent is additive and must never be the reason a run fails.
+AND `kagent_url` is configured. Configuration misses and definite pre-connection
+rejections fall back to the Job path; possible acceptance must fail closed.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ class _FakeKagentClient:
 async def test_routes_to_kagent_when_labelled_and_configured(monkeypatch):
     monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _FakeKagentClient())
     deps = _deps(kagent_url="http://kagent:8083", agent_labels={"devai.io/runtime": "kagent"})
-    task = DevAITask(intent="review PR #5", repo="org/app", triggered_by="alice@x.com", trace_id="t-1")
+    task = DevAITask(id="task-1", intent="review PR #5", repo="org/app", triggered_by="alice@x.com", trace_id="t-1")
 
     result = await _stage(deps).execute(task)
 
@@ -114,6 +114,8 @@ async def test_routes_to_kagent_when_labelled_and_configured(monkeypatch):
     assert _FakeKagentClient.last_call["namespace"] == "kagent-system"
     assert _FakeKagentClient.last_call["triggered_by"] == "alice@x.com"
     assert _FakeKagentClient.last_call["trace_id"] == "t-1"
+    assert _FakeKagentClient.last_call["request_id"] == "task-1:review_code:reviewer-agent"
+    assert _FakeKagentClient.last_call["message_id"] == "task-1:review_code:reviewer-agent"
 
 
 @pytest.mark.asyncio
@@ -255,9 +257,8 @@ async def test_passthrough_per_model_variant(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_passthrough_falls_back_across_providers(monkeypatch):
-    """User's primary provider variant fails (bad model/key) → dispatch falls
-    back to the next catalog provider they have a key for."""
+async def test_passthrough_does_not_replay_an_accepted_failure(monkeypatch):
+    """A failed A2A task was accepted and may have run tools, so it is not replayed."""
 
     class _Failover:
         calls: list = []
@@ -286,11 +287,23 @@ async def test_passthrough_falls_back_across_providers(monkeypatch):
         kagent_passthrough=True,
         settings_service=svc,
     )
-    result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="alice@x.com"))
+    with pytest.raises(kc.KagentDispatchOutcomeUncertain):
+        await _stage(deps).execute(DevAITask(intent="x", triggered_by="alice@x.com"))
 
-    # primary (openai) tried first and failed → fell back to anthropic.
-    assert _Failover.calls == ["reviewer-agent-openai", "reviewer-agent-anthropic"]
-    assert result.data["review_code_output"]["agent"] == "reviewer-agent-anthropic"
+    assert _Failover.calls == ["reviewer-agent-openai"]
+
+
+@pytest.mark.asyncio
+async def test_shared_key_mode_does_not_fall_back_after_accepted_failure(monkeypatch):
+    class _FailedTask:
+        async def dispatch(self, *a, **k):
+            return {"status": {"state": "failed"}}
+
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _FailedTask())
+    deps = _deps(kagent_url="http://kagent:8083", agent_labels={"devai.io/runtime": "kagent"})
+
+    with pytest.raises(kc.KagentDispatchOutcomeUncertain):
+        await _stage(deps).execute(DevAITask(intent="x"))
 
 
 @pytest.mark.asyncio
@@ -382,7 +395,7 @@ async def test_settings_switch_on_with_per_user_url(monkeypatch):
         scope_id="alice@x.com",
         connector_key="kagent",
         provider="on",
-        prefs={"kagent_url": "http://my-kagent:8083"},
+        prefs={"kagent_url": "https://kagent.example.com"},
         enabled=True,
     )
     deps = _deps(
@@ -394,7 +407,7 @@ async def test_settings_switch_on_with_per_user_url(monkeypatch):
     result = await _stage(deps).execute(DevAITask(intent="x", triggered_by="alice@x.com"))
 
     assert result.data["review_code_output"]["runtime"] == "kagent"
-    assert seen["url"] == "http://my-kagent:8083"
+    assert seen["url"] == "https://kagent.example.com"
     assert seen["enabled"] is True
 
 
@@ -409,6 +422,19 @@ async def test_falls_back_to_job_on_dispatch_error(monkeypatch):
     result = await _stage(deps).execute(DevAITask(intent="x"))
     # Dispatch failed → fall through to the Job path (stub, since no runtime).
     assert result.data.get("review_code_stub") is True
+
+
+@pytest.mark.asyncio
+async def test_does_not_fall_back_when_dispatch_outcome_is_uncertain(monkeypatch):
+    class _Uncertain:
+        async def dispatch(self, *a, **k):
+            raise kc.KagentDispatchOutcomeUncertain("response lost")
+
+    monkeypatch.setattr(kc, "create_kagent_client", lambda settings: _Uncertain())
+    deps = _deps(kagent_url="http://kagent:8083", agent_labels={"devai.io/runtime": "kagent"})
+
+    with pytest.raises(kc.KagentDispatchOutcomeUncertain):
+        await _stage(deps).execute(DevAITask(intent="x"))
 
 
 @pytest.mark.asyncio

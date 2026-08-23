@@ -128,7 +128,7 @@ async def kagent_dispatch(request: Request, agent: str, body: KagentDispatchBody
     Additive to the default Job-dispatch path — used for agents the kagent
     agent-sync has reconciled into managed Deployments. 503s cleanly when
     kagent isn't wired (no kagent_url)."""
-    from devai.agentic.kagent_client import KagentError, create_kagent_client
+    from devai.agentic.kagent_client import KagentDispatchOutcomeUncertain, KagentError, create_kagent_client
     from devai.config import settings
     from devai.identity import extract_principal, trace_id_from_request
 
@@ -141,16 +141,29 @@ async def kagent_dispatch(request: Request, agent: str, body: KagentDispatchBody
     triggered_by = ""
     if principal is not None:
         triggered_by = str(getattr(principal, "email", "") or getattr(principal, "uid", "") or "")
+    trace_id = trace_id_from_request(request)
+    dispatch_id = f"{trace_id}:kagent:{body.namespace or 'default'}:{agent}"
     try:
         result = await client.dispatch(
             agent,
             body.message,
             namespace=body.namespace or None,
             triggered_by=triggered_by,
-            trace_id=trace_id_from_request(request) or "",
+            trace_id=trace_id,
+            request_id=dispatch_id,
+            message_id=dispatch_id,
         )
+    except KagentDispatchOutcomeUncertain as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "kagent_dispatch_outcome_uncertain",
+                "message": "kagent may have accepted this dispatch; do not retry automatically",
+                "request_id": dispatch_id,
+            },
+        ) from e
     except KagentError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(status_code=502, detail="kagent dispatch failed") from e
     return {"agent": agent, "result": result}
 
 

@@ -179,8 +179,9 @@ different tenants where applicable.
    file, process, socket, memory, or tool-call state observable by the next run.
 7. Token, cost, and concurrency consumption is charged only to A's qualified
    tenant/user/run and cannot reduce B's budget.
-8. A WorkerPool saturation or controller failure degrades to the supported Job
-   path without retry amplification or credential reuse.
+8. WorkerPool/controller unavailability detected before dispatch degrades to the
+   supported Job path. A timeout or error after possible acceptance fails closed
+   without retry amplification or credential reuse.
 
 Tests must assert generic client errors and inspect only metadata or hashes.
 They must never print a credential, secret payload, Kubernetes token, or user
@@ -214,8 +215,9 @@ The Actor path remains a NO-GO until all of these are true:
    are recorded before the GitOps promotion.
 
 There is no Actor availability or latency SLO until those measurements exist.
-The current service objective is the supported Job fallback: Actor failure must
-not become a DevAI-wide single point of failure.
+The current service objective is a Job selection before Actor acceptance and an
+explicit uncertain result afterward. Availability must not be bought by executing
+the same side-effecting task twice.
 
 ## Incident boundary
 
