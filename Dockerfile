@@ -30,6 +30,7 @@ RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels,ro \
 COPY --from=wheels /usr/local/bin/kubectl /usr/local/bin/kubectl
 COPY blueprints/ /app/blueprints/
 COPY specializations/ /app/specializations/
+COPY crews/ /app/crews/
 
 WORKDIR /app
 USER 10001:10001
