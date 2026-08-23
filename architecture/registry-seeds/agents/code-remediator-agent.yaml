@@ -38,13 +38,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: code-remediator
-    name: Code Remediator
-    description: "Bridges a production root cause to the codebase. When the root cause is a code defect\
-      \ (not just a config/capacity issue), it reads the affected service's repository, confirms the bug\
-      \ in source, opens a fix pull request on a branch, and files a classified, priority-labelled tracking\
-      \ issue. It never merges and never deploys \u2014 humans review the PR."
-    tags:
-    - sre
-    - medium
-    - devai
+  - code-remediator
+  prompts:
+  - code-remediator-prompt-v1
+  promptRef: code-remediator-prompt-v1

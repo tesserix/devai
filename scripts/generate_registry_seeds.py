@@ -147,14 +147,9 @@ def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
                 "defaultInputModes": ["application/json", "text/plain"],
                 "defaultOutputModes": ["application/json", "text/plain"],
             },
-            "skills": [
-                {
-                    "id": name,
-                    "name": title,
-                    "description": description,
-                    "tags": [category, risk, "devai"],
-                }
-            ],
+            "skills": [name],
+            "prompts": [f"{name}-prompt-v1"],
+            "promptRef": f"{name}-prompt-v1",
         },
     }
 

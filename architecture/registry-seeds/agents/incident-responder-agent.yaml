@@ -36,12 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: incident-responder
-    name: Incident Responder
-    description: Final SRE stage. Reads correlated findings from the parallel monitor fan-out and decides
-      whether to create an incident, remediate automatically (where safe), or escalate to a human via
-      PagerDuty/Slack.
-    tags:
-    - sre
-    - high
-    - devai
+  - incident-responder
+  prompts:
+  - incident-responder-prompt-v1
+  promptRef: incident-responder-prompt-v1

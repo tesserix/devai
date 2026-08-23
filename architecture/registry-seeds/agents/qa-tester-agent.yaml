@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: qa-tester
-    name: Senior QA Engineer
-    description: Write and run E2E tests for the implemented story. Verifies acceptance criteria pass
-      against the real running app (when a preview is up) or the deployed branch. Loops back to senior_developer
-      on test failures.
-    tags:
-    - review
-    - medium
-    - devai
+  - qa-tester
+  prompts:
+  - qa-tester-prompt-v1
+  promptRef: qa-tester-prompt-v1

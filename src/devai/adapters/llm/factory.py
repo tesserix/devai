@@ -33,7 +33,7 @@ from devai.adapters.base import (
     AdapterNotInstalled,
     AdapterRegistry,
 )
-from devai.adapters.llm.base import LLMAdapter
+from devai.adapters.llm.base import LLMAdapter, LLMRequest, LLMResponse
 from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
 from devai.adapters.llm.noop import NoopLLMAdapter
 
@@ -295,6 +295,7 @@ _ROLE_CRED_ATTRS = (
     "vertex_base_url",
     "llm_gateway_api_key",
     "llm_gateway_base_url",
+    "llm_gateway_required",
     "llm_role_chain_provider",
     "llm_fallback_provider",
 )
@@ -395,17 +396,17 @@ class PinnedModelLLMAdapter(LLMAdapter):
     def default_model(self) -> str:  # type: ignore[override]
         return self._model or self._inner.default_model
 
-    async def generate(self, request):  # type: ignore[override]
+    async def generate(self, request: LLMRequest) -> LLMResponse:
         from dataclasses import replace
 
         if not request.model and self._model:
             request = replace(request, model=self._model)
         return await self._inner.generate(request)
 
-    async def health_check(self):  # type: ignore[override]
+    async def health_check(self) -> dict[str, Any]:
         return await self._inner.health_check()
 
-    async def close(self) -> None:  # type: ignore[override]
+    async def close(self) -> None:
         await self._inner.close()
 
 

@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: negotiator
-    name: Requirement Negotiator
-    description: "Multi-turn clarifying Q&A with the user. Used when intake decided \"clarify\" \u2014\
-      \ the negotiator asks one question at a time, waits for the user's answer, and continues until requirements\
-      \ are concrete enough to proceed. Parks the task between turns."
-    tags:
-    - specialist
-    - low
-    - devai
+  - negotiator
+  prompts:
+  - negotiator-prompt-v1
+  promptRef: negotiator-prompt-v1

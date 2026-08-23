@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: supervisor
-    name: Supervisor Architect
-    description: Senior technical architect that plans the run before execution starts. Reviews requirements
-      + repo + memory + governance, produces a delegation plan (which roles run, in what order, with what
-      depends_on). The orchestrator_pre stage hands off to it.
-    tags:
-    - orchestration
-    - low
-    - devai
+  - supervisor
+  prompts:
+  - supervisor-prompt-v1
+  promptRef: supervisor-prompt-v1

@@ -38,13 +38,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: deployment-engineer
-    name: Deployment Engineer
-    description: 'GitOps deployment specialist. Owns the moment between "merged" and "serving traffic":
-      verifies the Argo CD app (or Flux Kustomization/ HelmRelease) picked up the new revision, watches
-      sync + health converge, diagnoses stuck or degraded rollouts from controller conditions, and rolls
-      back when the new revision cannot become healthy. Fluent in both Argo CD and Flux semantics.'
-    tags:
-    - orchestration
-    - high
-    - devai
+  - deployment-engineer
+  prompts:
+  - deployment-engineer-prompt-v1
+  promptRef: deployment-engineer-prompt-v1

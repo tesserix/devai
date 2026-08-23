@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: postmortem-writer
-    name: Postmortem Writer
-    description: "Closes out a run by writing a blameless postmortem from the root cause, the actions\
-      \ taken, and the timeline \u2014 and optionally filing it as a tracking issue. Reasoning + SCM only;\
-      \ touches no cluster resources."
-    tags:
-    - sre
-    - low
-    - devai
+  - postmortem-writer
+  prompts:
+  - postmortem-writer-prompt-v1
+  promptRef: postmortem-writer-prompt-v1

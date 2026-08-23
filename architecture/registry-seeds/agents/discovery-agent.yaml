@@ -36,11 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: discovery
-    name: SRE Discovery Agent
-    description: First agent in every SRE sweep. Auto-discovers all K8s namespaces, services, deployments,
-      and dependencies. Maps the topology and stores it as semantic memory for downstream SRE agents.
-    tags:
-    - sre
-    - low
-    - devai
+  - discovery
+  prompts:
+  - discovery-prompt-v1
+  promptRef: discovery-prompt-v1

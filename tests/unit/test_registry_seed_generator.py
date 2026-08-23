@@ -31,7 +31,9 @@ def test_agent_seed_uses_current_a2a_schema_and_dynamic_user_routing() -> None:
     assert manifest["spec"]["model"] == {"provider": "devai-user-routing", "name": "dynamic"}
     assert manifest["spec"]["a2a"]["url"].endswith("/a2a/v1/requirements-analyst")
     assert manifest["spec"]["a2a"]["preferredTransport"] == "JSONRPC"
-    assert manifest["spec"]["skills"][0]["id"] == "requirements-analyst"
+    assert manifest["spec"]["skills"] == ["requirements-analyst"]
+    assert manifest["spec"]["prompts"] == ["requirements-analyst-prompt-v1"]
+    assert manifest["spec"]["promptRef"] == "requirements-analyst-prompt-v1"
     assert "runtime" not in manifest["spec"]
     assert "llm" not in manifest["spec"]
 
@@ -68,6 +70,21 @@ def test_all_40_generated_agent_seeds_are_tesserix_adk_a2a_agents() -> None:
     assert len(manifests) == 40
     assert {manifest["metadata"]["labels"]["ai.tesserix.dev/runtime"] for manifest in manifests} == {"tesserix-adk"}
     assert len({manifest["spec"]["a2a"]["url"] for manifest in manifests}) == 40
+
+
+def test_all_generated_agents_reference_seeded_skill_and_prompt_artifacts() -> None:
+    seeds = REPO_ROOT / "architecture" / "registry-seeds"
+
+    for path in sorted((seeds / "agents").glob("*.yaml")):
+        agent = yaml.safe_load(path.read_text())
+        name = agent["metadata"]["name"].removesuffix("-agent")
+        prompt = f"{name}-prompt-v1"
+
+        assert agent["spec"]["skills"] == [name]
+        assert agent["spec"]["prompts"] == [prompt]
+        assert agent["spec"]["promptRef"] == prompt
+        assert (seeds / "skills" / f"{name}.yaml").is_file()
+        assert (seeds / "prompts" / f"{prompt}.yaml").is_file()
 
 
 def test_all_40_generated_agents_have_owned_golden_evaluations() -> None:

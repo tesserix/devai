@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: security-auditor
-    name: Security Auditor
-    description: "Scans the running cluster for security posture issues \u2014 publicly exposed services,\
-      \ expiring TLS certificates, risky workload settings, and Google Cloud Recommender security findings.\
-      \ Read-only: it reports and ranks, it never changes anything."
-    tags:
-    - sre
-    - medium
-    - devai
+  - security-auditor
+  prompts:
+  - security-auditor-prompt-v1
+  promptRef: security-auditor-prompt-v1

@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: intake
-    name: Intake Triager
-    description: "Pre-sandbox decision: should the pipeline proceed, ask the user to clarify, or propose\
-      \ an alternate plan? Acts as the human-friendly front door \u2014 never modifies code, never opens\
-      \ a PR."
-    tags:
-    - specialist
-    - low
-    - devai
+  - intake
+  prompts:
+  - intake-prompt-v1
+  promptRef: intake-prompt-v1

@@ -118,6 +118,24 @@ async def test_routes_to_kagent_when_labelled_and_configured(monkeypatch):
     assert _FakeKagentClient.last_call["message_id"] == "task-1:review_code:reviewer-agent"
 
 
+async def test_required_gateway_stage_fails_before_dispatch_when_registry_resolution_fails() -> None:
+    config = SimpleNamespace(
+        llm_gateway_required=True,
+        llm_gateway_base_url="http://ai-gateway:8080",
+        agentgateway_url="http://agentgateway-mcp:8080",
+        kagent_url="",
+    )
+    registry = SimpleNamespace(
+        resolve_agent=lambda name: (_ for _ in ()).throw(RuntimeError("private registry detail"))
+    )
+    deps = StageDeps(config=config, extra={"registry_client": registry})
+
+    with pytest.raises(RuntimeError, match="governed agent composition unavailable") as caught:
+        await _stage(deps).execute(DevAITask(id="task-1", intent="review"))
+
+    assert "private registry detail" not in str(caught.value)
+
+
 @pytest.mark.asyncio
 async def test_sandboxed_evaluation_never_bypasses_the_job_boundary_through_kagent(monkeypatch):
     _FakeKagentClient.last_call = {}

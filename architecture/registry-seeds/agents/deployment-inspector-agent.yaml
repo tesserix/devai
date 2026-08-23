@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: deployment-inspector
-    name: Deployment Inspector
-    description: "Inspects workload rollout health \u2014 stuck or partial rollouts, replica mismatches,\
-      \ autoscaler saturation, image drift, and recent deploy-correlated regressions. Read-only; surfaces\
-      \ what changed and whether it looks healthy."
-    tags:
-    - sre
-    - low
-    - devai
+  - deployment-inspector
+  prompts:
+  - deployment-inspector-prompt-v1
+  promptRef: deployment-inspector-prompt-v1

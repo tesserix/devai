@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: capacity-planner
-    name: Capacity Planner
-    description: Forecasts when each app will hit its current resource ceiling at the current growth rate.
-      Recommends HPA / VPA / cluster-autoscaler tweaks. Runs the long-tail (7-day, 30-day) trend analysis
-      the other monitors don't cover.
-    tags:
-    - sre
-    - low
-    - devai
+  - capacity-planner
+  prompts:
+  - capacity-planner-prompt-v1
+  promptRef: capacity-planner-prompt-v1

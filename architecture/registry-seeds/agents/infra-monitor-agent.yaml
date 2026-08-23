@@ -36,11 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: infra-monitor
-    name: Infrastructure Monitor
-    description: 'Checks cluster-level health: node readiness, pod CrashLoopBackOff, flapping deployments,
-      restart counts, OOMKills, PVC pressure. Outputs findings consumed by the correlate stage.'
-    tags:
-    - sre
-    - low
-    - devai
+  - infra-monitor
+  prompts:
+  - infra-monitor-prompt-v1
+  promptRef: infra-monitor-prompt-v1

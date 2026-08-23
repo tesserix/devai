@@ -39,14 +39,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: sre-supervisor
-    name: SRE Supervisor
-    description: "Senior SRE / incident commander that plans a monitoring or incident run before any agent\
-      \ investigates. Reads the discovered cluster topology and the run intent, then produces a delegation\
-      \ plan: which SRE specialists to dispatch, in what order, against which namespaces, and what each\
-      \ should focus on. Pure planning \u2014 never touches the cluster. The multi-agent SRE blueprints\
-      \ hand off to it first."
-    tags:
-    - orchestration
-    - low
-    - devai
+  - sre-supervisor
+  prompts:
+  - sre-supervisor-prompt-v1
+  promptRef: sre-supervisor-prompt-v1

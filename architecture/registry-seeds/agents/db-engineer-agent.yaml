@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: db-engineer
-    name: Database Engineer
-    description: Schema management, migration safety, data integrity. Produces Liquibase changesets for
-      any schema deltas the senior_developer introduced via ORM models. Hard-gates the pipeline on destructive
-      changes (drops, type narrows).
-    tags:
-    - coding
-    - high
-    - devai
+  - db-engineer
+  prompts:
+  - db-engineer-prompt-v1
+  promptRef: db-engineer-prompt-v1

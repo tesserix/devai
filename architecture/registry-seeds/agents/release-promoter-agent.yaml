@@ -38,13 +38,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: release-promoter
-    name: Release Promoter
-    description: "Kargo promotion specialist. Moves a release through the delivery pipeline stage by stage\
-      \ (dev \u2192 staging \u2192 prod) by promoting freight \u2014 immutable artifact sets of image\
-      \ tags, chart versions and commits. Verifies each stage is healthy before promoting to the next,\
-      \ watches the Promotion to completion, and halts the train (never skips a stage) on any failure."
-    tags:
-    - orchestration
-    - critical
-    - devai
+  - release-promoter
+  prompts:
+  - release-promoter-prompt-v1
+  promptRef: release-promoter-prompt-v1

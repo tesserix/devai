@@ -1,8 +1,8 @@
 """HTTP client for the aregistry v0 catalog API.
 
-One client per process. Constructed via :func:`create_registry_client`
-from settings; never raises on construction so the rest of the app can
-degrade gracefully when the catalog is unreachable.
+One client per process. Constructed via :func:`create_registry_client` from
+settings. Catalog callers choose whether a failure is degradable; governed
+agent admission treats resolution failures as terminal.
 
 Threading: methods are sync ``def`` (not ``async``). The FastAPI routes
 that wrap this run the call in a threadpool via Starlette's default
@@ -33,11 +33,7 @@ type RegistryJSON = dict[str, Any] | list[Any]
 
 
 class RegistryError(Exception):
-    """Any failure reaching aregistry or parsing its response.
-
-    Specialization loader catches this and falls back to local YAML so a
-    transient registry blip never crashes the pipeline.
-    """
+    """Any failure reaching aregistry or parsing its response."""
 
 
 # --------------------------------------------------------------------------- #
@@ -107,6 +103,20 @@ class Agent:
     labels: dict[str, str] = field(default_factory=dict)
     annotations: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class UnresolvedRef:
+    kind: str
+    ref: str
+    reason: str
+
+
+@dataclass(slots=True)
+class ResolvedAgent:
+    agent: Agent
+    resolved: dict[str, list[dict[str, Any]]]
+    unresolved: list[UnresolvedRef]
 
 
 @dataclass(slots=True)
@@ -276,6 +286,48 @@ class RegistryClient:
                 return a
         return None
 
+    def resolve_agent(self, name: str, *, namespace: str = "", tag: str = "") -> ResolvedAgent:
+        path = f"/v0/agents/{quote(name, safe='')}"
+        if tag:
+            path += f"/{quote(tag, safe='')}"
+        path += "/resolved"
+        ns = namespace or self._namespace
+        if ns:
+            path += f"?namespace={quote(ns, safe='')}"
+        body = self._get_dict(path, use_cache=False)
+        agent_value = body.get("agent")
+        resolved_value = body.get("resolved", {})
+        unresolved_value = body.get("unresolved", [])
+        if not isinstance(agent_value, dict):
+            raise RegistryError(f"registry: GET {path} returned an invalid resolved agent")
+        if not isinstance(resolved_value, dict) or not isinstance(unresolved_value, list):
+            raise RegistryError(f"registry: GET {path} returned an invalid resolution result")
+
+        resolved: dict[str, list[dict[str, Any]]] = {}
+        for field_name, entries in resolved_value.items():
+            if not isinstance(field_name, str) or not isinstance(entries, list):
+                raise RegistryError(f"registry: GET {path} returned an invalid resolution result")
+            if not all(isinstance(entry, dict) for entry in entries):
+                raise RegistryError(f"registry: GET {path} returned an invalid resolution result")
+            resolved[field_name] = [dict(entry) for entry in entries]
+
+        unresolved: list[UnresolvedRef] = []
+        for entry in unresolved_value:
+            if not isinstance(entry, dict):
+                raise RegistryError(f"registry: GET {path} returned an invalid unresolved reference")
+            unresolved.append(
+                UnresolvedRef(
+                    kind=str(entry.get("kind") or ""),
+                    ref=str(entry.get("ref") or ""),
+                    reason=str(entry.get("reason") or ""),
+                )
+            )
+        return ResolvedAgent(
+            agent=_parse_agent(_unwrap(agent_value, "agent")),
+            resolved=resolved,
+            unresolved=unresolved,
+        )
+
     def get_agent_card(self, name: str, *, namespace: str = "", tag: str = "") -> dict[str, Any]:
         """Fetch the A2A (Agent2Agent) Agent Card for an agent.
 
@@ -403,7 +455,7 @@ class RegistryClient:
         if response.status_code == 404:
             return None
         if response.status_code >= 400:
-            raise RegistryError(f"registry: {response.status_code} on GET {path}: {response.text[:200]}")
+            raise RegistryError(f"registry: {response.status_code} on GET {path}")
         try:
             body: object = response.json()
         except json.JSONDecodeError as e:
@@ -532,9 +584,9 @@ class RegistryClient:
             raise RegistryError(f"registry: network error {method} {path}: {e}") from e
 
         if r.status_code >= 500:
-            raise RegistryError(f"registry: {r.status_code} on {method} {path}: {r.text[:200]}")
+            raise RegistryError(f"registry: {r.status_code} on {method} {path}")
         if r.status_code >= 400 and (raise_on_error or method != "POST"):
-            raise RegistryError(f"registry: {r.status_code} on {method} {path}: {r.text[:200]}")
+            raise RegistryError(f"registry: {r.status_code} on {method} {path}")
 
         if r.headers.get("content-type", "").startswith("application/json") and r.text:
             try:
@@ -714,9 +766,8 @@ def _parse_eval_suite(d: dict[str, Any]) -> EvalSuite:
 def create_registry_client(settings: Any) -> RegistryClient | None:
     """Build a RegistryClient from settings. Never raises.
 
-    Returns ``None`` when configuration is missing or the URL is empty —
-    callers treat ``None`` as "registry not wired up" and fall back to
-    local YAML.
+    Returns ``None`` when configuration is missing or the URL is empty. Each
+    caller owns the failure policy; governed execution fails closed.
     """
     base_url = getattr(settings, "registry_url", "") or ""
     if not base_url:

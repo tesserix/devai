@@ -5,8 +5,9 @@ shows up when ?namespace= is passed."""
 from __future__ import annotations
 
 import httpx
+import pytest
 
-from devai.registry.client import RegistryClient
+from devai.registry.client import RegistryClient, RegistryError
 
 
 def test_ns_appends_namespace_and_limit() -> None:
@@ -148,3 +149,71 @@ def test_eval_publish_accepts_full_manifest_without_double_enveloping(monkeypatc
     client.publish_dataset(manifest)
 
     assert bodies == [manifest]
+
+
+def test_resolve_agent_returns_composition_and_scopes_the_request(monkeypatch) -> None:
+    requested: list[str] = []
+
+    def request(method: str, url: str, **_: object) -> httpx.Response:
+        assert method == "GET"
+        requested.append(url)
+        return httpx.Response(
+            200,
+            json={
+                "agent": {
+                    "kind": "Agent",
+                    "metadata": {
+                        "name": "requirements-analyst-agent",
+                        "tag": "1.0.0",
+                        "labels": {"ai.tesserix.dev/runtime": "tesserix-adk"},
+                    },
+                    "spec": {"skills": ["requirements-analyst"]},
+                },
+                "resolved": {
+                    "skills": [
+                        {
+                            "kind": "Skill",
+                            "metadata": {"name": "requirements-analyst"},
+                            "spec": {"tools": ["read_repository"]},
+                        }
+                    ],
+                    "prompts": [
+                        {
+                            "kind": "Prompt",
+                            "metadata": {"name": "requirements-analyst-prompt-v1"},
+                            "spec": {"systemPrompt": "Review requirements."},
+                        }
+                    ],
+                },
+                "unresolved": [],
+            },
+        )
+
+    monkeypatch.setattr(httpx, "request", request)
+    client = RegistryClient(base_url="http://reg:12121", namespace="tenant a")
+
+    result = client.resolve_agent("requirements/analyst-agent")
+
+    assert result.agent.name == "requirements-analyst-agent"
+    assert result.resolved["skills"][0]["metadata"]["name"] == "requirements-analyst"
+    assert result.unresolved == []
+    assert requested == ["http://reg:12121/v0/agents/requirements%2Fanalyst-agent/resolved?namespace=tenant%20a"]
+
+
+def test_registry_http_error_does_not_expose_upstream_body(monkeypatch) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "request",
+        lambda *args, **kwargs: httpx.Response(
+            503,
+            text="internal hostname registry-db.prod plus bearer-secret",
+        ),
+    )
+    client = RegistryClient(base_url="http://reg:12121", namespace="devai")
+
+    with pytest.raises(RegistryError) as caught:
+        client.resolve_agent("requirements-analyst-agent")
+
+    message = str(caught.value)
+    assert message == ("registry: 503 on GET /v0/agents/requirements-analyst-agent/resolved?namespace=devai")
+    assert "bearer-secret" not in message

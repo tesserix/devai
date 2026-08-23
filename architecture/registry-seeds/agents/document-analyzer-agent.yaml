@@ -36,11 +36,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: document-analyzer
-    name: Document Analyzer
-    description: Ingest PDFs, URLs, OpenAPI specs, architecture diagrams. Extract every functional + non-functional
-      requirement, plus any tech-stack hints buried in the input. Output is consumed by requirements_analyst.
-    tags:
-    - planning
-    - low
-    - devai
+  - document-analyzer
+  prompts:
+  - document-analyzer-prompt-v1
+  promptRef: document-analyzer-prompt-v1

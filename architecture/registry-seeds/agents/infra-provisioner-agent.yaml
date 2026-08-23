@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: infra-provisioner
-    name: Platform Engineer
-    description: "Creates Kubernetes deployment manifests (Helm charts) or VM deploy scripts based on\
-      \ the deployment target. Owns the Dockerfile and all infra files \u2014 every other role escalates\
-      \ here for infra changes."
-    tags:
-    - orchestration
-    - high
-    - devai
+  - infra-provisioner
+  prompts:
+  - infra-provisioner-prompt-v1
+  promptRef: infra-provisioner-prompt-v1

@@ -173,7 +173,7 @@ async def test_a_draft_is_scored_against_its_checks_before_it_is_published(platf
     assert body["results"][1]["failures"] == ["used 102 tokens, budget 10"]
 
 
-async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(platform) -> None:
+async def test_publishing_does_not_promote_an_unreviewed_agent_into_the_runtime(platform) -> None:
     client, catalog = platform
 
     # 1. Authoring publishes to the registry.
@@ -185,7 +185,7 @@ async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(plat
         }
     )
 
-    # 2. A sandbox pins that agent, a model and a tool policy.
+    # 2. A sandbox may record that pin, but publication is not runtime admission.
     created = client.post(
         "/api/sandboxes",
         headers=_SAM,
@@ -199,21 +199,14 @@ async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(plat
     assert created.status_code == 201, created.text
     sandbox_id = created.json()["id"]
 
-    # 3. Invoking it answers, and says which trace it left.
+    # 3. Invocation fails closed until a reviewed local capability admits it.
     answered = client.post(
         f"/api/sandboxes/{sandbox_id}/invoke",
         headers=_SAM,
         json={"message": "summarise the release"},
     )
-    assert answered.status_code == 200, answered.text
-    body = answered.json()
-    assert body["ok"] is True
-    assert body["final_text"] == "v2.1 ships the sandbox console."
-    assert body["totals"]["total_tokens"] == 102
+    assert answered.status_code == 422
+    assert "not runnable here" in answered.json()["detail"]
 
-    # 4. The trace is readable afterwards — that is where the metrics come from.
     listed = client.get(f"/api/sandboxes/{sandbox_id}/traces", headers=_SAM)
-    assert [t["id"] for t in listed.json()] == [body["id"]]
-
-    trace = client.get(f"/api/sandboxes/{sandbox_id}/traces/{body['id']}", headers=_SAM).json()
-    assert [s["kind"] for s in trace["steps"]] == ["prompt", "prompt", "llm", "response"]
+    assert listed.json() == []

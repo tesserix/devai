@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: ci-monitor
-    name: CI Engineer
-    description: "Watches GitHub Actions for the PR's CI run and either confirms green or autonomously\
-      \ fixes a broken workflow. Owns `.github/workflows/` \u2014 every other role escalates to ci_monitor\
-      \ for CI changes."
-    tags:
-    - review
-    - medium
-    - devai
+  - ci-monitor
+  prompts:
+  - ci-monitor-prompt-v1
+  promptRef: ci-monitor-prompt-v1

@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: release-manager
-    name: Release Manager
-    description: Merge story PRs in dependency order, close the epic, trigger deployment (ArgoCD or direct
-      kubectl), and post the release report. Final stage in the ALM pipeline. Hard-gated by risk_level=critical
-      in production.
-    tags:
-    - orchestration
-    - critical
-    - devai
+  - release-manager
+  prompts:
+  - release-manager-prompt-v1
+  promptRef: release-manager-prompt-v1

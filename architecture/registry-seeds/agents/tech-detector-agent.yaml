@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: tech-detector
-    name: Tech Stack Detector
-    description: Inspect the repo file tree + key configuration files and identify the language, framework,
-      database, ORM, test framework, CI/CD platform, deployment target, and coding patterns. Output drives
-      the skill_profile_name selection.
-    tags:
-    - planning
-    - low
-    - devai
+  - tech-detector
+  prompts:
+  - tech-detector-prompt-v1
+  promptRef: tech-detector-prompt-v1

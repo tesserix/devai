@@ -51,6 +51,14 @@ a tool.
 
 ## Shared runtime rules
 
+- The local inventory is the reviewed admission list. Registry publication alone does
+  not make an agent runnable. Each invocation maps the logical capability to its exact
+  canonical `*-agent` name and fetches a fresh Registry `/resolved` bundle.
+- Registry Skill, Prompt, Tool, and MCP references must resolve completely and match
+  the reviewed capability contract. Missing Registry or gateway dependencies fail
+  closed; DevAI does not fall back to local-only or direct-provider execution.
+- Product callers should use `POST /a2a/v1/capabilities/{capability}`. The named A2A
+  route remains compatible but passes through the identical admission checks.
 - Provider choice is resolved per invocation from the authenticated principal's enabled
   connectors. Same-provider model fallback is attempted before cross-provider fallback.
 - Strict connector mode never borrows a platform key for a human without authorization.
@@ -60,4 +68,3 @@ a tool.
   blocked, and dry-run modes remain available for evaluation and safety.
 - High- and critical-risk workflow stages continue to surface approval state through the
   pipeline; registry/A2A discovery does not itself grant approval.
-

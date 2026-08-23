@@ -37,12 +37,7 @@ spec:
     - application/json
     - text/plain
   skills:
-  - id: security-expert
-    name: Principal Security Engineer
-    description: "Hard security gate. Runs SAST + SCA + secret detection + container scan + OWASP Top\
-      \ 10 against the PR diff. READ-ONLY on application code \u2014 files findings, doesn't fix them.\
-      \ Blocks pipeline on CRITICAL/HIGH findings."
-    tags:
-    - review
-    - high
-    - devai
+  - security-expert
+  prompts:
+  - security-expert-prompt-v1
+  promptRef: security-expert-prompt-v1

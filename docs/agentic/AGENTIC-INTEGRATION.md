@@ -1,9 +1,9 @@
 # DevAI ↔ aregistry ↔ agentgateway — End-to-End Integration
 
-This document describes how a user-triggered task in DevAI fetches the right agent
-definition from the **Agent Registry**, dispatches it through the **Agent Gateway**,
-runs it as a Kubernetes Job, and uses the **A2A (Agent-to-Agent) protocol** for
-inter-agent handoffs.
+This document describes how DevAI maps a reviewed product capability to one canonical
+agent, resolves its complete composition from **Agentic Registry**, runs it with
+Tesserix ADK, and sends model, MCP, and outbound A2A traffic through the approved
+gateways. The same admission rules apply to in-process A2A and Kubernetes Job runs.
 
 Publishing and release operations are covered separately in
 [Publishing DevAI agents to the Agent Registry](AGENT-REGISTRY-PUBLISHING.md).
@@ -32,8 +32,8 @@ flowchart LR
     MCP[/MCP servers/]
 
     User    -- 1. trigger --> DevAI
-    DevAI   -- 2. get_agent --> Reg
-    Reg     -. profile .-> DevAI
+    DevAI   -- 2. /resolved --> Reg
+    Reg     -. validated bundle .-> DevAI
     DevAI   -- 3. create Job<br/>(profile in env) --> Runner
     Runner  -- 4. LLM call --> AIGW
     Runner  -- 5. MCP call --> AGW
@@ -57,8 +57,8 @@ flowchart LR
 | **devai-dashboard** | `devai` | 3100 | Next.js UI |
 | **auth-bff** | `devai` | 8090 | Terminates OAuth, stamps `X-Forwarded-User/Uid/Tenant` |
 | **agentregistry (aregistry)** | `agentregistry-system` | 12121 | Catalog. `/v0/{agents,skills,prompts,servers,health}`. pgvector for semantic search. |
-| **agentgateway** | `agentgateway-system` | 9092 | solo.io MCP dispatch gateway. Routes `/mcp/{name}` → backend MCP server. |
-| **ai-gateway** | `agentgateway-system` | 8080 | nginx LLM proxy. Routes `/anthropic/*` + `/openai/*` to public APIs, injects API keys server-side. |
+| **agentgateway-mcp** | `agentgateway-system` | 8080 | Solo MCP data plane. Routes approved `/mcp/{name}` traffic to backend MCP servers. |
+| **ai-gateway** | `agentgateway-system` | 8080 | Solo AI data plane. Routes provider and `/a2a/v1/*` paths under policy. |
 | **kagent** | `kagent-system` | 8083 | Agent lifecycle controller (solo.io). Reconciles agents labelled `devai.io/runtime=kagent` into Deployments; the dispatcher routes those over A2A (all other agents stay Job-dispatched). |
 
 → Edit: [`diagrams/01-component-topology.drawio`](diagrams/01-component-topology.drawio)
@@ -86,9 +86,9 @@ flowchart LR
     style S5 fill:#5a5a5a,color:#fff
 ```
 
-> **Key insight:** the aregistry call happens **once** per dispatch (step 2).
-> The runner reads its profile from env vars baked into the Job by DevAI in step 3 —
-> it does **not** re-query aregistry on boot.
+> **Key insight:** Registry is an execution dependency, not a hint. Dispatch resolves
+> the exact canonical Agent before creating a Job, and the runner revalidates a fresh
+> composition at its own execution boundary. Either failure stops before model/tool use.
 
 ### What each step gets right
 
@@ -96,12 +96,12 @@ flowchart LR
 |---|---|---|
 | Identity at boundary | auth-bff `X-Forwarded-User` | `services/auth-bff/internal/proxy/proxy.go:92-95` |
 | Identity in pipeline | `Principal` on `ALMState` / `DevAITask` | `src/devai/identity.py`, `src/devai/graph/state.py:62-70` |
-| Agent profile resolution | aregistry single round-trip per dispatch | `src/devai/pipeline/stages/job_runner.py:_fetch_agent_profile` |
+| Agent composition resolution | Agentic Registry `/v0/agents/{name}/resolved` | `src/devai/pipeline/stages/job_runner.py:_fetch_agent_profile` |
 | Image selection | per-stack → profile → default | `_resolve_image` |
 | Profile delivery to runner | `DEVAI_AGENT_PROFILE` env | `src/devai/runtime/job_spec.py:96-128` |
-| Profile consumption | env-first, aregistry only on env miss | `src/devai/runner/entrypoint.py:_decode_agent_profile_from_env` |
-| LLM dispatch | ai-gateway (keys injected server-side) | `DEVAI_ANTHROPIC_BASE_URL` in `values-prod.yaml` |
-| MCP dispatch | agentgateway when `DEVAI_AGENTGATEWAY_URL` set; direct otherwise | `_resolve_mcp_endpoints` |
+| Runtime admission | reviewed local contract + fresh Registry composition | `src/devai/specializations/service.py:resolve_governed` |
+| LLM dispatch | mandatory AI Gateway in governed mode | `DEVAI_LLM_GATEWAY_REQUIRED`, `DEVAI_LLM_GATEWAY_BASE_URL` |
+| MCP dispatch | mandatory agentgateway when the bundle declares MCP Servers | `DEVAI_AGENTGATEWAY_URL` |
 | Job completion | structured `RESULT::` line parsed from stdout | `_parse_runner_result` |
 
 → Edit: [`diagrams/02-spinup-flow.drawio`](diagrams/02-spinup-flow.drawio)
@@ -115,9 +115,11 @@ Each one has a single owner; they never overlap.
 
 ### Question 1 — "Which agent should run at this step?"
 
-**Answered by the blueprint.** A blueprint is a YAML file in `blueprints/` that
-lists the steps of a workflow in order. Each step names the agent that should
-run there.
+**Answered by reviewed product mapping.** A blueprint names a reviewed capability for
+workflow steps. Direct product callers use
+`POST /a2a/v1/capabilities/{capability}`. Both map deterministically to exactly one
+canonical Registry name (`senior_developer` → `senior-developer-agent`); DevAI does not
+choose the first fuzzy Agent Card match.
 
 ```yaml
 # blueprints/app-scaffold.yaml
@@ -127,9 +129,8 @@ run there.
     agent: senior_developer    # ← the blueprint picks the agent
 ```
 
-When DevAI walks the blueprint and reaches `scaffold_app`, it just reads
-`config.agent` and gets the string `"senior_developer"`. That's it. The
-blueprint author decides this at design time — DevAI doesn't choose, it obeys.
+When DevAI reaches `scaffold_app`, it reads `senior_developer`, verifies that capability
+is in the shipped admission catalog, and resolves only `senior-developer-agent`.
 
 ### Question 2 — "What does that agent need to do its job?"
 
@@ -145,17 +146,17 @@ every agent, it stores a record like a business card:
 | prompts | implement_story, refactor |
 | **mcp_servers** | **scm-mcp, devai-mcp** |
 
-DevAI calls aregistry once per dispatch:
+DevAI calls the Registry resolution endpoint:
 
 ```
-DevAI → aregistry: "what's on senior_developer's card?"
-aregistry → DevAI: { …the whole business card… }
+DevAI → aregistry: GET /v0/agents/senior-developer-agent/resolved
+aregistry → DevAI: { agent, resolved: {skills, tools, mcpServers, prompts}, unresolved }
 ```
 
-DevAI takes the whole card, **JSON-encodes it**, and writes it into a single
-environment variable on the K8s Job: `DEVAI_AGENT_PROFILE`. That way the
-runner pod gets everything it needs the moment it boots, without having to
-phone aregistry again.
+DevAI rejects any unresolved reference or drift from the reviewed Skill, Prompt, risk,
+tool, output, and handover contracts. Job metadata carries the dispatch snapshot, and
+the runner performs fresh admission before execution so a stale snapshot cannot bypass
+revocation.
 
 ### Question 3 — "Where do those MCP servers actually live?"
 
@@ -167,49 +168,39 @@ runner → aregistry: "where is scm-mcp?"
 aregistry → runner: "http://devai-api.devai.svc.cluster.local:8080/mcp/scm"
 ```
 
-Then there's one last twist: if `DEVAI_AGENTGATEWAY_URL` is set in the
-runner's environment, the runner *replaces* the URL aregistry handed back
-with one that goes through the Agent Gateway instead:
+The runner replaces backing-service URLs with the configured Agent Gateway route:
 
 ```
 http://agentgateway.agentgateway-system.svc.cluster.local:9092/mcp/scm-mcp
 ```
 
-That way traffic policy, retries, and tracing live on the gateway — but the
-**discovery** is still aregistry's job.
+In governed mode an absent MCP gateway is an error before agent execution. Direct MCP
+fallback remains only for explicitly non-governed local development.
 
 ### One-paragraph summary
 
-> The blueprint picks **which agent** runs at each step.
-> The agent's card in aregistry says **what skills, prompts, MCP servers, and
-> model** that agent needs.
-> Aregistry also tells the runner **where each MCP server actually lives**.
-> The Agent Gateway just *reroutes* MCP traffic when it's enabled — it doesn't
-> pick anything.
+> The reviewed capability mapping picks **which canonical agent** may run.
+> Registry `/resolved` supplies **what Skill, Prompt, Tool, and MCP artifacts** compose it.
+> The gateways enforce **how every outbound call flows** once admitted.
 
 So:
 
-> **Blueprint = which agent.
-> Aregistry = what that agent needs and where to find it.
-> Agent Gateway = how the traffic flows once decided.**
+> **Reviewed mapping = which agent. Registry = exact composition.
+> Gateways = the only approved data plane.**
 
 ### Worked example — `senior_developer` on a Next.js scaffold
 
 1. Blueprint `app-scaffold.yaml` says step `scaffold_app` runs
    `agent: senior_developer`.
-2. DevAI asks aregistry for senior_developer's card → gets back model + skills
-   + prompts + `mcp_servers: [scm-mcp, devai-mcp]`.
+2. DevAI resolves `senior-developer-agent` and rejects an incomplete or drifted bundle.
 3. DevAI picks a runner image — for this step, the per-stack default
    (`devai-runner-nextjs:main`) wins over what's on the card.
 4. DevAI creates a K8s Job. The Job's env carries the full card as JSON, plus
    the gateway URL.
-5. The runner pod boots, reads the card from env (no aregistry call), and
-   asks aregistry for each MCP server's address.
-6. If a gateway URL is set, the runner rewrites those addresses to go through
-   the Agent Gateway.
-7. The agent runs: LLM calls flow through the AI Gateway, MCP calls through
-   the Agent Gateway (or direct if the gateway URL is empty), Git commits go
-   straight to GitHub.
+5. The runner pod boots and revalidates the canonical Registry bundle.
+6. Registry MCP references become Agent Gateway routes; an absent gateway fails closed.
+7. The agent runs: LLM calls flow through the AI Gateway and MCP calls through
+   Agent Gateway. There is no direct-provider retry in governed mode.
 8. The pod prints `RESULT::{...}` and exits. DevAI picks up the result and
    moves to the next blueprint step.
 
