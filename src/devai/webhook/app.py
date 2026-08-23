@@ -696,6 +696,13 @@ def create_app(
             return blocked
         return await call_next(request)
 
+    # Bound the request body before any handler reads it. Added last of the
+    # two so it sits outside the auth gate — an oversized body is rejected
+    # without buffering it for an identity lookup.
+    from devai.services.request_limits import BodySizeLimitMiddleware
+
+    app.add_middleware(BodySizeLimitMiddleware)
+
     # Telemetry adapter (adapters/telemetry). Built synchronously HERE — not in
     # lifespan — because instrument_asgi adds middleware, which must be
     # registered before the app starts serving. Added after the auth gate so

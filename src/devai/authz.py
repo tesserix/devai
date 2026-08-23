@@ -98,3 +98,43 @@ async def require_principal(request: Request) -> Principal:
 
 
 __all__ = ["enforce_auth", "needs_auth_check", "require_principal"]
+
+async def resolve_principal(request: Request) -> Principal | None:
+    """Resolve the caller, gated by the ``require_auth`` flag.
+
+    Behavior-neutral while ``DEVAI_REQUIRE_AUTH`` is False: returns the
+    resolved principal or ``None`` for anonymous callers. With the flag on it
+    delegates to :func:`require_principal`, which 401s anonymous callers.
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is not None and getattr(config, "require_auth", False):
+        return await require_principal(request)
+    try:
+        return await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
+        return None
+
+
+def may_see_run(request: Request, principal: Principal | None, run: dict | None) -> bool:
+    """Whether `principal` may see `run`, per its owning team.
+
+    Delegates to the same ``can_dispatch`` rule the write paths use, so an
+    unscoped run (no team_id) and a principal with no teams both keep the
+    global access they had before.
+    """
+    team_service = getattr(request.app.state, "team_service", None)
+    if team_service is None:
+        return True
+    return bool(team_service.can_dispatch(principal, (run or {}).get("team_id") or ""))
+
+
+async def authorize_run_read(request: Request, run: dict | None) -> Principal | None:
+    """Enforce team membership on a run READ, answering 404 rather than 403.
+
+    A 403 would confirm that a run id exists in another team, so reads report
+    the run as simply absent.
+    """
+    principal = await resolve_principal(request)
+    if not may_see_run(request, principal, run):
+        raise HTTPException(status_code=404, detail="Run not found")
+    return principal

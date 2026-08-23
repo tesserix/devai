@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from devai.services.request_limits import enforce_rate_limit
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
@@ -387,6 +389,7 @@ async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
     if not intent:
         raise HTTPException(status_code=400, detail="requirements text is required")
     principal = await _require_principal(request)
+    await enforce_rate_limit(request, "pipeline_trigger", principal)
     await _llm_preflight(request, principal)
     agent_context: dict[str, Any] = {"requirements": intent}
     if body.issue_number is not None:
