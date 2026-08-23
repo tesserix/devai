@@ -596,6 +596,9 @@ class Settings(BaseSettings):
 
     # --- Crews (AI agent teams; seed catalog) ---
     crews_dir: str = "crews"
+    # Crew used when a run picks "Dynamic" and the intent matches no crew's
+    # keywords. Empty = fall back to a crew tagged `default` in crews/*.yaml.
+    default_crew: str = "backend_crew"
 
     # --- Teams (human teams that own crews) ---
     teams_enabled: bool = True

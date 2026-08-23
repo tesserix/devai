@@ -6,6 +6,29 @@ description: >
   expert reviews for vulnerabilities before the work ships. Members are
   equipped with terminal, git checkpoints, and web search.
 
+tags: [alm, backend, default]
+
+# Intent words that make this the right crew when the composer's crew is "Dynamic".
+keywords:
+  - api
+  - endpoint
+  - service
+  - backend
+  - server
+  - database
+  - schema
+  - sql
+  - migration
+  - orm
+  - queue
+  - worker
+  - go
+  - python
+  - fastapi
+  - grpc
+  - auth
+  - handler
+
 lead: senior_developer
 
 members:

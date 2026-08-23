@@ -42,6 +42,11 @@ class CrewSpec:
     lead: str
     display_name: str = ""
     description: str = ""
+    # Routing hints for dynamic crew selection ("Dynamic" in the composer):
+    # `tags` groups a crew by domain (alm / sre / default), `keywords` are the
+    # intent words that make this crew the right pick.
+    tags: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.members:
@@ -72,6 +77,8 @@ class CrewSpec:
             lead=str(data.get("lead", "")),
             display_name=str(data.get("display_name", "")),
             description=str(data.get("description", "")),
+            tags=[str(t) for t in (data.get("tags") or [])],
+            keywords=[str(k) for k in (data.get("keywords") or [])],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -81,6 +88,8 @@ class CrewSpec:
             "description": self.description,
             "lead": self.lead,
             "members": [m.to_dict() for m in self.members],
+            "tags": list(self.tags),
+            "keywords": list(self.keywords),
         }
 
 

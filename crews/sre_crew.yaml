@@ -8,6 +8,27 @@ description: >
   side-effects. Read-only investigation — remediation is handled by the
   blueprint's responder stage, not the crew.
 
+tags: [sre]
+
+# Intent words that make this the right crew when the composer's crew is "Dynamic".
+keywords:
+  - incident
+  - alert
+  - oncall
+  - kubernetes
+  - cluster
+  - pod
+  - latency
+  - slo
+  - outage
+  - postmortem
+  - cost
+  - reliability
+  - runbook
+  - rollout
+  - error budget
+  - saturation
+
 lead: root_cause_analyst
 
 members:
