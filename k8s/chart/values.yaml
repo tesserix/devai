@@ -31,7 +31,7 @@ env:
   DEVAI_SCM_PROVIDER: "github"
   DEVAI_SCM_AUTH_METHOD: "pat"        # use the PAT in devai-secrets (flip to github_app to test App auth)
   DEVAI_GITHUB_ORG: "tesserix"
-  DEVAI_CLAUDE_MODEL: "claude-sonnet-4-20250514"
+  DEVAI_CLAUDE_MODEL: "claude-sonnet-5"
   DEVAI_GROQ_MODEL: "llama-3.3-70b-versatile"
   # Local = fewer moving parts: no NATS, no LangSmith, no K8s job runtime.
   # Memory runs on the sandbox Redis so the learn/inject loop is actually

@@ -44,6 +44,26 @@ _DEFAULT_STAGE_TIMEOUT = 900
 _DEFAULT_MAX_ATTEMPTS = 3
 
 
+def root_cause(exc: BaseException) -> str:
+    """The deepest useful message in an exception chain.
+
+    A stage that raises surfaces to the workflow as Temporal's ``ActivityError``,
+    whose own message is the constant "Activity task failed" — the real reason
+    ("all authorized LLM providers failed") sits further down ``__cause__``.
+    Reporting only the outer message leaves a failed run with nothing to act on.
+    """
+    message = ""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text = str(current).strip()
+        if text:
+            message = text
+        current = current.__cause__
+    return message or str(exc)
+
+
 def _result_failed(result: Any) -> bool:
     """True when a (non-raised) StageResult signals a soft failure.
 
@@ -220,7 +240,7 @@ class BlueprintWorkflow:
             was merged as a completed stage, so ``on_failure: stop`` never fired.
         """
         if isinstance(res, BaseException):
-            self._record_failure(task, spec, f"stage {spec.name!r} failed: {res}")
+            self._record_failure(task, spec, f"stage {spec.name!r} failed: {root_cause(res)}")
             return
 
         result = stage_result_from_dict(res)
