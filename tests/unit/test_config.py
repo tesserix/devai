@@ -14,7 +14,7 @@ def test_default_settings():
     assert s.nats_url == "nats://localhost:4222"
     assert s.redis_url == "redis://localhost:6379"
     assert s.nats_stream == "DEVAI"
-    assert s.claude_model == "claude-sonnet-4-20250514"
+    assert s.claude_model == "claude-sonnet-5"
     assert s.openai_model == "gpt-4.1"
     assert s.max_review_iterations == 3
     assert s.pipeline_label == "devai:automate"
