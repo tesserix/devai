@@ -1252,7 +1252,7 @@ async def get_pipeline_config(request: Request, repo: str = "default") -> dict[s
             "merge": True,
             "createPR": False,
         },
-        "claude_model": "claude-sonnet-4-20250514",
+        "claude_model": "claude-sonnet-5",
         "openai_model": "o3",
         "groq_model": "llama-3.3-70b-versatile",
         "max_review_iterations": 3,

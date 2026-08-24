@@ -44,7 +44,7 @@ class AnthropicLLMAdapter(LLMAdapter):
     """Adapter over `anthropic.AsyncAnthropic`."""
 
     provider_name = "anthropic"
-    default_model = "claude-sonnet-4-20250514"
+    default_model = "claude-sonnet-5"
     default_max_tokens = 8192
 
     def __init__(

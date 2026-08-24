@@ -58,7 +58,7 @@ export function SandboxCreateDialog({
   const [versions, setVersions] = useState<string[]>([]);
   const [agent, setAgent] = useState("");
   const [provider, setProvider] = useState("anthropic");
-  const [model, setModel] = useState("claude-sonnet-4-20250514");
+  const [model, setModel] = useState("claude-sonnet-5");
   const [adkVersion, setAdkVersion] = useState("");
   const [toolMode, setToolMode] = useState("mock");
   const [toolOverrides, setToolOverrides] = useState<Record<string, string>>({});

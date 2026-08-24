@@ -15,6 +15,8 @@ Three layers of coverage matching the memory adapter tests:
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from devai.adapters.llm import (
@@ -528,6 +530,33 @@ def test_model_policy_normalizes_fable_to_48():
     assert coerce_model("anthropic", "claude-fable-5") == "claude-opus-4-8"
     # Non-fable claude id is untouched on anthropic.
     assert coerce_model("anthropic", "claude-sonnet-4-6") == "claude-sonnet-4-6"
+
+
+def test_model_policy_remaps_retired_models():
+    from devai.adapters.llm.model_policy import coerce_model, normalize_model
+
+    # The retired sonnet 404s from /v1/messages; a stale pin self-heals.
+    assert normalize_model("claude-sonnet-4-20250514") == "claude-sonnet-5"
+    assert normalize_model("Claude-Sonnet-4-20250514") == "claude-sonnet-5"
+    assert coerce_model("anthropic", "claude-sonnet-4-20250514") == "claude-sonnet-5"
+    # Exact ids only — a live dated release of the same family is untouched.
+    assert normalize_model("claude-sonnet-4-20991231") == "claude-sonnet-4-20991231"
+
+
+def test_no_specialization_pins_a_retired_model():
+    """The spec YAMLs shipped in the image must not pin a withdrawn id: the
+    per-role pin overrides the platform default, so a stale one 404s first."""
+    import yaml
+
+    from devai.adapters.llm.model_policy import _RETIRED_MODELS
+
+    spec_dir = pathlib.Path(__file__).resolve().parents[2] / "specializations"
+    stale = []
+    for path in sorted(spec_dir.rglob("*.yaml")):
+        model = (yaml.safe_load(path.read_text()) or {}).get("llm_model", "")
+        if str(model).strip().lower() in _RETIRED_MODELS:
+            stale.append(f"{path.name}: {model}")
+    assert not stale, "specializations pin retired models: " + "; ".join(stale)
 
 
 def test_model_policy_provider_fit():

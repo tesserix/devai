@@ -236,7 +236,7 @@ class Agent:
     _language: str = "python"
     _framework: str = "langgraph"
     _model_provider: str = "anthropic"
-    _model_name: str = "claude-sonnet-4-20250514"
+    _model_name: str = "claude-sonnet-5"
     _skills: list[str] = field(default_factory=list)
     _prompts: list[str] = field(default_factory=list)
     _mcp_servers: list[str] = field(default_factory=list)
