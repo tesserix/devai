@@ -88,7 +88,7 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
                 "claude_model",
                 "Claude Model",
                 "claude_model",
-                placeholder="claude-sonnet-4-20250514",
+                placeholder="claude-sonnet-5",
                 provider="anthropic",
             ),
             _f(

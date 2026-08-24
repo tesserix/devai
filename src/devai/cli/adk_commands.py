@@ -122,7 +122,7 @@ def new_agent(
     skill: str = typer.Option("", "--skill"),
     prompt: str = typer.Option("", "--prompt"),
     model_provider: str = typer.Option("anthropic", "--model-provider"),
-    model: str = typer.Option("claude-sonnet-4-20250514", "--model"),
+    model: str = typer.Option("claude-sonnet-5", "--model"),
     version: str = typer.Option("1", "--version"),
     seeds_root: Path = typer.Option(Path("architecture/registry-seeds"), "--seeds-root"),
 ) -> None:

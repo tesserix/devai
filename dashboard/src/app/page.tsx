@@ -729,7 +729,7 @@ function ConfigTab({ repo }: { repo: string }) {
       merge: true,
       createPR: false,
     },
-    claude_model: "claude-sonnet-4-20250514",
+    claude_model: "claude-sonnet-5",
     openai_model: "o3",
     groq_model: "llama-3.3-70b-versatile",
     max_review_iterations: 3,

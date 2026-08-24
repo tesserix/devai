@@ -31,7 +31,7 @@ Typical workflow::
         .description("Drives my-skill")
         .skill("my-skill")
         .prompt("my-skill-prompt-v1")
-        .model("anthropic", "claude-sonnet-4-20250514")
+        .model("anthropic", "claude-sonnet-5")
         .image("ghcr.io/tesserix/devai/devai:latest")
     )
 
