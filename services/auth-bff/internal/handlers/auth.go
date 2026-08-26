@@ -28,6 +28,7 @@ type AuthHandler struct {
 	verifier     gip.Verifier
 	session      *session.Manager
 	allowlist    *allowlist.Allowlist
+	publicSignup bool
 	almTenant    string
 	sreTenant    string
 	gipAPIKey    string
@@ -39,16 +40,17 @@ type AuthHandler struct {
 
 // AuthDeps groups handler dependencies.
 type AuthDeps struct {
-	Verifier         gip.Verifier
-	Session          *session.Manager
-	Allowlist        *allowlist.Allowlist
-	ALMTenant        string
-	SRETenant        string
-	GIPWebAPIKey     string
-	GIPAuthDomain    string
-	GIPProjectID     string
-	ALMHosts         []string
-	SREHosts         []string
+	Verifier      gip.Verifier
+	Session       *session.Manager
+	Allowlist     *allowlist.Allowlist
+	PublicSignup  bool
+	ALMTenant     string
+	SRETenant     string
+	GIPWebAPIKey  string
+	GIPAuthDomain string
+	GIPProjectID  string
+	ALMHosts      []string
+	SREHosts      []string
 }
 
 // NewAuthHandler constructs the AuthHandler.
@@ -65,6 +67,7 @@ func NewAuthHandler(d AuthDeps) *AuthHandler {
 		verifier:     d.Verifier,
 		session:      d.Session,
 		allowlist:    d.Allowlist,
+		publicSignup: d.PublicSignup,
 		almTenant:    d.ALMTenant,
 		sreTenant:    d.SRETenant,
 		gipAPIKey:    d.GIPWebAPIKey,
@@ -205,7 +208,7 @@ func (h *AuthHandler) autoLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.allowlist.Has(verified.Email) {
+	if !h.publicSignup && !h.allowlist.Has(verified.Email) {
 		writeJSON(w, http.StatusForbidden, errorResp("forbidden", "email not in admin allow-list"))
 		return
 	}

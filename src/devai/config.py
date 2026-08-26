@@ -140,6 +140,11 @@ class Settings(BaseSettings):
     github_webhook_secret: str = ""
     github_org: str = "tesserix"
 
+    # Public product feedback is filed in this repository using the platform
+    # GitHub App. The two operators remain the default assignees.
+    feedback_repo: str = "tesserix/devai"
+    feedback_assignees: list[str] = Field(default_factory=lambda: ["sam123ben", "mahesh.sangawar"])
+
     # --- Repo onboarding (Repos page) ---
     # When true, the API runs a reconcile ~30s after boot so the onboarding
     # cache self-heals from the `.platform/devai.yaml` markers (the source of

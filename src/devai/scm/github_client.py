@@ -423,6 +423,16 @@ class GitHubSCMClient(SCMClient):
                 f"Failed to create issue on {repo}: {detail}. Check that the repo exists and has Issues enabled."
             ) from exc
 
+    async def assign_issue(self, repo: str, issue_number: int, assignees: list[str]) -> dict[str, Any]:
+        """Assign a created issue to the configured GitHub logins."""
+        safe = [str(login).strip() for login in assignees if str(login).strip()]
+        if not safe:
+            return {}
+        resp = await self._request(
+            "POST", f"/repos/{repo}/issues/{issue_number}/assignees", json={"assignees": safe}
+        )
+        return resp.json()
+
     async def get_issue(self, repo: str, issue_id: int | str) -> dict[str, Any]:
         resp = await self._request("GET", f"/repos/{repo}/issues/{issue_id}")
         return resp.json()

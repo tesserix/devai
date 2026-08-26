@@ -25,6 +25,8 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+_FEEDBACK_TYPES = {"story": "user story", "bug": "bug report", "task": "task"}
+
 
 # --- Dashboard Page ---
 
@@ -149,6 +151,41 @@ async def oauth_logout(request: Request) -> RedirectResponse:
     response = RedirectResponse("/dashboard")
     response.delete_cookie("devai_session")
     return response
+
+
+@router.post("/api/feedback")
+async def submit_feedback(request: Request) -> dict[str, Any]:
+    """File authenticated product feedback as a classified GitHub issue."""
+    principal = await _require_principal(request)
+    await enforce_rate_limit(request, "feedback", principal)
+    payload = await request.json()
+    kind = str(payload.get("type", "")).strip().lower()
+    title = str(payload.get("title", "")).strip()
+    description = str(payload.get("description", "")).strip()
+    if kind not in _FEEDBACK_TYPES:
+        raise HTTPException(status_code=422, detail="type must be story, bug, or task")
+    if not title or len(title) > 200 or not description or len(description) > 10000:
+        raise HTTPException(status_code=422, detail="title and description are required and bounded")
+
+    config = request.app.state.config
+    repo = getattr(config, "feedback_repo", "tesserix/devai")
+    labels = ["feedback", f"type:{kind}"]
+    body = (
+        f"## { _FEEDBACK_TYPES[kind].title() }\n\n{description}\n\n"
+        f"---\nSubmitted by: {principal.email or principal.login or 'authenticated user'}\n"
+        "This issue was created from the public DevAI feedback form."
+    )
+    from devai.scm import create_scm_client
+
+    scm = create_scm_client(config)
+    try:
+        issue = await scm.create_issue(repo, f"[{kind}] {title}", body, labels)
+        assign = getattr(scm, "assign_issue", None)
+        if callable(assign) and issue.get("number"):
+            await assign(repo, int(issue["number"]), list(getattr(config, "feedback_assignees", [])))
+    finally:
+        await scm.close()
+    return {"issue_url": issue.get("html_url", ""), "issue_number": issue.get("number"), "type": kind}
 
 
 async def _get_session(request: Request) -> dict[str, Any] | None:

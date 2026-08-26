@@ -416,6 +416,11 @@ function normalizeRun(raw: unknown): PipelineRun {
 export const api = {
   // Auth
   me: () => apiFetch<{ login: string; name: string; avatar_url: string }>("/me"),
+  submitFeedback: (body: { type: "story" | "bug" | "task"; title: string; description: string }) =>
+    apiFetch<{ issue_url: string; issue_number: number; type: string }>("/feedback", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // ── Settings (per-user/per-tenant connectors + secrets) ─────────────
   getSettingsCatalog: () =>
