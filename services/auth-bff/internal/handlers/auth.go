@@ -4,7 +4,7 @@
 //
 //	POST /auth/auto-login   — exchange GIP id_token for a session cookie
 //	GET  /auth/me           — introspect current session
-//	POST /auth/logout       — clear the session cookie
+//	GET|POST /auth/logout   — clear the session cookie
 //	GET  /healthz           — liveness
 //	GET  /readyz            — readiness (always 200 once handler is constructed)
 //
@@ -252,11 +252,15 @@ func (h *AuthHandler) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 	h.session.Clear(w)
+	if r.Method == http.MethodGet {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
