@@ -162,7 +162,7 @@ function LoginPageInner() {
           )}
 
           <p className="mt-5 text-center text-xs text-[var(--ink-muted)]">
-            Access restricted to authorized users
+            New users can sign up with Google. Samyak Rout and Mahesh Sangawar own the product board.
           </p>
         </div>
 
