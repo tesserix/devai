@@ -441,10 +441,9 @@ prod setting once operationalized.
 
 ### 10.5 LLM providers
 
-Anthropic (primary), OpenAI (ProductDirector/StaffReviewer), Groq + Gemini (legacy wrappers),
-NemoClaw self-hosted vLLM/NIM (`nemotron-3-super-120b-a12b`, Groq fallback). Target state —
-**Vertex AI as the regulated in-VPC plane with direct Anthropic fallback** — is specified in
-`docs/plans/vertex-multi-model/IMPLEMENTATION-PLAN.md`.
+The production provider chain is **Vertex Gemini primary → Anthropic secondary**. Agent and
+model preferences select a provider-native capability tier but cannot reorder that chain. Legacy
+wrappers and Tesserix ADK runtimes both receive the same adapter chain.
 
 **Private Vertex access is live (2026-06-12):** a PSC endpoint (`vertex-psc-ip` = 10.255.0.2,
 forwarding rule `vertexapis`, all-apis bundle) + a private DNS zone pinning
@@ -453,12 +452,11 @@ forwarding rule `vertexapis`, all-apis bundle) + a private DNS zone pinning
 `roles/aiplatform.user` on `app-secrets-devai-prod@` (DevAI pods) and `agentgateway-llm@`
 (gateway GSA, Workload-Identity-bound to `agentgateway-system/agentgateway`).
 
-**LLM egress direction — agentgateway:** DevAI's factory now registers a `gateway` provider
-(`DEVAI_LLM_GATEWAY_BASE_URL` → the solo.io agentgateway's OpenAI-compatible `ai-gateway`
-service). The gateway maps model aliases to any backend (Vertex Gemini/Claude, Anthropic,
-OpenAI) and owns the credentials, keeping DevAI provider-independent. Caveat: the gateway
-chart wrapper currently runs at replicaCount 0 pending adoption of the upstream Helm chart —
-direct provider adapters remain the active path until then.
+**LLM egress — Agent Gateway only:** `DEVAI_LLM_GATEWAY_REQUIRED=true` makes every concrete
+provider adapter resolve its dedicated route below `DEVAI_LLM_GATEWAY_BASE_URL`. The Solo.io
+gateway owns backend authentication and policy. Missing gateway configuration fails closed;
+production has no direct-provider fallback. The reusable contract is recorded in
+`docs/adr/0006-agent-gateway-provider-priority.md`.
 
 ---
 

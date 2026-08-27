@@ -7,9 +7,12 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import devai.adapters.llm as llm_module
 import devai.agentic.kagent_client as kagent_client_module
 import devai.agentic.routes as routes
 import devai.agentic.status as status_module
+from devai.adapters.llm import LLMResponse
+from devai.adapters.llm.base import LLMUsage
 from devai.agentic.status import AgenticStatus, ComponentStatus, fetch_agentic_status
 
 
@@ -91,6 +94,107 @@ def test_ai_gateway_is_reachable_when_listener_returns_404(monkeypatch: Any) -> 
     assert snapshot.agentgateway.reachable is True
     assert snapshot.ai_gateway.reachable is True
     assert "http://ai-gateway.agentgateway-system.svc.cluster.local:8080/" in requested
+
+
+def test_llm_probe_uses_runtime_fallback_chain_and_normalized_usage(monkeypatch: Any) -> None:
+    runtime_config = SimpleNamespace(require_auth=False)
+    captured: dict[str, Any] = {}
+
+    class Adapter:
+        provider_name = "vertex_gemini→anthropic"
+
+        async def generate(self, _: Any) -> LLMResponse:
+            return LLMResponse(
+                text="Gateway healthy",
+                usage=LLMUsage(prompt_tokens=7, completion_tokens=2, total_tokens=9),
+                finish_reason="stop",
+                model="claude-sonnet-4-6",
+                provider="anthropic",
+            )
+
+    def fake_create_llm_chain(config: Any) -> Adapter:
+        captured["config"] = config
+        return Adapter()
+
+    monkeypatch.setattr(llm_module, "create_llm_chain", fake_create_llm_chain)
+    app = FastAPI()
+    app.state.config = runtime_config
+    app.include_router(routes.router)
+
+    response = TestClient(app).get("/api/agentic/llm-probe")
+
+    assert response.status_code == 200
+    assert captured["config"] is runtime_config
+    assert response.json() == {
+        "ok": True,
+        "adapter": "Adapter",
+        "provider": "vertex_gemini→anthropic",
+        "model": "claude-sonnet-4-6",
+        "text": "Gateway healthy",
+        "usage": {"input": 7, "output": 2},
+    }
+
+
+def test_llm_probe_reports_adapter_error_response_as_failure(monkeypatch: Any) -> None:
+    class Adapter:
+        provider_name = "vertex_gemini"
+
+        async def generate(self, _: Any) -> LLMResponse:
+            return LLMResponse(
+                text="backend authentication failed",
+                finish_reason="error",
+                model="gemini-2.5-flash",
+                provider="vertex_gemini",
+            )
+
+    monkeypatch.setattr(llm_module, "create_llm_chain", lambda _: Adapter())
+    app = FastAPI()
+    app.state.config = SimpleNamespace(require_auth=False)
+    app.include_router(routes.router)
+
+    response = TestClient(app).get("/api/agentic/llm-probe")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "adapter": "Adapter",
+        "provider": "vertex_gemini",
+        "model": "gemini-2.5-flash",
+        "error": "backend authentication failed",
+    }
+
+
+def test_llm_probe_rejects_empty_completion_with_sufficient_budget(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    class Adapter:
+        provider_name = "anthropic"
+
+        async def generate(self, request: Any) -> LLMResponse:
+            captured["max_tokens"] = request.max_tokens
+            return LLMResponse(
+                text="",
+                finish_reason="max_tokens",
+                model="claude-sonnet-4-6",
+                provider="anthropic",
+            )
+
+    monkeypatch.setattr(llm_module, "create_llm_chain", lambda _: Adapter())
+    app = FastAPI()
+    app.state.config = SimpleNamespace(require_auth=False)
+    app.include_router(routes.router)
+
+    response = TestClient(app).get("/api/agentic/llm-probe")
+
+    assert response.status_code == 200
+    assert captured["max_tokens"] == 128
+    assert response.json() == {
+        "ok": False,
+        "adapter": "Adapter",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "error": "model returned no text (finish_reason=max_tokens)",
+    }
 
 
 def test_kagent_dispatch_uses_request_scoped_a2a_ids(monkeypatch: Any) -> None:

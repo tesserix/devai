@@ -273,6 +273,48 @@ async def test_resolver_chains_only_the_users_connected_providers():
     assert adapter.provider_name == "vertex_gemini→groq"
 
 
+@pytest.mark.asyncio
+async def test_overlay_persists_explicit_primary_and_fallback_order():
+    from devai.settings.models import Scope
+    from devai.settings.overlay import PrincipalSettingsOverlay, build_overlay
+
+    class _PlatformSettings:
+        llm_provider = "anthropic"
+        llm_fallback_provider = ""
+        anthropic_api_key = "sk-ant-platform"
+
+    svc = SettingsService(secrets=_MemSecrets())
+    await svc.upsert_connector(
+        scope=Scope.USER,
+        scope_id="owner@example.com",
+        connector_key="llm",
+        provider="vertex_gemini",
+        prefs={
+            "fallback_providers": "anthropic,groq",
+            "vertex_project": "user-project",
+        },
+        secret_values={
+            "vertex_api_key": "AQ.user-vertex",
+            "anthropic_api_key": "sk-ant-user",
+            "groq_api_key": "gsk_user-groq",
+        },
+        updated_by="owner@example.com",
+    )
+
+    overlay = await build_overlay(_PlatformSettings(), Principal(email="owner@example.com"), svc)
+
+    assert isinstance(overlay, PrincipalSettingsOverlay)
+    assert overlay.llm_provider == "vertex_gemini"
+    assert overlay.llm_authorized_providers == ("vertex_gemini", "anthropic", "groq")
+    assert overlay.llm_fallback_provider == "anthropic,groq"
+
+
+def test_llm_connector_catalog_exposes_ordered_fallback_setting():
+    field = next(field for field in CONNECTOR_BY_KEY["llm"].fields if field.key == "fallback_providers")
+    assert field.settings_attr == "llm_fallback_provider"
+    assert field.secret is False
+
+
 # ─────────────────────────────────────────────────────────────────────
 # role_llm_for_principal — the one LLM-selection policy
 # ─────────────────────────────────────────────────────────────────────

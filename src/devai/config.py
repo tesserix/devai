@@ -815,11 +815,9 @@ class Settings(BaseSettings):
     llm_fallback_provider: str = "openai,vertex_gemini,groq"
 
     # --- per-ROLE model routing ---
-    # Each role resolves to a model + a provider failover chain:
-    #   configured primary (anthropic) → llm_role_chain_provider — the
-    # gateway routes Claude on VERTEX server-side, so the SAME model id is
-    # preserved down the chain (Opus 4.8 on Anthropic → Opus 4.8 on Vertex).
-    # Unconfigured fallback links skip with a log; empty disables the link.
+    # Each role model selects a capability tier without changing the product's
+    # primary/fallback order. Retained for non-governed legacy deployments;
+    # governed production routes every concrete provider through Agent Gateway.
     llm_role_chain_provider: str = "gateway"
     # Frontend/UI implementation — strongest coding model. NO Fable: any
     # claude-fable-* id is force-mapped to 4.8 by adapters.llm.model_policy.

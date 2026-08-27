@@ -1170,10 +1170,12 @@ function ConnectorForm({
           />
         </div>
         <div className="block">
-          <span className="text-xs text-[var(--ink-300)]">Provider</span>
+          <span className="text-xs text-[var(--ink-300)]">
+            {spec.key === "llm" ? "Primary provider" : "Provider"}
+          </span>
           <Select
             className="mt-1"
-            ariaLabel="Provider"
+            ariaLabel={spec.key === "llm" ? "Primary provider" : "Provider"}
             value={provider}
             onChange={setProvider}
             options={spec.providers.map((p) => ({ value: p, label: p }))}
