@@ -171,7 +171,7 @@ async def submit_feedback(request: Request) -> dict[str, Any]:
     repo = getattr(config, "feedback_repo", "tesserix/devai")
     labels = ["feedback", f"type:{kind}"]
     body = (
-        f"## { _FEEDBACK_TYPES[kind].title() }\n\n{description}\n\n"
+        f"## {_FEEDBACK_TYPES[kind].title()}\n\n{description}\n\n"
         f"---\nSubmitted by: {principal.email or principal.login or 'authenticated user'}\n"
         "This issue was created from the public DevAI feedback form."
     )

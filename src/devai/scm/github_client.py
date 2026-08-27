@@ -428,9 +428,7 @@ class GitHubSCMClient(SCMClient):
         safe = [str(login).strip() for login in assignees if str(login).strip()]
         if not safe:
             return {}
-        resp = await self._request(
-            "POST", f"/repos/{repo}/issues/{issue_number}/assignees", json={"assignees": safe}
-        )
+        resp = await self._request("POST", f"/repos/{repo}/issues/{issue_number}/assignees", json={"assignees": safe})
         return resp.json()
 
     async def get_issue(self, repo: str, issue_id: int | str) -> dict[str, Any]:
