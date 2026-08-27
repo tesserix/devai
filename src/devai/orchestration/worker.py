@@ -19,7 +19,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from devai.config import Settings
-from devai.orchestration.activities import run_stage_activity
+from devai.orchestration.activities import publish_progress_activity, run_stage_activity
 from devai.orchestration.context import WorkerContext, set_worker_context
 from devai.orchestration.workflows import BlueprintWorkflow
 from devai.pipeline.bootstrap import build_runtime
@@ -130,7 +130,7 @@ async def run_worker(config: Settings | None = None) -> None:
         client,
         task_queue=task_queue,
         workflows=[BlueprintWorkflow],
-        activities=[run_stage_activity],
+        activities=[run_stage_activity, publish_progress_activity],
         **_worker_options(config),
     )
     logger.info("devai-worker started: host=%s ns=%s queue=%s", host, namespace, task_queue)

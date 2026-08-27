@@ -9,6 +9,10 @@ If the stage raises, the activity propagates the error so Temporal applies the
 declared ``RetryPolicy``; the workflow decides stop-vs-continue on final failure.
 The exception is a ``retry_unsafe`` failure — one whose side effects may already
 have happened — which is re-raised as a non-retryable ApplicationError.
+
+The activity persists live progress but does not author timeline events: only the
+workflow holds the stage spec, so only it can attribute an event to an agent and
+lane. Recording here too produced a second, agent-less copy of every event.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from temporalio.exceptions import ApplicationError
 from devai.blueprint.registry import StageRegistryError
 from devai.orchestration.context import get_worker_context
 from devai.orchestration.serde import stage_result_to_dict, task_from_dict, task_to_dict
-from devai.pipeline.types import StageEvent, StageEventPhase, TaskState
+from devai.pipeline.types import TaskState
 
 _HEARTBEAT_INTERVAL_SECONDS = 10.0
 
@@ -51,6 +55,25 @@ async def _heartbeat_until_complete(
             await asyncio.wait_for(complete.wait(), timeout=_HEARTBEAT_INTERVAL_SECONDS)
         except TimeoutError:
             await _persist_progress(task, state_manager)
+
+
+@activity.defn(name="publish_progress")
+async def publish_progress_activity(task_dict: dict[str, Any]) -> None:
+    """Publish a workflow-side task snapshot to shared state.
+
+    A workflow cannot do I/O, so terminal stage events — and the state ahead of a
+    long approval gate — reach the dashboard only through this activity.
+    Best-effort: ``persist_task`` is last-writer-wins on ``updated_at``, and a
+    reporting failure must never fail the run.
+    """
+    state_manager = getattr(get_worker_context().deps, "state_manager", None)
+    persist = getattr(state_manager, "persist_task", None)
+    if persist is None:
+        return
+    try:
+        await persist(task_dict)
+    except Exception:  # noqa: BLE001 — reporting must not fail the run
+        activity.logger.warning("progress snapshot failed for %s", task_dict.get("id"), exc_info=True)
 
 
 @activity.defn(name="run_stage")
@@ -81,11 +104,9 @@ async def run_stage_activity(
         if task.started_at is None:
             task.started_at = time.time()
     task.current_stage = stage_name
-    task.record_event(StageEvent(stage_name, StageEventPhase.STARTED, message=stage_key))
     state_manager = getattr(ctx.deps, "state_manager", None)
     await _persist_progress(task, state_manager)
 
-    started_at = time.monotonic()
     complete = asyncio.Event()
     heartbeat = asyncio.create_task(_heartbeat_until_complete(stage_name, complete, task, state_manager))
     try:
@@ -96,24 +117,8 @@ async def run_stage_activity(
         if stage_name not in task.stages_completed:
             task.stages_completed.append(stage_name)
         task.current_stage = ""
-        task.record_event(
-            StageEvent(
-                stage_name,
-                StageEventPhase.COMPLETED,
-                duration_ms=(time.monotonic() - started_at) * 1000.0,
-                message=result.message,
-            )
-        )
         return stage_result_to_dict(result)
     except Exception as e:
-        task.record_event(
-            StageEvent(
-                stage_name,
-                StageEventPhase.FAILED,
-                duration_ms=(time.monotonic() - started_at) * 1000.0,
-                error=str(e),
-            )
-        )
         # A stage that may already have taken effect must not be replayed by
         # the RetryPolicy — surface it as non-retryable instead (ADR-0004).
         if getattr(e, "retry_unsafe", False):
