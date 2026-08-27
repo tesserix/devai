@@ -890,11 +890,11 @@ class Settings(BaseSettings):
     # no code changes. Missing SDKs / config degrade gracefully to "noop".
     memory_provider: str = "redis"  # noop | redis | pgvector | qdrant | mem0 | zep | hondo
 
-    # Embedding provider for memory semantic search (pgvector). `auto` uses
-    # OpenAI when DEVAI_OPENAI_API_KEY is set, otherwise disables embeddings
-    # and pgvector degrades to keyword recall. `none` disables explicitly.
+    # Embedding provider for memory semantic search. `auto` follows the
+    # configured LLM primary/fallback order and picks the first adapter that
+    # implements embeddings (Vertex/OpenAI/gateway). `none` disables explicitly.
     # Dimensions must match the agent_memories.embedding column: vector(1536).
-    embedding_provider: str = "auto"  # auto | openai | none
+    embedding_provider: str = "auto"  # auto | vertex_gemini | openai | gateway | none
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 

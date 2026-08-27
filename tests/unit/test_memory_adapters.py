@@ -456,6 +456,51 @@ def test_build_embedder_auto_without_key_returns_none():
     assert _build_embedder(settings) is None
 
 
+def test_build_embedder_auto_follows_vertex_primary_through_gateway():
+    from devai.adapters.memory.factory import _build_embedder
+
+    settings = _Settings()
+    settings.embedding_provider = "auto"
+    settings.embedding_dimensions = 768
+    settings.llm_provider = "vertex_gemini"
+    settings.llm_fallback_provider = "anthropic"
+    settings.llm_gateway_required = True
+    settings.llm_gateway_base_url = "http://ai-gateway.agentgateway-system.svc.cluster.local:8080"
+    settings.vertex_project = "project-1"
+    settings.vertex_location = "global"
+    settings.vertex_embedding_model = "text-embedding-005"
+
+    embedder = _build_embedder(settings)
+
+    assert embedder is not None
+    assert embedder.model == "text-embedding-005"
+    assert embedder.dimensions == 768
+    assert embedder._llm.provider_name == "vertex_gemini"
+    vertex = embedder._llm._inner
+    assert vertex._base.startswith(
+        "http://ai-gateway.agentgateway-system.svc.cluster.local:8080/vertex/v1/projects/project-1/"
+    )
+    assert "Authorization" not in vertex._headers()
+
+
+def test_build_embedder_explicit_openai_keeps_openai_model():
+    from devai.adapters.memory.factory import _build_embedder
+
+    settings = _Settings()
+    settings.embedding_provider = "openai"
+    settings.embedding_dimensions = 1536
+    settings.embedding_model = "text-embedding-3-small"
+    settings.openai_api_key = "user-key"
+    settings.openai_base_url = "https://api.openai.com/v1"
+
+    embedder = _build_embedder(settings)
+
+    assert embedder is not None
+    assert embedder.model == "text-embedding-3-small"
+    assert embedder.dimensions == 1536
+    assert embedder._llm.provider_name == "openai"
+
+
 def test_pgvector_factory_prefers_explicit_memory_embedder():
     """An embedder attached to settings wins over factory construction."""
     from devai.adapters.memory.factory import _build_pgvector
