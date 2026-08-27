@@ -26,7 +26,7 @@ def test_auth_bff_and_mcp_bridge_are_verified_in_direct_gar() -> None:
     workflow = WORKFLOW.read_text()
 
     assert "GAR_REGISTRY: asia-south1-docker.pkg.dev" in workflow
-    assert "DIRECT_GAR_IMAGES=\"devai-auth-bff devai-mcp-bridge\"" in workflow
+    assert 'DIRECT_GAR_IMAGES="devai-auth-bff devai-mcp-bridge"' in workflow
     assert 'crane copy "$source" "$target"' in workflow
     assert 'crane manifest "$target"' in workflow
     assert workflow.index('crane manifest "$target"') < workflow.index("Advance the deploy marker")
