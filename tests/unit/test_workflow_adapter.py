@@ -278,6 +278,33 @@ async def test_temporal_already_started_reuses_the_scoped_workflow():
 
 
 @pytest.mark.asyncio
+async def test_temporal_resume_allows_a_new_execution_after_business_failure():
+    from temporalio.common import WorkflowIDReusePolicy
+
+    task = DevAITask(blueprint="t-linear")
+    task.agent_context["resumed_from_failure_at"] = 123.0
+
+    class Handle:
+        async def result(self):
+            return task_to_dict(task)
+
+    class Client:
+        requested_policy = None
+
+        async def start_workflow(self, *_args, **kwargs):
+            self.requested_policy = kwargs.get("id_reuse_policy")
+            return Handle()
+
+    client = Client()
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=NoopWorkflowAdapter())
+    adapter._client = client
+
+    await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert client.requested_policy == WorkflowIDReusePolicy.ALLOW_DUPLICATE
+
+
+@pytest.mark.asyncio
 async def test_temporal_result_updates_the_original_queued_task():
     task = DevAITask(blueprint="t-linear")
     completed = DevAITask.from_dict(task.to_dict())
