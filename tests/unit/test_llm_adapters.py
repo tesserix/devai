@@ -634,8 +634,7 @@ def test_default_fallback_order_is_anthropic_openai_vertex_groq():
 
 
 def test_platform_and_role_chains_build_in_order(monkeypatch):
-    """The platform chain degrades anthropic→openai→vertex→groq; role chains
-    add the claude-preserving gateway right after the primary."""
+    """Role model preferences never reorder the configured provider chain."""
     from devai.adapters.llm import factory
     from devai.config import Settings
 
@@ -656,10 +655,10 @@ def test_platform_and_role_chains_build_in_order(monkeypatch):
         chain = factory.create_llm_chain(s)
         assert chain.provider_name == "anthropic→openai→vertex_gemini→groq"
 
-        # Role chain for a claude-pinned role: anthropic primary, gateway
-        # (claude-on-vertex) first, then the same ordered fallbacks.
+        # The non-governed legacy gateway remains a final fallback. In
+        # production gateway_required routes every provider through it instead.
         role = factory.create_role_llm(s, "dev_api")
-        assert role.provider_name == "anthropic→gateway→openai→vertex_gemini→groq"
+        assert role.provider_name == "anthropic→openai→vertex_gemini→groq→gateway"
     finally:
         factory._ROLE_CHAIN_CACHE.clear()
 

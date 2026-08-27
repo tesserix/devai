@@ -1490,6 +1490,7 @@ export interface WritableScope {
 export interface LlmCapabilities {
   connected: string[];
   primary: string;
+  gateway_required: boolean;
   roles: Record<string, { tier: string; provider: string; model: string }>;
 }
 

@@ -13,6 +13,7 @@ from devai.adapters.llm import capabilities as cap
 class _S:
     llm_provider = "anthropic"
     llm_role_chain_provider = "gateway"
+    llm_gateway_required = True
     llm_fallback_provider = "openai,vertex_gemini,groq"
     llm_model_dev_api = "claude-opus-4-8"
     llm_model_utility = "claude-haiku-4-5-20251001"
@@ -40,6 +41,7 @@ def test_tier_for_model():
     assert cap.tier_for_model("o3") == "heavy"
     assert cap.tier_for_model("claude-sonnet-4-6") == "standard"
     assert cap.tier_for_model("gpt-4.1") == "standard"
+    assert cap.tier_for_model("gemini-2.5-pro") == "standard"
     assert cap.tier_for_model("claude-haiku-4-5-20251001") == "light"
     assert cap.tier_for_model("gpt-4.1-mini") == "light"
     assert cap.tier_for_model("") == "standard"
@@ -59,17 +61,17 @@ def test_model_for():
     assert cap.model_for("anthropic", "light") == "claude-haiku-4-5-20251001"
     assert cap.model_for("groq", "heavy") == "llama-3.3-70b-versatile"
     assert cap.model_for("openrouter", "heavy") == ""  # not in map → provider default
+    assert cap.model_for_provider(_S(), "openrouter", "claude-opus-4-8") == "claude-opus-4-8"
 
 
-def test_ordered_providers_prefers_then_dedups():
+def test_ordered_providers_keeps_configured_primary_ahead_of_model_preference():
     assert cap.ordered_providers(_S(), prefer="anthropic") == [
         "anthropic",
-        "gateway",
         "openai",
         "vertex_gemini",
         "groq",
     ]
-    assert cap.ordered_providers(_S(), prefer="openai")[0] == "openai"
+    assert cap.ordered_providers(_S(), prefer="openai")[0] == "anthropic"
 
 
 def test_connected_providers_only_configured(monkeypatch):
@@ -89,11 +91,33 @@ def test_resolve_primary_honors_configured_id_on_own_provider(monkeypatch):
     assert cap.resolve_primary(_S(), "dev_api") == ("anthropic", "claude-opus-4-8")
 
 
+def test_resolve_primary_maps_foreign_role_model_to_primary_provider_tier(monkeypatch):
+    class _VertexPrimary(_S):
+        llm_provider = "vertex_gemini"
+        llm_fallback_provider = "anthropic"
+        llm_tier_heavy = "vertex_gemini:gemini-2.5-flash"
+
+    _patch_live(monkeypatch, {"vertex_gemini", "anthropic"})
+    assert cap.resolve_primary(_VertexPrimary(), "dev_api") == ("vertex_gemini", "gemini-2.5-flash")
+
+
+def test_product_tier_model_overrides_agent_model_on_same_primary(monkeypatch):
+    class _VertexPrimary(_S):
+        llm_provider = "vertex_gemini"
+        llm_fallback_provider = "anthropic"
+        llm_model_dev_api = "gemini-2.5-pro"
+        llm_tier_standard = "vertex_gemini:gemini-2.5-flash"
+
+    _patch_live(monkeypatch, {"vertex_gemini", "anthropic"})
+    assert cap.resolve_primary(_VertexPrimary(), "dev_api") == ("vertex_gemini", "gemini-2.5-flash")
+
+
 def test_describe_capabilities(monkeypatch):
     _patch_live(monkeypatch, {"anthropic", "groq"})
     desc = cap.describe_capabilities(_S(), roles=["dev_api", "utility"])
     assert desc["connected"] == ["anthropic", "groq"]
     assert desc["primary"] == "anthropic"
+    assert desc["gateway_required"] is True
     assert desc["roles"]["dev_api"] == {"tier": "heavy", "provider": "anthropic", "model": "claude-opus-4-8"}
     assert desc["roles"]["utility"]["provider"] == "anthropic"
     assert desc["roles"]["utility"]["tier"] == "light"

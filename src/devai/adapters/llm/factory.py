@@ -306,59 +306,52 @@ def _role_cache_key(settings: Any, role: str) -> str:
     return f"{role or '_default'}::{fp}"
 
 
+def create_model_llm(settings: Any, model: str) -> LLMAdapter:
+    """Build the authoritative provider chain for one requested model tier."""
+    from devai.adapters.llm.capabilities import model_for_provider, ordered_providers
+    from devai.adapters.llm.model_policy import normalize_model
+
+    requested = normalize_model(model)
+    links: list[LLMAdapter] = []
+    for provider in ordered_providers(settings):
+        adapter = create_llm_adapter(settings, provider=provider)
+        if adapter.provider_name == "noop":
+            continue
+        mapped_model = model_for_provider(settings, provider, requested) if requested else ""
+        links.append(PinnedModelLLMAdapter(adapter, mapped_model, force_model=True) if mapped_model else adapter)
+
+    if not links:
+        fallback = create_llm_adapter(settings)
+        mapped_model = model_for_provider(settings, fallback.provider_name, requested) if requested else ""
+        return PinnedModelLLMAdapter(fallback, mapped_model, force_model=True) if mapped_model else fallback
+    if len(links) == 1:
+        return links[0]
+
+    from devai.adapters.llm.fallback import FallbackLLMAdapter
+
+    return FallbackLLMAdapter(*links, preserve_model=False)
+
+
 def create_role_llm(settings: Any, role: str) -> LLMAdapter:
     """Capability-aware role-routed adapter.
 
-    DYNAMIC: looks at which providers are actually CONNECTED for this
-    settings/overlay and resolves the role to the tier-appropriate model on
-    each — the configured ``llm_model_<role>`` is honored on its OWN provider
-    (an Anthropic tenant is unchanged) and every OTHER connected provider
-    contributes ITS model for the same tier (heavy → openai ``o3`` / groq
-    ``llama`` …), chained as ordered fallbacks so a provider outage degrades
-    instead of failing ("no failures"). Empty/unknown role → no pin (each
-    link's provider default). See adapters.llm.capabilities + model_policy
-    (No Fable: any claude-fable-* id maps to 4.8). Cached per (role, creds).
+    The product's primary/fallback order is authoritative. The configured
+    ``llm_model_<role>`` selects a tier, and each link receives the product's
+    configured or provider-native model for that tier. A provider outage moves
+    to the next link without letting an agent preference reorder the chain.
+    Empty/unknown role uses each provider's default. Cached per (role, creds).
     """
     cache_key = _role_cache_key(settings, role)
     cached = _ROLE_CHAIN_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    from devai.adapters.llm.capabilities import model_for, natural_provider, ordered_providers, tier_for_model
-    from devai.adapters.llm.model_policy import normalize_model, provider_serves
+    from devai.adapters.llm.capabilities import tier_for_model
+    from devai.adapters.llm.model_policy import normalize_model
 
     model = normalize_model(str(getattr(settings, f"llm_model_{role}", "") or ""))
     tier = tier_for_model(model)
-    # Connected providers in preference order — the role model's own provider
-    # first, then the global default, the claude-preserving gateway, and the
-    # llm_fallback_provider order. noop (keyless) links are skipped inline.
-    order = ordered_providers(settings, prefer=natural_provider(model))
-
-    links: list[LLMAdapter] = []
-    for p in order:
-        adapter = create_llm_adapter(settings, provider=p)
-        if adapter.provider_name == "noop":
-            continue
-        if not model:
-            pm = ""  # role has no opinion → this provider's default model
-        elif not links and provider_serves(p, model):
-            pm = model  # honor the configured id on its own provider (primary)
-        else:
-            pm = model_for(p, tier)  # this provider's model for the role's tier
-        links.append(PinnedModelLLMAdapter(adapter, pm) if pm else adapter)
-
-    if not links:
-        # Nothing connected — degrade to the plain default adapter (noop-safe).
-        fallback = create_llm_adapter(settings)
-        base: LLMAdapter = PinnedModelLLMAdapter(fallback, model) if model else fallback
-    elif len(links) == 1:
-        base = links[0]
-    else:
-        from devai.adapters.llm.fallback import FallbackLLMAdapter
-
-        # preserve_model=False so each FALLBACK link applies its own pinned
-        # tier model; the primary still honors an explicit per-call override.
-        base = FallbackLLMAdapter(*links, preserve_model=False)
+    base = create_model_llm(settings, model)
 
     if len(_ROLE_CHAIN_CACHE) >= _ROLE_CHAIN_CACHE_MAX:
         _ROLE_CHAIN_CACHE.clear()
@@ -381,12 +374,12 @@ def role_llm_or(settings: Any, role: str, fallback: Any) -> Any:
 
 
 class PinnedModelLLMAdapter(LLMAdapter):
-    """Delegate that defaults requests to a pinned model (explicit
-    request.model still wins — callers can override per call)."""
+    """Delegate that defaults or maps requests to a provider-specific model."""
 
-    def __init__(self, inner: LLMAdapter, model: str) -> None:
+    def __init__(self, inner: LLMAdapter, model: str, *, force_model: bool = False) -> None:
         self._inner = inner
         self._model = model
+        self._force_model = force_model
 
     @property
     def provider_name(self) -> str:  # type: ignore[override]
@@ -399,7 +392,7 @@ class PinnedModelLLMAdapter(LLMAdapter):
     async def generate(self, request: LLMRequest) -> LLMResponse:
         from dataclasses import replace
 
-        if not request.model and self._model:
+        if self._model and (self._force_model or not request.model):
             request = replace(request, model=self._model)
         return await self._inner.generate(request)
 
@@ -455,6 +448,7 @@ __all__ = [
     "LLM_TIERS",
     "create_llm_adapter",
     "create_llm_chain",
+    "create_model_llm",
     "create_role_llm",
     "role_llm_or",
     "llm_registry",
