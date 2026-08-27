@@ -50,6 +50,10 @@ _DEFAULT_MAX_ATTEMPTS = 3
 #: Progress reporting is advisory — never let it hold up a run.
 _PUBLISH_TIMEOUT = 10
 
+#: Patch gate for the progress-publishing activity. Never rename or remove
+#: while a run started before it may still replay.
+_PROGRESS_PATCH = "stage-progress-publish"
+
 
 def root_cause(exc: BaseException) -> str:
     """The deepest useful message in an exception chain.
@@ -224,7 +228,14 @@ class BlueprintWorkflow:
         Without this the run's state only reaches shared storage when the
         workflow returns — a run sitting on an approval gate, or a stage that
         just failed, would render as untouched until then.
+
+        Gated: this activity did not exist when in-flight runs recorded their
+        history, and issuing it during replay wedges them with `Nondeterminism
+        error: Activity type of scheduled event 'run_stage' does not match
+        activity type of activity command 'publish_progress'`.
         """
+        if not workflow.patched(_PROGRESS_PATCH):
+            return
         await workflow.execute_activity(
             publish_progress_activity,
             args=[task_to_dict(task)],

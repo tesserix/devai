@@ -255,7 +255,7 @@ def _is_publish(fn) -> bool:
     return "publish_progress" in getattr(fn, "__name__", str(fn))
 
 
-async def _run_workflow(monkeypatch, payload, activity_result=None):
+async def _run_workflow(monkeypatch, payload, activity_result=None, patched=True):
     async def execute_activity(fn, **_kwargs):
         if _is_publish(fn):
             return None
@@ -268,7 +268,62 @@ async def _run_workflow(monkeypatch, payload, activity_result=None):
     monkeypatch.setattr(workflow, "wait_condition", wait_condition)
     monkeypatch.setattr(workflow, "logger", logging.getLogger("test-workflow"))
     monkeypatch.setattr(workflow, "now", lambda: datetime(2026, 8, 27, tzinfo=UTC))
+    monkeypatch.setattr(workflow, "patched", lambda _id: patched)
     return await BlueprintWorkflow().run(payload)
+
+
+@pytest.mark.asyncio
+async def test_progress_publishing_is_gated_behind_a_patch(monkeypatch):
+    """A workflow started before this activity existed must not command it.
+
+    Adding publish_progress to the command sequence wedged every in-flight run
+    with `Nondeterminism error: Activity type of scheduled event 'run_stage'
+    does not match activity type of activity command 'publish_progress'`. On
+    replay of a pre-patch history workflow.patched() returns False, so the call
+    must not be issued at all.
+    """
+    issued: list[str] = []
+
+    async def execute_activity(fn, **_kwargs):
+        issued.append(getattr(fn, "__name__", str(fn)))
+        return {"message": "done", "data": {}}
+
+    async def wait_condition(predicate, *_args, **_kwargs):
+        return predicate()
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(workflow, "logger", logging.getLogger("test-workflow"))
+    monkeypatch.setattr(workflow, "now", lambda: datetime(2026, 8, 27, tzinfo=UTC))
+    monkeypatch.setattr(workflow, "patched", lambda _id: False)
+
+    result = await BlueprintWorkflow().run(_two_stage_payload())
+
+    assert not any("publish_progress" in name for name in issued)
+    # The timeline is still built — it is in-memory state, not a command.
+    assert [e["phase"] for e in result["stage_events"]] == ["started", "completed", "skipped"]
+
+
+@pytest.mark.asyncio
+async def test_progress_publishing_happens_once_patched(monkeypatch):
+    issued: list[str] = []
+
+    async def execute_activity(fn, **_kwargs):
+        issued.append(getattr(fn, "__name__", str(fn)))
+        return None if _is_publish(fn) else {"message": "done", "data": {}}
+
+    async def wait_condition(predicate, *_args, **_kwargs):
+        return predicate()
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(workflow, "logger", logging.getLogger("test-workflow"))
+    monkeypatch.setattr(workflow, "now", lambda: datetime(2026, 8, 27, tzinfo=UTC))
+    monkeypatch.setattr(workflow, "patched", lambda _id: True)
+
+    await BlueprintWorkflow().run(_two_stage_payload())
+
+    assert any("publish_progress" in name for name in issued)
 
 
 @pytest.mark.asyncio
@@ -342,6 +397,7 @@ async def test_workflow_marks_agent_running_before_the_stage_finishes(monkeypatc
     monkeypatch.setattr(workflow, "wait_condition", wait_condition)
     monkeypatch.setattr(workflow, "logger", logging.getLogger("test-workflow"))
     monkeypatch.setattr(workflow, "now", lambda: datetime(2026, 8, 27, tzinfo=UTC))
+    monkeypatch.setattr(workflow, "patched", lambda _id: True)
 
     captured: list[dict] = []
 
@@ -430,6 +486,7 @@ async def test_workflow_publishes_progress_after_every_stage(monkeypatch):
     monkeypatch.setattr(workflow, "wait_condition", wait_condition)
     monkeypatch.setattr(workflow, "logger", logging.getLogger("test-workflow"))
     monkeypatch.setattr(workflow, "now", lambda: datetime(2026, 8, 27, tzinfo=UTC))
+    monkeypatch.setattr(workflow, "patched", lambda _id: True)
 
     await BlueprintWorkflow().run(_two_stage_payload())
 
