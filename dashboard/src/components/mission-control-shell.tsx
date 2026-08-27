@@ -6,6 +6,7 @@ import { Menu, ShieldHalf } from "lucide-react";
 import { MissionControlNav } from "@/components/mission-control-nav";
 import { StatusBar } from "@/components/status-bar";
 import { CommandPalette } from "@/components/command-palette";
+import { NEW_RUN_HREF } from "@/lib/run-entry";
 
 /**
  * Top-level shell: pass-through for /login (no nav), mission-control
@@ -40,7 +41,7 @@ export function MissionControlShell({ children }: { children: React.ReactNode })
 
   // The "New task" action opens the lifecycle home (Workflows), where the
   // blueprint picker + trigger dialog live — NOT the removed /control stub (DASH-9).
-  const onNewTask = useCallback(() => router.push("/workflows?action=new"), [router]);
+  const onNewTask = useCallback(() => router.push(NEW_RUN_HREF), [router]);
 
   if (isAuth) {
     return <>{children}</>;
