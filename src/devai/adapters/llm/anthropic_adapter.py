@@ -10,7 +10,7 @@ Maps DevAI's normalized `LLMRequest` onto the Messages API:
     request.tools            → Anthropic tool schema (`input_schema`)
     request.model            → default if empty
     request.max_tokens       → required by Anthropic; default 4096
-    request.temperature/top_p → passed through
+    request.temperature/top_p → passed through when supported by the model
 
 Response normalization:
 
@@ -144,15 +144,16 @@ class AnthropicLLMAdapter(LLMAdapter):
         if not wire_messages:
             wire_messages = [{"role": "user", "content": "."}]
 
+        model = request.model or self.default_model
         kwargs: dict[str, Any] = {
-            "model": request.model or self.default_model,
+            "model": model,
             "max_tokens": request.max_tokens or self.default_max_tokens,
             "messages": wire_messages,
         }
         combined_system = "\n\n".join(filter(None, [request.system, *system_texts]))
         if combined_system:
             kwargs["system"] = combined_system
-        if request.temperature is not None:
+        if request.temperature is not None and not model.startswith("claude-opus-4-8"):
             kwargs["temperature"] = request.temperature
         if request.top_p is not None:
             kwargs["top_p"] = request.top_p
