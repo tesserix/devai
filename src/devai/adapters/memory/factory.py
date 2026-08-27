@@ -132,9 +132,10 @@ def _build_embedder(settings: Any) -> Any | None:
     """Build an `embed(text)` object from the LLM adapter family.
 
     Controlled by `DEVAI_EMBEDDING_PROVIDER`:
-        auto    → use OpenAI when DEVAI_OPENAI_API_KEY is set, else None
-        openai  → require the OpenAI key, warn + None when missing
-        none    → explicitly disabled
+        auto           → follow the configured primary/fallback provider order
+        vertex_gemini  → use Vertex embeddings (gateway-routed when required)
+        openai         → require the OpenAI key
+        none           → explicitly disabled
 
     Never raises — without an embedder pgvector degrades to keyword recall,
     which is the documented fallback, not an error.
@@ -143,29 +144,49 @@ def _build_embedder(settings: Any) -> Any | None:
     if provider in ("none", "off", "noop", "disabled"):
         return None
 
-    api_key = getattr(settings, "openai_api_key", "") or ""
-    if not api_key:
-        if provider == "openai":
-            logger.warning(
-                "embedding_provider=openai but DEVAI_OPENAI_API_KEY is unset — semantic search degrades to keyword recall"
-            )
-        else:
-            logger.info("embedding_provider=auto with no OpenAI key — semantic search degrades to keyword recall")
-        return None
-
     try:
-        from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
+        from devai.adapters.llm.factory import create_llm_adapter
         from devai.adapters.memory.embedder import LLMEmbedder
 
-        llm = OpenAILLMAdapter(
-            api_key=api_key,
-            base_url=getattr(settings, "openai_base_url", "") or "",
-            organization=getattr(settings, "openai_organization", "") or "",
-        )
-        model = getattr(settings, "embedding_model", "") or "text-embedding-3-small"
+        aliases = {"vertex": "vertex_gemini", "gemini": "vertex_gemini", "google": "vertex_gemini"}
+        supported = {"vertex_gemini", "openai", "gateway"}
+        if provider == "auto":
+            configured = [getattr(settings, "llm_provider", "") or ""]
+            configured.extend(str(getattr(settings, "llm_fallback_provider", "") or "").split(","))
+            if getattr(settings, "openai_api_key", ""):
+                configured.append("openai")
+        else:
+            configured = [provider]
+
+        candidates: list[str] = []
+        for raw in configured:
+            candidate = aliases.get(raw.strip().lower(), raw.strip().lower())
+            if candidate in supported and candidate not in candidates:
+                candidates.append(candidate)
+
         dimensions = int(getattr(settings, "embedding_dimensions", 0) or 0)
-        logger.info("memory embedder active: openai model=%s dims=%s", model, dimensions or "unchecked")
-        return LLMEmbedder(llm, model=model, dimensions=dimensions)
+        for candidate in candidates:
+            llm = create_llm_adapter(settings, provider=candidate)
+            if llm.provider_name == "noop":
+                continue
+            model = (
+                getattr(settings, "vertex_embedding_model", "") or "text-embedding-005"
+                if candidate == "vertex_gemini"
+                else getattr(settings, "embedding_model", "") or "text-embedding-3-small"
+            )
+            logger.info(
+                "memory embedder active: %s model=%s dims=%s",
+                candidate,
+                model,
+                dimensions or "unchecked",
+            )
+            return LLMEmbedder(llm, model=model, dimensions=dimensions)
+
+        logger.warning(
+            "embedding_provider=%s has no configured embedding-capable provider — semantic search degrades to keyword recall",
+            provider,
+        )
+        return None
     except (AdapterNotInstalled, AdapterNotConfigured) as e:
         logger.warning("memory embedder unavailable (%s) — semantic search degrades to keyword recall", e)
         return None

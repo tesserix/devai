@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type PipelineRun } from "@/lib/api";
 import { useRunEvents } from "@/lib/use-run-events";
@@ -15,10 +16,12 @@ import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
 import { useToast } from "@/components/toast";
 import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
+import { NEW_RUN_HREF, runDetailHref } from "@/lib/run-entry";
 
 type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "events" | "chat" | "config";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const toast = useToast();
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>();
@@ -99,8 +102,7 @@ export default function DashboardPage() {
     // Forward the blueprint picked in the dialog (DASH-6) so the backend no
     // longer silently falls back to the default blueprint.
     const result = await api.triggerPipeline(repo, requirements, opts);
-    setSelectedRunId(result.run_id);
-    await fetchRuns();
+    router.push(runDetailHref(result.run_id));
   };
 
   const handleRetrigger = async (runId: string) => {
@@ -416,7 +418,7 @@ export default function DashboardPage() {
                 <button onClick={() => setTriggerOpen(true)} className="btn-primary">
                   Start a run now
                 </button>
-                <Link href="/compose" className="btn-secondary">
+                <Link href={NEW_RUN_HREF} className="btn-secondary">
                   Describe a task instead
                 </Link>
               </div>

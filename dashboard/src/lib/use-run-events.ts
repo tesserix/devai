@@ -18,6 +18,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+export type RunEventStreamStatus = "idle" | "connecting" | "connected" | "reconnecting";
+
 export interface RunEventEnvelope {
   timestamp: number;
   task_id: string;
@@ -32,8 +34,9 @@ const MAX_BACKOFF_MS = 15_000;
 export function useRunEvents(
   taskId: string | null | undefined,
   onEvent: (envelope: RunEventEnvelope) => void,
-): { connected: boolean } {
+): { connected: boolean; status: RunEventStreamStatus } {
   const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<RunEventStreamStatus>(taskId ? "connecting" : "idle");
   // Keep the handler in a ref so handler identity never forces a reconnect.
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
@@ -41,8 +44,10 @@ export function useRunEvents(
   useEffect(() => {
     if (!taskId) {
       setConnected(false);
+      setStatus("idle");
       return;
     }
+    setStatus("connecting");
     let es: EventSource | null = null;
     let closedByUs = false;
     let backoff = 1_000;
@@ -58,6 +63,7 @@ export function useRunEvents(
       es.onopen = () => {
         backoff = 1_000;
         setConnected(true);
+        setStatus("connected");
       };
       for (const type of EVENT_TYPES) {
         es.addEventListener(type, (e) => {
@@ -74,6 +80,7 @@ export function useRunEvents(
       }
       es.onerror = () => {
         setConnected(false);
+        setStatus("reconnecting");
         es?.close();
         if (closedByUs) return;
         retryTimer = setTimeout(connect, backoff);
@@ -90,5 +97,5 @@ export function useRunEvents(
     };
   }, [taskId]);
 
-  return { connected };
+  return { connected, status };
 }

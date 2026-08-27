@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { InfoHint } from "@/components/guidance";
+import { NEW_RUN_HREF } from "@/lib/run-entry";
 
 /**
  * Fiber-style mission-control left nav.
@@ -62,7 +63,7 @@ type NavItem = {
 const START: NavItem[] = [
   { href: "/repos", label: "Repositories", Icon: FolderGit2, description: "Step 1 — connect the repos DevAI may work on" },
   { href: "/workflows", label: "Workflows", Icon: Workflow, description: "Step 2 — pick a workflow and run it" },
-  { href: "/compose", label: "Describe a task", Icon: Sparkles, description: "Or just say what you want in plain English" },
+  { href: NEW_RUN_HREF, label: "Describe a task", Icon: Sparkles, description: "Or just say what you want in plain English" },
 ];
 
 // 2. YOUR WORK — where a run in flight is watched and tracked.
@@ -146,7 +147,7 @@ export function MissionControlNav({
   // The "New task" CTA opens the lifecycle home (Workflows), where the
   // blueprint picker + trigger dialog live — NOT the old /control stub (DASH-9).
   function newTask() {
-    router.push("/workflows?action=new");
+    router.push(NEW_RUN_HREF);
   }
 
   return (

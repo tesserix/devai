@@ -35,6 +35,10 @@ class LLMEmbedder:
     def model(self) -> str:
         return self._model
 
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
     async def embed(self, text: str) -> list[float]:
         vectors = await self._llm.embed([text], model=self._model)
         if not vectors or not vectors[0]:
