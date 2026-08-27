@@ -14,6 +14,7 @@ have happened — which is re-raised as a non-retryable ApplicationError.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from temporalio import activity
@@ -21,18 +22,35 @@ from temporalio.exceptions import ApplicationError
 
 from devai.blueprint.registry import StageRegistryError
 from devai.orchestration.context import get_worker_context
-from devai.orchestration.serde import stage_result_to_dict, task_from_dict
+from devai.orchestration.serde import stage_result_to_dict, task_from_dict, task_to_dict
+from devai.pipeline.types import StageEvent, StageEventPhase, TaskState
 
 _HEARTBEAT_INTERVAL_SECONDS = 10.0
 
 
-async def _heartbeat_until_complete(stage_name: str, complete: asyncio.Event) -> None:
+async def _persist_progress(task: Any, state_manager: Any) -> None:
+    persist = getattr(state_manager, "persist_task", None)
+    if persist is None:
+        return
+    task.updated_at = time.time()
+    try:
+        await persist(task_to_dict(task))
+    except Exception:  # noqa: BLE001 — progress persistence must not fail the activity
+        activity.logger.warning("stage progress persistence failed for %s", task.id, exc_info=True)
+
+
+async def _heartbeat_until_complete(
+    stage_name: str,
+    complete: asyncio.Event,
+    task: Any,
+    state_manager: Any,
+) -> None:
     while not complete.is_set():
         activity.heartbeat({"stage": stage_name})
         try:
             await asyncio.wait_for(complete.wait(), timeout=_HEARTBEAT_INTERVAL_SECONDS)
         except TimeoutError:
-            continue
+            await _persist_progress(task, state_manager)
 
 
 @activity.defn(name="run_stage")
@@ -58,12 +76,44 @@ async def run_stage_activity(
         ) from exc
 
     activity.logger.info("running stage %s (key=%s)", stage_name, stage_key)
+    if task.state in (TaskState.PENDING, TaskState.QUEUED):
+        task.transition(TaskState.RUNNING)
+        if task.started_at is None:
+            task.started_at = time.time()
+    task.current_stage = stage_name
+    task.record_event(StageEvent(stage_name, StageEventPhase.STARTED, message=stage_key))
+    state_manager = getattr(ctx.deps, "state_manager", None)
+    await _persist_progress(task, state_manager)
+
+    started_at = time.monotonic()
     complete = asyncio.Event()
-    heartbeat = asyncio.create_task(_heartbeat_until_complete(stage_name, complete))
+    heartbeat = asyncio.create_task(_heartbeat_until_complete(stage_name, complete, task, state_manager))
     try:
         result = await stage.execute(task)
+        task.merge_handover(result.data)
+        if result.next_state is not None:
+            task.transition(result.next_state)
+        if stage_name not in task.stages_completed:
+            task.stages_completed.append(stage_name)
+        task.current_stage = ""
+        task.record_event(
+            StageEvent(
+                stage_name,
+                StageEventPhase.COMPLETED,
+                duration_ms=(time.monotonic() - started_at) * 1000.0,
+                message=result.message,
+            )
+        )
         return stage_result_to_dict(result)
     except Exception as e:
+        task.record_event(
+            StageEvent(
+                stage_name,
+                StageEventPhase.FAILED,
+                duration_ms=(time.monotonic() - started_at) * 1000.0,
+                error=str(e),
+            )
+        )
         # A stage that may already have taken effect must not be replayed by
         # the RetryPolicy — surface it as non-retryable instead (ADR-0004).
         if getattr(e, "retry_unsafe", False):
@@ -73,3 +123,4 @@ async def run_stage_activity(
     finally:
         complete.set()
         await heartbeat
+        await _persist_progress(task, state_manager)
