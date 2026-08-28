@@ -814,8 +814,10 @@ def create_app(
 
     # Authenticated Agent2Agent server endpoint for the specialization catalog.
     from devai.a2a.routes import router as a2a_router
+    from devai.a2a.routes import well_known_router as a2a_well_known_router
 
     app.include_router(a2a_router)
+    app.include_router(a2a_well_known_router)
 
     # Agentic control-plane status (/api/agentic/status + smoke probes).
     # Backs the dashboard's Gateway panel; one endpoint aggregates the

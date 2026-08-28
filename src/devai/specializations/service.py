@@ -254,6 +254,10 @@ class SpecializationService:
             return SpecializationRegistry()
         return self._registry
 
+    def admitted_specs(self) -> list[Specialization]:
+        """Specs `resolve_governed` will admit — what A2A may advertise."""
+        return [spec for spec in self.registry.all() if spec.name in self._reviewed_capabilities]
+
     def list_all(self) -> list[dict[str, Any]]:
         return [s.to_dict() for s in self.registry.all()]
 
