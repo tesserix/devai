@@ -4,10 +4,48 @@ shows up when ?namespace= is passed."""
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlsplit
+
 import httpx
 import pytest
 
 from devai.registry.client import RegistryClient, RegistryError
+
+
+def test_search_capabilities_delegates_to_registry_safe_stub_view(monkeypatch) -> None:
+    requested: list[str] = []
+
+    def request(method: str, url: str, **_: object) -> httpx.Response:
+        assert method == "GET"
+        requested.append(url)
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "kind": "Tool",
+                    "name": "sast-scan",
+                    "namespace": "devai",
+                    "description": "Static application security",
+                    "fetchPath": "/v0/tools/sast-scan?namespace=devai",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(httpx, "request", request)
+    client = RegistryClient(base_url="http://reg:12121", namespace="devai")
+
+    hits = client.search_capabilities("static security", kinds=["tools", "agents"], limit=7)
+
+    assert hits[0]["name"] == "sast-scan"
+    parsed = urlsplit(requested[0])
+    assert parsed.path == "/v0/search"
+    assert parse_qs(parsed.query) == {
+        "q": ["static security"],
+        "view": ["stub"],
+        "limit": ["7"],
+        "namespace": ["devai"],
+        "kinds": ["tools,agents"],
+    }
 
 
 def test_ns_appends_namespace_and_limit() -> None:
@@ -49,8 +87,14 @@ def test_artifact_envelope_uses_scoped_encoded_path(monkeypatch) -> None:
 
     result = client.get_artifact_envelope("mcp-servers", "acme/files")
 
+    versioned = client.get_artifact_envelope("mcp-servers", "acme/files", "v2")
+
     assert result == {"metadata": {"name": "acme/files", "labels": {"owner": "alice"}}}
-    assert requested == ["http://reg:12121/v0/servers/acme%2Ffiles?namespace=tenant%20a"]
+    assert versioned == result
+    assert requested == [
+        "http://reg:12121/v0/servers/acme%2Ffiles?namespace=tenant%20a",
+        "http://reg:12121/v0/servers/acme%2Ffiles/v2?namespace=tenant%20a",
+    ]
 
 
 def test_artifact_envelope_returns_none_only_for_404(monkeypatch) -> None:

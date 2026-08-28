@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +262,34 @@ class RegistryClient:
             logger.warning("registry: list_tool_artifacts failed", exc_info=True)
             return []
 
+    def search_capabilities(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str] | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Return Agent Registry's authorized, secret-safe discovery stubs."""
+        normalized_query = query.strip()
+        if not normalized_query:
+            raise ValueError("query must not be empty")
+        if len(normalized_query) > 512:
+            raise ValueError("query must be at most 512 characters")
+        if not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50")
+        selected_kinds = [kind.strip() for kind in (kinds or ()) if kind.strip()]
+        params: dict[str, str | int] = {
+            "q": normalized_query,
+            "view": "stub",
+            "limit": limit,
+        }
+        if self._namespace:
+            params["namespace"] = self._namespace
+        if selected_kinds:
+            params["kinds"] = ",".join(selected_kinds)
+        path = f"/v0/search?{urlencode(params)}"
+        return self._get_collection(path, "items")
+
     def get_skill(self, name: str) -> Skill | None:
         for s in self.list_skills():
             if s.name == name:
@@ -428,7 +456,7 @@ class RegistryClient:
     def publish_tool(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/tools", body)
 
-    def get_artifact_envelope(self, plural: str, name: str) -> dict[str, Any] | None:
+    def get_artifact_envelope(self, plural: str, name: str, tag: str = "") -> dict[str, Any] | None:
         """Return one raw artifact in this client's namespace.
 
         The registry proxy uses the unflattened metadata labels for object-level
@@ -438,6 +466,8 @@ class RegistryClient:
         """
         collection = {"mcp-servers": "servers", "eval-suites": "evalsuites"}.get(plural, plural)
         path = f"/v0/{quote(collection, safe='')}/{quote(name, safe='')}"
+        if tag and tag != "latest":
+            path += f"/{quote(tag, safe='')}"
         if self._namespace:
             path += f"?namespace={quote(self._namespace, safe='')}"
         try:

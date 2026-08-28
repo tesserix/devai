@@ -62,15 +62,22 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
         app.state.hub = None
         app.state._refresh_task = None
         app.state._mcp_cm = None
+        app.state.registry_search_service = None
 
         if not settings.mcp_hub_enabled or registry is None:
             yield
             return
 
+        from devai.registry.semantic import RegistrySemanticSearch
+
+        capability_search = RegistrySemanticSearch(registry)
+        app.state.registry_search_service = capability_search
+
         hub = MCPHub(
             registry,
             service_token=settings.mcp_hub_service_token,
             connect_timeout=settings.mcp_hub_connect_timeout,
+            capability_search=capability_search,
         )
         app.state.hub = hub
         await hub.refresh()
