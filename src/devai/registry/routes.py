@@ -12,7 +12,6 @@ not configured" empty state without guessing from a 404.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 from collections.abc import Callable
 from copy import deepcopy
@@ -49,6 +48,7 @@ from devai.registry.client import (
     RegistryError,
     Skill,
 )
+from devai.registry.semantic import OWNER_LABEL, RegistrySemanticSearch, principal_owner_id
 
 if TYPE_CHECKING:
     from devai.identity import Principal
@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/registry", tags=["registry"])
 
-_OWNER_LABEL = "devai.tesserix.app/owner-id"
+_OWNER_LABEL = OWNER_LABEL
 _VISIBILITY_LABEL = "devai.tesserix.app/visibility"
 _RUNTIME_LABEL = "devai.io/runtime"
 _BUILD_GATE_LABEL = "devai.tesserix.app/build-gate"
@@ -165,12 +165,7 @@ async def _optional_principal(request: Request) -> Principal | None:
 
 
 def _owner_id(principal: Principal | None) -> str:
-    if principal is None:
-        return ""
-    scope = principal.user_scope_id.strip()
-    if not scope:
-        return ""
-    return hashlib.sha256(scope.encode()).hexdigest()[:32]
+    return principal_owner_id(principal)
 
 
 def _labels(item: RegistryItem | dict[str, Any]) -> dict[str, str]:
@@ -315,7 +310,7 @@ def _visibility(item: RegistryItem | dict[str, Any]) -> str:
     return str(value or "").strip().lower()
 
 
-def _visible(item: RegistryItem, principal: Principal | None) -> bool:
+def _visible(item: RegistryItem | dict[str, Any], principal: Principal | None) -> bool:
     owner = _labels(item).get(_OWNER_LABEL, "")
     if owner:
         return owner == _owner_id(principal)
@@ -340,6 +335,23 @@ async def _visible_item[T: RegistryItem](
 ) -> T | None:
     principal = await _optional_principal(request)
     item = await asyncio.to_thread(loader, name)
+    if item is None or not _visible(item, principal):
+        return None
+    return item
+
+
+async def _visible_envelope(
+    request: Request,
+    client: RegistryClient,
+    plural: str,
+    name: str,
+    tag: str = "",
+) -> dict[str, Any] | None:
+    principal = await _optional_principal(request)
+    if tag:
+        item = await asyncio.to_thread(client.get_artifact_envelope, plural, name, tag)
+    else:
+        item = await asyncio.to_thread(client.get_artifact_envelope, plural, name)
     if item is None or not _visible(item, principal):
         return None
     return item
@@ -377,6 +389,71 @@ async def registry_counts(request: Request) -> dict[str, int]:
         }
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+def _search_service(request: Request, client: RegistryClient) -> RegistrySemanticSearch:
+    service = getattr(request.app.state, "registry_search_service", None)
+    if isinstance(service, RegistrySemanticSearch):
+        return service
+    service = RegistrySemanticSearch(client)
+    request.app.state.registry_search_service = service
+    return service
+
+
+@router.get("/search")
+async def search_registry(
+    request: Request,
+    q: str,
+    kinds: str = "",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Find authorized registry artifacts by meaning and structured metadata."""
+    client = _client(request)
+    principal = await _optional_principal(request)
+    selected_kinds = [part.strip() for part in kinds.split(",") if part.strip()] or None
+    try:
+        result = await _search_service(request, client).search(
+            q,
+            principal=principal,
+            kinds=selected_kinds,
+            limit=limit,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return result.to_dict()
+
+
+@router.get("/artifacts/{plural}/{name:path}")
+async def get_registry_artifact(
+    request: Request,
+    plural: str,
+    name: str,
+    tag: str = "",
+) -> dict[str, Any]:
+    """Progressively fetch one exact search hit after object authorization."""
+    allowed = {
+        "tools",
+        "skills",
+        "agents",
+        "mcp-servers",
+        "prompts",
+        "workflows",
+        "blueprints",
+        "datasets",
+        "eval-suites",
+    }
+    if plural not in allowed:
+        raise HTTPException(status_code=404, detail=f"registry collection not found: {plural}")
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, plural, name, tag)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"registry artifact not found: {name}")
+    return item
 
 
 @router.get("/skills")
