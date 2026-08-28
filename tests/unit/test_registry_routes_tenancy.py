@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from devai.config import settings
 from devai.evaluations.gates import AgentPublishGate
 from devai.evaluations.models import ArtifactVersionRef
+from devai.identity import Principal
 from devai.registry.client import Agent, Prompt
 from devai.registry.routes import router
 
@@ -273,6 +274,65 @@ def test_publish_is_private_and_server_owned() -> None:
     assert metadata["visibility"] == "private"
     assert metadata["labels"]["devai.tesserix.app/visibility"] == "private"
     assert metadata["labels"]["devai.tesserix.app/owner-id"] != "attacker-chosen"
+
+
+def test_agent_promotion_uses_the_durable_workflow_and_idempotency_key() -> None:
+    class _Orchestrator:
+        request: dict[str, Any] | None = None
+
+        async def promote(
+            self,
+            principal: Principal,
+            request: dict[str, Any],
+            *,
+            request_id: str,
+            requires_approval: bool,
+        ) -> dict[str, Any]:
+            self.request = {
+                "tenant_id": principal.tenant_id,
+                "request_id": request_id,
+                "requires_approval": requires_approval,
+                **request,
+            }
+            return {"name": "durable-agent", "state": "published"}
+
+    client, registry = _client()
+    orchestrator = _Orchestrator()
+    client.app.state.agent_lifecycle_orchestrator = orchestrator
+    client.app.state.config.temporal_fail_closed = True
+
+    response = client.post(
+        "/api/registry/agents?overwrite=true",
+        headers={**_headers("alice", "tenant-a"), "Idempotency-Key": "promotion-request-42"},
+        json=_manifest("durable-agent"),
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["name"] == "durable-agent"
+    assert registry.items == {}
+    assert orchestrator.request == {
+        "tenant_id": "tenant-a",
+        "request_id": "promotion-request-42",
+        "requires_approval": False,
+        "manifest": _manifest("durable-agent"),
+        "overwrite": True,
+        "allow_gate_override": False,
+        "override_reason": "",
+    }
+
+
+def test_durable_agent_promotion_requires_an_idempotency_key() -> None:
+    client, _ = _client()
+    client.app.state.agent_lifecycle_orchestrator = object()
+
+    response = client.post(
+        "/api/registry/agents",
+        headers=_headers("alice", "tenant-a"),
+        json=_manifest("durable-agent"),
+    )
+
+    assert response.status_code == 422
+    assert "Idempotency-Key" in response.text
 
 
 def test_another_tenant_cannot_list_read_or_overwrite_private_agent() -> None:

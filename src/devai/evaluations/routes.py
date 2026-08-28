@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from devai.authz import require_principal
 from devai.evaluations.models import (
@@ -21,6 +21,7 @@ from devai.evaluations.service import (
     EvaluationNotFound,
     EvaluationService,
 )
+from devai.orchestration.agent_lifecycle_http import durable_result, require_idempotency_key
 from devai.sandbox.models import DatasetRef, SandboxStatus
 from devai.sandbox.service import SandboxError
 
@@ -134,8 +135,24 @@ async def get_suite(request: Request, name: str, version: str) -> dict[str, Any]
 
 
 @router.post("", status_code=201)
-async def run_evaluation(request: Request, body: EvaluationRunCreate) -> dict[str, Any]:
+async def run_evaluation(
+    request: Request,
+    body: EvaluationRunCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
     principal = await require_principal(request)
+    key = require_idempotency_key(request, idempotency_key)
+    result = await durable_result(
+        request,
+        "evaluation",
+        lambda orchestrator: orchestrator.evaluate(
+            principal,
+            body.model_dump(mode="json", exclude_none=True),
+            request_id=key,
+        ),
+    )
+    if result is not None:
+        return result
     try:
         resolved = await _service(request).resolve_suite(principal, body.suite)
         owner_scope = principal.user_scope_id
@@ -204,8 +221,24 @@ async def get_evaluation_run(request: Request, run_id: str) -> dict[str, Any]:
 
 
 @comparison_router.post("", status_code=201)
-async def create_comparison(request: Request, body: ComparisonCreate) -> dict[str, Any]:
+async def create_comparison(
+    request: Request,
+    body: ComparisonCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
     principal = await require_principal(request)
+    key = require_idempotency_key(request, idempotency_key)
+    result = await durable_result(
+        request,
+        "evaluation comparison",
+        lambda orchestrator: orchestrator.compare(
+            principal,
+            body.model_dump(mode="json"),
+            request_id=key,
+        ),
+    )
+    if result is not None:
+        return result
     try:
         comparison = await _service(request).create_comparison(principal, body)
         return comparison.model_dump(mode="json")

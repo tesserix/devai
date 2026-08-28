@@ -376,3 +376,61 @@ def test_top_level_evaluation_get_is_scoped_to_the_authenticated_user() -> None:
 
     bob = _evaluation_run_app(BOB, runner=runner, sandboxes=sandboxes)
     assert bob.get("/api/evaluations/eval-1").status_code == 404
+
+
+def test_top_level_evaluation_uses_the_durable_orchestrator_and_request_key() -> None:
+    runner = _Runner()
+    sandboxes = _Sandboxes()
+    client = _evaluation_run_app(ALICE, runner=runner, sandboxes=sandboxes)
+
+    class _Orchestrator:
+        request: dict[str, Any] | None = None
+
+        async def evaluate(
+            self,
+            principal: Principal,
+            body: dict[str, Any],
+            *,
+            request_id: str,
+            cleanup: bool = False,
+        ) -> dict[str, Any]:
+            self.request = {
+                "tenant_id": principal.tenant_id,
+                "request_id": request_id,
+                "cleanup": cleanup,
+                **body,
+            }
+            return {"id": "eval-durable", "sandbox_id": "sb-1", "results": []}
+
+    orchestrator = _Orchestrator()
+    client.app.state.agent_lifecycle_orchestrator = orchestrator
+    client.app.state.config = type("Config", (), {"temporal_fail_closed": True})()
+    response = client.post(
+        "/api/evaluations",
+        headers={"Idempotency-Key": "evaluation-request-42"},
+        json={"suite": {"name": "release-gate", "version": "2"}, "sandbox_id": "sb-1"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["id"] == "eval-durable"
+    assert orchestrator.request == {
+        "tenant_id": "tenant-a",
+        "request_id": "evaluation-request-42",
+        "cleanup": False,
+        "suite": {"name": "release-gate", "version": "2"},
+        "sandbox_id": "sb-1",
+    }
+    assert runner.calls == []
+
+
+def test_durable_evaluation_requires_an_idempotency_key() -> None:
+    client = _evaluation_run_app(ALICE, runner=_Runner(), sandboxes=_Sandboxes())
+    client.app.state.agent_lifecycle_orchestrator = object()
+
+    response = client.post(
+        "/api/evaluations",
+        json={"suite": {"name": "release-gate", "version": "2"}, "sandbox_id": "sb-1"},
+    )
+
+    assert response.status_code == 422
+    assert "Idempotency-Key" in response.text

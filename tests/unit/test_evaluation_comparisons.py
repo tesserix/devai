@@ -186,3 +186,40 @@ def test_comparison_routes_require_auth_and_return_the_public_contract(monkeypat
 
     monkeypatch.setattr(evaluation_routes, "require_principal", anonymous)
     assert client.get(f"/api/comparisons/{comparison.id}").status_code == 401
+
+
+def test_comparison_route_uses_durable_orchestration_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    principal = Principal(email="alice@example.com", uid="alice", tenant_id="tenant-a")
+
+    class _Orchestrator:
+        request: dict[str, Any] | None = None
+
+        async def compare(self, actor: Principal, body: dict[str, Any], *, request_id: str) -> dict[str, Any]:
+            self.request = {"tenant_id": actor.tenant_id, "request_id": request_id, **body}
+            return {"id": "cmp-durable"}
+
+    async def authenticated(_request):
+        return principal
+
+    monkeypatch.setattr(evaluation_routes, "require_principal", authenticated)
+    app = FastAPI()
+    app.include_router(evaluation_routes.comparison_router)
+    app.state.agent_lifecycle_orchestrator = _Orchestrator()
+    app.state.config = type("Config", (), {"temporal_fail_closed": True})()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/comparisons",
+        headers={"Idempotency-Key": "comparison-request-42"},
+        json={"baseline_run_id": "eval-1", "candidate_run_id": "eval-2"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json() == {"id": "cmp-durable"}
+    assert app.state.agent_lifecycle_orchestrator.request == {
+        "tenant_id": "tenant-a",
+        "request_id": "comparison-request-42",
+        "baseline_run_id": "eval-1",
+        "candidate_run_id": "eval-2",
+        "axes": ["prompt_version", "model", "agent_version", "tool_config"],
+    }

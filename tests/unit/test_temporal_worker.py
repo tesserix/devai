@@ -505,3 +505,7 @@ def test_worker_registers_the_progress_activity():
     source = inspect.getsource(worker_module.run_worker)
 
     assert "publish_progress_activity" in source
+    assert "AgentLifecycleWorkflow" in source
+    assert "lifecycle.activities.registered()" in source
+    assert "AgentLifecycleOutboxRelay" in source
+    assert "relay.run" in source

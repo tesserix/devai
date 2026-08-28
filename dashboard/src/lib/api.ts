@@ -18,6 +18,15 @@ export interface ArtifactVersionRef {
 
 export interface SandboxSpec {
   agent: ArtifactVersionRef;
+  import_id?: string | null;
+  import_snapshot?: {
+    import_id: string;
+    registry_ref: string;
+    agent_digest: string;
+    dependency_lock: Array<Record<string, string>>;
+    runtime: Record<string, unknown>;
+    permissions: Record<string, unknown>;
+  } | null;
   model: { provider: string; model: string };
   prompt?: { ref: string; version: string } | null;
   dataset?: { ref: string; version: string } | null;
@@ -44,6 +53,53 @@ export interface SandboxRecord {
   expires_at: string;
   last_access_at?: string | null;
   detail?: Record<string, unknown>;
+}
+
+export interface RegistrySearchHit {
+  kind: string;
+  name: string;
+  title: string;
+  description: string;
+  version: string;
+  namespace: string;
+  arn: string;
+  digest: string;
+  visibility: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  attributes: Record<string, unknown>;
+  rank: number;
+  match_type: string;
+  fetch_path: string;
+  registry_fetch_path: string;
+}
+
+export interface RegistrySearchResponse {
+  query: string;
+  hits: RegistrySearchHit[];
+  provider: string;
+  index_refreshing: boolean;
+}
+
+export interface AgentImport {
+  id: string;
+  project_id: string;
+  registry_ref: string;
+  state: string;
+  agent: {
+    name: string;
+    namespace: string;
+    version: string;
+    digest: string;
+    framework: string;
+    runtime: Record<string, unknown>;
+    spec: Record<string, unknown>;
+  };
+  dependency_lock: Array<Record<string, string>>;
+  permissions: Record<string, unknown>;
+  conformance: { level: string; findings: string[]; evidence: Record<string, boolean> };
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TraceStep {
@@ -278,6 +334,10 @@ function handleUnauthorized(): void {
   window.location.assign(`/login?return_to=${encodeURIComponent(returnTo)}`);
 }
 
+export function lifecycleMutationHeaders(idempotencyKey = crypto.randomUUID()): Record<string, string> {
+  return { "Idempotency-Key": idempotencyKey };
+}
+
 async function apiFetch<T>(path: string, opts?: RequestInit & { soft?: boolean }): Promise<T> {
   const { soft, ...init } = opts ?? {};
   const res = await fetch(`${API_BASE}${path}`, {
@@ -310,6 +370,17 @@ export function registryAgentManifestPath(name: string): string {
 
 export function registryArtifactPath(plural: string, name: string): string {
   return `/registry/${encodeURIComponent(plural)}/${encodeURIComponent(name)}`;
+}
+
+export function registrySearchPath(query: string, kinds: string[] = [], limit = 10): string {
+  const params = new URLSearchParams({ q: query });
+  if (kinds.length > 0) params.set("kinds", kinds.join(","));
+  params.set("limit", String(Math.max(1, Math.min(limit, 50))));
+  return `/registry/search?${params.toString()}`;
+}
+
+export function agentImportsPath(projectId: string): string {
+  return `/registry/imports?${new URLSearchParams({ project_id: projectId }).toString()}`;
 }
 
 export function sandboxPath(id: string): string {
@@ -831,10 +902,21 @@ export const api = {
   // browser state.
   listSandboxes: () => apiFetch<SandboxRecord[]>("/sandboxes"),
   getSandbox: (id: string) => apiFetch<SandboxRecord>(sandboxPath(id)),
-  createSandbox: (input: Partial<SandboxSpec> & Pick<SandboxSpec, "agent" | "model">) =>
-    apiFetch<SandboxRecord>("/sandboxes", { method: "POST", body: JSON.stringify(input) }),
-  destroySandbox: (id: string) =>
-    apiFetch<{ destroyed: string }>(sandboxPath(id), { method: "DELETE" }),
+  createSandbox: (
+    input: Partial<SandboxSpec> & Pick<SandboxSpec, "model"> &
+      ({ agent: ArtifactVersionRef } | { import_id: string }),
+    idempotencyKey?: string,
+  ) =>
+    apiFetch<SandboxRecord>("/sandboxes", {
+      method: "POST",
+      headers: lifecycleMutationHeaders(idempotencyKey),
+      body: JSON.stringify(input),
+    }),
+  destroySandbox: (id: string, idempotencyKey?: string) =>
+    apiFetch<{ destroyed: string }>(sandboxPath(id), {
+      method: "DELETE",
+      headers: lifecycleMutationHeaders(idempotencyKey),
+    }),
   invokeSandbox: (id: string, message: string) =>
     apiFetch<SandboxInvocation>(`${sandboxPath(id)}/invoke`, {
       method: "POST",
@@ -849,24 +931,50 @@ export const api = {
     suite: ArtifactVersionRef;
     sandbox_id?: string;
     sandbox?: SandboxSpec;
-  }) => apiFetch<EvaluationRun>("/evaluations", { method: "POST", body: JSON.stringify(input) }),
+  }, idempotencyKey?: string) => apiFetch<EvaluationRun>("/evaluations", {
+    method: "POST",
+    headers: lifecycleMutationHeaders(idempotencyKey),
+    body: JSON.stringify(input),
+  }),
   getEvaluationRun: (id: string) => apiFetch<EvaluationRun>(evaluationRunPath(id)),
   listSandboxEvaluations: (id: string, limit = 20) =>
     apiFetch<EvaluationRun[]>(`${sandboxPath(id)}/evals?limit=${Math.max(1, Math.min(limit, 200))}`),
   runSandboxEvaluation: (
     id: string,
     source: { dataset: ArtifactVersionRef } | { suite: ArtifactVersionRef },
+    idempotencyKey?: string,
   ) =>
     apiFetch<EvaluationRun>(`${sandboxPath(id)}/evals`, {
       method: "POST",
+      headers: lifecycleMutationHeaders(idempotencyKey),
       body: JSON.stringify(source),
     }),
   createComparison: (input: {
     baseline_run_id: string;
     candidate_run_id: string;
     axes?: ComparisonAxisName[];
-  }) => apiFetch<EvaluationComparison>("/comparisons", { method: "POST", body: JSON.stringify(input) }),
+  }, idempotencyKey?: string) => apiFetch<EvaluationComparison>("/comparisons", {
+    method: "POST",
+    headers: lifecycleMutationHeaders(idempotencyKey),
+    body: JSON.stringify(input),
+  }),
   getComparison: (id: string) => apiFetch<EvaluationComparison>(comparisonPath(id)),
+
+  searchRegistry: (query: string, kinds: string[] = [], limit = 10) =>
+    apiFetch<RegistrySearchResponse>(registrySearchPath(query, kinds, limit)),
+  createAgentImport: (
+    input: { project_id: string; registry_ref: string },
+    idempotencyKey: string,
+  ) =>
+    apiFetch<AgentImport>("/registry/imports", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(input),
+    }),
+  listAgentImports: (projectId: string) =>
+    apiFetch<AgentImport[]>(agentImportsPath(projectId)),
+  getAgentImport: (id: string) =>
+    apiFetch<AgentImport>(`/registry/imports/${encodeURIComponent(id)}`),
 
   // ── Catalog (tools available to pick when authoring an agent) ──────
   listCatalogTools: (category?: string) =>
@@ -890,10 +998,14 @@ export const api = {
   // artifact reflects in both DevAI and the aregistry marketplace. Names are
   // unique within the tenant: a create that collides returns 409 — pass
   // overwrite to publish a new version of the existing artifact on purpose.
-  publishArtifact: (plural: string, manifest: unknown, overwrite = false) =>
+  publishArtifact: (plural: string, manifest: unknown, overwrite = false, idempotencyKey?: string) =>
     apiFetch<{ name?: string; status?: string }>(
       `/registry/${plural}${overwrite ? "?overwrite=true" : ""}`,
-      { method: "POST", body: JSON.stringify(manifest) }
+      {
+        method: "POST",
+        headers: lifecycleMutationHeaders(idempotencyKey),
+        body: JSON.stringify(manifest),
+      }
     ),
   unpublishArtifact: (plural: string, name: string) =>
     apiFetch<{ deleted: string }>(registryArtifactPath(plural, name), { method: "DELETE" }),
