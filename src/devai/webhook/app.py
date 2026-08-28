@@ -88,6 +88,7 @@ def create_app(
             logger.exception("registry client construction failed — running in pure-local mode")
             _registry_client = None
         app.state.registry_client = _registry_client
+        app.state.agent_import_service = None
 
         # A2A (Agent2Agent) runtime client — lets the orchestrator discover
         # peer agents via the registry, fetch their capability cards, and
@@ -256,6 +257,15 @@ def create_app(
         except Exception:
             logger.exception("SRE Studio service failed to start — sre-studio API will 503")
             app.state.sre_studio_service = None
+
+        if app.state.sre_studio_db is not None and _registry_client is not None:
+            from devai.registry.imports import AgentImportService
+
+            app.state.agent_import_service = AgentImportService(
+                database=app.state.sre_studio_db,
+                registry=_registry_client,
+            )
+            logger.info("Registry import service ready")
 
         # Live preview service — on-demand ephemeral preview environments.
         # Reuses the SRE Studio DB pool + the pipeline's connected K8s runtime.
@@ -683,6 +693,11 @@ def create_app(
     app.state.event_bus_adapter = event_bus_adapter
     app.state.state_manager = state
     app.state.config = config
+    app.state.agent_lifecycle_orchestrator = None
+    if getattr(config, "workflow_provider", "inproc") == "temporal":
+        from devai.orchestration.agent_lifecycle_client import AgentLifecycleOrchestrator
+
+        app.state.agent_lifecycle_orchestrator = AgentLifecycleOrchestrator(config)
 
     # Opt-in auth gate (DEVAI_REQUIRE_AUTH). No-op unless enabled; when on,
     # mutating requests without a resolvable principal get 401. Webhook
@@ -808,9 +823,11 @@ def create_app(
     app.include_router(catalog_router)
 
     # Agent Registry catalog routes (/api/registry/*).
+    from devai.registry.import_routes import router as registry_import_router
     from devai.registry.routes import router as registry_router
 
     app.include_router(registry_router)
+    app.include_router(registry_import_router)
 
     # Authenticated Agent2Agent server endpoint for the specialization catalog.
     from devai.a2a.routes import router as a2a_router

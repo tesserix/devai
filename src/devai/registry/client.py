@@ -117,6 +117,10 @@ class ResolvedAgent:
     agent: Agent
     resolved: dict[str, list[dict[str, Any]]]
     unresolved: list[UnresolvedRef]
+    # Full server-owned Agent envelope. Importers need the Registry digest,
+    # signature, scope, and exact tag; `_parse_agent` intentionally exposes
+    # only the runtime-friendly projection.
+    envelope: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -354,6 +358,7 @@ class RegistryClient:
             agent=_parse_agent(_unwrap(agent_value, "agent")),
             resolved=resolved,
             unresolved=unresolved,
+            envelope=deepcopy(agent_value),
         )
 
     def get_agent_card(self, name: str, *, namespace: str = "", tag: str = "") -> dict[str, Any]:

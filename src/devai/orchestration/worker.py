@@ -1,4 +1,4 @@
-"""Temporal worker — hosts the generic BlueprintWorkflow + run_stage activity.
+"""Temporal worker — hosts blueprint and Agent development workflows.
 
 Run as the ``devai-worker`` Deployment:
 
@@ -14,15 +14,18 @@ blueprint or agent never requires a worker change.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from devai.config import Settings
 from devai.orchestration.activities import publish_progress_activity, run_stage_activity
+from devai.orchestration.agent_lifecycle import AgentLifecycleWorkflow
+from devai.orchestration.agent_lifecycle_outbox import AgentLifecycleOutboxRelay
+from devai.orchestration.agent_lifecycle_runtime import build_agent_lifecycle_runtime
 from devai.orchestration.context import WorkerContext, set_worker_context
 from devai.orchestration.workflows import BlueprintWorkflow
-from devai.pipeline.bootstrap import build_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +109,13 @@ async def run_worker(config: Settings | None = None) -> None:
         logger.warning("worker: event-bus unavailable — continuing", exc_info=True)
         event_bus_adapter = None
 
-    bundle = await build_runtime(
+    lifecycle = await build_agent_lifecycle_runtime(
         config,
         scm=scm,
         state_manager=state_manager,
         event_bus_adapter=event_bus_adapter,
-        registry_client=None,
     )
+    bundle = lifecycle.bundle
     set_worker_context(WorkerContext(registry=bundle.registry, deps=bundle.deps))
 
     host = getattr(config, "temporal_host", "localhost:7233")
@@ -129,15 +132,36 @@ async def run_worker(config: Settings | None = None) -> None:
     worker = Worker(
         client,
         task_queue=task_queue,
-        workflows=[BlueprintWorkflow],
-        activities=[run_stage_activity, publish_progress_activity],
+        workflows=[BlueprintWorkflow, AgentLifecycleWorkflow],
+        activities=[run_stage_activity, publish_progress_activity, *lifecycle.activities.registered()],
         **_worker_options(config),
     )
+    relay_stop = asyncio.Event()
+    relay_task: asyncio.Task[None] | None = None
+    if event_bus_adapter is not None and event_bus_adapter.provider_name != "noop":
+        try:
+            await event_bus_adapter.ensure_stream(
+                "DEVAI_AGENT_LIFECYCLE",
+                ["devai.agent.lifecycle.>"],
+                work_queue=False,
+            )
+            relay = AgentLifecycleOutboxRelay(
+                lifecycle.database,
+                event_bus_adapter,
+                telemetry=lifecycle.telemetry,
+            )
+            relay_task = asyncio.create_task(relay.run(relay_stop), name="agent-lifecycle-outbox")
+        except Exception:  # noqa: BLE001
+            logger.warning("worker: lifecycle outbox relay unavailable — intents remain pending", exc_info=True)
     logger.info("devai-worker started: host=%s ns=%s queue=%s", host, namespace, task_queue)
     try:
         await worker.run()
     finally:
-        await bundle.aclose()
+        relay_stop.set()
+        if relay_task is not None:
+            with contextlib.suppress(Exception):
+                await relay_task
+        await lifecycle.aclose()
 
 
 def main() -> None:

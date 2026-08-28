@@ -18,7 +18,7 @@ import {
   lifecycleGateFromError,
   type AgentGateResult,
 } from "@/lib/agent-lifecycle";
-import { api } from "@/lib/api";
+import { api, lifecycleMutationHeaders } from "@/lib/api";
 import { lintManifest } from "@/lib/registry-schemas";
 
 /**
@@ -221,7 +221,7 @@ export default function AgentStudioPage() {
       const res = await fetch("/api/sandboxes", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
         body: JSON.stringify({
           agent: { name: agentName, version: "draft" },
           model: { provider, model },
@@ -255,7 +255,7 @@ export default function AgentStudioPage() {
       const res = await fetch("/api/evaluations", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
         body: JSON.stringify({
           suite: { name: selectedSuite.name, version: selectedSuite.version },
           sandbox_id: sandboxId,
@@ -278,6 +278,7 @@ export default function AgentStudioPage() {
     setError(null);
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
+      Object.assign(headers, lifecycleMutationHeaders());
       if (override) {
         headers["x-devai-eval-gate-override"] = "true";
         headers["x-devai-eval-gate-override-reason"] = overrideReason;

@@ -1,5 +1,7 @@
 # DevAI
 
+Developing an external Agent? Follow [Bring your own Agent to DevAI](docs/guides/bring-your-own-agent.md) for the signed Registry → immutable import → sandbox → evaluation → comparison → gated promotion journey.
+
 DevAI is an agentic application-lifecycle and SRE platform. It combines versioned
 agents, prompts, skills, MCP tools, isolated sandboxes, evaluation gates, workflow
 orchestration, traces, and owner-attributed model usage in one control plane.
