@@ -6,23 +6,13 @@ from devai.admin.activity import ActivityMiddleware
 from devai.config import Settings
 
 
-def _paths(routes) -> set[str]:
-    """Collect route paths. Newer Starlette wraps included routers in a
-    holder that carries nested routes instead of a path of its own."""
-    found: set[str] = set()
-    for route in routes:
-        path = getattr(route, "path", None)
-        if path:
-            found.add(path)
-        found |= _paths(getattr(route, "routes", ()) or ())
-    return found
-
-
 def test_admin_router_is_registered():
     from devai.webhook.app import create_app
 
     app = create_app(MagicMock(), MagicMock(), Settings())
-    paths = _paths(app.routes)
+    # The generated schema is the version-stable view of what is mounted;
+    # `app.routes` holds different shapes across Starlette releases.
+    paths = app.openapi()["paths"]
     assert "/api/admin/overview" in paths
     assert "/api/admin/openpanel" in paths
 
