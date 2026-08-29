@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,9 +29,11 @@ _SPEC: dict[str, Any] = {
 }
 
 
-def _client(*, wired: bool = True, db: Any | None = None) -> TestClient:
+def _client(*, wired: bool = True, db: Any | None = None, orchestrator: Any | None = None) -> TestClient:
     app = FastAPI()
     app.state.sandbox_service = SandboxService(db or _FakeDB()) if wired else None
+    app.state.agent_lifecycle_orchestrator = orchestrator
+    app.state.config = SimpleNamespace(temporal_fail_closed=True)
     app.include_router(router)
     return TestClient(app)
 
@@ -121,3 +124,56 @@ def test_destroy_is_terminal() -> None:
 
 def test_routes_503_until_the_service_is_wired() -> None:
     assert _client(wired=False).post("/api/sandboxes", json=_SPEC, headers=_SAM).status_code == 503
+
+
+def test_create_and_cleanup_use_tenant_scoped_durable_workflows() -> None:
+    class _Orchestrator:
+        calls: list[tuple[str, str, str]] = []
+
+        async def provision(self, principal: Principal, spec: dict[str, Any], *, request_id: str) -> dict[str, Any]:
+            self.calls.append(("provision", principal.tenant_id, request_id))
+            now = datetime.now(UTC)
+            return {
+                "id": "sb-durable",
+                "owner": principal.user_scope_id,
+                "status": "ready",
+                "spec": spec,
+                "created_at": now.isoformat(),
+                "expires_at": (now + timedelta(hours=1)).isoformat(),
+                "last_access_at": now.isoformat(),
+                "detail": {},
+            }
+
+        async def cleanup(self, principal: Principal, sandbox_id: str, *, request_id: str) -> dict[str, Any]:
+            self.calls.append(("cleanup", principal.tenant_id, request_id))
+            return {"destroyed": sandbox_id}
+
+    orchestrator = _Orchestrator()
+    client = _client(orchestrator=orchestrator)
+    headers = {**_TENANT_A, "Idempotency-Key": "sandbox-request-42"}
+
+    created = client.post("/api/sandboxes", json=_SPEC, headers=headers)
+    client.app.state.sandbox_service._db.rows["sb-durable"] = {  # noqa: SLF001 - route authorization fixture
+        **created.json(),
+        "owner": "tenant-a:same-subject",
+    }
+    destroyed = client.delete(
+        "/api/sandboxes/sb-durable",
+        headers={**_TENANT_A, "Idempotency-Key": "cleanup-request-42"},
+    )
+
+    assert created.status_code == 201, created.text
+    assert destroyed.status_code == 200, destroyed.text
+    assert orchestrator.calls == [
+        ("provision", "tenant-a", "sandbox-request-42"),
+        ("cleanup", "tenant-a", "cleanup-request-42"),
+    ]
+
+
+def test_durable_sandbox_mutations_require_an_idempotency_key() -> None:
+    client = _client(orchestrator=object())
+
+    response = client.post("/api/sandboxes", json=_SPEC, headers=_TENANT_A)
+
+    assert response.status_code == 422
+    assert "Idempotency-Key" in response.text

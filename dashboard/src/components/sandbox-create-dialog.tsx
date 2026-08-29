@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { Select } from "@/components/ui/select";
-import { api, type EvaluationDataset, type RegistryItem, type SettingsConnector } from "@/lib/api";
+import {
+  api,
+  lifecycleMutationHeaders,
+  type EvaluationDataset,
+  type RegistryItem,
+  type SettingsConnector,
+} from "@/lib/api";
 import {
   canonicalSandboxProvider,
   sandboxLlmConnectorOptions,
@@ -160,7 +166,7 @@ export function SandboxCreateDialog({
       const res = await fetch("/api/sandboxes", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
         body: JSON.stringify({
           agent: { name: agent, version: selected?.version || "latest" },
           model: { provider, model },

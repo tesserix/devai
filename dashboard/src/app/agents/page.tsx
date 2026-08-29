@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ExternalLink, Loader2, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { aregistryUrl } from "@/lib/aregistry";
 import ArtifactEditor from "@/components/artifact-editor";
+import { RegistryAgentImport } from "@/components/registry-agent-import";
 import { useConfirm } from "@/components/confirm-dialog";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
 import { useToast } from "@/components/toast";
@@ -166,6 +167,7 @@ export default function AgentsPage() {
       </header>
 
       <GuidancePanel id="agents" />
+      <RegistryAgentImport />
 
       {runtime && (
         <section className="panel p-4 text-xs text-[var(--ink-300)]" aria-label="Substrate runtime status">

@@ -21,7 +21,7 @@ degrade gracefully rather than crashing the pod.
 """
 
 from devai.a2a.card import AgentCard, AgentSkill
-from devai.a2a.client import A2AClient, create_a2a_client
+from devai.a2a.client import A2AClient, create_a2a_client, resolve_host_block_check
 from devai.a2a.errors import A2AError
 from devai.a2a.verify import check_service_url, verify_card_signature
 
@@ -31,6 +31,7 @@ __all__ = [
     "A2AClient",
     "A2AError",
     "create_a2a_client",
+    "resolve_host_block_check",
     "verify_card_signature",
     "check_service_url",
 ]

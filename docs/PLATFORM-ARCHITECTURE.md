@@ -441,10 +441,9 @@ prod setting once operationalized.
 
 ### 10.5 LLM providers
 
-Anthropic (primary), OpenAI (ProductDirector/StaffReviewer), Groq + Gemini (legacy wrappers),
-NemoClaw self-hosted vLLM/NIM (`nemotron-3-super-120b-a12b`, Groq fallback). Target state —
-**Vertex AI as the regulated in-VPC plane with direct Anthropic fallback** — is specified in
-`docs/plans/vertex-multi-model/IMPLEMENTATION-PLAN.md`.
+The production provider chain is **Vertex Gemini primary → Anthropic secondary**. Agent and
+model preferences select a provider-native capability tier but cannot reorder that chain. Legacy
+wrappers and Tesserix ADK runtimes both receive the same adapter chain.
 
 **Private Vertex access is live (2026-06-12):** a PSC endpoint (`vertex-psc-ip` = 10.255.0.2,
 forwarding rule `vertexapis`, all-apis bundle) + a private DNS zone pinning
@@ -453,12 +452,11 @@ forwarding rule `vertexapis`, all-apis bundle) + a private DNS zone pinning
 `roles/aiplatform.user` on `app-secrets-devai-prod@` (DevAI pods) and `agentgateway-llm@`
 (gateway GSA, Workload-Identity-bound to `agentgateway-system/agentgateway`).
 
-**LLM egress direction — agentgateway:** DevAI's factory now registers a `gateway` provider
-(`DEVAI_LLM_GATEWAY_BASE_URL` → the solo.io agentgateway's OpenAI-compatible `ai-gateway`
-service). The gateway maps model aliases to any backend (Vertex Gemini/Claude, Anthropic,
-OpenAI) and owns the credentials, keeping DevAI provider-independent. Caveat: the gateway
-chart wrapper currently runs at replicaCount 0 pending adoption of the upstream Helm chart —
-direct provider adapters remain the active path until then.
+**LLM egress — Agent Gateway only:** `DEVAI_LLM_GATEWAY_REQUIRED=true` makes every concrete
+provider adapter resolve its dedicated route below `DEVAI_LLM_GATEWAY_BASE_URL`. The Solo.io
+gateway owns backend authentication and policy. Missing gateway configuration fails closed;
+production has no direct-provider fallback. The reusable contract is recorded in
+`docs/adr/0006-agent-gateway-provider-priority.md`.
 
 ---
 
@@ -568,6 +566,44 @@ per run, stage durations, fallback rates. **Data caveat:** Fiber-style runs pers
 (not Postgres), so analytics reads both stores; a rebuild should unify run persistence.
 
 **Audit:** `audit_log` table + registry publish audit; SRE scan history.
+
+### Admin analytics and the trial allowance
+
+`/api/admin/*` is gated by a router-level admin-role dependency
+(`src/devai/admin/routes.py`), granted through `DEVAI_ADMIN_EMAILS`. It
+reports daily active users (exact, from `audit_log`), sign-ins, per-user
+LLM spend (from the Redis usage ledger), and — when configured — page-level
+stats proxied from OpenPanel.
+
+Production never observes a login: auth-bff terminates OAuth outside the
+pod, so the backend counts *active users*, not sign-ins. The dashboard
+labels the two separately rather than conflating them.
+
+The trial allowance (`src/devai/settings/trial.py`) defaults to inert:
+with `DEVAI_LLM_REQUIRE_USER_CONNECTOR=false`, `applicable` is always
+false and the dashboard shows nothing. Flipping that flag to `true` both
+reveals the meter and starts enforcing it.
+
+Trial counters are permanent by design — exhaustion revokes the shared keys
+for that user for good. `trial_enabled` is only the global budget flag: the
+per-user gate is `applicable` (`strict and not has_own`,
+`src/devai/settings/routes.py:519`), true only when strict mode is on and
+the caller has no connector of their own. Because that gate, not the
+permanent counter, decides visibility, a user who exhausts the trial and
+later adds their own connector stops being `applicable` rather than
+staying exhausted forever — which is why the dashboard checks `applicable`.
+
+This repo's local/sandbox chart (`k8s/chart/values.yaml`) carries local
+defaults for all three env vars. Prod does not source config from this
+repo — `DEVAI_ADMIN_EMAILS`, `DEVAI_LLM_TRIAL_TOKEN_BUDGET`, and
+`DEVAI_LLM_REQUIRE_USER_CONNECTOR` need setting in the devai chart values
+in the `tesserix-k8s` repo before the admin tab or trial meter are live
+in production.
+
+Onboarding OpenPanel requires a `devai` project in
+`tesserix-k8s/charts/thirdparty/openpanel/values-prod.yaml` and its client
+ID in the `openpanel-client-ids` secret; until then the section reports
+`enabled: false`.
 
 ---
 

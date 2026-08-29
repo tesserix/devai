@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ListChecks, Play, Plus, Trash2, XCircle } from "lucide-react";
 import { formatEvalCost, type EvalCost } from "@/lib/eval-cost";
+import { lifecycleMutationHeaders } from "@/lib/api";
 
 /**
  * Checks — the saved inputs and expectations an agent has to keep satisfying.
@@ -87,7 +88,7 @@ export function EvalPanel({
       const res = await fetch(`/api/sandboxes/${encodeURIComponent(sandboxId)}/evals`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
         body: JSON.stringify({ cases }),
       });
       const body = await res.json().catch(() => ({}));

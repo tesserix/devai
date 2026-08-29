@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_URL_SUFFIXES = [".svc.cluster.local", ".svc"]
 
 
-def _resolve_host_block_check(url: str, in_cluster_suffixes: list[str]) -> None:
+def resolve_host_block_check(url: str, in_cluster_suffixes: list[str]) -> None:
     """Resolve a card URL's hostname and reject non-routable/metadata targets.
 
     ``check_service_url`` only blocks IP *literals*; a hostname that resolves to
@@ -167,7 +167,7 @@ class A2AClient:
         check_service_url(card.url, self._suffixes)
         # Suffix allowlist alone misses a hostname that resolves to a
         # private/metadata IP — resolve and IP-block before calling.
-        _resolve_host_block_check(card.url, self._suffixes)
+        resolve_host_block_check(card.url, self._suffixes)
 
     # -- invocation --------------------------------------------------------- #
 

@@ -45,6 +45,7 @@ _READ_ONLY_PREFIXES = (
     "validate_",
     "recall_",
     "web_search",
+    "devai__registry_search",
     # The sandbox workspace's own read verbs; its writes and shell stay unclassified
     # so a `real` default still has to name them one by one.
     "sandbox__file_read",

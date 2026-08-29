@@ -162,3 +162,43 @@ async def test_same_provider_model_fallback_runs_before_next_provider():
     assert response.text == "same-provider-ok"
     assert response.provider == "vertex_gemini"
     assert response.extra.get("model_fallback") is True
+
+
+@pytest.mark.asyncio
+async def test_model_chain_keeps_vertex_primary_and_maps_models_per_provider(monkeypatch):
+    from devai.adapters.llm import factory
+
+    seen: dict[str, list[str]] = {"vertex_gemini": [], "anthropic": []}
+
+    class _Provider(LLMAdapter):
+        default_model = ""
+
+        def __init__(self, provider: str) -> None:
+            self.provider_name = provider
+
+        async def generate(self, request: LLMRequest) -> LLMResponse:
+            seen[self.provider_name].append(request.model)
+            if self.provider_name == "vertex_gemini":
+                return LLMResponse(text="", finish_reason="error", provider=self.provider_name)
+            return LLMResponse(text="fallback-ok", finish_reason="stop", provider=self.provider_name)
+
+    monkeypatch.setattr(
+        factory, "create_llm_adapter", lambda _settings, *, provider=None: _Provider(provider or "noop")
+    )
+
+    class _Settings:
+        llm_provider = "vertex_gemini"
+        llm_fallback_provider = "anthropic"
+        llm_role_chain_provider = "gateway"
+        llm_gateway_required = True
+        llm_tier_heavy = "vertex_gemini:gemini-2.5-flash"
+
+    chain = factory.create_model_llm(_Settings(), "claude-opus-4-8")
+    response = await chain.generate(LLMRequest(model="claude-opus-4-8"))
+
+    assert chain.provider_name == "vertex_gemini→anthropic"
+    assert seen == {
+        "vertex_gemini": ["gemini-2.5-flash"],
+        "anthropic": ["claude-opus-4-8"],
+    }
+    assert response.text == "fallback-ok"

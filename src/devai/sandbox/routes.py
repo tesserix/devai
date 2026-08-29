@@ -17,6 +17,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, 
 from pydantic import ValidationError
 
 from devai.identity import Principal, extract_principal
+from devai.orchestration.agent_lifecycle_http import durable_result, require_idempotency_key
 from devai.sandbox.broker import BrokerError, CredentialBroker
 from devai.sandbox.browser_proxy import proxy_browser_request, proxy_browser_socket
 from devai.sandbox.ide_proxy import proxy_ide_request, proxy_ide_socket
@@ -100,15 +101,34 @@ def _view(record: SandboxRecord) -> dict[str, Any]:
 
 
 @router.post("", status_code=201)
-async def create_sandbox(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-    svc = _service(request)
+async def create_sandbox(
+    request: Request,
+    body: dict[str, Any],
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
     owner, _, tenant_id, user_id = await _write_scope(request)
     try:
         spec = SandboxSpec.model_validate(body)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=e.errors(include_url=False)) from e
+    key = require_idempotency_key(request, idempotency_key)
+    principal = await _resolve_principal(request)
+    if getattr(request.app.state, "agent_lifecycle_orchestrator", None) is not None:
+        if principal is None or not principal.user_scope_id:
+            raise HTTPException(status_code=401, detail="authentication required")
+        result = await durable_result(
+            request,
+            "sandbox provisioning",
+            lambda orchestrator: orchestrator.provision(
+                principal,
+                spec.model_dump(mode="json"),
+                request_id=key,
+            ),
+        )
+        if result is not None:
+            return result
     try:
-        return _view(await svc.create(spec, owner=owner, tenant_id=tenant_id, user_id=user_id))
+        return _view(await _service(request).create(spec, owner=owner, tenant_id=tenant_id, user_id=user_id))
     except SandboxError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
@@ -130,8 +150,27 @@ async def get_sandbox(request: Request, sandbox_id: str) -> dict[str, Any]:
 
 
 @router.delete("/{sandbox_id}")
-async def destroy_sandbox(request: Request, sandbox_id: str) -> dict[str, Any]:
+async def destroy_sandbox(
+    request: Request,
+    sandbox_id: str,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
     owner, is_admin = await _read_scope(request)
+    key = require_idempotency_key(request, idempotency_key)
+    principal = await _resolve_principal(request)
+    if getattr(request.app.state, "agent_lifecycle_orchestrator", None) is not None:
+        if principal is None or not principal.user_scope_id:
+            raise HTTPException(status_code=401, detail="authentication required")
+        record = await _service(request).get(sandbox_id, owner=owner, is_admin=is_admin)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
+        result = await durable_result(
+            request,
+            "sandbox cleanup",
+            lambda orchestrator: orchestrator.cleanup(principal, sandbox_id, request_id=key),
+        )
+        if result is not None:
+            return result
     try:
         await _service(request).destroy(sandbox_id, owner=owner, is_admin=is_admin)
     except SandboxError as e:
@@ -411,7 +450,12 @@ def _evals(request: Request) -> EvalRunner:
 
 
 @router.post("/{sandbox_id}/evals")
-async def run_evals(request: Request, sandbox_id: str, body: dict[str, Any]) -> dict[str, Any]:
+async def run_evals(
+    request: Request,
+    sandbox_id: str,
+    body: dict[str, Any],
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
     """Run the saved checks against this sandbox and answer with the scorecard."""
     from devai.evaluations.models import ArtifactVersionRef
     from devai.evaluations.service import EvaluationError, EvaluationNotFound
@@ -422,6 +466,21 @@ async def run_evals(request: Request, sandbox_id: str, body: dict[str, Any]) -> 
     record = await _service(request).get(sandbox_id, owner=owner, is_admin=is_admin)
     if record is None:
         raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
+    key = require_idempotency_key(request, idempotency_key)
+    if getattr(request.app.state, "agent_lifecycle_orchestrator", None) is not None:
+        if principal is None or not principal.user_scope_id:
+            raise HTTPException(status_code=401, detail="authentication required")
+        result = await durable_result(
+            request,
+            "evaluation",
+            lambda orchestrator: orchestrator.evaluate(
+                principal,
+                {**body, "sandbox_id": sandbox_id},
+                request_id=key,
+            ),
+        )
+        if result is not None:
+            return result
     runner = _evals(request)
     sources = sum(("cases" in body, body.get("dataset") is not None, body.get("suite") is not None))
     if sources != 1:

@@ -1,3 +1,5 @@
+import { NEW_RUN_HREF } from "./run-entry.ts";
+
 /**
  * help-content.ts — the single source of truth for in-context guidance.
  *
@@ -53,13 +55,13 @@ export const GUIDANCE: Record<string, GuidanceEntry> = {
     id: "home",
     title: "New here? Three steps to your first run",
     body: [
-      "1. Connect a repository under Repositories — DevAI can only work on repos you have onboarded. 2. Open Workflows and pick one, or use Compose to describe the job in plain English. 3. Come back here to watch it run step by step.",
+      "1. Connect a repository under Repositories — DevAI can only work on repos you have onboarded. 2. Open Workflows and pick one, or describe the job in plain English from the new-run dialog. 3. Open the live run to watch it work step by step.",
       "This page shows one run at a time. Pick a run on the left and the stages, agents and messages for it fill in on the right, live.",
     ],
     links: [
       { label: "Connect a repository", href: "/repos" },
       { label: "Pick a workflow", href: "/workflows" },
-      { label: "Describe a task instead", href: "/compose" },
+      { label: "Describe a task instead", href: NEW_RUN_HREF },
     ],
   },
 
