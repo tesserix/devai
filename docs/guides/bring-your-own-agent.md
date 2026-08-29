@@ -53,7 +53,9 @@ registry://acme/agents/acme-ai/support-agent@1.2.0
 
 ## 3. Import the exact version into a DevAI project
 
-Authenticate to DevAI separately, then search or paste the exact reference:
+Install the DevAI CLI by following the
+[installation and authentication guide](install-and-authenticate.md). Authenticate
+to DevAI separately, then search or paste the exact reference:
 
 ```bash
 devai auth login --api-url https://devai.tesserix.app
