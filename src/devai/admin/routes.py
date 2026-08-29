@@ -39,9 +39,7 @@ async def require_admin(request: Request) -> Principal:
     return principal
 
 
-router = APIRouter(
-    prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)]
-)
+router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 @router.get("/overview")
