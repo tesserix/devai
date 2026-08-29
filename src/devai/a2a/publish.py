@@ -60,8 +60,8 @@ def build_platform_card(specs: list[Specialization], base_url: str) -> dict[str,
     """One card for the whole catalog — each admitted agent is a skill."""
     root = base_url.rstrip("/")
     return _card(
-        name="DevAI",
-        description="DevAI agent catalog: registry-composed agents callable over A2A.",
+        name="Tesserix Global ADK Runtime",
+        description="Reviewed, registry-composed Tesserix agents callable over A2A.",
         url=f"{root}/a2a/v1",
         skills=[_skill(spec) for spec in sorted(specs, key=lambda s: s.name)],
     )

@@ -255,6 +255,36 @@ def _principal_from_service_bearer(request: Request) -> Principal | None:
         return None
 
 
+def extract_adk_runtime_principal(request: Request) -> Principal | None:
+    """Resolve an AgentGateway-admitted A2A workload, or return ``None``."""
+    try:
+        auth = request.headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            return None
+        presented = auth[7:].strip()
+        state = getattr(getattr(request, "app", None), "state", None)
+        expected = str(getattr(getattr(state, "config", None), "adk_runtime_service_token", "") or "")
+        if len(expected) < 16 or not presented:
+            return None
+        if not hmac.compare_digest(presented.encode(), expected.encode()):
+            return None
+
+        subject = request.headers.get("x-adk-workload-subject", "").strip()
+        client_id = request.headers.get("x-adk-workload-client-id", "").strip()
+        if not subject or not client_id or len(subject) > 256 or len(client_id) > 256:
+            return None
+        return Principal(
+            email=f"agentgateway:{client_id}",
+            uid=subject,
+            auth_provider="agentgateway-runtime",
+            roles=["service", "agentgateway.runtime"],
+            display_name=client_id,
+        )
+    except Exception:  # noqa: BLE001 -- identity resolution must never 500
+        logger.debug("ADK runtime service-bearer check failed", exc_info=True)
+        return None
+
+
 async def extract_principal(request: Request) -> Principal | None:
     """Resolve the current Principal from the request, or None.
 
@@ -460,6 +490,7 @@ __all__ = [
     "Principal",
     "SYSTEM_PRINCIPAL_EMAIL",
     "WEBHOOK_PRINCIPAL_EMAIL",
+    "extract_adk_runtime_principal",
     "extract_principal",
     "new_trace_id",
     "trace_id_from_request",

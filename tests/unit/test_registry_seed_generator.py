@@ -29,7 +29,9 @@ def test_agent_seed_uses_current_a2a_schema_and_dynamic_user_routing() -> None:
     assert manifest["metadata"]["tag"] == "1.0.1"
     assert manifest["metadata"]["labels"]["ai.tesserix.dev/runtime"] == "tesserix-adk"
     assert manifest["spec"]["model"] == {"provider": "devai-user-routing", "name": "dynamic"}
-    assert manifest["spec"]["a2a"]["url"].endswith("/a2a/v1/requirements-analyst")
+    assert manifest["spec"]["a2a"]["url"] == (
+        "http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/requirements-analyst"
+    )
     assert manifest["spec"]["a2a"]["preferredTransport"] == "JSONRPC"
     assert manifest["spec"]["skills"] == ["requirements-analyst"]
     assert manifest["spec"]["prompts"] == ["requirements-analyst-prompt-v1"]

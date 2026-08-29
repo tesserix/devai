@@ -194,6 +194,46 @@ async def test_service_event_ring_records_completion(settings, state_manager):
         await svc.stop()
 
 
+@pytest.mark.asyncio
+async def test_live_events_reach_every_api_replica(settings):
+    fakeredis = pytest.importorskip("fakeredis")
+    server = fakeredis.FakeServer()
+    producer_state = _MemoryStateManager()
+    producer_state.redis = fakeredis.aioredis.FakeRedis(  # type: ignore[attr-defined]
+        server=server,
+        decode_responses=True,
+    )
+    observer_state = _MemoryStateManager()
+    observer_state.redis = fakeredis.aioredis.FakeRedis(  # type: ignore[attr-defined]
+        server=server,
+        decode_responses=True,
+    )
+    producer = PipelineService(settings, state_manager=producer_state)
+    observer = PipelineService(settings, state_manager=observer_state)
+
+    await producer.start()
+    await observer.start()
+    stream = observer.event_stream()
+    next_event = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    try:
+        task = await producer.run_once(
+            intent="scan",
+            blueprint="security-scan",
+            repo="x/y",
+        )
+        _, task_id, payload = await asyncio.wait_for(next_event, timeout=1.0)
+
+        assert task_id == task.id
+        assert payload is not None
+        assert payload["event_type"] == "stage"
+    finally:
+        next_event.cancel()
+        await stream.aclose()
+        await producer.stop()
+        await observer.stop()
+
+
 # ─────────────────────────────────────────────────────────────────────
 # FastAPI route surface — /api/pipeline/*
 # ─────────────────────────────────────────────────────────────────────

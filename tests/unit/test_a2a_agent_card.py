@@ -17,10 +17,21 @@ _AUTH = {
     "X-Forwarded-Tenant": "tenant-a",
     "X-Auth-Bff-Secret": "test-shared-secret",
 }
+_RUNTIME_TOKEN = "global-adk-runtime-upstream-token-123"
+_RUNTIME_AUTH = {
+    "Authorization": f"Bearer {_RUNTIME_TOKEN}",
+    "X-ADK-Workload-Subject": "zitadel-service-user-123",
+    "X-ADK-Workload-Client-ID": "inventory-agent",
+}
 
 
-def _client() -> TestClient:
+def _client(
+    *,
+    adk_runtime_base_url: str = ("http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080"),
+) -> TestClient:
     config = Settings(
+        adk_runtime_base_url=adk_runtime_base_url,
+        adk_runtime_service_token=_RUNTIME_TOKEN,
         auth_bff_shared_secret="test-shared-secret",
         public_base_url="https://devai.example.com",
     )
@@ -119,3 +130,18 @@ def test_cards_require_a_verified_principal() -> None:
 
     assert client.get("/.well-known/agent-card.json").status_code == 401
     assert client.get("/a2a/v1/requirements-analyst/card").status_code == 401
+
+
+def test_cards_accept_agentgateway_runtime_identity() -> None:
+    client = _client()
+
+    platform = client.get("/.well-known/agent-card.json", headers=_RUNTIME_AUTH)
+    agent = client.get("/a2a/v1/requirements-analyst/card", headers=_RUNTIME_AUTH)
+
+    assert platform.status_code == 200
+    assert platform.json()["name"] == "Tesserix Global ADK Runtime"
+    assert platform.json()["url"] == ("http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1")
+    assert agent.status_code == 200
+    assert agent.json()["url"] == (
+        "http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/requirements-analyst"
+    )

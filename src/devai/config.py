@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     # caller's identity is terminated at the Hub; callers never hold this).
     # Empty → no bearer injected (fine for authMode=none/header downstreams).
     mcp_hub_service_token: str = ""
+    # AgentGateway replaces an admitted caller's Zitadel token with this
+    # dedicated upstream bearer before calling the shared A2A runtime.
+    adk_runtime_service_token: str = ""
+    # Consumer-facing AgentGateway origin advertised by Agent Cards accepted
+    # through the shared runtime authentication boundary.
+    adk_runtime_base_url: str = ""
     # How often the Hub re-discovers the registry + reconnects legs (seconds).
     mcp_hub_refresh_seconds: float = 60.0
     # Per-downstream connect timeout (seconds).
