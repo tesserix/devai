@@ -27,13 +27,10 @@ _ADMIN_ROLES = frozenset({"admin", "platform-admin"})
 async def require_admin(request: Request) -> Principal:
     """Gate admin routes: non-anonymous users must have admin role.
 
-    Raises HTTPException(401) if anonymous, or HTTPException(403) if
-    authenticated but without admin role.
+    Raises HTTPException(401) if anonymous or identity resolution fails,
+    or HTTPException(403) if authenticated but without admin role.
     """
-    principal = await devai.authz.extract_principal(request)
-
-    if not principal:
-        raise HTTPException(status_code=401, detail="authentication required")
+    principal = await devai.authz.require_principal(request)
 
     if not (_ADMIN_ROLES & set(principal.roles)):
         raise HTTPException(status_code=403, detail="admin role required")
