@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from devai.identity import extract_principal
+from devai.identity import Principal, extract_principal
 from devai.sre_studio.service import SREStudioError
 
 if TYPE_CHECKING:
@@ -25,23 +25,17 @@ router = APIRouter(prefix="/api/sre-studio", tags=["sre-studio"])
 
 
 def _service(request: Request) -> SREStudioService:
-    svc = getattr(request.app.state, "sre_studio_service", None)
+    svc: SREStudioService | None = getattr(request.app.state, "sre_studio_service", None)
     if svc is None:
         raise HTTPException(status_code=503, detail="SRE Studio service unavailable")
     return svc
 
 
-async def _principal(request: Request) -> str:
-    try:
-        p = await extract_principal(request)
-    except Exception:  # noqa: BLE001
-        p = None
-    if p is not None:
-        for attr in ("email", "display_name", "uid"):
-            val = getattr(p, attr, None)
-            if val:
-                return str(val)
-    return "operator"
+async def _require_principal(request: Request) -> Principal:
+    principal = await extract_principal(request)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return principal
 
 
 class CreateDraftBody(BaseModel):
@@ -62,11 +56,13 @@ class DryRunBody(BaseModel):
 
 @router.get("/drafts")
 async def list_drafts(request: Request, status: str | None = None) -> list[dict[str, Any]]:
+    await _require_principal(request)
     return await _service(request).list_drafts(status=status)
 
 
 @router.get("/drafts/{draft_id}")
 async def get_draft(request: Request, draft_id: str) -> dict[str, Any]:
+    await _require_principal(request)
     row = await _service(request).get_draft(draft_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"draft {draft_id!r} not found")
@@ -75,9 +71,10 @@ async def get_draft(request: Request, draft_id: str) -> dict[str, Any]:
 
 @router.post("/drafts", status_code=201)
 async def create_draft(request: Request, body: CreateDraftBody) -> dict[str, Any]:
+    principal = await _require_principal(request)
     try:
         return await _service(request).create_draft(
-            body.kind, body.yaml, created_by=await _principal(request), description=body.description
+            body.kind, body.yaml, created_by=principal.email, description=body.description
         )
     except SREStudioError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
@@ -85,6 +82,7 @@ async def create_draft(request: Request, body: CreateDraftBody) -> dict[str, Any
 
 @router.patch("/drafts/{draft_id}")
 async def update_draft(request: Request, draft_id: str, body: UpdateDraftBody) -> dict[str, Any]:
+    await _require_principal(request)
     try:
         row = await _service(request).update_draft(
             draft_id, yaml_text=body.yaml, name=body.name, description=body.description
@@ -98,6 +96,7 @@ async def update_draft(request: Request, draft_id: str, body: UpdateDraftBody) -
 
 @router.delete("/drafts/{draft_id}")
 async def delete_draft(request: Request, draft_id: str) -> dict[str, Any]:
+    await _require_principal(request)
     if not await _service(request).delete_draft(draft_id):
         raise HTTPException(status_code=404, detail=f"draft {draft_id!r} not found")
     return {"deleted": draft_id}
@@ -105,6 +104,7 @@ async def delete_draft(request: Request, draft_id: str) -> dict[str, Any]:
 
 @router.post("/drafts/{draft_id}/dry-run")
 async def dry_run(request: Request, draft_id: str, body: DryRunBody) -> dict[str, Any]:
+    await _require_principal(request)
     try:
         return await _service(request).dry_run(draft_id, cluster_id=body.cluster_id)
     except SREStudioError as e:
@@ -115,8 +115,9 @@ async def dry_run(request: Request, draft_id: str, body: DryRunBody) -> dict[str
 
 @router.post("/drafts/{draft_id}/publish")
 async def publish_draft(request: Request, draft_id: str) -> dict[str, Any]:
+    principal = await _require_principal(request)
     try:
-        return await _service(request).publish(draft_id, created_by=await _principal(request))
+        return await _service(request).publish(draft_id, created_by=principal.email)
     except SREStudioError as e:
         status = 404 if "not found" in str(e) else 422
         raise HTTPException(status_code=status, detail=str(e)) from e
