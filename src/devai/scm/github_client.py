@@ -447,22 +447,60 @@ class GitHubSCMClient(SCMClient):
         Filters out pull requests (GitHub returns PRs as issues from this
         endpoint). Used by the cross-run dedup logic in the SCMClient base.
         """
-        params: dict[str, str] = {"state": state, "per_page": str(min(limit, 100))}
-        if labels:
-            params["labels"] = ",".join(labels)
+        if limit <= 0:
+            return []
+        issues: list[dict[str, Any]] = []
+        page = 1
+        per_page = min(limit, 100)
         try:
-            resp = await self._request("GET", f"/repos/{repo}/issues", params=params)
-            data = resp.json()
+            while len(issues) < limit:
+                params: dict[str, str] = {
+                    "state": state,
+                    "per_page": str(per_page),
+                    "page": str(page),
+                }
+                if labels:
+                    params["labels"] = ",".join(labels)
+                resp = await self._request("GET", f"/repos/{repo}/issues", params=params)
+                data = resp.json()
+                if not isinstance(data, list):
+                    break
+                issues.extend(item for item in data if "pull_request" not in item)
+                if len(data) < per_page:
+                    break
+                page += 1
         except Exception as e:
             logger.warning("Failed to list issues on %s: %s", repo, e)
             return []
-        if not isinstance(data, list):
-            return []
-        return [item for item in data if "pull_request" not in item]
+        return issues[:limit]
 
     async def add_comment(self, repo: str, issue_id: int | str, body: str) -> dict[str, Any]:
         resp = await self._request("POST", f"/repos/{repo}/issues/{issue_id}/comments", json={"body": body})
         return resp.json()
+
+    async def list_issue_comments(
+        self,
+        repo: str,
+        issue_id: int | str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        comments: list[dict[str, Any]] = []
+        page = 1
+        per_page = min(max(limit, 1), 100)
+        while len(comments) < limit:
+            resp = await self._request(
+                "GET",
+                f"/repos/{repo}/issues/{issue_id}/comments",
+                params={"per_page": str(per_page), "page": str(page)},
+            )
+            batch = resp.json()
+            if not isinstance(batch, list):
+                break
+            comments.extend(batch)
+            if len(batch) < per_page:
+                break
+            page += 1
+        return comments[:limit]
 
     async def add_labels(self, repo: str, issue_id: int | str, labels: list[str]) -> None:
         safe_labels = await self.ensure_labels(repo, labels)

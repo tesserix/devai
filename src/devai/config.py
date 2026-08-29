@@ -144,6 +144,7 @@ class Settings(BaseSettings):
     # GitHub App. The two operators remain the default assignees.
     feedback_repo: str = "tesserix/devai"
     feedback_assignees: list[str] = Field(default_factory=lambda: ["sam123ben", "mahesh.sangawar"])
+    feedback_support_identities: list[str] = Field(default_factory=list)
 
     # --- Repo onboarding (Repos page) ---
     # When true, the API runs a reconcile ~30s after boot so the onboarding
