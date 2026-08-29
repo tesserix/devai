@@ -976,12 +976,19 @@ async def test_memory_maintenance_degrades_without_db():
 def test_global_memory_defaults_to_noop_and_resets():
     from devai.adapters.memory.runtime import get_global_memory, set_global_memory
 
-    assert get_global_memory().provider_name == "noop"
-    real = NoopMemoryAdapter(keep_in_memory=True)
-    set_global_memory(real)
-    assert get_global_memory() is real
-    set_global_memory(None)
-    assert get_global_memory().provider_name == "noop"
+    # Any earlier test that built the app registered its adapter here, so
+    # start from a known reset rather than from whatever ran before.
+    previous = get_global_memory()
+    try:
+        set_global_memory(None)
+        assert get_global_memory().provider_name == "noop"
+        real = NoopMemoryAdapter(keep_in_memory=True)
+        set_global_memory(real)
+        assert get_global_memory() is real
+        set_global_memory(None)
+        assert get_global_memory().provider_name == "noop"
+    finally:
+        set_global_memory(previous)
 
 
 @pytest.mark.asyncio

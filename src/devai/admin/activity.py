@@ -51,11 +51,7 @@ async def record_active(app_state: Any, principal: Principal | None) -> bool:
     actor = actor.lower()
     # Synthetic principals are machines, not users on a dashboard.
     auth_provider = getattr(principal, "auth_provider", "") or ""
-    if (
-        auth_provider == "system"
-        or auth_provider.startswith("webhook:")
-        or auth_provider == "service-token"
-    ):
+    if auth_provider == "system" or auth_provider.startswith("webhook:") or auth_provider == "service-token":
         return False
 
     database = getattr(app_state, "analytics_db", None)

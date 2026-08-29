@@ -10,7 +10,9 @@ def test_admin_router_is_registered():
     from devai.webhook.app import create_app
 
     app = create_app(MagicMock(), MagicMock(), Settings())
-    paths = {r.path for r in app.routes}
+    # The generated schema is the version-stable view of what is mounted;
+    # `app.routes` holds different shapes across Starlette releases.
+    paths = app.openapi()["paths"]
     assert "/api/admin/overview" in paths
     assert "/api/admin/openpanel" in paths
 

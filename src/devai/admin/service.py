@@ -48,9 +48,7 @@ _USER_TOTALS_SQL = """
 """
 
 
-async def _fetch(
-    database: Any, sql: str, days: int, action: str
-) -> list[dict[str, Any]]:
+async def _fetch(database: Any, sql: str, days: int, action: str) -> list[dict[str, Any]]:
     pool = getattr(database, "pool", None) if database is not None else None
     if pool is None:
         return []
