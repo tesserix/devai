@@ -26,3 +26,12 @@ def test_homebrew_release_mints_a_tap_only_short_lived_token() -> None:
     assert "permission-contents: write" in text
     assert "prod-devai-github-app-private-key" in text
     assert "DEVAI_DEPLOY_KEY" not in text
+
+
+def test_homebrew_release_audits_rendered_formula_by_tap_name() -> None:
+    text = WORKFLOW.read_text()
+
+    assert 'tap_root="$(brew --repository)/Library/Taps/tesserix/homebrew-tap"' in text
+    assert 'ln -s "$PWD/tap" "$tap_root"' in text
+    assert "brew audit --strict tesserix/tap/devai" in text
+    assert "brew audit --strict tap/Formula/devai.rb" not in text
