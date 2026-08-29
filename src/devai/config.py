@@ -140,6 +140,12 @@ class Settings(BaseSettings):
     github_webhook_secret: str = ""
     github_org: str = "tesserix"
 
+    # Public product feedback is filed in this repository using the platform
+    # GitHub App. The two operators remain the default assignees.
+    feedback_repo: str = "tesserix/devai"
+    feedback_assignees: list[str] = Field(default_factory=lambda: ["sam123ben", "mahesh.sangawar"])
+    feedback_support_identities: list[str] = Field(default_factory=list)
+
     # --- Repo onboarding (Repos page) ---
     # When true, the API runs a reconcile ~30s after boot so the onboarding
     # cache self-heals from the `.platform/devai.yaml` markers (the source of
@@ -290,6 +296,16 @@ class Settings(BaseSettings):
     # without this nobody is admin — analytics then scopes everyone to their
     # personal usage view and the global/by-user rollups are unreachable.
     admin_emails: str = ""
+
+    # --- openpanel (web analytics) ---
+    # OpenPanel runs in-cluster (tesserix-k8s charts/thirdparty/openpanel) and
+    # answers page-level questions the backend can't: hits, sessions,
+    # referrers. Read server-side only so the client secret never reaches a
+    # browser. Any of the three unset leaves /api/admin/openpanel reporting
+    # {"enabled": false} — DevAI is not onboarded as an OpenPanel project yet.
+    openpanel_api_url: str = ""  # e.g. https://analytics.tesserix.app/api
+    openpanel_client_id: str = ""
+    openpanel_client_secret: str = ""
 
     # Shared secret the auth-bff includes (header X-Auth-Bff-Secret) so the
     # backend only trusts X-Forwarded-* identity headers from the bff. When
@@ -810,11 +826,9 @@ class Settings(BaseSettings):
     llm_fallback_provider: str = "openai,vertex_gemini,groq"
 
     # --- per-ROLE model routing ---
-    # Each role resolves to a model + a provider failover chain:
-    #   configured primary (anthropic) → llm_role_chain_provider — the
-    # gateway routes Claude on VERTEX server-side, so the SAME model id is
-    # preserved down the chain (Opus 4.8 on Anthropic → Opus 4.8 on Vertex).
-    # Unconfigured fallback links skip with a log; empty disables the link.
+    # Each role model selects a capability tier without changing the product's
+    # primary/fallback order. Retained for non-governed legacy deployments;
+    # governed production routes every concrete provider through Agent Gateway.
     llm_role_chain_provider: str = "gateway"
     # Frontend/UI implementation — strongest coding model. NO Fable: any
     # claude-fable-* id is force-mapped to 4.8 by adapters.llm.model_policy.
@@ -887,11 +901,11 @@ class Settings(BaseSettings):
     # no code changes. Missing SDKs / config degrade gracefully to "noop".
     memory_provider: str = "redis"  # noop | redis | pgvector | qdrant | mem0 | zep | hondo
 
-    # Embedding provider for memory semantic search (pgvector). `auto` uses
-    # OpenAI when DEVAI_OPENAI_API_KEY is set, otherwise disables embeddings
-    # and pgvector degrades to keyword recall. `none` disables explicitly.
+    # Embedding provider for memory semantic search. `auto` follows the
+    # configured LLM primary/fallback order and picks the first adapter that
+    # implements embeddings (Vertex/OpenAI/gateway). `none` disables explicitly.
     # Dimensions must match the agent_memories.embedding column: vector(1536).
-    embedding_provider: str = "auto"  # auto | openai | none
+    embedding_provider: str = "auto"  # auto | vertex_gemini | openai | gateway | none
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 

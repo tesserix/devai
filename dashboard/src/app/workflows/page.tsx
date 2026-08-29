@@ -38,6 +38,7 @@ import { EmptyState } from "@/components/empty-state";
 import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
 import { RunStateBadge } from "@/components/run-state-badge";
 import { TriggerDialog } from "@/components/trigger-dialog";
+import { runDetailHref } from "@/lib/run-entry";
 
 export default function WorkflowsPage() {
   return (
@@ -58,6 +59,7 @@ function WorkflowsHome() {
 
   // The trigger flow, pre-bound to a chosen blueprint.
   const [triggerBlueprint, setTriggerBlueprint] = useState<string | null>(null);
+  const [triggerRepo, setTriggerRepo] = useState("");
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -84,18 +86,25 @@ function WorkflowsHome() {
   // unbound". Clear the query so a refresh doesn't re-open it.
   useEffect(() => {
     if (searchParams.get("action") === "new") {
+      setTriggerRepo(searchParams.get("repo") ?? "");
       setTriggerBlueprint("");
       router.replace("/workflows");
     }
   }, [searchParams, router]);
 
   const handleTrigger = useCallback(
-    async (repo: string, requirements: string) => {
+    async (
+      repo: string,
+      requirements: string,
+      opts?: { blueprint?: string; autonomy?: string; brainstorm?: boolean },
+    ) => {
       const result = await api.triggerPipeline(repo, requirements, {
-        blueprint: triggerBlueprint || undefined,
+        ...opts,
+        blueprint: triggerBlueprint || opts?.blueprint,
       });
       setTriggerBlueprint(null);
-      if (result?.run_id) router.push(`/runs/${result.run_id}`);
+      setTriggerRepo("");
+      if (result?.run_id) router.push(runDetailHref(result.run_id));
     },
     [triggerBlueprint, router],
   );
@@ -123,7 +132,10 @@ function WorkflowsHome() {
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setTriggerBlueprint("")}
+            onClick={() => {
+              setTriggerRepo("");
+              setTriggerBlueprint("");
+            }}
             className="btn-primary !py-1.5"
           >
             <Plus className="w-3.5 h-3.5" /> New run
@@ -175,7 +187,10 @@ function WorkflowsHome() {
             <BlueprintCard
               key={b.name}
               blueprint={b}
-              onRun={() => setTriggerBlueprint(b.name)}
+              onRun={() => {
+                setTriggerRepo("");
+                setTriggerBlueprint(b.name);
+              }}
             />
           ))}
         </section>
@@ -186,7 +201,11 @@ function WorkflowsHome() {
           handler so the backend dispatches the right DAG (DASH-6). */}
       <TriggerDialog
         open={triggerBlueprint !== null}
-        onClose={() => setTriggerBlueprint(null)}
+        initialRepo={triggerRepo}
+        onClose={() => {
+          setTriggerBlueprint(null);
+          setTriggerRepo("");
+        }}
         onTrigger={handleTrigger}
       />
     </div>

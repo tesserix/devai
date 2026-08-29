@@ -74,26 +74,25 @@ async def status(request: Request) -> dict[str, Any]:
 
 @router.get("/llm-probe")
 async def llm_probe(request: Request) -> dict[str, Any]:
-    """End-to-end test: dial the LLM gateway from devai-api, fire a
-    1-token Anthropic call, return the result. Used as a smoke-test
-    button in the Gateway panel."""
+    """Run a bounded completion through the configured LLM fallback chain."""
     await _require_operator(request)
     try:
         from devai.adapters.llm import (
             LLMMessage,
             LLMRequest,
             LLMRole,
-            create_llm_adapter,
+            create_llm_chain,
         )
         from devai.config import settings
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"adapters unavailable: {e}") from e
 
-    adapter = create_llm_adapter(settings)
+    config = getattr(request.app.state, "config", settings)
+    adapter = create_llm_chain(config)
     req = LLMRequest(
         system="Reply in exactly two words.",
         messages=[LLMMessage(role=LLMRole.USER, content="Gateway routing status?")],
-        max_tokens=16,
+        max_tokens=128,
     )
     try:
         resp = await adapter.generate(req)
@@ -103,6 +102,22 @@ async def llm_probe(request: Request) -> dict[str, Any]:
             "adapter": type(adapter).__name__,
             "error": f"{type(e).__name__}: {str(e)[:200]}",
         }
+    if resp.finish_reason == "error":
+        return {
+            "ok": False,
+            "adapter": type(adapter).__name__,
+            "provider": getattr(adapter, "provider_name", "?"),
+            "model": resp.model,
+            "error": resp.text.replace("\r", " ").replace("\n", " ")[:200],
+        }
+    if not resp.text.strip():
+        return {
+            "ok": False,
+            "adapter": type(adapter).__name__,
+            "provider": getattr(adapter, "provider_name", "?"),
+            "model": resp.model,
+            "error": f"model returned no text (finish_reason={resp.finish_reason})",
+        }
     return {
         "ok": True,
         "adapter": type(adapter).__name__,
@@ -110,8 +125,8 @@ async def llm_probe(request: Request) -> dict[str, Any]:
         "model": resp.model,
         "text": resp.text,
         "usage": {
-            "input": resp.usage.input_tokens,
-            "output": resp.usage.output_tokens,
+            "input": resp.usage.prompt_tokens,
+            "output": resp.usage.completion_tokens,
         },
     }
 

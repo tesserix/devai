@@ -40,6 +40,8 @@ interface Project {
 interface TriggerDialogProps {
   open: boolean;
   onClose: () => void;
+  /** Optional repository supplied by a deep link such as the command palette. */
+  initialRepo?: string;
   /**
    * Dispatch handler. The 3rd `opts` argument threads the chosen blueprint
    * (DASH-6) so the backend no longer silently defaults. It is optional so
@@ -52,7 +54,7 @@ interface TriggerDialogProps {
   ) => Promise<void>;
 }
 
-export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) {
+export function TriggerDialog({ open, onClose, onTrigger, initialRepo = "" }: TriggerDialogProps) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [search, setSearch] = useState("");
@@ -153,6 +155,12 @@ export function TriggerDialog({ open, onClose, onTrigger }: TriggerDialogProps) 
     if (open && projects.length === 0) fetchProjects();
     if (open && blueprints.length === 0) fetchBlueprints();
   }, [open, repos.length, projects.length, blueprints.length, fetchRepos, fetchProjects, fetchBlueprints]);
+
+  useEffect(() => {
+    if (!open || !initialRepo) return;
+    setSelectedRepo(initialRepo);
+    setSearch(initialRepo);
+  }, [open, initialRepo]);
 
   // The recommended blueprint depends on whether the target repo is empty:
   // scaffolding a brand-new repo, or a freshly created one, leans toward

@@ -6,17 +6,21 @@ import json
 import logging
 import re
 import uuid
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from devai.a2a.publish import build_agent_card, build_platform_card
 from devai.authz import require_principal
 from devai.specializations.service import AgentNotAdmittedError, AgentUnavailableError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/a2a/v1", tags=["a2a"])
+
+#: Served at the site root, where the A2A spec says discovery starts.
+well_known_router = APIRouter(tags=["a2a"])
 
 _AGENT_NAME = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 _Text = Annotated[str, Field(min_length=1, max_length=65_536)]
@@ -69,6 +73,32 @@ def _normalize_agent_name(name: str) -> str | None:
     if len(normalized) > 128 or not _AGENT_NAME.fullmatch(normalized):
         return None
     return normalized.removesuffix("-agent").replace("-", "_")
+
+
+def _service_and_base_url(request: Request) -> tuple[Any, str]:
+    service = getattr(request.app.state, "specialization_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="agent catalog unavailable")
+    base_url = str(getattr(request.app.state.config, "public_base_url", "") or "").strip()
+    return service, base_url
+
+
+@well_known_router.get("/.well-known/agent-card.json")
+async def platform_agent_card(request: Request) -> dict[str, object]:
+    await require_principal(request)
+    service, base_url = _service_and_base_url(request)
+    return build_platform_card(service.admitted_specs(), base_url)
+
+
+@router.get("/{agent_name}/card")
+async def agent_card(agent_name: str, request: Request) -> dict[str, object]:
+    await require_principal(request)
+    service, base_url = _service_and_base_url(request)
+    normalized_name = _normalize_agent_name(agent_name)
+    spec = service.get_full(normalized_name) if normalized_name else None
+    if spec is None or spec not in service.admitted_specs():
+        raise HTTPException(status_code=404, detail="agent not found")
+    return build_agent_card(spec, base_url)
 
 
 @router.post("/capabilities/{capability}")
@@ -151,4 +181,4 @@ async def _send_message(requested_name: str, body: A2ARequest, request: Request)
     }
 
 
-__all__ = ["router"]
+__all__ = ["router", "well_known_router"]

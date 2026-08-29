@@ -259,7 +259,12 @@ async def build_overlay(
         if primary not in llm_authorized_providers:
             primary = llm_authorized_providers[0]
             set_override(llm_spec.provider_attr, primary, llm_provider_scopes[primary])
-        ordered = [primary, *(p for p in llm_authorized_providers if p != primary)]
+        raw_fallbacks = str(overrides.get("llm_fallback_provider", "") or "")
+        requested_fallbacks = [name.strip().lower() for name in raw_fallbacks.split(",") if name.strip()]
+        ordered = [primary]
+        for provider in [*requested_fallbacks, *llm_authorized_providers]:
+            if provider in llm_authorized_providers and provider not in ordered:
+                ordered.append(provider)
         primary_scope = llm_provider_scopes[primary]
         set_override("llm_authorized_providers", tuple(ordered), primary_scope)
         set_override("llm_fallback_provider", ",".join(ordered[1:]), primary_scope)

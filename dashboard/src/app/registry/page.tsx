@@ -58,8 +58,6 @@ type Tab = RegistryTab
   | "specializations"
   | "stages";
 
-const LOCAL_TABS: Tab[] = ["tools", "blueprints", "specializations", "stages"];
-
 export default function RegistryPage() {
   const [counts, setCounts] = useState<Counts | null>(null);
   const [localCounts, setLocalCounts] = useState<LocalCounts | null>(null);

@@ -151,8 +151,8 @@ async def list_runs(
 ) -> list[dict[str, Any]]:
     """List recent pipeline tasks.
 
-    `source` — "auto" (in-memory then Redis), "memory" (in-memory only),
-    or "persisted" (Redis only). Defaults to auto.
+    `source` — "auto" (in-memory merged with Redis, newest wins), "memory"
+    (in-memory only), or "persisted" (Redis only). Defaults to auto.
     """
     svc = _service(request)
     if source == "memory":
@@ -160,12 +160,8 @@ async def list_runs(
     if source == "persisted":
         return await svc.list_persisted_tasks(limit=limit, blueprint=blueprint, repo=repo)
 
-    # auto: merge in-memory + persisted with in-memory winning on id collision
-    in_mem = svc.list_tasks_in_memory()
-    seen = {t["id"] for t in in_mem}
-    persisted = await svc.list_persisted_tasks(limit=limit, blueprint=blueprint, repo=repo)
-    out = in_mem[:limit] + [t for t in persisted if t["id"] not in seen]
-    return out[:limit]
+    # auto: merge in-memory + persisted, newest snapshot per run id wins
+    return await svc.list_runs(limit=limit, blueprint=blueprint, repo=repo)
 
 
 @router.get("/runs/{task_id}")

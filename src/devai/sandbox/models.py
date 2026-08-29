@@ -107,8 +107,23 @@ class SandboxCredentials(_Pinned):
         return self
 
 
+class ImportSnapshot(_Pinned):
+    """Server-created immutable projection copied from an Agent import."""
+
+    import_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
+    registry_ref: str = Field(min_length=1)
+    agent_digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+    dependency_lock: list[dict[str, str]] = Field(default_factory=list)
+    runtime: dict[str, Any]
+    permissions: dict[str, Any] = Field(default_factory=dict)
+
+
 class SandboxSpec(_Pinned):
-    agent: AgentRef
+    agent: AgentRef | None = None
+    # Portable callers supply only import_id. The service resolves it within
+    # the authenticated tenant and materializes import_snapshot before storage.
+    import_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F-]{36}$")
+    import_snapshot: ImportSnapshot | None = None
     model: ModelRef
     prompt: PromptRef | None = None
     dataset: DatasetRef | None = None
@@ -144,7 +159,12 @@ class SandboxSpec(_Pinned):
     model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
 
     @model_validator(mode="after")
-    def browser_needs_workspace(self) -> SandboxSpec:
+    def validate_sandbox_shape(self) -> SandboxSpec:
+        if self.agent is None and self.import_id is None:
+            raise ValueError("agent or import_id is required")
+        if self.import_snapshot is not None:
+            if self.import_id != self.import_snapshot.import_id or self.agent is None:
+                raise ValueError("import_snapshot must match a materialized import_id and agent")
         if self.browser and not self.workspace:
             raise ValueError("browser requires workspace=true")
         return self
@@ -166,6 +186,7 @@ __all__ = [
     "MAX_TTL_SECONDS",
     "AgentRef",
     "DatasetRef",
+    "ImportSnapshot",
     "ModelRef",
     "PromptRef",
     "RepoRef",

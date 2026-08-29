@@ -14,6 +14,7 @@ from devai.sandbox.egress import build_proxy_manifests, proxy_service_host
 from devai.sandbox.isolation import build_isolation_manifests
 from devai.sandbox.job import build_sandbox_secret
 from devai.sandbox.models import SandboxStatus
+from devai.sandbox.portable import build_portable_runtime_manifests, portable_runtime_endpoint
 from devai.sandbox.snapshot import capture
 from devai.sandbox.workspace import build_workspace_manifests, workspace_service_host
 from devai.sandbox.workspace_client import WorkspaceClient
@@ -43,6 +44,7 @@ class SandboxProvisioner:
                 await self._runtime.apply_manifest(manifest)
             await self._provision_identity(record, namespace)
             detail = await self._provision_egress(record, namespace)
+            detail.update(await self._provision_agent_runtime(record, namespace) or {})
             detail.update(await self._provision_workspace(record, namespace) or {})
         except Exception as e:  # noqa: BLE001 — a cluster failure is a sandbox outcome, not a crash
             logger.warning("sandbox %s: provisioning failed", record.id, exc_info=True)
@@ -82,6 +84,21 @@ class SandboxProvisioner:
             await self._runtime.apply_manifest(manifest)
         return {"workspace": {"endpoint": workspace_service_host(record.id, namespace=namespace)}}
 
+    async def _provision_agent_runtime(self, record: SandboxRecord, namespace: str) -> dict[str, Any] | None:
+        snapshot = record.spec.import_snapshot
+        if snapshot is None:
+            return None
+        for manifest in build_portable_runtime_manifests(record, namespace=namespace):
+            await self._runtime.apply_manifest(manifest)
+        return {
+            "agent_runtime": {
+                "endpoint": portable_runtime_endpoint(record, namespace=namespace),
+                "protocol": snapshot.runtime.get("protocol"),
+                "type": snapshot.runtime.get("type"),
+                "agent_digest": snapshot.agent_digest,
+            }
+        }
+
     async def _clone_token(self, record: SandboxRecord) -> str:
         """The seed's credential, minted through the broker like any other.
 
@@ -104,6 +121,8 @@ class SandboxProvisioner:
         manifests = build_isolation_manifests(record, namespace=namespace)
         manifests += [build_sandbox_secret(record, namespace=namespace, token="-")]
         manifests += build_proxy_manifests(record, namespace=namespace)
+        if record.spec.import_snapshot is not None:
+            manifests += build_portable_runtime_manifests(record, namespace=namespace)
         detail = await self._snapshot(record, namespace)
         if record.spec.workspace:
             # Deleting needs the kinds and names only, so no token is minted here.

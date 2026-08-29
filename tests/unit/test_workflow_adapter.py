@@ -39,7 +39,7 @@ from devai.orchestration.serde import (
     task_to_dict,
 )
 from devai.pipeline.interfaces import PipelineStage, StageDeps
-from devai.pipeline.types import DevAITask, StageResult, TaskState
+from devai.pipeline.types import DevAITask, StageEvent, StageEventPhase, StageResult, TaskState
 
 # ── Fakes ────────────────────────────────────────────────────────────────
 
@@ -275,6 +275,33 @@ async def test_temporal_already_started_reuses_the_scoped_workflow():
 
     assert client.requested_id == expected_id
     assert client.requested_policy == WorkflowIDReusePolicy.REJECT_DUPLICATE
+
+
+@pytest.mark.asyncio
+async def test_temporal_resume_allows_a_new_execution_after_business_failure():
+    from temporalio.common import WorkflowIDReusePolicy
+
+    task = DevAITask(blueprint="t-linear")
+    task.agent_context["resumed_from_failure_at"] = 123.0
+
+    class Handle:
+        async def result(self):
+            return task_to_dict(task)
+
+    class Client:
+        requested_policy = None
+
+        async def start_workflow(self, *_args, **kwargs):
+            self.requested_policy = kwargs.get("id_reuse_policy")
+            return Handle()
+
+    client = Client()
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=NoopWorkflowAdapter())
+    adapter._client = client
+
+    await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert client.requested_policy == WorkflowIDReusePolicy.ALLOW_DUPLICATE
 
 
 @pytest.mark.asyncio
@@ -590,3 +617,50 @@ async def test_service_approve_gate_signals_workflow():
     sigs = svc._pipeline.signals  # type: ignore[attr-defined]
     assert ("t1", "approve", ["deploy-release"]) in sigs
     assert ("t1", "reject", ["deploy-release"]) in sigs
+
+
+# ── Regression: the Temporal round-trip must not lose live observability ──
+
+
+def _task_with_timeline() -> DevAITask:
+    task = DevAITask(id="devai-timeline", repo="tesserix/test-repo", blueprint="alm-pipeline")
+    task.record_event(
+        StageEvent(
+            "analyze-requirements",
+            StageEventPhase.COMPLETED,
+            agent="requirements_analyst",
+            lane="plan",
+        )
+    )
+    task.agents["requirements_analyst"] = {"status": "completed", "stage": "analyze-requirements"}
+    task.stages_completed.append("analyze-requirements")
+    return task
+
+
+def test_task_round_trip_preserves_stage_events_and_agents():
+    """serde must be an exact inverse of task_to_dict.
+
+    task_from_dict used to omit stage_events/agents, so every Temporal
+    round-trip silently wiped the run timeline and the dashboard's agent
+    cards — the run showed "no agents yet" while agents were demonstrably
+    running.
+    """
+    restored = task_from_dict(task_to_dict(_task_with_timeline()))
+
+    assert [e.stage for e in restored.stage_events] == ["analyze-requirements"]
+    assert restored.stage_events[0].agent == "requirements_analyst"
+    assert restored.stage_events[0].lane == "plan"
+    assert restored.agents == {"requirements_analyst": {"status": "completed", "stage": "analyze-requirements"}}
+
+
+def test_task_round_trip_preserves_timestamps():
+    task = _task_with_timeline()
+    task.started_at = 1000.0
+    task.finished_at = 2000.0
+    task.created_at = 900.0
+
+    restored = task_from_dict(task_to_dict(task))
+
+    assert restored.started_at == 1000.0
+    assert restored.finished_at == 2000.0
+    assert restored.created_at == 900.0

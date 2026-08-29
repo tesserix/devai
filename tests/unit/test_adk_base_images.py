@@ -1,8 +1,8 @@
 from pathlib import Path
 
 ADK_BASE = (
-    "ghcr.io/tesserix/base-python-adk-3.13:20260820@"
-    "sha256:cca20646be7d01045fe3fa4c411cdaff8df600da7a3d7769b9786b5282d18f9a"
+    "ghcr.io/tesserix/base-python-adk-3.13:20260827@"
+    "sha256:575f845a640619b19a4612fd2fd483b85547ebbe47793b28b971534de3d4cfb9"
 )
 
 

@@ -88,6 +88,7 @@ def create_app(
             logger.exception("registry client construction failed — running in pure-local mode")
             _registry_client = None
         app.state.registry_client = _registry_client
+        app.state.agent_import_service = None
 
         # A2A (Agent2Agent) runtime client — lets the orchestrator discover
         # peer agents via the registry, fetch their capability cards, and
@@ -256,6 +257,15 @@ def create_app(
         except Exception:
             logger.exception("SRE Studio service failed to start — sre-studio API will 503")
             app.state.sre_studio_service = None
+
+        if app.state.sre_studio_db is not None and _registry_client is not None:
+            from devai.registry.imports import AgentImportService
+
+            app.state.agent_import_service = AgentImportService(
+                database=app.state.sre_studio_db,
+                registry=_registry_client,
+            )
+            logger.info("Registry import service ready")
 
         # Live preview service — on-demand ephemeral preview environments.
         # Reuses the SRE Studio DB pool + the pipeline's connected K8s runtime.
@@ -608,6 +618,22 @@ def create_app(
             logger.exception("MessagingService failed to start — remote channels disabled")
             app.state.messaging_service = None
 
+        # Admin analytics rollups reuse this same Postgres handle. Connected
+        # here (not lazily on first request) so `record_active` — which only
+        # writes when app.state.analytics_db is already set — never silently
+        # drops active-user rows before the first /api/analytics/* call.
+        app.state.analytics_db = None
+        if getattr(config, "database_url", ""):
+            try:
+                from devai.services.database import Database
+
+                analytics_db = Database(config.database_url)
+                await analytics_db.connect()
+                app.state.analytics_db = analytics_db
+            except Exception:  # noqa: BLE001
+                logger.info("analytics: Postgres unavailable at startup — rollups disabled", exc_info=True)
+                app.state.analytics_db = None
+
         try:
             yield
         finally:
@@ -683,6 +709,32 @@ def create_app(
     app.state.event_bus_adapter = event_bus_adapter
     app.state.state_manager = state
     app.state.config = config
+    app.state.agent_lifecycle_orchestrator = None
+    if getattr(config, "workflow_provider", "inproc") == "temporal":
+        from devai.orchestration.agent_lifecycle_client import AgentLifecycleOrchestrator
+
+        app.state.agent_lifecycle_orchestrator = AgentLifecycleOrchestrator(config)
+
+    # Daily active-user recording. Starlette runs middleware in the reverse
+    # of add order, so registering this before the auth gate below makes it
+    # the innermost layer — it only runs once auth has resolved the
+    # request, and its failures are swallowed so a telemetry miss can never
+    # fail a user request.
+    from devai.admin.activity import ActivityMiddleware
+
+    app.add_middleware(ActivityMiddleware)
+
+    # Dedup guard for the above — one audit_log row per user per day, shared
+    # across pods. None degrades to "record nothing", never to a crash.
+    app.state.activity_redis = None
+    try:
+        import redis.asyncio as _redis
+
+        url = getattr(config, "redis_url", "") or ""
+        if url:
+            app.state.activity_redis = _redis.from_url(url, decode_responses=True)
+    except Exception:  # noqa: BLE001
+        logger.info("activity dedup guard unavailable — active-user stats disabled")
 
     # Opt-in auth gate (DEVAI_REQUIRE_AUTH). No-op unless enabled; when on,
     # mutating requests without a resolvable principal get 401. Webhook
@@ -808,14 +860,18 @@ def create_app(
     app.include_router(catalog_router)
 
     # Agent Registry catalog routes (/api/registry/*).
+    from devai.registry.import_routes import router as registry_import_router
     from devai.registry.routes import router as registry_router
 
     app.include_router(registry_router)
+    app.include_router(registry_import_router)
 
     # Authenticated Agent2Agent server endpoint for the specialization catalog.
     from devai.a2a.routes import router as a2a_router
+    from devai.a2a.routes import well_known_router as a2a_well_known_router
 
     app.include_router(a2a_router)
+    app.include_router(a2a_well_known_router)
 
     # Agentic control-plane status (/api/agentic/status + smoke probes).
     # Backs the dashboard's Gateway panel; one endpoint aggregates the
@@ -852,6 +908,13 @@ def create_app(
     from devai.analytics.routes import router as analytics_router
 
     app.include_router(analytics_router)
+
+    # Admin routes (/api/admin/*) — platform-owner view of who uses DevAI.
+    # Gated by a router-level admin-role dependency, not by the edge, so the
+    # boundary holds regardless of how the pod is reached.
+    from devai.admin.routes import router as admin_router
+
+    app.include_router(admin_router)
 
     # Specializations catalog routes (/api/specializations/*)
     from devai.specializations.routes import router as specializations_router

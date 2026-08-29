@@ -4,7 +4,7 @@
 //
 //	POST /auth/auto-login   — exchange GIP id_token for a session cookie
 //	GET  /auth/me           — introspect current session
-//	POST /auth/logout       — clear the session cookie
+//	GET|POST /auth/logout   — clear the session cookie
 //	GET  /healthz           — liveness
 //	GET  /readyz            — readiness (always 200 once handler is constructed)
 //
@@ -17,6 +17,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tesserix/devai/services/auth-bff/internal/allowlist"
 	"github.com/tesserix/devai/services/auth-bff/internal/gip"
@@ -28,6 +29,7 @@ type AuthHandler struct {
 	verifier     gip.Verifier
 	session      *session.Manager
 	allowlist    *allowlist.Allowlist
+	publicSignup bool
 	almTenant    string
 	sreTenant    string
 	gipAPIKey    string
@@ -39,16 +41,17 @@ type AuthHandler struct {
 
 // AuthDeps groups handler dependencies.
 type AuthDeps struct {
-	Verifier         gip.Verifier
-	Session          *session.Manager
-	Allowlist        *allowlist.Allowlist
-	ALMTenant        string
-	SRETenant        string
-	GIPWebAPIKey     string
-	GIPAuthDomain    string
-	GIPProjectID     string
-	ALMHosts         []string
-	SREHosts         []string
+	Verifier      gip.Verifier
+	Session       *session.Manager
+	Allowlist     *allowlist.Allowlist
+	PublicSignup  bool
+	ALMTenant     string
+	SRETenant     string
+	GIPWebAPIKey  string
+	GIPAuthDomain string
+	GIPProjectID  string
+	ALMHosts      []string
+	SREHosts      []string
 }
 
 // NewAuthHandler constructs the AuthHandler.
@@ -65,6 +68,7 @@ func NewAuthHandler(d AuthDeps) *AuthHandler {
 		verifier:     d.Verifier,
 		session:      d.Session,
 		allowlist:    d.Allowlist,
+		publicSignup: d.PublicSignup,
 		almTenant:    d.ALMTenant,
 		sreTenant:    d.SRETenant,
 		gipAPIKey:    d.GIPWebAPIKey,
@@ -143,6 +147,7 @@ type autoLoginRequest struct {
 	IDToken          string `json:"id_token"`
 	ExpectedTenantID string `json:"expected_tenant_id"`
 	Pool             string `json:"pool"` // "alm" | "sre" | "agentic"
+	ClientType       string `json:"client_type"`
 }
 
 type autoLoginResponse struct {
@@ -165,6 +170,10 @@ func (h *AuthHandler) autoLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.IDToken == "" || req.ExpectedTenantID == "" || req.Pool == "" {
 		writeJSON(w, http.StatusBadRequest, errorResp("invalid_request", "id_token, expected_tenant_id, and pool are required"))
+		return
+	}
+	if req.ClientType != "" && req.ClientType != "cli" {
+		writeJSON(w, http.StatusBadRequest, errorResp("invalid_request", "client_type must be cli when provided"))
 		return
 	}
 	// Pool/tenant cross-check: the caller cannot ask the BFF to mint an
@@ -205,7 +214,7 @@ func (h *AuthHandler) autoLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.allowlist.Has(verified.Email) {
+	if !h.publicSignup && !h.allowlist.Has(verified.Email) {
 		writeJSON(w, http.StatusForbidden, errorResp("forbidden", "email not in admin allow-list"))
 		return
 	}
@@ -215,6 +224,9 @@ func (h *AuthHandler) autoLogin(w http.ResponseWriter, r *http.Request) {
 		Email:    verified.Email,
 		TenantID: verified.TenantID,
 		Pool:     req.Pool,
+	}
+	if req.ClientType == "cli" {
+		sess.ExpiresAt = time.Now().Add(time.Hour)
 	}
 	if err := h.session.Mint(w, sess); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResp("internal_error", "failed to mint session"))
@@ -249,11 +261,15 @@ func (h *AuthHandler) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 	h.session.Clear(w)
+	if r.Method == http.MethodGet {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

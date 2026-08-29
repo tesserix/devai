@@ -19,6 +19,7 @@ from devai.sandbox.credentials import SandboxMeteredLLMAdapter
 from devai.sandbox.invoke import SandboxInvoker
 from devai.sandbox.models import (
     AgentRef,
+    ImportSnapshot,
     ModelRef,
     SandboxLimits,
     SandboxRecord,
@@ -27,6 +28,7 @@ from devai.sandbox.models import (
     ToolMode,
     ToolPolicy,
 )
+from devai.sandbox.portable_client import PortableAgentResult
 from devai.sandbox.trace import TraceStore
 from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.registry import SpecializationRegistry
@@ -110,14 +112,35 @@ class _GrantedSandboxLLM:
         )
 
 
-def _invoker(llm, *, registry=None, store=None, telemetry=None) -> SandboxInvoker:
+def _invoker(llm, *, registry=None, store=None, telemetry=None, portable_client=None) -> SandboxInvoker:
     return SandboxInvoker(
         specializations=registry if registry is not None else _Specs(_registry()),
         deps=StageDeps(config=Settings(), llm=llm),
         traces=store or TraceStore(None),
         credentials=_GrantedSandboxLLM(llm),  # type: ignore[arg-type]
         telemetry=telemetry,
+        portable_client=portable_client,
     )
+
+
+def _imported_record() -> SandboxRecord:
+    record = _record(agent="support")
+    snapshot = ImportSnapshot(
+        import_id="bf2ef27d-98a2-4ce4-b87a-c6952d2d5d09",
+        registry_ref="registry://acme/agents/acme/support@1.4.0",
+        agent_digest="sha256:" + "a" * 64,
+        dependency_lock=[],
+        runtime={"type": "remote", "protocol": "a2a", "url": "https://agent.acme.example/a2a/v1"},
+        permissions={},
+    )
+    spec = record.spec.model_copy(
+        update={
+            "agent": AgentRef(name="support", version="1.4.0"),
+            "import_id": snapshot.import_id,
+            "import_snapshot": snapshot,
+        }
+    )
+    return record.model_copy(update={"spec": spec})
 
 
 async def test_one_turn_produces_a_trace_with_the_final_answer() -> None:
@@ -130,6 +153,32 @@ async def test_one_turn_produces_a_trace_with_the_final_answer() -> None:
     assert inv.agent == "release_notes_writer"
     assert [s.kind for s in inv.steps][0] == "prompt"
     assert [s.kind for s in inv.steps][-1] == "response"
+
+
+async def test_imported_agent_uses_its_portable_runtime_and_preserves_trace_evidence() -> None:
+    class _PortableClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        async def invoke(self, record, *, message: str, triggered_by: str):
+            self.calls.append((message, triggered_by))
+            return PortableAgentResult(
+                final_text="portable answer",
+                backend="remote:a2a",
+                raw={"kind": "message"},
+            )
+
+    portable = _PortableClient()
+    invocation = await _invoker(
+        _ScriptedLLM([]),
+        portable_client=portable,
+    ).invoke(_imported_record(), message="triage this", triggered_by="tenant-a:alice")
+
+    assert portable.calls == [("triage this", "tenant-a:alice")]
+    assert invocation.ok is True
+    assert invocation.final_text == "portable answer"
+    assert invocation.execution_backend == "remote:a2a"
+    assert [step.kind for step in invocation.steps] == ["prompt", "response"]
 
 
 async def test_the_llm_step_carries_the_tokens_the_metrics_are_built_from() -> None:

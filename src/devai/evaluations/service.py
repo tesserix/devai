@@ -44,7 +44,19 @@ class EvaluationInvalid(EvaluationError):
 
 
 class EvaluationDatabase(Protocol):
-    async def create_eval_dataset_version(self, **values: Any) -> dict[str, Any] | None: ...
+    async def create_eval_dataset_version(
+        self,
+        *,
+        owner_scope: str,
+        tenant_id: str,
+        user_id: str,
+        name: str,
+        version: str,
+        description: str,
+        case_count: int,
+        content_hash: str,
+        blob_key: str,
+    ) -> dict[str, Any] | None: ...
 
     async def list_eval_datasets(self, owner_scope: str, *, limit: int) -> list[dict[str, Any]]: ...
 
@@ -55,7 +67,20 @@ class EvaluationDatabase(Protocol):
         version: str,
     ) -> dict[str, Any] | None: ...
 
-    async def create_eval_suite(self, **values: Any) -> dict[str, Any] | None: ...
+    async def create_eval_suite(
+        self,
+        *,
+        owner_scope: str,
+        tenant_id: str,
+        user_id: str,
+        name: str,
+        version: str,
+        description: str,
+        dataset_name: str,
+        dataset_version: str,
+        scorers: list[str],
+        thresholds: dict[str, Any],
+    ) -> dict[str, Any] | None: ...
 
     async def list_eval_suites(self, owner_scope: str, *, limit: int) -> list[dict[str, Any]]: ...
 

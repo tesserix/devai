@@ -282,6 +282,40 @@ async def test_global_run_lookup_is_scoped_to_the_server_derived_owner() -> None
 
 
 @pytest.mark.asyncio
+async def test_retrying_a_durable_eval_returns_the_saved_run_without_invoking_again() -> None:
+    class _CountingInvoker:
+        calls = 0
+
+        async def invoke(self, record, *, message: str, triggered_by: str):
+            del record, message, triggered_by
+            self.calls += 1
+            return _invocation(final_text="ok")
+
+    invoker = _CountingInvoker()
+    store = EvalStore(None)
+    runner = EvalRunner(invoker, store)  # type: ignore[arg-type]
+    case = EvalCase(name="works", input="go")
+
+    first = await runner.run(
+        _record(),
+        [case],
+        triggered_by="tenant-a:alice",
+        owner_scope="tenant-a:alice",
+        run_id="eval-stable",
+    )
+    second = await runner.run(
+        _record(),
+        [case],
+        triggered_by="tenant-a:alice",
+        owner_scope="tenant-a:alice",
+        run_id="eval-stable",
+    )
+
+    assert first.id == second.id == "eval-stable"
+    assert invoker.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_a_tool_calling_case_is_graded_on_the_tool_it_chose() -> None:
     llm = _ScriptedLLM(
         [
@@ -500,6 +534,55 @@ async def test_judge_budget_exhaustion_fails_only_the_judge_dimension_after_agen
     assert run.results[0].passed is False
     assert run.judge_cost_usd == 0
     assert run.judge == config.model_dump(mode="json")
+
+
+@pytest.mark.asyncio
+async def test_scoring_outage_preserves_agent_output_and_retry_does_not_reinvoke_tools() -> None:
+    class _Invoker:
+        calls = 0
+
+        async def invoke(self, record, *, message: str, triggered_by: str) -> Invocation:
+            del triggered_by
+            self.calls += 1
+            return Invocation(
+                id="inv-preserved",
+                sandbox_id=record.id,
+                agent="agent",
+                message=message,
+                final_text="expected",
+            )
+
+    class _UnavailableJudge:
+        async def create(self, **_: object) -> object:
+            raise ConnectionError("judge provider unavailable")
+
+    config = JudgeConfig(
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        rubric=JudgeRubric(name="quality", version="3", dimensions={"helpfulness": "Be useful."}),
+    )
+    invoker = _Invoker()
+    store = EvalStore(None)
+    runner = EvalRunner(invoker, store, judge_factory=_UnavailableJudge())  # type: ignore[arg-type]
+    request = {
+        "record": _record(),
+        "cases": [EvalCase(name="one", input="go", expect=EvalExpect(exact_output="expected"))],
+        "triggered_by": "alice@example.com",
+        "owner_scope": "tenant-a:alice",
+        "scorers": ["exact_match", "llm_judge"],
+        "principal": Principal(uid="alice", email="alice@example.com", tenant_id="tenant-a"),
+        "judge_config": config,
+        "run_id": "eval-scoring-outage",
+    }
+
+    first = await runner.run(**request)  # type: ignore[arg-type]
+    second = await runner.run(**request)  # type: ignore[arg-type]
+
+    assert first.id == second.id == "eval-scoring-outage"
+    assert invoker.calls == 1
+    assert first.results[0].invocation_id == "inv-preserved"
+    assert first.results[0].scores["exact_match"]["passed"] is True
+    assert first.results[0].scores["llm_judge"]["detail"]["error"] == "judge runtime unavailable"
 
 
 @pytest.mark.asyncio

@@ -101,11 +101,14 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
             from temporalio.common import WorkflowIDReusePolicy
             from temporalio.exceptions import WorkflowAlreadyStartedError
 
+            reuse_policy = WorkflowIDReusePolicy.REJECT_DUPLICATE
+            if task.agent_context.get("resumed_from_failure_at") is not None:
+                reuse_policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE
             handle = await client.start_workflow(
                 "BlueprintWorkflow",
                 payload,
                 id=workflow_id,
-                id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                id_reuse_policy=reuse_policy,
                 task_queue=task_queue,
             )
         except WorkflowAlreadyStartedError:

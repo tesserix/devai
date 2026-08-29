@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -56,8 +59,13 @@ class SandboxClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def create(self, spec: dict[str, Any]) -> dict[str, Any]:
-        return self._request_object("POST", "/api/sandboxes", json=spec)
+    def create(self, spec: dict[str, Any], *, idempotency_key: str = "") -> dict[str, Any]:
+        return self._request_object(
+            "POST",
+            "/api/sandboxes",
+            json=spec,
+            headers=_mutation_headers(idempotency_key),
+        )
 
     def get(self, sandbox_id: str) -> dict[str, Any]:
         return self._request_object("GET", f"/api/sandboxes/{sandbox_id}")
@@ -71,10 +79,28 @@ class SandboxClient:
             raise AdkAPIError(502, "trace response was not a list")
         return [{str(key): value for key, value in item.items()} for item in body]
 
-    def test(self, sandbox_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
-        return self._request_object("POST", f"/api/sandboxes/{sandbox_id}/evals", json={"cases": cases})
+    def test(
+        self,
+        sandbox_id: str,
+        cases: list[dict[str, Any]],
+        *,
+        idempotency_key: str = "",
+    ) -> dict[str, Any]:
+        return self._request_object(
+            "POST",
+            f"/api/sandboxes/{sandbox_id}/evals",
+            json={"cases": cases},
+            headers=_mutation_headers(idempotency_key),
+        )
 
-    def evaluate(self, sandbox_id: str, suite_name: str, suite_version: str) -> dict[str, Any]:
+    def evaluate(
+        self,
+        sandbox_id: str,
+        suite_name: str,
+        suite_version: str,
+        *,
+        idempotency_key: str = "",
+    ) -> dict[str, Any]:
         return self._request_object(
             "POST",
             "/api/evaluations",
@@ -82,6 +108,60 @@ class SandboxClient:
                 "suite": {"name": suite_name, "version": suite_version},
                 "sandbox_id": sandbox_id,
             },
+            headers=_mutation_headers(idempotency_key),
+        )
+
+    def search_registry(
+        self,
+        query: str,
+        *,
+        kinds: Sequence[str] = (),
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        params: dict[str, str | int] = {"q": query}
+        if kinds:
+            params["kinds"] = ",".join(kinds)
+        params["limit"] = limit
+        return self._request_object("GET", f"/api/registry/search?{urlencode(params)}")
+
+    def import_agent(
+        self,
+        *,
+        project_id: str,
+        registry_ref: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        return self._request_object(
+            "POST",
+            "/api/registry/imports",
+            json={"project_id": project_id, "registry_ref": registry_ref},
+            headers={"Idempotency-Key": idempotency_key},
+        )
+
+    def list_agent_imports(self, project_id: str) -> list[dict[str, Any]]:
+        body = self._request(
+            "GET",
+            f"/api/registry/imports?{urlencode({'project_id': project_id})}",
+        )
+        if not isinstance(body, list) or not all(isinstance(item, dict) for item in body):
+            raise AdkAPIError(502, "agent import response was not a list")
+        return [{str(key): value for key, value in item.items()} for item in body]
+
+    def compare(
+        self,
+        baseline_run_id: str,
+        candidate_run_id: str,
+        *,
+        idempotency_key: str = "",
+    ) -> dict[str, Any]:
+        return self._request_object(
+            "POST",
+            "/api/comparisons",
+            json={
+                "baseline_run_id": baseline_run_id,
+                "candidate_run_id": candidate_run_id,
+            },
+            headers=_mutation_headers(idempotency_key),
         )
 
     def publish_agent(
@@ -90,18 +170,25 @@ class SandboxClient:
         *,
         overwrite: bool = False,
         override_reason: str = "",
+        idempotency_key: str = "",
     ) -> dict[str, Any]:
-        headers = None
+        headers = _mutation_headers(idempotency_key)
         if override_reason:
-            headers = {
-                "x-devai-eval-gate-override": "true",
-                "x-devai-eval-gate-override-reason": override_reason,
-            }
+            headers.update(
+                {
+                    "x-devai-eval-gate-override": "true",
+                    "x-devai-eval-gate-override-reason": override_reason,
+                }
+            )
         path = "/api/registry/agents?overwrite=true" if overwrite else "/api/registry/agents"
         return self._request_object("POST", path, json=manifest, headers=headers)
 
-    def destroy(self, sandbox_id: str) -> dict[str, Any]:
-        return self._request_object("DELETE", f"/api/sandboxes/{sandbox_id}")
+    def destroy(self, sandbox_id: str, *, idempotency_key: str = "") -> dict[str, Any]:
+        return self._request_object(
+            "DELETE",
+            f"/api/sandboxes/{sandbox_id}",
+            headers=_mutation_headers(idempotency_key),
+        )
 
     def _request_object(
         self,
@@ -140,6 +227,10 @@ class SandboxClient:
             return body
         except ValueError as error:
             raise AdkAPIError(502, "DevAI API returned invalid JSON") from error
+
+
+def _mutation_headers(idempotency_key: str) -> dict[str, str]:
+    return {"Idempotency-Key": idempotency_key.strip() or str(uuid.uuid4())}
 
 
 __all__ = ["AdkAPIError", "AdkError", "SandboxClient"]

@@ -56,6 +56,7 @@ async def test_noop_satisfies_contract() -> None:
     assert a.record_llm(LLMMetric(agent="dev", provider="anthropic", model="claude", tokens_input=5)) is None
     assert a.incr("x") is None
     assert a.observe("y", 1.0) is None
+    assert a.gauge("z", 2.0) is None
     a.instrument_asgi(object())  # no-op, no app needed
     health = await a.health_check()
     assert health["provider"] == "noop"

@@ -37,6 +37,14 @@ _LIVE = {SandboxStatus.PENDING, SandboxStatus.PROVISIONING, SandboxStatus.READY}
 _MIN_TTL_SECONDS = 300
 
 
+def _prompt_version(record: SandboxRecord) -> str:
+    if record.spec.prompt is not None:
+        return record.spec.prompt.version
+    if record.spec.agent is not None:
+        return record.spec.agent.version
+    return "draft"
+
+
 class SandboxInvoker:
     def __init__(
         self,
@@ -46,6 +54,7 @@ class SandboxInvoker:
         traces: TraceStore,
         credentials: SandboxCredentialProvider | None = None,
         telemetry: Any | None = None,
+        portable_client: Any | None = None,
     ) -> None:
         from devai.sandbox.credentials import SandboxCredentialResolver
 
@@ -53,6 +62,11 @@ class SandboxInvoker:
         self._deps = deps
         self._traces = traces
         self._credentials = credentials or SandboxCredentialResolver()
+        if portable_client is None:
+            from devai.sandbox.portable_client import PortableRuntimeClient
+
+            portable_client = PortableRuntimeClient(deps.config)
+        self._portable_client = portable_client
         if telemetry is None:
             from devai.adapters.telemetry.runtime import get_global_telemetry
 
@@ -63,6 +77,8 @@ class SandboxInvoker:
         """One turn. Model and tool failures become a failed trace, never a lost one."""
         if record.status not in _LIVE:
             raise ValueError(f"sandbox {record.id} is {record.status.value} and cannot be invoked")
+        if record.spec.import_snapshot is not None:
+            return await self._invoke_portable(record, message=message, triggered_by=triggered_by)
         spec = await self._resolve(record)
         from devai.services.redact import redact_secrets
 
@@ -138,9 +154,7 @@ class SandboxInvoker:
                     kind="llm",
                     name=record.spec.model.model,
                     provider=record.spec.model.provider,
-                    prompt_version=(
-                        record.spec.prompt.version if record.spec.prompt is not None else record.spec.agent.version
-                    ),
+                    prompt_version=_prompt_version(record),
                     latency_ms=int((time.perf_counter() - started) * 1000),
                     error=safe_error,
                 )
@@ -151,6 +165,42 @@ class SandboxInvoker:
         await self._traces.save(invocation, ttl_seconds=self._ttl(record))
         return invocation
 
+    async def _invoke_portable(self, record: SandboxRecord, *, message: str, triggered_by: str) -> Invocation:
+        from devai.services.redact import redact_secrets
+
+        if record.spec.agent is None:
+            raise ValueError(f"sandbox {record.id} has no imported agent identity")
+        safe_message = redact_secrets(message)
+        invocation = Invocation(
+            id=f"inv-{uuid.uuid4().hex[:12]}",
+            sandbox_id=record.id,
+            agent=record.spec.agent.name,
+            message=safe_message,
+            execution_backend="portable",
+            steps=[TraceStep(kind="prompt", name="user", output=safe_message)],
+        )
+        started = time.perf_counter()
+        try:
+            async with asyncio.timeout(record.spec.limits.max_wall_clock_s):
+                result = await self._portable_client.invoke(
+                    record,
+                    message=message,
+                    triggered_by=triggered_by,
+                )
+            invocation.final_text = redact_secrets(result.final_text)
+            invocation.execution_backend = result.backend
+            invocation.steps.append(TraceStep(kind="response", name="final", output=invocation.final_text))
+        except Exception as exc:  # noqa: BLE001
+            invocation.ok = False
+            invocation.error = redact_secrets(str(exc))[:500]
+            invocation.steps.append(TraceStep(kind="response", name="final", error=invocation.error))
+            logger.warning("sandbox %s: portable invocation failed: %s", record.id, invocation.error)
+        invocation.wall_clock_ms = int((time.perf_counter() - started) * 1000)
+        for step in invocation.steps:
+            self._mirror_step(step, invocation_id=invocation.id, sandbox_id=record.id)
+        await self._traces.save(invocation, ttl_seconds=self._ttl(record))
+        return invocation
+
     async def _resolve(self, record: SandboxRecord) -> Specialization:
         from devai.registry.mapping import agent_envelope_to_spec, role_name
 
@@ -158,9 +208,12 @@ class SandboxInvoker:
         if record.spec.draft:
             spec = agent_envelope_to_spec(record.spec.draft)
         else:
+            if record.spec.agent is None:
+                raise ValueError(f"sandbox {record.id} has no agent")
             spec = await self._specs.resolve_runnable(role_name(record.spec.agent.name))
         if spec is None:
-            raise ValueError(f"sandbox {record.id} pins agent {record.spec.agent.name!r}, which is not runnable here")
+            agent_name = record.spec.agent.name if record.spec.agent is not None else "draft"
+            raise ValueError(f"sandbox {record.id} pins agent {agent_name!r}, which is not runnable here")
         # The sandbox's pin beats the role's own preference — that is what makes
         # a result attributable to a configuration rather than to a default.
         return replace(
@@ -193,9 +246,7 @@ class SandboxInvoker:
                     invocation_id=invocation_id,
                     provider=record.spec.model.provider,
                     model=record.spec.model.model,
-                    prompt_version=(
-                        record.spec.prompt.version if record.spec.prompt is not None else record.spec.agent.version
-                    ),
+                    prompt_version=_prompt_version(record),
                     telemetry=self._telemetry,
                 ),
             )

@@ -188,6 +188,15 @@ So:
 > **Reviewed mapping = which agent. Registry = exact composition.
 > Gateways = the only approved data plane.**
 
+### AI provider routing standard
+
+Every product configures an ordered LLM chain. The product primary is always attempted first;
+agent/model preferences only select the equivalent model tier on that provider. A failure moves
+to the configured secondary and every attempt uses that provider's dedicated Solo.io AI Gateway
+route. In production `LLM_GATEWAY_REQUIRED` is fail-closed, so a gateway outage never falls back
+to direct vendor egress. DevAI's production chain is Vertex Gemini → Anthropic. See
+`docs/adr/0006-agent-gateway-provider-priority.md` for the reusable product contract.
+
 ### Worked example — `senior_developer` on a Next.js scaffold
 
 1. Blueprint `app-scaffold.yaml` says step `scaffold_app` runs

@@ -96,6 +96,7 @@ func (m *Manager) Mint(w http.ResponseWriter, s Session) error {
 	if s.ExpiresAt.IsZero() {
 		s.ExpiresAt = now.Add(m.maxAge)
 	}
+	cookieMaxAge := int(s.ExpiresAt.Sub(now).Seconds())
 
 	encoded, err := m.encode(s)
 	if err != nil {
@@ -107,7 +108,8 @@ func (m *Manager) Mint(w http.ResponseWriter, s Session) error {
 		Value:    encoded,
 		Path:     "/",
 		Domain:   m.domain,
-		MaxAge:   int(m.maxAge.Seconds()),
+		Expires:  s.ExpiresAt,
+		MaxAge:   cookieMaxAge,
 		HttpOnly: true,
 		Secure:   m.secure,
 		SameSite: http.SameSiteLaxMode,

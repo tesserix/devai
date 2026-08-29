@@ -32,3 +32,6 @@ node_modules/
 
 # AI tooling instructions — never commit
 CLAUDE.md
+
+# Subagent-driven-development scratch workspace (not part of the project)
+.superpowers/

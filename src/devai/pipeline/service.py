@@ -249,9 +249,13 @@ class PipelineService:
             db = await get_global_db()
             if db is None:
                 return
+            # No `or provider` fallback: the provider already has its own
+            # column, and naming the row after it invents an agent that then
+            # pollutes every per-agent rollup. record_llm_call defaults an
+            # empty name to "unknown".
             await db.record_llm_call(
                 run_id=run_id,
-                agent_name=agent or provider,
+                agent_name=agent,
                 provider=provider,
                 model=model,
                 tokens_input=tok_in,
@@ -1069,12 +1073,42 @@ class PipelineService:
             return None
         return await self.state_manager.get_pipeline_task(task_id)
 
+    @staticmethod
+    def _newer(a: dict[str, Any] | None, b: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The fresher of two snapshots of the same run, by `updated_at`.
+
+        In-memory is not automatically the newest: the API pod holds the task
+        it enqueued while a *different* process (the Temporal worker) executes
+        it and persists progress. Ranking by `updated_at` matches the rule
+        `StateManager.persist_task` already applies to concurrent writes, so
+        readers and writers agree on which snapshot is current.
+        """
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return a if float(a.get("updated_at") or 0.0) >= float(b.get("updated_at") or 0.0) else b
+
     async def get_task(self, task_id: str) -> dict[str, Any] | None:
-        """Best-effort: prefer the in-memory snapshot, fall back to Redis."""
-        in_mem = self.get_task_in_memory(task_id)
-        if in_mem is not None:
-            return in_mem
-        return await self.get_persisted_task(task_id)
+        """Best-effort: whichever of the in-memory / persisted snapshots is newer."""
+        return self._newer(self.get_task_in_memory(task_id), await self.get_persisted_task(task_id))
+
+    async def list_runs(
+        self, *, limit: int = 50, blueprint: str | None = None, repo: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Recent runs, merging in-memory and persisted by run id.
+
+        Same freshness rule as :meth:`get_task` — see :meth:`_newer`.
+        """
+        merged: dict[str, dict[str, Any]] = {}
+        persisted = await self.list_persisted_tasks(limit=limit, blueprint=blueprint, repo=repo)
+        for task in [*persisted, *self.list_tasks_in_memory()]:
+            task_id = task.get("id")
+            if not task_id:
+                continue
+            merged[task_id] = self._newer(merged.get(task_id), task) or task
+        ordered = sorted(merged.values(), key=lambda t: float(t.get("created_at") or 0.0), reverse=True)
+        return ordered[:limit]
 
     # ── SSE event stream ────────────────────────────────────────────
 
@@ -1302,13 +1336,6 @@ class PipelineService:
 
     # ── Internal: live-observability derivations (run-event spine) ────
 
-    #: stage phase → agent card status
-    _PHASE_TO_STATUS = {
-        "started": "running",
-        "completed": "completed",
-        "failed": "failed",
-        "skipped": "skipped",
-    }
     _A2A_CAP = 500  # max coordination messages kept per run
 
     def _derive_run_signals(self, task: DevAITask, event: StageEvent, ts: float) -> list[dict[str, Any]]:
@@ -1322,15 +1349,11 @@ class PipelineService:
         """
         envelopes: list[dict[str, Any]] = []
         phase = event.phase.value
-        status = self._PHASE_TO_STATUS.get(phase, "")
         agent = (event.agent or "").strip()
 
         # ── 1. Per-agent runtime status ─────────────────────────────
-        if agent and status:
-            entry: dict[str, Any] = {"status": status, "updated_at": ts, "stage": event.stage}
-            if event.error:
-                entry["error"] = event.error
-            task.agents[agent] = entry
+        status = task.apply_agent_status(event, ts)
+        if status:
             envelopes.append(
                 {
                     "event_type": "agent_status",
