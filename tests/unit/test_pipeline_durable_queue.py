@@ -81,6 +81,41 @@ async def test_enqueue_is_idempotent():
     assert await sm.is_task_active("devai-1") is True
 
 
+async def test_delete_tombstone_blocks_stale_persist_and_reenqueue():
+    sm = _state_manager()
+    task = {
+        "id": "devai-deleted",
+        "blueprint": "alm-pipeline",
+        "repo": "tesserix/test-repo",
+        "state": "queued",
+        "updated_at": 100.0,
+    }
+    await sm.persist_task(task)
+    await sm.enqueue_task(task["id"])
+
+    await sm.delete_pipeline_task(task["id"])
+
+    assert await sm.get_pipeline_task(task["id"]) is None
+    assert await sm.is_task_active(task["id"]) is False
+    assert await sm.redis.lpos(sm.PIPELINE_QUEUE_KEY, task["id"]) is None
+
+    stale = {**task, "updated_at": 200.0}
+    await sm.persist_task(stale, force=True)
+    assert await sm.enqueue_task(task["id"]) is False
+    assert await sm.get_pipeline_task(task["id"]) is None
+    assert await sm.claim_next_task("workerA") is None
+
+
+async def test_claim_skips_deleted_queue_residue():
+    sm = _state_manager()
+    await sm.delete_pipeline_task("devai-deleted")
+    await sm.redis.lpush(sm.PIPELINE_QUEUE_KEY, "devai-deleted")
+    await sm.enqueue_task("devai-live")
+
+    assert await sm.claim_next_task("workerA") == "devai-live"
+    assert await sm.is_task_active("devai-deleted") is False
+
+
 async def test_claim_is_exactly_once_then_empty():
     sm = _state_manager()
     await sm.enqueue_task("devai-1")

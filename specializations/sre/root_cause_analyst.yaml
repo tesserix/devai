@@ -7,9 +7,10 @@ description: >-
   with read-only evidence tools (logs, events, metrics) to verify a
   causal chain before committing to it — changes nothing.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 temperature: 0.2
 
 allowed_tools:

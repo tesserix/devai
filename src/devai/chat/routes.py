@@ -14,6 +14,7 @@ from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
 from devai.identity import Principal, extract_principal, trace_id_from_request
+from devai.services.request_limits import enforce_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ async def chat_message(request: Request) -> dict[str, str]:
         return {"response": "Please send a message."}
 
     principal = await extract_principal(request) or Principal.system()
+    await enforce_rate_limit(request, "chat_message", principal)
     trace_id = trace_id_from_request(request)
 
     agent, trial_block = await _resolve_chat(request.app.state, principal)
@@ -86,6 +88,7 @@ async def chat_stream(request: Request) -> StreamingResponse:
     session_id = body.get("session_id", "default")
 
     principal = await extract_principal(request) or Principal.system()
+    await enforce_rate_limit(request, "chat_message", principal)
     trace_id = trace_id_from_request(request)
 
     agent, trial_block = await _resolve_chat(request.app.state, principal)
@@ -159,4 +162,4 @@ async def chat_websocket(websocket: WebSocket) -> None:
             await websocket.send_json({"type": "done"})
 
     except WebSocketDisconnect:
-        agent.clear_session(session_id)
+        agent.clear_session(session_id, principal=principal)

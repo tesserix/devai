@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from devai.adapters.base import AdapterNotConfigured, AdapterNotInstalled
@@ -142,6 +143,7 @@ class OtelTelemetryAdapter(TelemetryAdapter):
         # Generic instrument caches for incr()/observe().
         self._counters: dict[str, Any] = {}
         self._histograms: dict[str, Any] = {}
+        self._gauges: dict[str, Any] = {}
         self._instrumented = False
         logger.info("OtelTelemetryAdapter active: endpoint=%s service=%s", endpoint, service_name)
 
@@ -158,8 +160,10 @@ class OtelTelemetryAdapter(TelemetryAdapter):
         req_duration = self._req_duration
         status_code = self._trace_api.StatusCode
 
-        @app.middleware("http")
-        async def _otel_request_middleware(request: Any, call_next: Any):  # noqa: ANN202
+        async def _otel_request_middleware(
+            request: Any,
+            call_next: Callable[[Any], Awaitable[Any]],
+        ) -> Any:
             route = request.url.path
             method = request.method
             started = time.perf_counter()
@@ -178,6 +182,8 @@ class OtelTelemetryAdapter(TelemetryAdapter):
                     span.set_status(status_code.ERROR)
                 _safe_record(req_count, req_duration, method, route, code, (time.perf_counter() - started) * 1000)
                 return response
+
+        app.middleware("http")(_otel_request_middleware)
 
     # ──────────────────────────────────────────────────────────────────
     # Domain records
@@ -250,6 +256,16 @@ class OtelTelemetryAdapter(TelemetryAdapter):
             hist.record(value, attrs or {})
         except Exception:  # noqa: BLE001
             logger.debug("observe(%s) failed", name, exc_info=True)
+
+    def gauge(self, name: str, value: float, attrs: dict[str, str] | None = None) -> None:
+        try:
+            gauge = self._gauges.get(name)
+            if gauge is None:
+                gauge = self._meter.create_gauge(name)
+                self._gauges[name] = gauge
+            gauge.set(value, attrs or {})
+        except Exception:  # noqa: BLE001
+            logger.debug("gauge(%s) failed", name, exc_info=True)
 
     # ──────────────────────────────────────────────────────────────────
     # Lifecycle

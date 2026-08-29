@@ -1,7 +1,7 @@
 """Model-id policy — keep every LLM call on a model the resolved provider
 can actually serve.
 
-Applied once, at the :class:`InstrumentedLLMAdapter` chokepoint, so the two
+Applied once, at the :class:`InstrumentedLLMAdapter` chokepoint, so the three
 guarantees below hold for EVERY call path (role chains, spec agents, chat,
 SRE, boardroom) without touching any call site:
 
@@ -9,7 +9,13 @@ SRE, boardroom) without touching any call site:
    overlay, or a spec YAML — is remapped to ``claude-opus-4-8`` (the 4.8
    model). Nothing in DevAI runs on Fable.
 
-2. **Provider/model fit.** When a pinned model belongs to a KNOWN family the
+2. **No retired models.** A pin the vendor has withdrawn 404s on the primary
+   provider and only "works" by falling through the chain with the model
+   cleared. ``_RETIRED_MODELS`` remaps those ids to their live successor, so a
+   stale pin in a spec YAML or a tenant overlay self-heals instead of burning
+   an attempt.
+
+3. **Provider/model fit.** When a pinned model belongs to a KNOWN family the
    resolved provider can't serve (a ``claude-*`` id reaching an OpenAI
    adapter — the exact cause of "every seat absent → runbook → needs human"),
    the model is cleared so the provider's OWN default applies, instead of the
@@ -25,6 +31,12 @@ from __future__ import annotations
 # The 4.8 model every retired Fable id falls back to.
 FABLE_FALLBACK_MODEL = "claude-opus-4-8"
 
+# Withdrawn model id → its live successor. Exact ids only: a prefix rule here
+# would capture future dated releases of the same family.
+_RETIRED_MODELS = {
+    "claude-sonnet-4-20250514": "claude-sonnet-5",
+}
+
 # provider_name → the model family it serves natively.
 _PROVIDER_FAMILY = {
     "anthropic": "claude",
@@ -39,11 +51,12 @@ _ALIAS_ROUTERS = ("gateway", "openrouter")
 
 
 def normalize_model(model: str) -> str:
-    """Remap retired/forbidden ids. Today: any ``claude-fable-*`` → 4.8."""
+    """Remap retired/forbidden ids: ``claude-fable-*`` → 4.8, then any id in
+    ``_RETIRED_MODELS`` → its successor."""
     m = (model or "").strip()
     if m.lower().startswith("claude-fable"):
         return FABLE_FALLBACK_MODEL
-    return m
+    return _RETIRED_MODELS.get(m.lower(), m)
 
 
 def model_family(model: str) -> str:

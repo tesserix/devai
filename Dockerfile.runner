@@ -1,52 +1,46 @@
 # syntax=docker/dockerfile:1.7
-#
-# devai-runner — generic agent-execution image.
-#
-# Each stage of a blueprint runs in a Pod backed by THIS image (or a
-# stack-specific variant for heavyweight stages). The Pod's entrypoint
-# reads `DEVAI_RUNNER_*` env vars, resolves its agent against aregistry,
-# pulls skills/prompts, runs the agent, and emits a `RESULT::<json>`
-# line on stdout that the JobRunnerStage in devai-api parses back into
-# a StageResult.
-#
-# Kept slim — language-specific scaffolding (Node, Go, Python) lives in
-# stack variants: devai-runner-nextjs, devai-runner-go, devai-runner-python.
+ARG ADK_BASE=ghcr.io/tesserix/base-python-adk-3.13:20260827@sha256:575f845a640619b19a4612fd2fd483b85547ebbe47793b28b971534de3d4cfb9
 
-# CHART-11: pin python:3.12-slim by digest for reproducible builds.
-FROM python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36 AS base
-RUN python -m pip install --no-cache-dir --upgrade pip
+FROM ${ADK_BASE} AS wheels
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+USER root
+WORKDIR /build
+COPY pyproject.toml .
+COPY src/ src/
+RUN python -m pip wheel --wheel-dir /wheels .
 
-# Minimal OS dependencies. We deliberately avoid build-essential — the
-# runner does NOT compile native extensions; everything is wheels.
+FROM ${ADK_BASE} AS base
+
+USER root
 RUN apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends \
-        git \
-        ca-certificates \
-        curl \
-        tini \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /devai/work \
+    && chown -R 10001:10001 /devai
+RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels,ro \
+    python -m pip install --no-cache-dir --no-index --find-links=/wheels devai \
+    && python -m pip check \
+    && python -c "import importlib.metadata as m; assert m.version('tesserix-adk') == '0.51.0'"
 
-# Non-root user — matches `securityContext.runAsUser: 1000` in the Job
-# spec (see src/devai/runtime/job_spec.py).
-RUN useradd --uid 1000 --create-home runner
-WORKDIR /devai
-
-# Install devai (api code + adapters + agents) but skip heavyweight
-# optional deps. The runner needs LangChain, registry client, SCM, and
-# adapters — same surface used by the agents themselves.
-COPY pyproject.toml /devai/
-COPY src /devai/src
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir /devai
-
-# The entrypoint is `python -m devai.runner.entrypoint`. tini handles
-# PID 1 so subprocess signal handling works correctly.
-USER 1000
+USER 10001:10001
 WORKDIR /devai/work
 ENTRYPOINT ["/usr/bin/tini", "--", "python", "-m", "devai.runner.entrypoint"]
+
+FROM base AS browser
+USER root
+ENV DISPLAY=:99 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        fluxbox \
+        fonts-liberation \
+        novnc \
+        websockify \
+        x11vnc \
+        xvfb \
+    && python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod -R a+rX /ms-playwright
+USER 10001:10001
+
+FROM base AS runner

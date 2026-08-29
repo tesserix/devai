@@ -29,6 +29,7 @@ class _FakeDB:
 
     def __init__(self) -> None:
         self.rows: dict[str, dict[str, Any]] = {}
+        self.imports: dict[str, dict[str, Any]] = {}
 
     async def create_sandbox(self, **kw: Any) -> dict[str, Any]:
         self.rows[kw["sandbox_id"]] = {**kw, "id": kw["sandbox_id"]}
@@ -55,6 +56,10 @@ class _FakeDB:
     async def expired_sandboxes(self, now: datetime) -> list[dict[str, Any]]:
         return [r for r in self.rows.values() if r["status"] != "destroyed" and r["expires_at"] <= now]
 
+    async def get_agent_import(self, owner_scope: str, import_id: str) -> dict[str, Any] | None:
+        row = self.imports.get(import_id)
+        return row if row and row["owner_scope"] == owner_scope else None
+
 
 def _service(db: Any = None, **kw: Any) -> SandboxService:
     return SandboxService(db or _FakeDB(), **kw)
@@ -69,6 +74,20 @@ def test_minimal_spec_defaults_to_safe_boundaries() -> None:
     assert spec.ttl_seconds == 4 * 60 * 60
     assert spec.limits.max_cost_usd > 0
     assert spec.limits.max_tokens > 0
+    assert spec.credentials.llm_connector == ""
+    assert spec.credentials.confirmed is False
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {"llm_connector": "sandbox-evals", "confirmed": False},
+        {"llm_connector": "", "confirmed": True},
+    ],
+)
+def test_connector_name_and_confirmation_have_to_be_supplied_together(credentials: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError, match="connector"):
+        SandboxSpec.model_validate({**_MIN_SPEC, "credentials": credentials})
 
 
 def test_spec_is_frozen_so_a_pinned_configuration_cannot_drift() -> None:
@@ -111,6 +130,18 @@ def test_ttl_is_capped_so_a_sandbox_cannot_live_forever() -> None:
         SandboxSpec.model_validate({**_MIN_SPEC, "ttl_seconds": 60 * 60 * 24 * 30})
 
 
+def test_browser_requires_a_workspace() -> None:
+    with pytest.raises(ValidationError, match="browser.*workspace"):
+        SandboxSpec.model_validate({**_MIN_SPEC, "browser": True})
+
+
+def test_browser_can_be_enabled_for_a_workspace() -> None:
+    spec = SandboxSpec.model_validate({**_MIN_SPEC, "workspace": True, "browser": True})
+
+    assert spec.workspace is True
+    assert spec.browser is True
+
+
 # ── lifecycle ─────────────────────────────────────────────────────────
 
 
@@ -125,6 +156,191 @@ async def test_create_pins_the_spec_and_sets_an_expiry() -> None:
     assert rec.spec.agent.version == "v1.8.2"
     assert before + timedelta(hours=3) < rec.expires_at < before + timedelta(hours=5)
     assert db.rows[rec.id]["spec"]["model"]["provider"] == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_create_passes_tenant_quota_context_to_the_atomic_database_write() -> None:
+    db = _FakeDB()
+    settings = type(
+        "Settings",
+        (),
+        {"sandbox_max_live_per_tenant": 5, "sandbox_monthly_cost_limit_usd": 25.0},
+    )()
+
+    rec = await _service(db, settings=settings).create(
+        SandboxSpec.model_validate(_MIN_SPEC),
+        owner="tenant-a:subject-a",
+        tenant_id="tenant-a",
+        user_id="subject-a",
+    )
+
+    row = db.rows[rec.id]
+    assert row["tenant_id"] == "tenant-a"
+    assert row["user_id"] == "subject-a"
+    assert row["max_live_per_tenant"] == 5
+    assert row["monthly_cost_limit_usd"] == 25.0
+
+
+@pytest.mark.asyncio
+async def test_retrying_a_deterministic_sandbox_creation_returns_the_original_row() -> None:
+    db = _FakeDB()
+    service = _service(db)
+    spec = SandboxSpec.model_validate(_MIN_SPEC)
+
+    first = await service.create(spec, owner="tenant-a:alice", sandbox_id="sbx-stable")
+    second = await service.create(spec, owner="tenant-a:alice", sandbox_id="sbx-stable")
+
+    assert first.id == second.id == "sbx-stable"
+    assert len(db.rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_deterministic_sandbox_id_cannot_be_reused_for_different_input() -> None:
+    service = _service()
+    await service.create(SandboxSpec.model_validate(_MIN_SPEC), owner="tenant-a:alice", sandbox_id="sbx-stable")
+
+    with pytest.raises(SandboxError, match="different sandbox request"):
+        await service.create(
+            SandboxSpec.model_validate({**_MIN_SPEC, "ttl_seconds": 60}),
+            owner="tenant-a:alice",
+            sandbox_id="sbx-stable",
+        )
+
+
+def _portable_import(import_id: str) -> dict[str, Any]:
+    return {
+        "id": import_id,
+        "owner_scope": "tenant-a",
+        "registry_ref": "registry://acme/agents/acme/support@1.4.0",
+        "state": "ready",
+        "agent": {
+            "name": "support",
+            "version": "1.4.0",
+            "digest": "sha256:" + "a" * 64,
+            "runtime": {
+                "type": "container",
+                "protocol": "a2a",
+                "image": "ghcr.io/acme/support@sha256:" + "c" * 64,
+            },
+        },
+        "dependency_lock": [
+            {
+                "kind": "Skill",
+                "name": "triage",
+                "namespace": "acme",
+                "version": "1.0.0",
+                "digest": "sha256:" + "b" * 64,
+            }
+        ],
+        "permissions": {
+            "network": {"domains": ["api.example.com"]},
+            "scopes": ["acme/support"],
+            "workspace": True,
+            "tools": {"real": ["ticket_lookup"]},
+        },
+        "conformance": {"level": "sandbox_runnable"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_from_import_copies_the_exact_lock_into_the_sandbox() -> None:
+    db = _FakeDB()
+    import_id = "bf2ef27d-98a2-4ce4-b87a-c6952d2d5d09"
+    db.imports[import_id] = _portable_import(import_id)
+    spec = SandboxSpec.model_validate(
+        {
+            "import_id": import_id,
+            "model": _MIN_SPEC["model"],
+            "workspace": True,
+            "allow_domains": ["api.example.com"],
+            "allow_scopes": ["acme/support"],
+            "tools": {"overrides": {"ticket_lookup": "real"}},
+        }
+    )
+
+    record = await _service(db).create(
+        spec,
+        owner="tenant-a:subject-a",
+        tenant_id="tenant-a",
+        user_id="subject-a",
+    )
+
+    assert record.spec.agent.name == "support"
+    assert record.spec.agent.version == "1.4.0"
+    assert record.spec.import_snapshot.agent_digest == "sha256:" + "a" * 64
+    assert record.spec.import_snapshot.dependency_lock[0]["version"] == "1.0.0"
+    assert db.rows[record.id]["spec"]["import_snapshot"]["runtime"]["type"] == "container"
+
+
+@pytest.mark.asyncio
+async def test_imported_sandbox_cannot_widen_locked_permissions() -> None:
+    db = _FakeDB()
+    import_id = "bf2ef27d-98a2-4ce4-b87a-c6952d2d5d09"
+    db.imports[import_id] = _portable_import(import_id)
+    spec = SandboxSpec.model_validate(
+        {
+            "import_id": import_id,
+            "model": _MIN_SPEC["model"],
+            "allow_domains": ["metadata.google.internal"],
+        }
+    )
+
+    with pytest.raises(SandboxError, match="network domains"):
+        await _service(db).create(
+            spec,
+            owner="tenant-a:subject-a",
+            tenant_id="tenant-a",
+            user_id="subject-a",
+        )
+
+
+@pytest.mark.asyncio
+async def test_import_lookup_is_tenant_scoped_and_foreign_import_is_hidden() -> None:
+    db = _FakeDB()
+    import_id = "bf2ef27d-98a2-4ce4-b87a-c6952d2d5d09"
+    db.imports[import_id] = _portable_import(import_id)
+    spec = SandboxSpec.model_validate({"import_id": import_id, "model": _MIN_SPEC["model"]})
+
+    with pytest.raises(SandboxError, match="not found"):
+        await _service(db).create(
+            spec,
+            owner="tenant-b:subject-b",
+            tenant_id="tenant-b",
+            user_id="subject-b",
+        )
+
+
+@pytest.mark.asyncio
+async def test_tenant_quota_rejection_is_a_clear_sandbox_error() -> None:
+    from devai.adapters.telemetry import NoopTelemetryAdapter, set_global_telemetry
+    from devai.services.database import SandboxQuotaExceeded
+
+    class _QuotaDB(_FakeDB):
+        async def create_sandbox(self, **kw: Any) -> dict[str, Any]:
+            del kw
+            raise SandboxQuotaExceeded("tenant tenant-a reached its concurrent sandbox quota (5)")
+
+    class _Telemetry(NoopTelemetryAdapter):
+        counters: list[tuple[str, dict[str, str]]] = []
+
+        def incr(self, name: str, value: float = 1.0, attrs: dict[str, str] | None = None) -> None:
+            assert value == 1.0
+            self.counters.append((name, dict(attrs or {})))
+
+    telemetry = _Telemetry()
+    set_global_telemetry(telemetry)
+    try:
+        with pytest.raises(SandboxError, match="tenant-a.*concurrent sandbox quota"):
+            await _service(_QuotaDB()).create(
+                SandboxSpec.model_validate(_MIN_SPEC),
+                owner="tenant-a:subject-a",
+                tenant_id="tenant-a",
+                user_id="subject-a",
+            )
+    finally:
+        set_global_telemetry(None)
+
+    assert telemetry.counters == [("devai.sandbox.quota_rejections", {"quota": "concurrent"})]
 
 
 @pytest.mark.asyncio

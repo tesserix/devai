@@ -102,10 +102,10 @@ _GIT_CLONE_SCRIPT = (
     # cache in the cloned config, and reset the remote to a bare URL.
     'git -C /work remote set-url origin "https://github.com/${REPO}.git" || true; '
     "git -C /work config --unset-all credential.helper 2>/dev/null || true; "
-    "chown -R 1000:1000 /work"
+    "chown -R 10001:10001 /work"
 )
 
-_GIT_CLONE_SCRIPT_IF_MISSING = "test -d /work/.git || { " + _GIT_CLONE_SCRIPT + "; }; chown -R 1000:1000 /work"
+_GIT_CLONE_SCRIPT_IF_MISSING = "test -d /work/.git || { " + _GIT_CLONE_SCRIPT + "; }; chown -R 10001:10001 /work"
 
 
 def _dns_safe(value: str, *, max_len: int = 63) -> str:
@@ -214,6 +214,9 @@ def build_job_spec(
     # vars just tell the adapter which project/location/model to dial.
     for plain_key in (
         "DEVAI_LLM_PROVIDER",
+        "DEVAI_LLM_FALLBACK_PROVIDER",
+        "DEVAI_LLM_GATEWAY_BASE_URL",
+        "DEVAI_LLM_GATEWAY_REQUIRED",
         "DEVAI_VERTEX_PROJECT",
         "DEVAI_VERTEX_LOCATION",
         "DEVAI_VERTEX_GEMINI_MODEL",

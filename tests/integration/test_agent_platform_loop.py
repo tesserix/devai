@@ -9,6 +9,7 @@ things DevAI does not own.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,26 @@ class _ScriptedLLM(LLMAdapter):
         )
 
 
+class _GrantedTestCredential:
+    def __init__(self, llm: LLMAdapter) -> None:
+        self._llm = llm
+
+    async def resolve(self, record, deps):
+        assert record.spec.credentials.llm_connector == "sandbox-test"
+        assert record.spec.credentials.confirmed is True
+        return replace(
+            deps,
+            llm=self._llm,
+            scm=None,
+            memory=None,
+            secrets=None,
+            settings_service=None,
+            llm_resolver=None,
+            scm_resolver=None,
+            extra=None,
+        )
+
+
 @pytest.fixture
 async def platform(tmp_path: Path):
     catalog = _Catalog()
@@ -69,10 +90,12 @@ async def platform(tmp_path: Path):
     app.state.specialization_service = specs
     app.state.sandbox_service = SandboxService(_FakeDB())
     app.state.sandbox_traces = TraceStore(None)
+    llm = _ScriptedLLM()
     app.state.sandbox_invoker = SandboxInvoker(
         specializations=specs,
-        deps=StageDeps(config=Settings(), llm=_ScriptedLLM()),
+        deps=StageDeps(config=Settings(), llm=llm),
         traces=app.state.sandbox_traces,
+        credentials=_GrantedTestCredential(llm),
     )
     app.state.sandbox_evals = EvalRunner(app.state.sandbox_invoker, EvalStore(None))
     app.include_router(router)
@@ -90,6 +113,7 @@ async def test_a_draft_agent_is_testable_before_it_is_published(platform) -> Non
         json={
             "agent": {"name": "draft-writer", "version": "draft"},
             "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+            "credentials": {"llm_connector": "sandbox-test", "confirmed": True},
             "draft": {
                 "apiVersion": "registry.agentic.dev/v1alpha1",
                 "kind": "Agent",
@@ -121,6 +145,7 @@ async def test_a_draft_is_scored_against_its_checks_before_it_is_published(platf
         json={
             "agent": {"name": "draft-writer", "version": "draft"},
             "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+            "credentials": {"llm_connector": "sandbox-test", "confirmed": True},
             "draft": {
                 "kind": "Agent",
                 "metadata": {"name": "draft-writer"},
@@ -148,7 +173,7 @@ async def test_a_draft_is_scored_against_its_checks_before_it_is_published(platf
     assert body["results"][1]["failures"] == ["used 102 tokens, budget 10"]
 
 
-async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(platform) -> None:
+async def test_publishing_does_not_promote_an_unreviewed_agent_into_the_runtime(platform) -> None:
     client, catalog = platform
 
     # 1. Authoring publishes to the registry.
@@ -160,34 +185,28 @@ async def test_an_agent_authored_now_can_be_sandboxed_invoked_and_read_back(plat
         }
     )
 
-    # 2. A sandbox pins that agent, a model and a tool policy.
+    # 2. A sandbox may record that pin, but publication is not runtime admission.
     created = client.post(
         "/api/sandboxes",
         headers=_SAM,
         json={
             "agent": {"name": "release-notes-writer", "version": "v1"},
             "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+            "credentials": {"llm_connector": "sandbox-test", "confirmed": True},
             "tools": {"default_mode": "mock"},
         },
     )
     assert created.status_code == 201, created.text
     sandbox_id = created.json()["id"]
 
-    # 3. Invoking it answers, and says which trace it left.
+    # 3. Invocation fails closed until a reviewed local capability admits it.
     answered = client.post(
         f"/api/sandboxes/{sandbox_id}/invoke",
         headers=_SAM,
         json={"message": "summarise the release"},
     )
-    assert answered.status_code == 200, answered.text
-    body = answered.json()
-    assert body["ok"] is True
-    assert body["final_text"] == "v2.1 ships the sandbox console."
-    assert body["totals"]["total_tokens"] == 102
+    assert answered.status_code == 422
+    assert "not runnable here" in answered.json()["detail"]
 
-    # 4. The trace is readable afterwards — that is where the metrics come from.
     listed = client.get(f"/api/sandboxes/{sandbox_id}/traces", headers=_SAM)
-    assert [t["id"] for t in listed.json()] == [body["id"]]
-
-    trace = client.get(f"/api/sandboxes/{sandbox_id}/traces/{body['id']}", headers=_SAM).json()
-    assert [s["kind"] for s in trace["steps"]] == ["prompt", "prompt", "llm", "response"]
+    assert listed.json() == []

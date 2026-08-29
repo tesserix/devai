@@ -85,10 +85,17 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
                 provider="anthropic",
             ),
             _f(
+                "fallback_providers",
+                "Fallback providers (in order)",
+                "llm_fallback_provider",
+                placeholder="anthropic,openai",
+                help="Comma-separated connected providers tried after the selected primary.",
+            ),
+            _f(
                 "claude_model",
                 "Claude Model",
                 "claude_model",
-                placeholder="claude-sonnet-4-20250514",
+                placeholder="claude-sonnet-5",
                 provider="anthropic",
             ),
             _f(

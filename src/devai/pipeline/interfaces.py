@@ -90,7 +90,26 @@ class StageDeps:
     # plumb it through here.
     extra: dict[str, Any] | None = None
 
-    async def llm_for_principal(self, email: str) -> LLMAdapter | None:
+    @staticmethod
+    def _principal_identity(identity: Any) -> Any:
+        from devai.identity import Principal
+
+        if isinstance(identity, Principal):
+            return identity
+        email = str(identity or "")
+        try:
+            from devai.services.agent_turns import get_turn_context
+
+            context = get_turn_context()
+        except Exception:  # noqa: BLE001
+            context = {}
+        return Principal(
+            email=email,
+            uid=str(context.get("user_id") or ""),
+            tenant_id=str(context.get("tenant_id") or ""),
+        )
+
+    async def llm_for_principal(self, identity: Any) -> LLMAdapter | None:
         """The triggering user's own LLM adapter (their Settings connectors),
         falling back to the platform default. Stages that talk to an LLM
         should prefer this over reading ``deps.llm`` directly.
@@ -104,10 +123,15 @@ class StageDeps:
         if self.llm_resolver is None:
             return self.llm
 
+        principal = self._principal_identity(identity)
+        email = principal.email
         is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
 
         if is_human:
-            adapter = await self.llm_resolver.resolve_for_email(email)
+            if hasattr(self.llm_resolver, "resolve"):
+                adapter = await self.llm_resolver.resolve(principal)
+            else:
+                adapter = await self.llm_resolver.resolve_for_email(email)
             if adapter is not None:
                 return adapter
             if bool(getattr(self.config, "llm_require_user_connector", False)):
@@ -158,7 +182,7 @@ class StageDeps:
         except Exception:  # noqa: BLE001 — settings must never break a stage
             return self.config
 
-    async def scm_for_principal(self, email: str) -> SCMClient | None:
+    async def scm_for_principal(self, identity: Any) -> SCMClient | None:
         """The triggering user's own SCM client (their Settings connector —
         PAT or their own GitHub App), falling back to the platform client.
 
@@ -170,14 +194,19 @@ class StageDeps:
         """
         if self.scm_resolver is None:
             return self.scm
+        principal = self._principal_identity(identity)
+        email = principal.email
         is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
         if is_human:
-            client = await self.scm_resolver.resolve_for_email(email)
+            if hasattr(self.scm_resolver, "resolve"):
+                client = await self.scm_resolver.resolve(principal)
+            else:
+                client = await self.scm_resolver.resolve_for_email(email)
             if client is not None:
                 return client
         return self.scm
 
-    async def role_llm_for_principal(self, email: str, role: str) -> LLMAdapter | None:
+    async def role_llm_for_principal(self, identity: Any, role: str) -> LLMAdapter | None:
         """Role-priced chain on the TRIGGERING USER's credentials.
 
         The one policy every adapter-path LLM call should follow:
@@ -193,18 +222,24 @@ class StageDeps:
         """
         from devai.adapters.llm import role_llm_or
 
+        principal = self._principal_identity(identity)
+        email = principal.email
         is_human = bool(email) and "@" in email and not email.startswith(("webhook:", "system:"))
         settings, has_own = self.config, False
         if self.llm_resolver is not None and is_human:
             try:
-                settings, has_own = await self.llm_resolver.llm_overlay_for_email(email)
+                if hasattr(self.llm_resolver, "llm_overlay_for_principal"):
+                    settings, has_own = await self.llm_resolver.llm_overlay_for_principal(principal)
+                else:
+                    settings, has_own = await self.llm_resolver.llm_overlay_for_email(email)
             except Exception:  # noqa: BLE001
                 settings, has_own = self.config, False
 
-        chain = role_llm_or(settings, role, self.llm)
+        strict = bool(getattr(self.config, "llm_require_user_connector", False))
+        chain = role_llm_or(settings, role, None if has_own and strict else self.llm)
         if has_own or not is_human or self.llm_resolver is None:
             return chain
-        if bool(getattr(self.config, "llm_require_user_connector", False)):
+        if strict:
             budget = int(getattr(self.config, "llm_trial_token_budget", 0) or 0)
             if budget > 0 and chain is not None:
                 from devai.settings.trial import TrialLLMAdapter, get_trial_meter

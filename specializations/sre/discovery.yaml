@@ -5,6 +5,7 @@ description: >-
   services, deployments, and dependencies. Maps the topology and
   stores it as semantic memory for downstream SRE agents.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

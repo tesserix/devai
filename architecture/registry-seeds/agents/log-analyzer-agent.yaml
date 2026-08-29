@@ -1,26 +1,42 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: log-analyzer-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: log-analyzer
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: log-analyzer
+  title: Log Analyzer
+  description: Scans recent logs from every app for error spikes, exception patterns, and security signals
+    (auth failures, scrapers, port scans). Correlates timestamps with metric anomalies from perf_monitor.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/log-analyzer
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - log-analyzer
+  prompts:
+  - log-analyzer-prompt-v1
   promptRef: log-analyzer-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 25
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.sre.agents.log_analyzer.LogAnalyzerAgent
-  riskLevel: low
-  roleColor: admin

@@ -5,9 +5,10 @@ description: >-
   fan-out and decides whether to create an incident, remediate
   automatically (where safe), or escalate to a human via PagerDuty/Slack.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 
 allowed_tools:
   - k8s_get_pod_status

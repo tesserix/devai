@@ -13,6 +13,13 @@ spec:
   description: Multi-SCM operations (GitHub / GitLab / Azure DevOps) behind a single interface. Tools
     normalize the vendor differences so agent prompts stay portable.
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/scm/
+  serviceSelector:
+    namespaces:
+      matchLabels:
+        kubernetes.io/metadata.name: devai
+    services:
+      matchLabels:
+        mcp.tesserix.app/server: scm-mcp
   authMode: jwt
   tools:
   - scm_get_repo_tree

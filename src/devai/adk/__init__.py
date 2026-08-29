@@ -31,7 +31,7 @@ Typical workflow::
         .description("Drives my-skill")
         .skill("my-skill")
         .prompt("my-skill-prompt-v1")
-        .model("anthropic", "claude-sonnet-4-20250514")
+        .model("anthropic", "claude-sonnet-5")
         .image("ghcr.io/tesserix/devai/devai:latest")
     )
 
@@ -52,7 +52,8 @@ Public surface:
     scaffold_prompt / scaffold_mcp      — write a starter YAML to disk
 """
 
-from devai.adk.builders import Agent, McpServer, Prompt, Skill
+from devai.adk.builders import Agent, Dataset, EvalSuite, McpServer, Prompt, Rubric, Skill
+from devai.adk.client import AdkAPIError, AdkError, SandboxClient
 from devai.adk.publisher import Publisher, PublishResult
 from devai.adk.scaffold import (
     scaffold_agent,
@@ -63,11 +64,17 @@ from devai.adk.scaffold import (
 
 __all__ = [
     "Agent",
+    "AdkAPIError",
+    "AdkError",
+    "Dataset",
+    "EvalSuite",
     "McpServer",
     "Prompt",
     "PublishResult",
     "Publisher",
+    "Rubric",
     "Skill",
+    "SandboxClient",
     "scaffold_agent",
     "scaffold_mcp_server",
     "scaffold_prompt",

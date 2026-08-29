@@ -14,8 +14,8 @@ spec:
     (auth failures, scrapers, port scans). Correlates timestamps with metric anomalies from perf_monitor.
   category: sre
   tools:
-  - kubectl_logs
-  - prometheus_query
+  - k8s_get_pod_logs
+  - prom_query
   handoverSchema:
     findings:
       type: array

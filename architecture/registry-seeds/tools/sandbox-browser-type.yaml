@@ -1,0 +1,30 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-browser-type
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: browser_type
+spec:
+  displayName: Browser Type
+  description: Replace an input value in the sandbox browser.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      selector:
+        type: string
+      text:
+        type: string
+    required:
+    - selector
+    - text
+  tags: [sandbox, mcp-tool, browser]

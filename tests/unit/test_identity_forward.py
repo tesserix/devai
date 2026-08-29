@@ -27,6 +27,14 @@ def test_forward_trusted_with_matching_secret():
     assert _forward_trusted(req)
 
 
+def test_forward_trusted_when_configured_secret_has_trailing_newline():
+    req = _FakeRequest(
+        {"x-forwarded-user": "a@b.com", "x-auth-bff-secret": "s3cret"},
+        secret="s3cret\n",
+    )
+    assert _forward_trusted(req)
+
+
 def test_forward_not_trusted_without_secret_header():
     req = _FakeRequest({"x-forwarded-user": "a@b.com"}, secret="s3cret")
     assert not _forward_trusted(req)

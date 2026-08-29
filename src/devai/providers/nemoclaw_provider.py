@@ -38,13 +38,21 @@ class NemoClawProvider:
     """NemoClaw GPU inference provider (OpenAI-compatible API)."""
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+
+        self._gateway_required = gateway_required(config)
         api_key = config.nemoclaw_api_key or "not-needed"
         base_url = config.nemoclaw_endpoint
 
         if not base_url:
             base_url = self._discover_endpoint()
+        base_url = gateway_base_url(config, "nemoclaw", base_url)
 
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers={"x-devai-provider": "nemoclaw"} if gateway_required(config) else None,
+        )
         self.client = wrap_openai_client(client)
         self.model = config.nemoclaw_model
         self.max_tokens = config.nemoclaw_max_tokens
@@ -208,6 +216,10 @@ class NemoClawProvider:
     @retry_async(max_attempts=2, base_delay=3.0, max_delay=30.0)
     async def _call_api_generate(self, **kwargs: Any) -> Any:
         """Single generation call with retry and circuit breaker."""
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            kwargs["extra_headers"] = current_gateway_headers("nemoclaw")
 
         async def _call() -> Any:
             return await asyncio.wait_for(
@@ -224,6 +236,11 @@ class NemoClawProvider:
         tools: list[dict[str, Any]],
     ) -> Any:
         """Chat completion with tools, retry, and circuit breaker."""
+        extra_headers = None
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            extra_headers = current_gateway_headers("nemoclaw")
 
         async def _call() -> Any:
             return await asyncio.wait_for(
@@ -233,6 +250,7 @@ class NemoClawProvider:
                     tools=tools if tools else None,
                     max_tokens=self.max_tokens,
                     temperature=0.2,
+                    extra_headers=extra_headers,
                 ),
                 timeout=API_CALL_TIMEOUT,
             )

@@ -220,10 +220,10 @@ class ConversationGateway:
         except Exception:
             logger.debug("audit write failed for remote chat turn", exc_info=True)
 
-    def clear(self, conversation_id: str) -> None:
+    def clear(self, conversation_id: str, *, principal: Principal | None = None) -> None:
         """Drop a conversation's history (e.g. a Slack thread ended)."""
         if self._agent is not None:
-            self._agent.clear_session(conversation_id)
+            self._agent.clear_session(conversation_id, principal=principal)
 
 
 __all__ = ["ConversationGateway"]

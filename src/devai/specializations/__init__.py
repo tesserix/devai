@@ -33,6 +33,7 @@ Public surface:
 """
 
 from devai.specializations.base import (
+    AgentRuntime,
     HandoverField,
     LLMProvider,
     RiskLevel,
@@ -48,6 +49,7 @@ from devai.specializations.registry import SpecializationRegistry
 from devai.specializations.validator import HandoverValidationError, validate_handover
 
 __all__ = [
+    "AgentRuntime",
     "HandoverField",
     "HandoverValidationError",
     "LLMProvider",

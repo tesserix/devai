@@ -11,16 +11,21 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from devai.authz import authorize_run_read as _authorize_run_read
+from devai.authz import may_see_run as _may_see_run
+from devai.authz import resolve_principal as _require_principal
 from devai.dashboard.auth import GitHubOAuth
 from devai.dashboard.keycloak_auth import KeycloakOIDC
 from devai.dashboard.templates import INDEX_HTML
-from devai.identity import Principal, extract_principal, trace_id_from_request
+from devai.feedback import FeedbackService
+from devai.identity import Principal, trace_id_from_request
+from devai.scm import create_scm_client
+from devai.services.request_limits import enforce_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 STATIC_DIR = Path(__file__).parent / "static"
-
 
 # --- Dashboard Page ---
 
@@ -147,6 +152,92 @@ async def oauth_logout(request: Request) -> RedirectResponse:
     return response
 
 
+@router.post("/api/feedback")
+async def submit_feedback(request: Request) -> dict[str, Any]:
+    """Create an authenticated, user-owned support thread."""
+    principal = await _require_feedback_principal(request)
+    await enforce_rate_limit(request, "feedback", principal)
+    payload = await request.json()
+    service, scm = _feedback_service(request)
+    try:
+        return await service.create(
+            principal,
+            kind=str(payload.get("type", "")),
+            title=str(payload.get("title", "")),
+            description=str(payload.get("description", "")),
+        )
+    finally:
+        await scm.close()
+
+
+@router.get("/api/feedback")
+async def list_feedback(request: Request) -> dict[str, Any]:
+    """List the caller's threads, or the full inbox for support staff."""
+    principal = await _require_feedback_principal(request)
+    service, scm = _feedback_service(request)
+    try:
+        return await service.list(principal)
+    finally:
+        await scm.close()
+
+
+@router.get("/api/feedback/{thread_id}")
+async def get_feedback(request: Request, thread_id: str) -> dict[str, Any]:
+    """Return one authorized support conversation."""
+    principal = await _require_feedback_principal(request)
+    service, scm = _feedback_service(request)
+    try:
+        return await service.get(principal, thread_id)
+    finally:
+        await scm.close()
+
+
+@router.post("/api/feedback/{thread_id}/replies")
+async def reply_to_feedback(request: Request, thread_id: str) -> dict[str, Any]:
+    """Append a user or support reply while the issue remains open."""
+    principal = await _require_feedback_principal(request)
+    await enforce_rate_limit(request, "feedback", principal)
+    payload = await request.json()
+    service, scm = _feedback_service(request)
+    try:
+        return await service.reply(principal, thread_id, str(payload.get("message", "")))
+    finally:
+        await scm.close()
+
+
+@router.patch("/api/feedback/{thread_id}/status")
+async def set_feedback_status(request: Request, thread_id: str) -> dict[str, Any]:
+    """Close or reopen a feedback thread; support staff only."""
+    principal = await _require_feedback_principal(request)
+    payload = await request.json()
+    service, scm = _feedback_service(request)
+    try:
+        return await service.set_status(principal, thread_id, str(payload.get("status", "")))
+    finally:
+        await scm.close()
+
+
+def _feedback_service(request: Request) -> tuple[FeedbackService, Any]:
+    config = request.app.state.config
+    scm = create_scm_client(config)
+    return (
+        FeedbackService(
+            scm,
+            repo=getattr(config, "feedback_repo", "tesserix/devai"),
+            assignees=list(getattr(config, "feedback_assignees", [])),
+            support_identities=list(getattr(config, "feedback_support_identities", [])),
+        ),
+        scm,
+    )
+
+
+async def _require_feedback_principal(request: Request) -> Principal:
+    principal = await _require_principal(request)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return principal
+
+
 async def _get_session(request: Request) -> dict[str, Any] | None:
     """Get the current user session from cookie."""
     session_id = request.cookies.get("devai_session")
@@ -159,32 +250,6 @@ async def _get_session(request: Request) -> dict[str, Any] | None:
     return json.loads(data)
 
 
-async def _require_principal(request: Request) -> Principal | None:
-    """Resolve the caller's Principal, gated by the ``require_auth`` flag.
-
-    Behavior-neutral by default: when ``DEVAI_REQUIRE_AUTH`` is False (the
-    current prod default) this returns the resolved principal or ``None`` for
-    anonymous callers — exactly the legacy ``extract_principal`` path, so the
-    legacy dashboard mutating routes behave identically until the flag is
-    flipped in chart values (CHART-1). When ``require_auth`` is True it
-    delegates to :func:`devai.authz.require_principal`, which 401s anonymous
-    callers (no fallback to a literal ``operator``).
-
-    This is the CODE-1 gate for the legacy dashboard mutating routes (repo /
-    project / scaffold / pipeline trigger / run-control / approval / governance
-    / config writes).
-    """
-    config = getattr(request.app.state, "config", None)
-    if config is not None and getattr(config, "require_auth", False):
-        from devai.authz import require_principal
-
-        return await require_principal(request)
-    try:
-        return await extract_principal(request)
-    except Exception:  # noqa: BLE001 — identity lookup failure must not 500
-        return None
-
-
 async def _authorize_run(request: Request, run: dict[str, Any] | None) -> Principal | None:
     """Resolve the caller and enforce team membership on the run's owning team.
 
@@ -195,9 +260,8 @@ async def _authorize_run(request: Request, run: dict[str, Any] | None) -> Princi
     can persist who approved/rejected.
     """
     principal = await _require_principal(request)
-    team_id = (run or {}).get("team_id") or ""
-    team_service = getattr(request.app.state, "team_service", None)
-    if team_service is not None and not team_service.can_dispatch(principal, team_id):
+    if not _may_see_run(request, principal, run):
+        team_id = (run or {}).get("team_id") or ""
         raise HTTPException(status_code=403, detail=f"not a member of team {team_id}")
     return principal
 
@@ -745,6 +809,7 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
     # CODE-1: gate the mutating trigger. Dormant when require_auth is False
     # (returns the resolved principal or None); 401s anonymous callers when on.
     gated_principal = await _require_principal(request)
+    await enforce_rate_limit(request, "pipeline_trigger", gated_principal)
     body = await request.json()
     repo = body["repo"]
     requirements = body.get("requirements", "")
@@ -768,10 +833,13 @@ async def trigger_pipeline(request: Request) -> dict[str, Any]:
         issue = await github.get_issue(repo, issue_number)
         # Build full requirements from issue (same as webhook)
         labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
-        requirements = (
+        from devai.services.guardrails import sanitize_untrusted_text
+
+        requirements = sanitize_untrusted_text(
             f"# Requirement: Issue #{issue_number} — {issue.get('title', '')}\n"
             f"**Labels:** {', '.join(labels)}\n\n"
-            f"## Description\n\n{issue.get('body', '')}"
+            f"## Description\n\n{issue.get('body', '')}",
+            "issue",
         )
         trigger_type = "github_issue"
         trigger_ref = str(issue_number)
@@ -1000,7 +1068,8 @@ async def stop_pipeline(run_id: str, request: Request) -> dict[str, Any]:
 
 @router.get("/api/pipeline/runs")
 async def get_pipeline_runs(request: Request, repo: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-    """Get recent pipeline runs."""
+    """Get recent pipeline runs the caller's teams own."""
+    principal = await _require_principal(request)
     state = request.app.state.state_manager
     if repo:
         run_ids = await state.list_runs_by_repo(repo, limit)
@@ -1010,7 +1079,7 @@ async def get_pipeline_runs(request: Request, repo: str | None = None, limit: in
     runs = []
     for rid in run_ids:
         run_data = await state.get_run(rid)
-        if run_data:
+        if run_data and _may_see_run(request, principal, run_data):
             agents = await state.get_agent_statuses(rid)
             runs.append(
                 {
@@ -1031,6 +1100,7 @@ async def get_pipeline_run(request: Request, run_id: str) -> dict[str, Any]:
     run_data = await state.get_run(run_id)
     if not run_data:
         raise HTTPException(status_code=404, detail="Run not found")
+    await _authorize_run_read(request, run_data)
     agents = await state.get_agent_statuses(run_id)
     run_data["agents"] = agents
 
@@ -1051,26 +1121,62 @@ async def get_pipeline_run(request: Request, run_id: str) -> dict[str, Any]:
 # --- Governance (CLAUDE.md) ---
 
 
+def _governance_repo(repo: str) -> str:
+    """Validate a governance repo slug before it becomes a Redis key."""
+    from devai.tools.git_guard import InvalidGitRef, validate_repo
+
+    try:
+        return validate_repo(repo)
+    except InvalidGitRef as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+async def _require_onboarded_repo(request: Request, repo: str) -> str:
+    """Confine governance writes to repos DevAI has actually onboarded.
+
+    The stored CLAUDE.md is injected into every run's initial state, so an
+    arbitrary repo slug here plants instructions for agents. Onboarding is the
+    ownership signal available today; when no onboarding service is wired
+    (local dev) the check is skipped rather than failing the route.
+    """
+    slug = _governance_repo(repo)
+    service = getattr(request.app.state, "onboarding_service", None)
+    if service is None:
+        return slug
+    owner, _, name = slug.partition("/")
+    if await service.get(owner, name) is None:
+        raise HTTPException(status_code=404, detail=f"repo {slug} is not onboarded")
+    return slug
+
+
 @router.get("/api/governance/claude-md")
 async def get_claude_md(request: Request, repo: str) -> dict[str, str]:
     """Get the stored CLAUDE.md governance content for a repo."""
+    await _require_principal(request)
+    slug = _governance_repo(repo)
     redis = request.app.state.state_manager.redis
-    content = await redis.get(f"devai:governance:{repo}:claude_md")
-    return {"content": content or "", "repo": repo}
+    content = await redis.get(f"devai:governance:{slug}:claude_md")
+    return {"content": content or "", "repo": slug}
 
 
 @router.post("/api/governance/claude-md")
 async def save_claude_md(request: Request) -> dict[str, str]:
     """Save CLAUDE.md governance content for a repo."""
-    await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
+    principal = await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
     body = await request.json()
-    repo = body["repo"]
-    content = body["content"]
+    if not isinstance(body, dict) or "repo" not in body or "content" not in body:
+        raise HTTPException(status_code=400, detail="repo and content are required")
+    slug = await _require_onboarded_repo(request, str(body["repo"]))
+    content = str(body["content"])
 
     redis = request.app.state.state_manager.redis
-    await redis.set(f"devai:governance:{repo}:claude_md", content)
-    logger.info("CLAUDE.md governance updated for %s", repo)
-    return {"status": "saved", "repo": repo}
+    await redis.set(f"devai:governance:{slug}:claude_md", content)
+    logger.info(
+        "CLAUDE.md governance updated for %s by %s",
+        slug,
+        (principal.email if principal else "anonymous"),
+    )
+    return {"status": "saved", "repo": slug}
 
 
 # --- Approval Gates ---
@@ -1079,7 +1185,9 @@ async def save_claude_md(request: Request) -> dict[str, str]:
 @router.get("/api/pipeline/runs/{run_id}/approvals")
 async def get_pending_approvals(request: Request, run_id: str) -> list[dict[str, Any]]:
     """Get pending approval gates for a pipeline run."""
-    redis = request.app.state.state_manager.redis
+    state = request.app.state.state_manager
+    await _authorize_run_read(request, await state.get_run(run_id))
+    redis = state.redis
     raw = await redis.lrange(f"devai:run:{run_id}:approvals", 0, -1)
     return [json.loads(item) for item in raw]
 
@@ -1231,7 +1339,7 @@ async def get_pipeline_config(request: Request, repo: str = "default") -> dict[s
             "merge": True,
             "createPR": False,
         },
-        "claude_model": "claude-sonnet-4-20250514",
+        "claude_model": "claude-sonnet-5",
         "openai_model": "o3",
         "groq_model": "llama-3.3-70b-versatile",
         "max_review_iterations": 3,

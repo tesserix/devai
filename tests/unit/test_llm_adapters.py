@@ -15,6 +15,8 @@ Three layers of coverage matching the memory adapter tests:
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from devai.adapters.llm import (
@@ -288,6 +290,39 @@ def test_factory_explicit_provider_override_wins_over_settings():
     assert a.provider_name == "noop"
 
 
+def test_gateway_sends_attribution_as_headers_not_openai_parameters():
+    from devai.adapters.llm.openai_adapter import OpenAILLMAdapter
+
+    adapter = object.__new__(OpenAILLMAdapter)
+    adapter.provider_name = "gateway"
+    adapter.default_model = "devai-default"
+    request = LLMRequest(
+        messages=[LLMMessage(role=LLMRole.USER, content="hello")],
+        extra={
+            "agent": "reviewer",
+            "run_id": "run-1",
+            "triggered_by": "same@example.com",
+            "tenant_id": "tenant-a",
+            "user_id": "shared-uid",
+        },
+    )
+
+    kwargs = adapter._build_kwargs(request)
+
+    assert "agent" not in kwargs
+    assert "run_id" not in kwargs
+    assert "triggered_by" not in kwargs
+    assert "tenant_id" not in kwargs
+    assert "user_id" not in kwargs
+    assert kwargs["extra_headers"] == {
+        "x-devai-tenant-id": "tenant-a",
+        "x-devai-user-id": "shared-uid",
+        "x-devai-run-id": "run-1",
+        "x-devai-agent": "reviewer",
+        "x-devai-provider": "gateway",
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Dataclass round-trip
 # ─────────────────────────────────────────────────────────────────────
@@ -389,6 +424,26 @@ def test_anthropic_kwargs_never_forward_bookkeeping_extras():
     # SYSTEM messages are PROMOTED to the system param, never dropped.
     assert kwargs["system"] == "You are the QA lead."
     assert all(m["role"] != "system" for m in kwargs["messages"])
+
+
+def test_anthropic_kwargs_omit_temperature_for_opus_4_8():
+    pytest.importorskip("anthropic")
+    from devai.adapters.llm.anthropic_adapter import AnthropicLLMAdapter
+    from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+    adapter = AnthropicLLMAdapter.__new__(AnthropicLLMAdapter)
+    adapter.default_model = "claude-sonnet-4-6"
+    adapter.default_max_tokens = 100
+
+    kwargs = adapter._build_kwargs(
+        LLMRequest(
+            messages=[LLMMessage(role=LLMRole.USER, content="hello")],
+            model="claude-opus-4-8",
+            temperature=0.2,
+        )
+    )
+
+    assert "temperature" not in kwargs
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -497,6 +552,33 @@ def test_model_policy_normalizes_fable_to_48():
     assert coerce_model("anthropic", "claude-sonnet-4-6") == "claude-sonnet-4-6"
 
 
+def test_model_policy_remaps_retired_models():
+    from devai.adapters.llm.model_policy import coerce_model, normalize_model
+
+    # The retired sonnet 404s from /v1/messages; a stale pin self-heals.
+    assert normalize_model("claude-sonnet-4-20250514") == "claude-sonnet-5"
+    assert normalize_model("Claude-Sonnet-4-20250514") == "claude-sonnet-5"
+    assert coerce_model("anthropic", "claude-sonnet-4-20250514") == "claude-sonnet-5"
+    # Exact ids only — a live dated release of the same family is untouched.
+    assert normalize_model("claude-sonnet-4-20991231") == "claude-sonnet-4-20991231"
+
+
+def test_no_specialization_pins_a_retired_model():
+    """The spec YAMLs shipped in the image must not pin a withdrawn id: the
+    per-role pin overrides the platform default, so a stale one 404s first."""
+    import yaml
+
+    from devai.adapters.llm.model_policy import _RETIRED_MODELS
+
+    spec_dir = pathlib.Path(__file__).resolve().parents[2] / "specializations"
+    stale = []
+    for path in sorted(spec_dir.rglob("*.yaml")):
+        model = (yaml.safe_load(path.read_text()) or {}).get("llm_model", "")
+        if str(model).strip().lower() in _RETIRED_MODELS:
+            stale.append(f"{path.name}: {model}")
+    assert not stale, "specializations pin retired models: " + "; ".join(stale)
+
+
 def test_model_policy_provider_fit():
     from devai.adapters.llm.model_policy import coerce_model, provider_serves
 
@@ -572,8 +654,7 @@ def test_default_fallback_order_is_anthropic_openai_vertex_groq():
 
 
 def test_platform_and_role_chains_build_in_order(monkeypatch):
-    """The platform chain degrades anthropic→openai→vertex→groq; role chains
-    add the claude-preserving gateway right after the primary."""
+    """Role model preferences never reorder the configured provider chain."""
     from devai.adapters.llm import factory
     from devai.config import Settings
 
@@ -594,10 +675,10 @@ def test_platform_and_role_chains_build_in_order(monkeypatch):
         chain = factory.create_llm_chain(s)
         assert chain.provider_name == "anthropic→openai→vertex_gemini→groq"
 
-        # Role chain for a claude-pinned role: anthropic primary, gateway
-        # (claude-on-vertex) first, then the same ordered fallbacks.
+        # The non-governed legacy gateway remains a final fallback. In
+        # production gateway_required routes every provider through it instead.
         role = factory.create_role_llm(s, "dev_api")
-        assert role.provider_name == "anthropic→gateway→openai→vertex_gemini→groq"
+        assert role.provider_name == "anthropic→openai→vertex_gemini→groq→gateway"
     finally:
         factory._ROLE_CHAIN_CACHE.clear()
 
@@ -629,5 +710,38 @@ def test_role_chain_adapts_to_connected_providers(monkeypatch):
         assert getattr(first, "_model", "") == "o3"
         second = role._chain[1]
         assert getattr(second, "_model", "") == "llama-3.3-70b-versatile"
+    finally:
+        factory._ROLE_CHAIN_CACHE.clear()
+
+
+def test_role_chain_cache_separates_required_gateway_policy(monkeypatch):
+    from devai.adapters.llm import factory
+    from devai.config import Settings
+
+    class _Fake:
+        provider_name = "anthropic"
+        default_model = ""
+
+        def __init__(self, gateway_routed: bool) -> None:
+            self.gateway_routed = gateway_routed
+
+    def fake_create(settings, provider=None):
+        del provider
+        return _Fake(settings.llm_gateway_required)
+
+    monkeypatch.setattr(factory, "create_llm_adapter", fake_create)
+    factory._ROLE_CHAIN_CACHE.clear()
+    try:
+        common = {
+            "llm_provider": "anthropic",
+            "llm_gateway_base_url": "http://ai-gateway:8080",
+            "anthropic_base_url": "https://api.anthropic.com",
+        }
+        direct = factory.create_role_llm(Settings(**common, llm_gateway_required=False), "dev_api")
+        governed = factory.create_role_llm(Settings(**common, llm_gateway_required=True), "dev_api")
+
+        assert direct is not governed
+        assert direct._chain[0]._inner.gateway_routed is False
+        assert governed._chain[0]._inner.gateway_routed is True
     finally:
         factory._ROLE_CHAIN_CACHE.clear()

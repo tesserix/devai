@@ -1,26 +1,44 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: root-cause-analyst-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: root-cause-analyst
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: root-cause-analyst
+  title: Root Cause Analyst
+  description: "Synthesis role. Reads every specialist's findings plus the correlated finding set and\
+    \ produces a single ranked root-cause hypothesis with a causal chain and confidence. Primarily reasoning\
+    \ over prior outputs, with read-only evidence tools (logs, events, metrics) to verify a causal chain\
+    \ before committing to it \u2014 changes nothing."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/root-cause-analyst
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - root-cause-analyst
+  prompts:
+  - root-cause-analyst-prompt-v1
   promptRef: root-cause-analyst-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: 0.2
-    maxTokens: null
-  limits:
-    maxTurns: 8
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: engineer

@@ -37,8 +37,19 @@ from devai.adapters.llm.base import (
     LLMUsage,
     ToolCall,
 )
+from devai.adapters.llm.gateway_routing import gateway_headers
 
 logger = logging.getLogger(__name__)
+
+_WIRE_EXTRA_KEYS = frozenset(
+    {
+        "frequency_penalty",
+        "parallel_tool_calls",
+        "presence_penalty",
+        "seed",
+        "tool_choice",
+    }
+)
 
 
 class OpenAILLMAdapter(LLMAdapter):
@@ -56,11 +67,12 @@ class OpenAILLMAdapter(LLMAdapter):
         default_model: str = "",
         timeout_seconds: float | None = None,
         provider_name: str = "",
+        gateway_routed: bool = False,
     ) -> None:
         if not api_key:
             raise AdapterNotConfigured("openai adapter requires DEVAI_OPENAI_API_KEY")
         try:
-            from openai import AsyncOpenAI  # type: ignore[import-untyped]
+            from openai import AsyncOpenAI
         except ImportError as e:
             raise AdapterNotInstalled("openai adapter requires `pip install openai` — falling back to Noop") from e
 
@@ -72,6 +84,7 @@ class OpenAILLMAdapter(LLMAdapter):
         if timeout_seconds is not None:
             kwargs["timeout"] = timeout_seconds
         self._client = AsyncOpenAI(**kwargs)
+        self._gateway_routed = gateway_routed
         if default_model:
             self.default_model = default_model
         if provider_name:
@@ -182,8 +195,14 @@ class OpenAILLMAdapter(LLMAdapter):
                 }
                 for t in request.tools
             ]
-        for k, v in (request.extra or {}).items():
-            kwargs.setdefault(k, v)
+        extra = request.extra or {}
+        for key in _WIRE_EXTRA_KEYS:
+            if key in extra:
+                kwargs[key] = extra[key]
+        if getattr(self, "_gateway_routed", self.provider_name == "gateway"):
+            headers = gateway_headers(extra, provider=self.provider_name)
+            if headers:
+                kwargs["extra_headers"] = headers
         return kwargs
 
     def _normalize(self, raw: Any, latency_ms: float) -> LLMResponse:

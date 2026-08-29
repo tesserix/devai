@@ -44,6 +44,7 @@ import { Breadcrumbs } from "@/components/breadcrumbs";
 import { BuildingState, type BuildPhase } from "@/components/building-state";
 import { EmptyState } from "@/components/empty-state";
 import { BoardroomCard } from "@/components/boardroom-card";
+import { QueuedRunStatus } from "@/components/queued-run-status";
 import { useToast } from "@/components/toast";
 import {
   AlertTriangle,
@@ -67,12 +68,27 @@ interface RunDetail extends PipelineRun {
   trace_id?: string;
   current_stage?: string;
   state?: string;
+  updated_at?: string | number;
+  started_at?: string | number | null;
   error?: string;
   failed_stage?: string;
   stages_completed?: string[];
   stages_skipped?: string[];
   stages_failed?: string[];
-  stage_events?: Array<{ stage: string; phase?: string; duration_ms?: number }>;
+  stage_events?: Array<{
+    stage: string;
+    phase?: string;
+    duration_ms?: number;
+    message?: string;
+    error?: string;
+    timestamp?: string | number;
+  }>;
+  events?: Array<{
+    step?: string;
+    status?: string;
+    detail?: string;
+    timestamp?: string | number;
+  }>;
   checkpoints?: Array<{ sha: string; label?: string; stage?: string; ts?: number }>;
   agent_context?: Record<string, unknown> & {
     preview_url?: string;
@@ -98,12 +114,14 @@ export default function RunDetailPage() {
   const [a2a, setA2a] = useState<A2AMessage[]>([]);
   const [delegation, setDelegation] = useState<DelegationPlan | null>(null);
   const [selectedStage, setSelectedStage] = useState<{ name: string; agent?: string } | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
 
   const refreshRun = useCallback(async () => {
     if (!runId) return;
     try {
       const data = (await api.getRun(runId)) as RunDetail;
       setRun(data);
+      setLastCheckedAt(Date.now());
       setNotFound(false);
     } catch (e) {
       // 404 (unknown run) is terminal; transient errors just keep last data.
@@ -129,7 +147,7 @@ export default function RunDetailPage() {
   // gates, and A2A timeline a consistent real-time view). The poll below is
   // the reconciliation fallback — slow while connected, 4s otherwise.
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { connected: live } = useRunEvents(
+  const { connected: live, status: streamStatus } = useRunEvents(
     runId || null,
     useCallback(() => {
       if (refreshTimer.current) return;
@@ -206,6 +224,7 @@ export default function RunDetailPage() {
   }, [gates]);
 
   const norm = normalizeRunState(run?.state || run?.stage);
+  const isQueued = norm === "pending" || norm === "queued";
   const isTerminal = norm === "done" || norm === "failed" || norm === "cancelled";
   const runActive = norm === "running" || norm === "paused" || norm === "queued" || norm === "gate-pending";
 
@@ -392,6 +411,14 @@ export default function RunDetailPage() {
               <div className="min-w-0 space-y-5">
                 <GuidancePanel id="run-detail" />
 
+                {run && isQueued && (
+                  <QueuedRunStatus
+                    run={run}
+                    streamStatus={streamStatus}
+                    lastCheckedAt={lastCheckedAt}
+                  />
+                )}
+
                 {/* Live run DAG */}
                 <section
                   className="rounded-lg border p-4"
@@ -523,7 +550,6 @@ export default function RunDetailPage() {
 
         {tab === "preview" && (
           <PreviewTab
-            runId={runId}
             repo={run?.repo}
             pipelineUrl={previewUrl}
             blueprint={blueprint}
@@ -725,13 +751,11 @@ function derivePhase(session: PreviewSession | null, diagnoses: PreviewDiagnosis
 }
 
 function PreviewTab({
-  runId,
   repo,
   pipelineUrl,
   blueprint,
   blueprintHasPreview,
 }: {
-  runId: string;
   repo?: string;
   pipelineUrl: string;
   blueprint?: string;

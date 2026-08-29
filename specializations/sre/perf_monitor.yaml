@@ -4,6 +4,7 @@ description: >-
   Queries Prometheus for latency, throughput, error rate, and saturation
   SLIs for every app discovered. Flags any app breaching its SLO budget.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

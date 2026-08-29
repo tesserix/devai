@@ -101,7 +101,15 @@ async def build_runtime(
         from devai.analytics.usage_ledger import UsageLedger, get_global_ledger, set_global_ledger
 
         if get_global_ledger() is None:
-            set_global_ledger(UsageLedger(getattr(config, "redis_url", "") or ""))
+            set_global_ledger(
+                UsageLedger(
+                    getattr(config, "redis_url", "") or "",
+                    sandbox_monthly_cost_limit_usd=float(
+                        getattr(config, "sandbox_monthly_cost_limit_usd", 100.0) or 0.0
+                    ),
+                    sandbox_spend_alert_ratio=float(getattr(config, "sandbox_spend_alert_ratio", 0.8) or 0.0),
+                )
+            )
     except Exception:  # noqa: BLE001
         logger.exception("bootstrap: usage ledger registration failed")
 

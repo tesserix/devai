@@ -1,26 +1,44 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: gitops-auditor-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: gitops-auditor
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: gitops-auditor
+  title: GitOps Auditor
+  description: "Read-only GitOps hygiene sweep across all three controllers. Finds Argo CD apps OutOfSync/Degraded\
+    \ or stuck mid-operation, Flux objects that are suspended, not Ready, or pinned to stale revisions,\
+    \ failing Flux sources, and Kargo stages with failed promotions or freight that stopped flowing. Issues\
+    \ no mutations \u2014 it reports drift with evidence so the responder or a human can act."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/gitops-auditor
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - gitops-auditor
+  prompts:
+  - gitops-auditor-prompt-v1
   promptRef: gitops-auditor-prompt-v1
-  llm:
-    provider: groq
-    model: llama-3.3-70b-versatile
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 20
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: admin

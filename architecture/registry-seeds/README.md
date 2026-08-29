@@ -1,5 +1,9 @@
 # DevAI registry seeds
 
+For the complete author, validate, commit, push, merge, reseed, and verify
+procedure, see
+[`docs/agentic/AGENT-REGISTRY-PUBLISHING.md`](../../docs/agentic/AGENT-REGISTRY-PUBLISHING.md).
+
 In-tree v1alpha1 manifests for every Skill / Agent / Prompt / MCPServer that
 DevAI publishes to the Solo.io agentregistry (aregistry). These seeds are
 the **source of truth** — when the cluster is bootstrapped or rebuilt, the
@@ -16,6 +20,8 @@ architecture/registry-seeds/
   agents/              one per Agent — runtime resource that points at a Skill
   prompts/             one per Prompt — extracted system prompts so the
                        dashboard prompt-editor can A/B test variants
+  datasets/            versioned public golden cases for built-in agents
+  eval-suites/         versioned scorer and threshold gates over datasets
   mcp-servers/         one per MCP server DevAI publishes (fiber-mcp etc.)
   projects/            top-level Project resource grouping it all
 ```

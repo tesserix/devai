@@ -197,6 +197,8 @@ class PipelineService:
                         cost_usd=cost,
                         duration_ms=0.0,
                         triggered_by=email,
+                        tenant_id=str(envelope.get("tenant_id") or ""),
+                        user_id=str(envelope.get("user_id") or email),
                         agent=str(envelope.get("agent") or ""),
                         run_id=run_id,
                     )
@@ -212,6 +214,9 @@ class PipelineService:
                     tok_in=tok_in,
                     tok_out=tok_out,
                     cost=cost,
+                    tenant_id=str(envelope.get("tenant_id") or ""),
+                    user_id=str(envelope.get("user_id") or email),
+                    triggered_by=email,
                 )
             )
             if envelope.get("trial") and email:
@@ -226,7 +231,17 @@ class PipelineService:
 
     @staticmethod
     async def _persist_turn_execution(
-        *, run_id: str, agent: str, provider: str, model: str, tok_in: int, tok_out: int, cost: float
+        *,
+        run_id: str,
+        agent: str,
+        provider: str,
+        model: str,
+        tok_in: int,
+        tok_out: int,
+        cost: float,
+        tenant_id: str,
+        user_id: str,
+        triggered_by: str,
     ) -> None:
         try:
             from devai.services.database import get_global_db
@@ -234,15 +249,22 @@ class PipelineService:
             db = await get_global_db()
             if db is None:
                 return
+            # No `or provider` fallback: the provider already has its own
+            # column, and naming the row after it invents an agent that then
+            # pollutes every per-agent rollup. record_llm_call defaults an
+            # empty name to "unknown".
             await db.record_llm_call(
                 run_id=run_id,
-                agent_name=agent or provider,
+                agent_name=agent,
                 provider=provider,
                 model=model,
                 tokens_input=tok_in,
                 tokens_output=tok_out,
                 cost_usd=cost,
                 duration_ms=0.0,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                triggered_by=triggered_by,
             )
         except Exception:  # noqa: BLE001 — analytics persistence is best-effort
             logger.debug("turn execution persistence failed", exc_info=True)
@@ -822,12 +844,13 @@ class PipelineService:
     async def delete_run(self, task_id: str) -> bool:
         """Remove a run entirely — from the in-memory pipeline (stopping it
         first), the pipeline-task store, and the legacy orchestrator store —
-        plus its control flag. Idempotent; safe on zombie / unknown runs."""
+        while retaining the stop flag until its TTL. Idempotent; safe on zombie
+        / unknown runs and runs owned by another replica."""
+        try:
+            await self.set_run_control(task_id, "stopped")
+        except Exception:  # noqa: BLE001
+            logger.debug("stop-before-delete failed for %s", task_id, exc_info=True)
         if self._pipeline is not None and self._pipeline.get_task(task_id) is not None:
-            try:
-                await self.set_run_control(task_id, "stopped")
-            except Exception:  # noqa: BLE001
-                logger.debug("stop-before-delete failed for %s", task_id, exc_info=True)
             self._pipeline.remove_task(task_id)
         sm = self.state_manager
         if sm is not None:
@@ -847,12 +870,6 @@ class PipelineService:
                         await fn(task_id)
                     except Exception:  # noqa: BLE001
                         logger.warning("%s failed for %s", method, task_id, exc_info=True)
-            ctrl = getattr(sm, "set_pipeline_control", None)
-            if ctrl is not None:
-                try:
-                    await ctrl(task_id, "")
-                except Exception:  # noqa: BLE001
-                    logger.debug("clear control flag failed for %s", task_id, exc_info=True)
         return True
 
     async def resume_from_failure(self, task_id: str) -> dict[str, Any]:
@@ -1056,12 +1073,42 @@ class PipelineService:
             return None
         return await self.state_manager.get_pipeline_task(task_id)
 
+    @staticmethod
+    def _newer(a: dict[str, Any] | None, b: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The fresher of two snapshots of the same run, by `updated_at`.
+
+        In-memory is not automatically the newest: the API pod holds the task
+        it enqueued while a *different* process (the Temporal worker) executes
+        it and persists progress. Ranking by `updated_at` matches the rule
+        `StateManager.persist_task` already applies to concurrent writes, so
+        readers and writers agree on which snapshot is current.
+        """
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return a if float(a.get("updated_at") or 0.0) >= float(b.get("updated_at") or 0.0) else b
+
     async def get_task(self, task_id: str) -> dict[str, Any] | None:
-        """Best-effort: prefer the in-memory snapshot, fall back to Redis."""
-        in_mem = self.get_task_in_memory(task_id)
-        if in_mem is not None:
-            return in_mem
-        return await self.get_persisted_task(task_id)
+        """Best-effort: whichever of the in-memory / persisted snapshots is newer."""
+        return self._newer(self.get_task_in_memory(task_id), await self.get_persisted_task(task_id))
+
+    async def list_runs(
+        self, *, limit: int = 50, blueprint: str | None = None, repo: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Recent runs, merging in-memory and persisted by run id.
+
+        Same freshness rule as :meth:`get_task` — see :meth:`_newer`.
+        """
+        merged: dict[str, dict[str, Any]] = {}
+        persisted = await self.list_persisted_tasks(limit=limit, blueprint=blueprint, repo=repo)
+        for task in [*persisted, *self.list_tasks_in_memory()]:
+            task_id = task.get("id")
+            if not task_id:
+                continue
+            merged[task_id] = self._newer(merged.get(task_id), task) or task
+        ordered = sorted(merged.values(), key=lambda t: float(t.get("created_at") or 0.0), reverse=True)
+        return ordered[:limit]
 
     # ── SSE event stream ────────────────────────────────────────────
 
@@ -1289,13 +1336,6 @@ class PipelineService:
 
     # ── Internal: live-observability derivations (run-event spine) ────
 
-    #: stage phase → agent card status
-    _PHASE_TO_STATUS = {
-        "started": "running",
-        "completed": "completed",
-        "failed": "failed",
-        "skipped": "skipped",
-    }
     _A2A_CAP = 500  # max coordination messages kept per run
 
     def _derive_run_signals(self, task: DevAITask, event: StageEvent, ts: float) -> list[dict[str, Any]]:
@@ -1309,15 +1349,11 @@ class PipelineService:
         """
         envelopes: list[dict[str, Any]] = []
         phase = event.phase.value
-        status = self._PHASE_TO_STATUS.get(phase, "")
         agent = (event.agent or "").strip()
 
         # ── 1. Per-agent runtime status ─────────────────────────────
-        if agent and status:
-            entry: dict[str, Any] = {"status": status, "updated_at": ts, "stage": event.stage}
-            if event.error:
-                entry["error"] = event.error
-            task.agents[agent] = entry
+        status = task.apply_agent_status(event, ts)
+        if status:
             envelopes.append(
                 {
                     "event_type": "agent_status",

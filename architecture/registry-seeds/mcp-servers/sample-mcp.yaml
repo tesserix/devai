@@ -15,6 +15,13 @@ spec:
     \ and the dashboard's MCP Servers tile. Safe to delete once verified \u2014 no real backend; the endpoint\
     \ is a placeholder."
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/sample/
+  serviceSelector:
+    namespaces:
+      matchLabels:
+        kubernetes.io/metadata.name: devai
+    services:
+      matchLabels:
+        mcp.tesserix.app/server: sample-mcp
   authMode: none
   tools:
   - sample_ping

@@ -86,6 +86,11 @@ async def auth_login(request: Request, body: LoginBody) -> dict:
         max_age=_SESSION_TTL,
     )
     logger.info("local_db login: %s (roles=%s)", result.login, result.roles)
+
+    # Best-effort sign-in record for the admin overview.
+    from devai.admin.activity import record_login
+
+    await record_login(request.app.state, body.username)
     return response
 
 

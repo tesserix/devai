@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: cost-optimizer-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: cost-optimizer
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: cost-optimizer
+  title: Cost Optimizer
+  description: "Finds concrete cloud savings \u2014 oversized or idle workloads, orphaned disks/IPs, low-utilisation\
+    \ Cloud SQL/compute, and Recommender cost insights \u2014 and quantifies the monthly saving for each.\
+    \ Read-only; proposes, never applies."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/cost-optimizer
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - cost-optimizer
+  prompts:
+  - cost-optimizer-prompt-v1
   promptRef: cost-optimizer-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: 0.1
-    maxTokens: null
-  limits:
-    maxTurns: 24
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: product

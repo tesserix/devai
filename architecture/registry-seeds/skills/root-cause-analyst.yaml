@@ -11,10 +11,18 @@ metadata:
 spec:
   displayName: Root Cause Analyst
   description: "Synthesis role. Reads every specialist's findings plus the correlated finding set and\
-    \ produces a single ranked root-cause hypothesis with a causal chain and confidence. Pure reasoning\
-    \ over prior outputs \u2014 calls no tools, changes nothing."
+    \ produces a single ranked root-cause hypothesis with a causal chain and confidence. Primarily reasoning\
+    \ over prior outputs, with read-only evidence tools (logs, events, metrics) to verify a causal chain\
+    \ before committing to it \u2014 changes nothing."
   category: sre
-  tools: []
+  tools:
+  - k8s_get_events
+  - k8s_get_pod_status
+  - k8s_get_pod_logs
+  - prom_query
+  - prom_query_range
+  - obs_query_logs
+  - obs_query_metrics
   handoverSchema:
     root_cause:
       type: string

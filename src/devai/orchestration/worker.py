@@ -1,4 +1,4 @@
-"""Temporal worker — hosts the generic BlueprintWorkflow + run_stage activity.
+"""Temporal worker — hosts blueprint and Agent development workflows.
 
 Run as the ``devai-worker`` Deployment:
 
@@ -14,18 +14,27 @@ blueprint or agent never requires a worker change.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any
 
 from devai.config import Settings
-from devai.orchestration.activities import run_stage_activity
+from devai.orchestration.activities import publish_progress_activity, run_stage_activity
+from devai.orchestration.agent_lifecycle import AgentLifecycleWorkflow
+from devai.orchestration.agent_lifecycle_outbox import AgentLifecycleOutboxRelay
+from devai.orchestration.agent_lifecycle_runtime import build_agent_lifecycle_runtime
 from devai.orchestration.context import WorkerContext, set_worker_context
 from devai.orchestration.workflows import BlueprintWorkflow
-from devai.pipeline.bootstrap import build_runtime
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from devai.core.state import StateManager
+    from devai.scm.base import SCMClient
 
-async def _build_scm(config: Settings):
+
+async def _build_scm(config: Settings) -> SCMClient | None:
     try:
         from devai.scm.factory import create_scm_client
 
@@ -35,20 +44,48 @@ async def _build_scm(config: Settings):
         return None
 
 
-async def _build_state_manager(config: Settings):
+async def _build_state_manager(config: Settings) -> StateManager | None:
     try:
-        from devai.core.state import create_state_manager
+        from devai.core.state import StateManager
 
-        sm = create_state_manager(config)
-        connect = getattr(sm, "connect", None)
-        if connect is not None:
-            maybe = connect()
-            if asyncio.iscoroutine(maybe):
-                await maybe
+        sm = StateManager(
+            config.redis_url,
+            config.redis_result_ttl,
+            config.redis_lock_ttl,
+        )
+        await sm.redis.ping()
         return sm
     except Exception:  # noqa: BLE001
+        if config.temporal_worker_dependencies_required:
+            logger.exception("worker: required StateManager unavailable")
+            raise
         logger.warning("worker: StateManager unavailable — persistence will degrade", exc_info=True)
         return None
+
+
+def _worker_options(config: Settings) -> dict[str, Any]:
+    from temporalio.common import VersioningBehavior, WorkerDeploymentVersion
+    from temporalio.worker import WorkerDeploymentConfig
+
+    deployment_config = None
+    if config.temporal_worker_versioning_enabled:
+        build_id = config.temporal_worker_build_id.strip()
+        if not build_id:
+            raise ValueError("Temporal worker build ID is required when versioning is enabled")
+        deployment_config = WorkerDeploymentConfig(
+            version=WorkerDeploymentVersion(
+                deployment_name=config.temporal_worker_deployment_name,
+                build_id=build_id,
+            ),
+            use_worker_versioning=True,
+            default_versioning_behavior=VersioningBehavior.AUTO_UPGRADE,
+        )
+
+    return {
+        "max_concurrent_activities": config.temporal_max_concurrent_activities,
+        "graceful_shutdown_timeout": timedelta(seconds=config.temporal_worker_graceful_shutdown_seconds),
+        "deployment_config": deployment_config,
+    }
 
 
 async def run_worker(config: Settings | None = None) -> None:
@@ -56,6 +93,8 @@ async def run_worker(config: Settings | None = None) -> None:
 
     from temporalio.client import Client
     from temporalio.worker import Worker
+
+    from devai.orchestration.payload_codec import temporal_data_converter
 
     scm = await _build_scm(config)
     state_manager = await _build_state_manager(config)
@@ -70,13 +109,13 @@ async def run_worker(config: Settings | None = None) -> None:
         logger.warning("worker: event-bus unavailable — continuing", exc_info=True)
         event_bus_adapter = None
 
-    bundle = await build_runtime(
+    lifecycle = await build_agent_lifecycle_runtime(
         config,
         scm=scm,
         state_manager=state_manager,
         event_bus_adapter=event_bus_adapter,
-        registry_client=None,
     )
+    bundle = lifecycle.bundle
     set_worker_context(WorkerContext(registry=bundle.registry, deps=bundle.deps))
 
     host = getattr(config, "temporal_host", "localhost:7233")
@@ -84,21 +123,45 @@ async def run_worker(config: Settings | None = None) -> None:
     task_queue = getattr(config, "temporal_task_queue", "devai")
     tls = bool(getattr(config, "temporal_tls_enabled", False))
 
-    client = await Client.connect(host, namespace=namespace, tls=tls)
-    max_activities = int(getattr(config, "temporal_max_concurrent_activities", 50))
-
+    client = await Client.connect(
+        host,
+        namespace=namespace,
+        tls=tls,
+        data_converter=temporal_data_converter(config),
+    )
     worker = Worker(
         client,
         task_queue=task_queue,
-        workflows=[BlueprintWorkflow],
-        activities=[run_stage_activity],
-        max_concurrent_activities=max_activities,
+        workflows=[BlueprintWorkflow, AgentLifecycleWorkflow],
+        activities=[run_stage_activity, publish_progress_activity, *lifecycle.activities.registered()],
+        **_worker_options(config),
     )
+    relay_stop = asyncio.Event()
+    relay_task: asyncio.Task[None] | None = None
+    if event_bus_adapter is not None and event_bus_adapter.provider_name != "noop":
+        try:
+            await event_bus_adapter.ensure_stream(
+                "DEVAI_AGENT_LIFECYCLE",
+                ["devai.agent.lifecycle.>"],
+                work_queue=False,
+            )
+            relay = AgentLifecycleOutboxRelay(
+                lifecycle.database,
+                event_bus_adapter,
+                telemetry=lifecycle.telemetry,
+            )
+            relay_task = asyncio.create_task(relay.run(relay_stop), name="agent-lifecycle-outbox")
+        except Exception:  # noqa: BLE001
+            logger.warning("worker: lifecycle outbox relay unavailable — intents remain pending", exc_info=True)
     logger.info("devai-worker started: host=%s ns=%s queue=%s", host, namespace, task_queue)
     try:
         await worker.run()
     finally:
-        await bundle.aclose()
+        relay_stop.set()
+        if relay_task is not None:
+            with contextlib.suppress(Exception):
+                await relay_task
+        await lifecycle.aclose()
 
 
 def main() -> None:

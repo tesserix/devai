@@ -8,9 +8,10 @@ description: >-
   rolls back when the new revision cannot become healthy. Fluent in both
   Argo CD and Flux semantics.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 
 allowed_tools:
   - argocd_list_apps

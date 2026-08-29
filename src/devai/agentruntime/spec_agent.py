@@ -15,15 +15,9 @@ Two paths, one contract:
     roles ship today without rewriting Python.
   - YAML-only → run the canonical tool-calling loop in
     :class:`devai.agentruntime.runner.AgentRunner` against ``deps.llm``, with the
-    spec's ``allowed_tools`` as the gate. This is the zero-code custom-agent path.
-
-The two YAML tool-loops that exist today (``AgentRunner`` and the
-``_run_yaml_runner`` method inside the run_specialization stage) are *not* merged
-here yet — ``SpecAgent`` standardizes on ``AgentRunner``, the cleaner of the two.
-Folding ``_run_yaml_runner``'s extras (skill-profile injection, per-role provider
-pinning) into ``AgentRunner`` is the next phase; until then those are the only
-behaviors a SpecAgent-routed YAML role does not yet get, and the gap is noted at
-the call site rather than silently dropped.
+    spec's ``allowed_tools`` as the gate. The model selects a capability tier;
+    the Settings provider chain remains authoritative. This is the zero-code
+    custom-agent path.
 """
 
 from __future__ import annotations
@@ -53,7 +47,7 @@ class SpecAgent:
     async def run(self, ctx: RunContext) -> AgentResult:
         # Bridge mode: the spec names an existing Python class. Reuse the one
         # LegacyAgent shim so there is a single construction + mapping path.
-        if self.spec.legacy_python_class:
+        if self.spec.uses_legacy_runtime:
             legacy = LegacyAgent.from_dotted(
                 self.spec.legacy_python_class,
                 name=self.spec.name,
@@ -87,6 +81,7 @@ class SpecAgent:
             tool_calls=rr.tool_calls,
             prompt_tokens=rr.prompt_tokens,
             completion_tokens=rr.completion_tokens,
+            trace_steps=rr.trace_steps,
             stub=rr.stub,
             error=rr.error,
             final_text=rr.final_text,
@@ -110,49 +105,33 @@ async def _resolve_spec_llm(spec: Specialization, ctx: RunContext) -> Any:
 
       1. per-tenant base — the dispatcher already resolved ``ctx.llm`` from the
          triggering user's connector (their keys), falling back to platform;
-      2. per-role pin — ``spec.llm_provider`` routes to a specific backend
-         (claude→anthropic, gemini→vertex_gemini, …), built from the SAME
-         settings source so user keys still apply, chained behind the base so a
-         provider outage degrades to the base instead of failing the run;
+      2. per-role model — ``spec.llm_model`` selects a capability tier, while
+         the Settings primary/fallback order remains authoritative. Each link
+         receives its provider-native model for that tier;
       3. per-request — ``llm_model``/``temperature``/``max_tokens`` ride on each
          request inside the runner.
 
     Never raises; any resolution failure falls back to the base adapter.
     """
     base = ctx.llm
-    wanted = getattr(spec, "llm_provider", None)
-    name = getattr(wanted, "value", "") or (str(wanted) if wanted else "")
     try:
-        from devai.adapters.llm.factory import create_llm_adapter, resolve_spec_provider
+        from devai.adapters.llm.factory import create_model_llm
 
-        provider = resolve_spec_provider(name)
-        if provider is None or base is None:
+        if base is None:
             return base
-        if getattr(base, "provider_name", "") == provider:
-            return base  # already on the requested backend
 
         deps = ctx.deps
-        src = deps.config
-        if deps.llm_resolver is not None and ctx.triggered_by:
-            src = await deps.llm_resolver.settings_for_email(ctx.triggered_by)
-
-        adapter = create_llm_adapter(src, provider=provider)
-        if getattr(adapter, "provider_name", "") == "noop":
-            # Spec asked for a backend that isn't configured here — run on the
-            # base rather than answering canned text.
-            logger.warning("spec %s: llm_provider=%s not configured — using default adapter", spec.name, name)
+        src = ctx.config if ctx.config is not None else deps.config
+        chain = create_model_llm(src, spec.llm_model or "")
+        if "noop" in str(getattr(chain, "provider_name", "noop")):
             return base
-
-        from devai.adapters.llm.fallback import FallbackLLMAdapter
-
-        chained = FallbackLLMAdapter(adapter, base)
         # Trial users stay metered even when the spec pins a provider — else a
         # YAML role would be a free side door to the shared platform keys.
         from devai.settings.trial import TrialLLMAdapter, get_trial_meter
 
         if isinstance(base, TrialLLMAdapter) and ctx.triggered_by:
-            return TrialLLMAdapter(chained, get_trial_meter(deps.config), ctx.triggered_by)
-        return chained
+            return TrialLLMAdapter(chain, get_trial_meter(deps.config), ctx.triggered_by)
+        return chain
     except Exception:  # noqa: BLE001
         logger.warning("spec %s: provider selection failed — using default", spec.name, exc_info=True)
         return base

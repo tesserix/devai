@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -57,14 +56,16 @@ async def status(request: Request) -> dict[str, Any]:
     """
     await _require_operator(request)
     client = getattr(request.app.state, "registry_client", None)
+    config = getattr(request.app.state, "config", None)
     snapshot = await asyncio.to_thread(
         fetch_agentic_status,
         registry_client=client,
-        agentgateway_url=os.environ.get("DEVAI_AGENTGATEWAY_URL", "")
+        agentgateway_url=getattr(config, "agentgateway_controller_url", "")
         or _default("http://agentgateway.agentgateway-system.svc.cluster.local:9092"),
-        ai_gateway_url=os.environ.get("DEVAI_AI_GATEWAY_URL", "")
+        ai_gateway_url=getattr(config, "ai_gateway_url", "")
+        or getattr(config, "llm_gateway_base_url", "")
         or _default("http://ai-gateway.agentgateway-system.svc.cluster.local:8080"),
-        kagent_url=os.environ.get("DEVAI_KAGENT_CONTROLLER_URL", "")
+        kagent_url=getattr(config, "kagent_url", "")
         or _default("http://kagent-controller.kagent-system.svc.cluster.local:8083"),
     )
     snapshot.sandboxes = await probe_sandbox_storage(getattr(request.app.state, "sandbox_service", None))
@@ -73,26 +74,25 @@ async def status(request: Request) -> dict[str, Any]:
 
 @router.get("/llm-probe")
 async def llm_probe(request: Request) -> dict[str, Any]:
-    """End-to-end test: dial the LLM gateway from devai-api, fire a
-    1-token Anthropic call, return the result. Used as a smoke-test
-    button in the Gateway panel."""
+    """Run a bounded completion through the configured LLM fallback chain."""
     await _require_operator(request)
     try:
         from devai.adapters.llm import (
             LLMMessage,
             LLMRequest,
             LLMRole,
-            create_llm_adapter,
+            create_llm_chain,
         )
         from devai.config import settings
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"adapters unavailable: {e}") from e
 
-    adapter = create_llm_adapter(settings)
+    config = getattr(request.app.state, "config", settings)
+    adapter = create_llm_chain(config)
     req = LLMRequest(
         system="Reply in exactly two words.",
         messages=[LLMMessage(role=LLMRole.USER, content="Gateway routing status?")],
-        max_tokens=16,
+        max_tokens=128,
     )
     try:
         resp = await adapter.generate(req)
@@ -102,6 +102,22 @@ async def llm_probe(request: Request) -> dict[str, Any]:
             "adapter": type(adapter).__name__,
             "error": f"{type(e).__name__}: {str(e)[:200]}",
         }
+    if resp.finish_reason == "error":
+        return {
+            "ok": False,
+            "adapter": type(adapter).__name__,
+            "provider": getattr(adapter, "provider_name", "?"),
+            "model": resp.model,
+            "error": resp.text.replace("\r", " ").replace("\n", " ")[:200],
+        }
+    if not resp.text.strip():
+        return {
+            "ok": False,
+            "adapter": type(adapter).__name__,
+            "provider": getattr(adapter, "provider_name", "?"),
+            "model": resp.model,
+            "error": f"model returned no text (finish_reason={resp.finish_reason})",
+        }
     return {
         "ok": True,
         "adapter": type(adapter).__name__,
@@ -109,8 +125,8 @@ async def llm_probe(request: Request) -> dict[str, Any]:
         "model": resp.model,
         "text": resp.text,
         "usage": {
-            "input": resp.usage.input_tokens,
-            "output": resp.usage.output_tokens,
+            "input": resp.usage.prompt_tokens,
+            "output": resp.usage.completion_tokens,
         },
     }
 
@@ -127,7 +143,7 @@ async def kagent_dispatch(request: Request, agent: str, body: KagentDispatchBody
     Additive to the default Job-dispatch path — used for agents the kagent
     agent-sync has reconciled into managed Deployments. 503s cleanly when
     kagent isn't wired (no kagent_url)."""
-    from devai.agentic.kagent_client import KagentError, create_kagent_client
+    from devai.agentic.kagent_client import KagentDispatchOutcomeUncertain, KagentError, create_kagent_client
     from devai.config import settings
     from devai.identity import extract_principal, trace_id_from_request
 
@@ -140,16 +156,29 @@ async def kagent_dispatch(request: Request, agent: str, body: KagentDispatchBody
     triggered_by = ""
     if principal is not None:
         triggered_by = str(getattr(principal, "email", "") or getattr(principal, "uid", "") or "")
+    trace_id = trace_id_from_request(request)
+    dispatch_id = f"{trace_id}:kagent:{body.namespace or 'default'}:{agent}"
     try:
         result = await client.dispatch(
             agent,
             body.message,
             namespace=body.namespace or None,
             triggered_by=triggered_by,
-            trace_id=trace_id_from_request(request) or "",
+            trace_id=trace_id,
+            request_id=dispatch_id,
+            message_id=dispatch_id,
         )
+    except KagentDispatchOutcomeUncertain as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "kagent_dispatch_outcome_uncertain",
+                "message": "kagent may have accepted this dispatch; do not retry automatically",
+                "request_id": dispatch_id,
+            },
+        ) from e
     except KagentError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(status_code=502, detail="kagent dispatch failed") from e
     return {"agent": agent, "result": result}
 
 

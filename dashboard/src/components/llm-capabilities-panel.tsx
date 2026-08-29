@@ -74,8 +74,8 @@ export function LlmCapabilitiesPanel({ refreshKey = 0 }: { refreshKey?: number }
         </h3>
       </div>
       <p className="text-xs mb-3" style={{ color: "var(--ink-muted)" }}>
-        Detected from your connectors. Each agent uses the right model on a connected provider, with
-        automatic fallback — Anthropic → OpenAI → Vertex → Groq.
+        Calls use your configured primary first, then each fallback in the order below
+        {caps?.gateway_required ? ", all through Agent Gateway." : "."}
       </p>
 
       {none ? (
