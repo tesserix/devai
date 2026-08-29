@@ -18,44 +18,44 @@ from devai.admin.activity import ACTION_ACTIVE, ACTION_LOGIN
 
 logger = logging.getLogger(__name__)
 
-# Action names come from the ACTION_* constants, never user input, so
-# embedding them in the query text (rather than binding as $1) is safe;
-# only the caller-supplied `days` window is bound as a parameter.
-_ACTIVE_TIMESERIES_SQL = f"""
+_ACTIVE_TIMESERIES_SQL = """
     SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
            COUNT(DISTINCT actor)                                AS users
       FROM audit_log
-     WHERE action = '{ACTION_ACTIVE}'
+     WHERE action = $2
        AND created_at >= NOW() - ($1::int * INTERVAL '1 day')
      GROUP BY 1
      ORDER BY 1
 """
 
-_SIGNIN_COUNT_SQL = f"""
+_SIGNIN_COUNT_SQL = """
     SELECT COUNT(*) AS count
       FROM audit_log
-     WHERE action = '{ACTION_LOGIN}'
+     WHERE action = $2
        AND created_at >= NOW() - ($1::int * INTERVAL '1 day')
 """
 
-_USER_TOTALS_SQL = f"""
+# Rows in audit_log are deduplicated by Redis SET NX EX guard: one user per day max.
+_USER_TOTALS_SQL = """
     SELECT actor                                                     AS "user",
            COUNT(*)                                                  AS days_active,
            to_char(MAX(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS last_seen
       FROM audit_log
-     WHERE action = '{ACTION_ACTIVE}'
+     WHERE action = $2
        AND created_at >= NOW() - ($1::int * INTERVAL '1 day')
      GROUP BY actor
      ORDER BY days_active DESC
 """
 
 
-async def _fetch(database: Any, sql: str, days: int) -> list[dict[str, Any]]:
+async def _fetch(
+    database: Any, sql: str, days: int, action: str
+) -> list[dict[str, Any]]:
     pool = getattr(database, "pool", None) if database is not None else None
     if pool is None:
         return []
     try:
-        return [dict(row) for row in await pool.fetch(sql, int(days))]
+        return [dict(row) for row in await pool.fetch(sql, int(days), action)]
     except Exception:  # noqa: BLE001
         logger.debug("admin: rollup query failed — degrading to empty", exc_info=True)
         return []
@@ -63,15 +63,15 @@ async def _fetch(database: Any, sql: str, days: int) -> list[dict[str, Any]]:
 
 async def active_users_timeseries(database: Any, days: int) -> list[dict[str, Any]]:
     """Distinct active users per day, oldest first."""
-    return await _fetch(database, _ACTIVE_TIMESERIES_SQL, days)
+    return await _fetch(database, _ACTIVE_TIMESERIES_SQL, days, ACTION_ACTIVE)
 
 
 async def signin_count(database: Any, days: int) -> int:
     """Explicit sign-in events in the window (local-dev logins only)."""
-    rows = await _fetch(database, _SIGNIN_COUNT_SQL, days)
+    rows = await _fetch(database, _SIGNIN_COUNT_SQL, days, ACTION_LOGIN)
     return int(rows[0].get("count", 0)) if rows else 0
 
 
 async def active_user_totals(database: Any, days: int) -> list[dict[str, Any]]:
     """Per-user active-day counts, busiest first."""
-    return await _fetch(database, _USER_TOTALS_SQL, days)
+    return await _fetch(database, _USER_TOTALS_SQL, days, ACTION_ACTIVE)

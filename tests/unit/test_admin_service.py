@@ -37,7 +37,7 @@ async def test_timeseries_maps_rows():
 async def test_timeseries_passes_the_day_window():
     pool = _Pool([])
     await active_users_timeseries(_db(pool), 7)
-    assert pool.queries[0][1] == (7,)
+    assert pool.queries[0][1] == (7, "user_active")
 
 
 @pytest.mark.asyncio
@@ -71,3 +71,12 @@ async def test_query_failure_degrades_to_empty():
     assert await active_users_timeseries(db, 30) == []
     assert await signin_count(db, 30) == 0
     assert await active_user_totals(db, 30) == []
+
+
+@pytest.mark.asyncio
+async def test_action_bound_as_parameter_not_literal():
+    pool = _Pool([])
+    await active_users_timeseries(_db(pool), 7)
+    sql_text, args = pool.queries[0]
+    assert "user_active" not in sql_text
+    assert args == (7, "user_active")
