@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from devai.sandbox.workspace_server import TOKEN_HEADER
+from devai.sandbox.browser_proxy import TOKEN_HEADER
 
 _TIMEOUT = 130.0
 
@@ -58,6 +58,24 @@ class WorkspaceClient:
 
     async def exec(self, command: str, *, timeout: float = 120.0) -> dict[str, Any]:
         return await self._post("/shell/exec", {"command": command, "timeout": timeout})
+
+    async def browser_navigate(self, url: str) -> dict[str, Any]:
+        return await self._post("/browser/navigate", {"url": url})
+
+    async def browser_screenshot(self, *, full_page: bool = False) -> dict[str, Any]:
+        return await self._post("/browser/screenshot", {"full_page": full_page})
+
+    async def browser_click(self, selector: str) -> dict[str, Any]:
+        return await self._post("/browser/click", {"selector": selector})
+
+    async def browser_type(self, selector: str, text: str) -> dict[str, Any]:
+        return await self._post("/browser/type", {"selector": selector, "text": text})
+
+    async def browser_scroll(self, *, delta_x: float = 0, delta_y: float = 600) -> dict[str, Any]:
+        return await self._post("/browser/scroll", {"delta_x": delta_x, "delta_y": delta_y})
+
+    async def browser_get_content(self, *, selector: str = "") -> dict[str, Any]:
+        return await self._post("/browser/content", {"selector": selector})
 
 
 __all__ = ["WorkspaceClient"]

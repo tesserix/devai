@@ -72,11 +72,12 @@ _KAGENT_PROVIDER_MODEL_ATTR: dict[str, str] = {
 
 
 def _a2a_failed(result: dict[str, Any] | None) -> bool:
-    """True when an A2A result reports a failure (so we should fall back).
+    """True when an accepted A2A result reports an execution failure.
 
     A transport-OK dispatch can still carry an LLM failure — kagent sets
     ``status.state=failed`` and/or ``metadata.kagent_error_code`` (bad key, bad
-    model, rate limit). Treat either as a failure for the fallback chain.
+    model, rate limit). The caller must not replay an accepted task because tool
+    side effects may already have occurred.
     """
     if not isinstance(result, dict):
         return True
@@ -153,21 +154,24 @@ class JobRunnerStage(PipelineStage):
 
     async def execute(self, task: DevAITask) -> StageResult:
         agent_name = str(self.config.get("agent", self._stage_name))
+        from devai.sandbox.job import apply_sandbox_boundary, sandbox_from_stage_config
+
+        sandbox = sandbox_from_stage_config(self.config)
         # Single round-trip to aregistry: pick the image AND capture the
         # full profile so we can pass it through the Job env. Avoids the
         # previous pattern where the dispatcher resolved the image and
         # the runner did a second lookup that it then threw away.
-        agent_profile = self._fetch_agent_profile(agent_name)
+        agent_profile = await self._fetch_agent_profile(agent_name)
 
-        # kagent fast-path: an agent the controller manages as a long-lived
-        # Deployment (label `devai.io/runtime=kagent`) is reached over A2A
-        # instead of spawning an ephemeral Job. kagent is its own control
-        # plane, so this is checked BEFORE the Job runtime gate. Opt-in (needs
-        # `kagent_url`) and degrades to the Job path on any failure, so kagent
-        # is never a single point of failure.
-        kagent_result = await self._maybe_dispatch_kagent(task, agent_name, agent_profile)
-        if kagent_result is not None:
-            return kagent_result
+        # kagent fast-path: a labelled agent is reached through its Substrate
+        # SandboxAgent over A2A instead of spawning an ephemeral Job. kagent is
+        # its own control plane, so this is checked BEFORE the Job runtime gate.
+        # It remains opt-in. Only failures known to precede acceptance degrade
+        # to the Job path; ambiguous or accepted outcomes fail closed.
+        if sandbox is None:
+            kagent_result = await self._maybe_dispatch_kagent(task, agent_name, agent_profile)
+            if kagent_result is not None:
+                return kagent_result
 
         runtime = self._runtime()
         watcher = self._watcher()
@@ -179,7 +183,6 @@ class JobRunnerStage(PipelineStage):
         blueprint = task.blueprint or ""
 
         from devai.runtime import RunnerJobInputs, build_job_spec
-        from devai.sandbox.job import apply_sandbox_boundary, sandbox_from_stage_config
 
         # Agent control-plane URLs are read off settings so deployments
         # can flip them per environment. Empty = "no gateway, talk direct".
@@ -203,7 +206,6 @@ class JobRunnerStage(PipelineStage):
         )
         job_spec = build_job_spec(runtime.config, inputs)
         # Same Job, tightened edges — set when an eval dispatches into a sandbox.
-        sandbox = sandbox_from_stage_config(self.config)
         if sandbox is not None:
             job_spec = apply_sandbox_boundary(job_spec, sandbox)
         job_name = job_spec["metadata"]["name"]
@@ -284,26 +286,49 @@ class JobRunnerStage(PipelineStage):
         extra = self.deps.extra or {}
         return extra.get("job_watcher")
 
-    def _fetch_agent_profile(self, agent_name: str) -> dict[str, Any] | None:
+    async def _fetch_agent_profile(self, agent_name: str) -> dict[str, Any] | None:
         """Pull the canonical aregistry record for this agent.
 
-        Returns ``{image, skills, prompts, mcp_servers, model_provider,
-        model_name}`` or None if aregistry isn't configured or doesn't
-        know the agent. Bounded by RegistryClient's 30 s TTL cache, so
-        the dispatcher path stays sub-millisecond on warm cache.
-
-        Defensive — never raises. A registry miss must not block a
-        pipeline run; the runner falls back to local YAML in that case.
+        Mandatory gateway mode performs a fresh Registry composition
+        resolution and fails before Job or kagent dispatch on any miss. Local
+        development retains the legacy best-effort profile lookup.
         """
         registry = (self.deps.extra or {}).get("registry_client") if self.deps.extra else None
+        governed = bool(getattr(self.deps.config, "llm_gateway_required", False))
+        if governed and not str(getattr(self.deps.config, "llm_gateway_base_url", "") or "").strip():
+            raise RuntimeError("governed agent composition unavailable")
         if registry is None:
+            if governed:
+                raise RuntimeError("governed agent composition unavailable")
             return None
-        try:
-            agent_meta = registry.get_agent(agent_name)
-        except Exception:  # noqa: BLE001
-            logger.debug("registry.get_agent(%s) failed", agent_name, exc_info=True)
-            return None
+        if governed:
+            canonical = f"{agent_name.strip().lower().removesuffix('-agent').replace('_', '-')}-agent"
+            try:
+                resolution = await asyncio.to_thread(registry.resolve_agent, canonical)
+            except Exception as exc:  # noqa: BLE001 -- dependency details stay internal
+                logger.warning(
+                    "governed Job agent resolution failed agent=%s error_type=%s",
+                    canonical,
+                    type(exc).__name__,
+                )
+                raise RuntimeError("governed agent composition unavailable") from None
+            if resolution.agent.name != canonical or resolution.unresolved:
+                raise RuntimeError("governed agent composition unavailable")
+            if (
+                resolution.resolved.get("mcpServers")
+                and not str(getattr(self.deps.config, "agentgateway_url", "") or "").strip()
+            ):
+                raise RuntimeError("governed agent composition unavailable")
+            agent_meta = resolution.agent
+        else:
+            try:
+                agent_meta = await asyncio.to_thread(registry.get_agent, agent_name)
+            except Exception:  # noqa: BLE001
+                logger.debug("registry.get_agent(%s) failed", agent_name, exc_info=True)
+                return None
         if agent_meta is None:
+            if governed:
+                raise RuntimeError("governed agent composition unavailable")
             return None
         return {
             "name": getattr(agent_meta, "name", agent_name),
@@ -321,7 +346,7 @@ class JobRunnerStage(PipelineStage):
             "labels": dict(getattr(agent_meta, "labels", {}) or {}),
         }
 
-    # ── kagent A2A dispatch (opt-in, long-lived agents) ──────────────
+    # ── kagent A2A dispatch (opt-in Substrate actors) ────────────────
 
     def _kagent_target(self, agent_name: str, profile: dict[str, Any] | None) -> str | None:
         """Return the kagent agent name to dispatch to, or None for the Job path.
@@ -348,15 +373,15 @@ class JobRunnerStage(PipelineStage):
         agent_name: str,
         profile: dict[str, Any] | None,
     ) -> StageResult | None:
-        """Dispatch to a kagent-managed agent over A2A, or None to use a Job.
+        """Dispatch to a kagent-managed SandboxAgent, or None to use a Job.
 
-        Returns a StageResult only on a clean kagent dispatch. Any miss —
-        kagent not configured, agent not kagent-managed, invalid name, or a
-        transport/JSON-RPC error — returns None so ``execute`` falls through to
-        the Job path. kagent is additive; it must never be the reason a run
-        fails when a Job would have worked.
+        Returns a StageResult only on a clean kagent dispatch. Configuration
+        misses and definite pre-connection rejection fall through to the Job
+        path. Once kagent may have accepted a task, errors fail closed because
+        replaying it could execute tools twice.
         """
         from devai.agentic.kagent_client import (
+            KagentDispatchOutcomeUncertain,
             create_kagent_client,
         )
 
@@ -393,8 +418,12 @@ class JobRunnerStage(PipelineStage):
         # Shared-key mode (no passthrough): dispatch to the bare agent, no Bearer.
         if not bool(getattr(settings, "kagent_passthrough", False)):
             result = await self._kagent_dispatch_one(client, task, target, message, namespace, "")
-            if result is None or _a2a_failed(result):
+            if result is None:
                 return None
+            if _a2a_failed(result):
+                raise KagentDispatchOutcomeUncertain(
+                    f"kagent accepted dispatch to {target!r} but reported an execution failure"
+                )
             return self._kagent_result(target, result, namespace)
 
         # Passthrough mode: forward each user's OWN key. Isolation guardrails:
@@ -412,8 +441,8 @@ class JobRunnerStage(PipelineStage):
         # Ordered (suffix, provider) chain — the user's chosen (provider, model)
         # first, then their fallback_model, then the rest of the catalog they
         # hold a key for. Each entry maps to a variant `<agent>-<suffix>` on its
-        # passthrough ModelConfig. Fall to the next on a transport error OR an LLM
-        # failure (bad key, bad model, rate limit). Exhausted → Job path.
+        # passthrough ModelConfig. Only a definite pre-connection rejection may
+        # try the next target; an accepted failure may already have run tools.
         for suffix, provider in self._kagent_variant_chain(settings):
             key = self._kagent_user_key(settings, provider)
             if not key:
@@ -423,12 +452,9 @@ class JobRunnerStage(PipelineStage):
             if result is None:
                 continue
             if _a2a_failed(result):
-                logger.warning(
-                    "stage %s: kagent variant %s returned an LLM failure — trying next",
-                    self._stage_name,
-                    variant,
+                raise KagentDispatchOutcomeUncertain(
+                    f"kagent accepted dispatch to {variant!r} but reported an execution failure"
                 )
-                continue
             return self._kagent_result(variant, result, namespace)
 
         logger.info("stage %s: no working kagent variant for %s — using Job path", self._stage_name, email)
@@ -438,19 +464,28 @@ class JobRunnerStage(PipelineStage):
         self, client: Any, task: DevAITask, agent: str, message: str, namespace: str | None, api_key: str
     ) -> dict[str, Any] | None:
         """One A2A dispatch; returns the result, or None on transport error."""
-        from devai.agentic.kagent_client import KagentError
+        from devai.agentic.kagent_client import KagentDispatchOutcomeUncertain, KagentDispatchTarget, KagentError
 
         try:
-            return await client.dispatch(
+            result = await client.dispatch(
                 agent,
                 message,
                 namespace=namespace,
+                target=KagentDispatchTarget.SANDBOX_AGENT,
                 triggered_by=task.triggered_by or "",
                 trace_id=task.trace_id or "",
                 api_key=api_key,
-                request_id=f"{task.id}:{self._stage_name}",
-                message_id=f"{task.id}:{self._stage_name}",
+                request_id=f"{task.id}:{self._stage_name}:{agent}",
+                message_id=f"{task.id}:{self._stage_name}:{agent}",
             )
+            return result if isinstance(result, dict) else None
+        except KagentDispatchOutcomeUncertain:
+            logger.error(
+                "stage %s: kagent dispatch to %s has an uncertain outcome; refusing Job fallback",
+                self._stage_name,
+                agent,
+            )
+            raise
         except KagentError:
             logger.warning("stage %s: kagent dispatch to %s failed", self._stage_name, agent, exc_info=True)
             return None
@@ -465,7 +500,12 @@ class JobRunnerStage(PipelineStage):
             next_state=self._next_state(),
             message=f"{self._stage_name}: kagent agent {agent} completed",
             data={
-                f"{self._stage_name}_output": {"runtime": "kagent", "agent": agent, "text": extract_a2a_text(result)}
+                f"{self._stage_name}_output": {
+                    "runtime": "kagent",
+                    "execution_target": "substrate",
+                    "agent": agent,
+                    "text": extract_a2a_text(result),
+                }
             },
         )
 
@@ -556,18 +596,18 @@ class JobRunnerStage(PipelineStage):
         """The triggering user's OWN LLM key for ``provider``, or "".
 
         Only the user's configured connector key is returned — never the
-        platform fallthrough. We check the overlay's `overlaid_attrs` so that a
-        run with no per-user connector (where the provider attr resolves to the
-        base/platform key) forwards nothing, keeping per-user billing honest. If
-        the user has no connector for ``provider``, the matched attr isn't in
-        their overrides → "" → that provider is skipped.
+        platform or shared-scope fallthrough. We check the overlay's
+        `user_overlaid_attrs` provenance so a tenant, org, team, or global key
+        configures the normal Job path but is never forwarded through A2A. If
+        the user has no personal connector for ``provider``, that provider is
+        skipped.
         """
         provider = (
             provider or str(getattr(self.deps.config, "kagent_model_provider", "anthropic") or "anthropic")
         ).lower()
         attr = _KAGENT_PROVIDER_KEY_ATTR.get(provider, "anthropic_api_key")
-        overlaid = set(getattr(settings, "overlaid_attrs", []) or [])
-        if attr not in overlaid:
+        user_overlaid = set(getattr(settings, "user_overlaid_attrs", []) or [])
+        if attr not in user_overlaid:
             return ""
         return str(getattr(settings, attr, "") or "")
 

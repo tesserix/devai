@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: orchestrator-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: orchestrator
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: orchestrator
+  title: Pipeline Orchestrator
+  description: "Mid-pipeline coordinator. At every quality-gate stage (review, security, tests) the orchestrator\
+    \ inspects the role's output and decides whether to advance, loop back to senior_developer, or escalate\
+    \ to a human. Pure decision-making \u2014 no code edits."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/orchestrator
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - orchestrator
+  prompts:
+  - orchestrator-prompt-v1
   promptRef: orchestrator-prompt-v1
-  llm:
-    provider: openai
-    model: o3
-    temperature: 0.2
-    maxTokens: null
-  limits:
-    maxTurns: 15
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.orchestrator.OrchestratorAgent
-  riskLevel: low
-  roleColor: admin

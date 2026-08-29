@@ -196,6 +196,7 @@ class AgentResult:
     tool_calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    trace_steps: list[dict[str, Any]] = field(default_factory=list)
 
     # A degraded run (no LLM wired, deps missing) sets ``stub=True`` and an empty
     # or sentinel handover. ``error`` carries a soft failure that didn't raise.

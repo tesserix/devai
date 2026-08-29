@@ -31,17 +31,48 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from devai.blueprint.conditions import evaluate as eval_condition
     from devai.blueprint.planner import should_continue_on_failure, topological_levels
-    from devai.orchestration.activities import run_stage_activity
+    from devai.orchestration.activities import publish_progress_activity, run_stage_activity
     from devai.orchestration.serde import (
         blueprint_from_dict,
         stage_result_from_dict,
         task_from_dict,
         task_to_dict,
     )
-    from devai.pipeline.types import FAILURE_STATES, TaskState
+    from devai.pipeline.types import (
+        FAILURE_STATES,
+        StageEvent,
+        StageEventPhase,
+        TaskState,
+    )
 
 _DEFAULT_STAGE_TIMEOUT = 900
 _DEFAULT_MAX_ATTEMPTS = 3
+#: Progress reporting is advisory — never let it hold up a run.
+_PUBLISH_TIMEOUT = 10
+
+#: Patch gate for the progress-publishing activity. Never rename or remove
+#: while a run started before it may still replay.
+_PROGRESS_PATCH = "stage-progress-publish"
+
+
+def root_cause(exc: BaseException) -> str:
+    """The deepest useful message in an exception chain.
+
+    A stage that raises surfaces to the workflow as Temporal's ``ActivityError``,
+    whose own message is the constant "Activity task failed" — the real reason
+    ("all authorized LLM providers failed") sits further down ``__cause__``.
+    Reporting only the outer message leaves a failed run with nothing to act on.
+    """
+    message = ""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text = str(current).strip()
+        if text:
+            message = text
+        current = current.__cause__
+    return message or str(exc)
 
 
 def _result_failed(result: Any) -> bool:
@@ -136,6 +167,12 @@ class BlueprintWorkflow:
                 if spec.condition and not eval_condition(spec.condition, task):
                     workflow.logger.info("stage %s skipped (condition false)", spec.name)
                     task.stages_skipped.append(spec.name)
+                    self._record(
+                        task,
+                        spec,
+                        StageEventPhase.SKIPPED,
+                        message=f"condition: {spec.condition}",
+                    )
                     continue
                 runnable.append(spec)
 
@@ -144,17 +181,25 @@ class BlueprintWorkflow:
 
             all_parallel = all(s.parallel for s in runnable)
             if all_parallel and len(runnable) > 1:
+                for spec in runnable:
+                    self._record(task, spec, StageEventPhase.STARTED, message=spec.stage)
                 snapshot = task_to_dict(task)
+                started = self._now()
                 results = await asyncio.gather(
                     *(self._run_stage(spec, snapshot) for spec in runnable),
                     return_exceptions=True,
                 )
+                elapsed = self._elapsed_ms(started)
                 for spec, res in zip(runnable, results, strict=True):
-                    self._apply(task, spec, res)
+                    self._apply(task, spec, res, duration_ms=elapsed)
+                await self._publish(task)
             else:
                 for spec in runnable:
+                    self._record(task, spec, StageEventPhase.STARTED, message=spec.stage)
+                    started = self._now()
                     res = await self._run_stage_safe(spec, task_to_dict(task))
-                    self._apply(task, spec, res)
+                    self._apply(task, spec, res, duration_ms=self._elapsed_ms(started))
+                    await self._publish(task)
 
             if task.is_failed:
                 workflow.logger.warning("blueprint %s halted at level", blueprint.name)
@@ -173,9 +218,62 @@ class BlueprintWorkflow:
         if not task.is_failed and not task.is_terminal:
             task.state = TaskState.COMPLETED
 
+        await self._publish(task)
         return task_to_dict(task)
 
     # ── Helpers ────────────────────────────────────────────────────────
+    async def _publish(self, task: Any) -> None:
+        """Push the current task snapshot out so the dashboard sees it now.
+
+        Without this the run's state only reaches shared storage when the
+        workflow returns — a run sitting on an approval gate, or a stage that
+        just failed, would render as untouched until then.
+
+        Gated: this activity did not exist when in-flight runs recorded their
+        history, and issuing it during replay wedges them with `Nondeterminism
+        error: Activity type of scheduled event 'run_stage' does not match
+        activity type of activity command 'publish_progress'`.
+        """
+        if not workflow.patched(_PROGRESS_PATCH):
+            return
+        await workflow.execute_activity(
+            publish_progress_activity,
+            args=[task_to_dict(task)],
+            start_to_close_timeout=timedelta(seconds=_PUBLISH_TIMEOUT),
+            retry_policy=RetryPolicy(maximum_attempts=1),
+        )
+
+    def _now(self) -> float:
+        """Workflow-safe wall clock. ``workflow.now()`` replays identically."""
+        return workflow.now().timestamp()
+
+    def _elapsed_ms(self, started: float) -> float:
+        return max(0.0, (self._now() - started) * 1000.0)
+
+    def _record(self, task: Any, spec: Any, phase: Any, **kw: Any) -> None:
+        """Append a StageEvent to the task timeline.
+
+        The in-process BlueprintExecutor emits these via ``_emit``; the durable
+        path has no executor, so the workflow must produce the same timeline or
+        the dashboard has nothing to render — no stage bars and no agent cards.
+        Appends directly (rather than via ``task.record_event``) to keep the
+        workflow free of ``time.time()``.
+        """
+        ts = self._now()
+        event = StageEvent(
+            spec.name,
+            phase,
+            timestamp=ts,
+            stage_type=spec.type,
+            gate=spec.gate,
+            agent=spec.resolved_agent(),
+            lane=spec.lane,
+            **kw,
+        )
+        task.stage_events.append(event)
+        task.apply_agent_status(event, ts)
+        task.updated_at = ts
+
     async def _await_gate(self, spec: Any, task: Any) -> None:
         """Block on a durable approval Signal for a gate stage."""
         gate = spec.name
@@ -197,6 +295,7 @@ class BlueprintWorkflow:
             run_stage_activity,
             args=[spec.stage, spec.name, dict(spec.config), task_snapshot],
             start_to_close_timeout=timedelta(seconds=timeout),
+            heartbeat_timeout=timedelta(seconds=min(30, max(1, timeout // 3))),
             retry_policy=RetryPolicy(maximum_attempts=self._max_attempts),
         )
 
@@ -206,7 +305,7 @@ class BlueprintWorkflow:
         except Exception as exc:  # noqa: BLE001 — surfaced to _apply for policy
             return exc
 
-    def _apply(self, task: Any, spec: Any, res: Any) -> None:
+    def _apply(self, task: Any, spec: Any, res: Any, *, duration_ms: float = 0.0) -> None:
         """Merge one stage outcome into the task (declared-order, deterministic).
 
         Two failure shapes are honored so ``on_failure`` is respected on either
@@ -219,7 +318,12 @@ class BlueprintWorkflow:
             was merged as a completed stage, so ``on_failure: stop`` never fired.
         """
         if isinstance(res, BaseException):
-            self._record_failure(task, spec, f"stage {spec.name!r} failed: {res}")
+            self._record_failure(
+                task,
+                spec,
+                f"stage {spec.name!r} failed: {root_cause(res)}",
+                duration_ms=duration_ms,
+            )
             return
 
         result = stage_result_from_dict(res)
@@ -231,7 +335,13 @@ class BlueprintWorkflow:
             # downstream diagnostics / rollback have its partial output.
             if result.data:
                 task.agent_context.update(result.data)
-            self._record_failure(task, spec, reason, soft_state=result.next_state)
+            self._record_failure(
+                task,
+                spec,
+                reason,
+                soft_state=result.next_state,
+                duration_ms=duration_ms,
+            )
             return
 
         if result.data:
@@ -239,10 +349,26 @@ class BlueprintWorkflow:
         if result.next_state is not None:
             task.state = result.next_state
         task.stages_completed.append(spec.name)
+        self._record(
+            task,
+            spec,
+            StageEventPhase.COMPLETED,
+            message=result.message,
+            duration_ms=duration_ms,
+        )
 
-    def _record_failure(self, task: Any, spec: Any, reason: str, *, soft_state: Any = None) -> None:
+    def _record_failure(
+        self,
+        task: Any,
+        spec: Any,
+        reason: str,
+        *,
+        soft_state: Any = None,
+        duration_ms: float = 0.0,
+    ) -> None:
         """Apply a stage failure (hard or soft) honoring ``on_failure``."""
         task.stages_failed.append(spec.name)
+        self._record(task, spec, StageEventPhase.FAILED, error=reason, duration_ms=duration_ms)
         if should_continue_on_failure(spec.on_failure):
             workflow.logger.warning("stage %s failed, on_failure=continue: %s", spec.name, reason)
             return

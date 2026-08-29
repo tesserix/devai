@@ -129,7 +129,7 @@ def scaffold_agent(
     skill: str = "",
     prompt: str = "",
     model_provider: str = "anthropic",
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-5",
     version: str = "1",
 ) -> Path:
     """Write ``<seeds_root>/agents/<name>.yaml``."""

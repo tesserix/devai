@@ -83,34 +83,15 @@ def task_to_dict(task: DevAITask) -> dict[str, Any]:
 
 
 def task_from_dict(d: dict[str, Any]) -> DevAITask:
-    task = DevAITask(id=d.get("id") or DevAITask().id)
-    task.intent = d.get("intent", "")
-    task.repo = d.get("repo", "")
-    task.blueprint = d.get("blueprint", "alm-pipeline")
-    task.trigger_type = d.get("trigger_type", "manual")
-    task.state = TaskState(d.get("state", TaskState.PENDING.value))
-    task.current_stage = d.get("current_stage", "")
-    task.stages_completed = list(d.get("stages_completed", []))
-    task.stages_skipped = list(d.get("stages_skipped", []))
-    task.stages_failed = list(d.get("stages_failed", []))
-    task.agent_context = dict(d.get("agent_context", {}))
-    task.issue_number = d.get("issue_number")
-    task.pr_number = d.get("pr_number")
-    task.branch_name = d.get("branch_name")
-    task.epic_issue_number = d.get("epic_issue_number")
-    task.story_issue_numbers = list(d.get("story_issue_numbers", []))
-    task.sandbox_pod = d.get("sandbox_pod")
-    task.dev_server_port = d.get("dev_server_port")
-    task.error = d.get("error")
-    task.failed_stage = d.get("failed_stage")
-    task.label = d.get("label", "")
-    task.checkpoints = list(d.get("checkpoints", []))
-    task.principal = dict(d["principal"]) if d.get("principal") else None
-    task.trace_id = d.get("trace_id")
-    task.triggered_by = d.get("triggered_by")
-    task.team_id = d.get("team_id", "")
-    task.crew_id = d.get("crew_id", "")
-    return task
+    """Exact inverse of :func:`task_to_dict`.
+
+    Delegates to ``DevAITask.from_dict`` rather than re-listing fields. A
+    hand-rolled inverse drifted: it omitted ``stage_events`` and ``agents``,
+    so every Temporal round-trip wiped the run timeline and the dashboard's
+    agent cards while ``stages_completed`` survived — a finished run rendered
+    as "no agents yet".
+    """
+    return DevAITask.from_dict(d)
 
 
 # --- StageResult ----------------------------------------------------------

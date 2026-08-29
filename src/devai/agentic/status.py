@@ -173,9 +173,10 @@ def fetch_agentic_status(
         role="llm-proxy",
         namespace="agentgateway-system",
         url=ai_gateway_url or "http://ai-gateway.agentgateway-system.svc.cluster.local:8080",
-        path="/health",
-        success_code_range=(200, 300),
-        success_body_includes="ok",
+        # The Gateway listener has no health route; its local 404 proves the
+        # data plane answered without forwarding a credential-bearing request.
+        path="/",
+        success_code_range=(200, 500),
     )
 
     # --- kagent (agent runtime controller) ----

@@ -28,12 +28,15 @@ import { api } from "@/lib/api";
 import { Select } from "@/components/ui/select";
 import { dump as toYAML, parse as parseYAML } from "@/lib/yaml";
 import {
+  AGENT_RUNTIME_FIELD,
+  agentRuntimeTarget,
+  editorDocument,
   fieldsFor,
   getPath,
   lintManifest,
   pluralForKind,
   setPath,
-  starter,
+  setAgentRuntimeTarget,
   type Field,
 } from "@/lib/registry-schemas";
 
@@ -82,15 +85,19 @@ export default function ArtifactEditor({
   open,
   onClose,
   onCreated,
+  initialDocument,
 }: {
   kind: string;
   open: boolean;
   onClose: () => void;
   onCreated: (name: string) => void;
+  initialDocument?: Doc;
 }) {
   const plural = useMemo(() => pluralForKind(kind), [kind]);
   const fields = useMemo(() => fieldsFor(kind), [kind]);
-  const [doc, setDoc] = useState<Doc>(() => starter(kind));
+  const editing = initialDocument != null;
+  const originalName = String(getPath(initialDocument, "metadata.name") ?? "").trim();
+  const [doc, setDoc] = useState<Doc>(() => editorDocument(kind, initialDocument));
   const [format, setFormat] = useState<Format>("yaml");
   const [raw, setRaw] = useState<string>("");
   const [labelRows, setLabelRows] = useState<[string, string][]>([]);
@@ -103,7 +110,7 @@ export default function ArtifactEditor({
 
   useEffect(() => {
     if (!open) return;
-    const d = starter(kind);
+    const d = editorDocument(kind, initialDocument);
     setDoc(d);
     setRaw(serialize(d, format));
     setLabelRows(rowsFromDoc(d));
@@ -111,7 +118,7 @@ export default function ArtifactEditor({
     setSubmitErr(null);
     setConflict(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, kind]);
+  }, [open, kind, initialDocument]);
 
   // The user's teams — optional grouping. Free-text is still allowed, so a
   // catalog blip never blocks authoring.
@@ -144,6 +151,11 @@ export default function ArtifactEditor({
   function onLabels(rows: [string, string][]) {
     setLabelRows(rows);
     applyDoc(setPath(doc, "metadata.labels", labelsObject(rows)));
+  }
+  function onRuntimeTarget(value: unknown) {
+    const next = setAgentRuntimeTarget(doc, value);
+    setLabelRows(rowsFromDoc(next));
+    applyDoc(next);
   }
   function onRaw(text: string) {
     setRaw(text);
@@ -185,10 +197,11 @@ export default function ArtifactEditor({
   }
 
   const name = String(getPath(doc, "metadata.name") ?? "").trim();
+  const nameChanged = editing && name !== originalName;
   const lint = useMemo(() => (parseErr ? [] : lintManifest(doc, kind)), [doc, kind, parseErr]);
   const lintErrors = lint.filter((i) => i.level === "error");
   const lintWarnings = lint.filter((i) => i.level === "warning");
-  const canSubmit = !!name && !parseErr && lintErrors.length === 0 && !submitting;
+  const canSubmit = !!name && !nameChanged && !parseErr && lintErrors.length === 0 && !submitting;
 
   const team = teamOf(labelRows);
   function onTeam(value: string) {
@@ -228,7 +241,7 @@ export default function ArtifactEditor({
         {/* Header */}
         <div className="flex items-center justify-between px-6 h-16 border-b shrink-0" style={{ borderColor: "var(--border-subtle)" }}>
           <div>
-            <div className="label-eyebrow">New artifact</div>
+            <div className="label-eyebrow">{editing ? "Edit artifact" : "New artifact"}</div>
             <h2 className="font-serif text-xl font-semibold leading-tight" style={{ color: "var(--ink-strong)" }}>
               {kind}
             </h2>
@@ -243,6 +256,26 @@ export default function ArtifactEditor({
           {/* Form */}
           <div className="overflow-y-auto p-6 space-y-4 border-b lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border-subtle)" }}>
             {fields.map((f) => {
+              if (f.path === AGENT_RUNTIME_FIELD) {
+                return (
+                  <FieldInput
+                    key={f.path}
+                    f={f}
+                    value={agentRuntimeTarget(doc)}
+                    onChange={onRuntimeTarget}
+                  />
+                );
+              }
+              if (f.type === "ref") {
+                return (
+                  <RefInput
+                    key={f.path}
+                    f={f}
+                    value={String(getPath(doc, f.path) ?? "")}
+                    onChange={(v) => onField(f.path, v)}
+                  />
+                );
+              }
               if (f.type === "refList") {
                 return (
                   <RefListInput
@@ -250,6 +283,17 @@ export default function ArtifactEditor({
                     f={f}
                     value={(getPath(doc, f.path) as unknown[]) ?? []}
                     onChange={(v) => onFieldVal(f.path, v)}
+                  />
+                );
+              }
+              if (f.type === "objectList") {
+                const value = getPath(doc, f.path);
+                return (
+                  <ObjectListInput
+                    key={f.path}
+                    f={f}
+                    value={Array.isArray(value) ? value : []}
+                    onChange={(next) => onFieldVal(f.path, next)}
                   />
                 );
               }
@@ -266,7 +310,7 @@ export default function ArtifactEditor({
                           key={c.path}
                           f={c}
                           value={String(getPath(doc, `${f.path}.${c.path}`) ?? "")}
-                          onChange={(v) => onField(`${f.path}.${c.path}`, v)}
+                          onChange={(v) => onFieldVal(`${f.path}.${c.path}`, v)}
                         />
                       ))}
                     </div>
@@ -278,7 +322,8 @@ export default function ArtifactEditor({
                   key={f.path}
                   f={f}
                   value={String(getPath(doc, f.path) ?? "")}
-                  onChange={(v) => onField(f.path, v)}
+                  onChange={(v) => onFieldVal(f.path, v)}
+                  disabled={editing && f.path === "metadata.name"}
                 />
               );
             })}
@@ -404,13 +449,15 @@ export default function ArtifactEditor({
           <span className="text-[12px]" style={{ color: submitErr || lintErrors.length ? "var(--error-ink)" : "var(--ink-muted)" }}>
             {submitErr
               ? submitErr
+              : nameChanged
+                ? "An existing agent's name cannot be changed — restore the published name to continue"
               : lintErrors.length
                 ? `${lintErrors.length} validation ${lintErrors.length === 1 ? "issue" : "issues"} — fix before publishing`
                 : "Published to your tenant · the name must be unique within it"}
           </span>
           <div className="flex items-center gap-2">
             <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            {conflict && (
+            {!editing && conflict && (
               <button
                 className="btn-secondary"
                 disabled={submitting}
@@ -420,9 +467,9 @@ export default function ArtifactEditor({
                 Publish as new version
               </button>
             )}
-            <button className="btn-primary" disabled={!canSubmit} style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={() => submit()}>
+            <button className="btn-primary" disabled={!canSubmit} style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={() => submit(editing)}>
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              Publish {kind}
+              {editing ? "Publish new version" : `Publish ${kind}`}
             </button>
           </div>
         </div>
@@ -431,7 +478,7 @@ export default function ArtifactEditor({
   );
 }
 
-function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value: string; onChange: (v: unknown) => void; disabled?: boolean }) {
   const dimmed = disabled ? { opacity: 0.6, cursor: "not-allowed" } : undefined;
   return (
     <div>
@@ -441,9 +488,9 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
       {f.type === "select" ? (
         <Select
           value={value || f.options?.[0] || ""}
-          onChange={onChange}
+          onChange={(next) => onChange(next)}
           disabled={disabled}
-          options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
+          options={(f.options ?? []).map((o) => ({ value: o, label: f.optionLabels?.[o] ?? o }))}
           ariaLabel={f.label}
         />
       ) : f.type === "textarea" ? (
@@ -456,6 +503,19 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
+      ) : f.type === "number" ? (
+        <input
+          className={`field ${f.mono ? "font-mono text-[13px]" : ""}`}
+          style={dimmed}
+          disabled={disabled}
+          type="number"
+          min={f.min}
+          max={f.max}
+          step={f.step}
+          placeholder={f.placeholder}
+          value={value}
+          onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value))}
+        />
       ) : (
         <input
           className={`field ${f.mono ? "font-mono text-[13px]" : ""}`}
@@ -466,6 +526,51 @@ function FieldInput({ f, value, onChange, disabled = false }: { f: Field; value:
           onChange={(e) => onChange(e.target.value)}
         />
       )}
+      {f.help && (
+        <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
+          {f.help}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RefInput({ f, value, onChange }: { f: Field; value: string; onChange: (v: string) => void }) {
+  const [candidates, setCandidates] = useState<string[]>([]);
+  const [unreachable, setUnreachable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listRegistry(f.itemKind ?? "prompts")
+      .then((items) => {
+        if (!cancelled) setCandidates(items.map((item) => item.name).filter(Boolean));
+      })
+      .catch(() => {
+        if (!cancelled) setUnreachable(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [f.itemKind]);
+
+  return (
+    <div>
+      <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--ink-soft)" }}>
+        {f.label}
+      </label>
+      <input
+        className="field w-full font-mono text-[13px]"
+        list={`ref-${f.path}`}
+        placeholder={unreachable ? "catalog unavailable — type a name" : f.placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <datalist id={`ref-${f.path}`}>
+        {candidates.map((candidate) => (
+          <option key={candidate} value={candidate} />
+        ))}
+      </datalist>
       {f.help && (
         <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
           {f.help}
@@ -569,6 +674,65 @@ function RefListInput({ f, value, onChange }: { f: Field; value: unknown[]; onCh
           {f.help}
         </p>
       )}
+    </div>
+  );
+}
+
+function ObjectListInput({ f, value, onChange }: { f: Field; value: unknown[]; onChange: (v: unknown[]) => void }) {
+  const entries = value.map((item) =>
+    item != null && typeof item === "object" && !Array.isArray(item) ? (item as Doc) : {},
+  );
+
+  function add() {
+    const next = Object.fromEntries((f.children ?? []).map((child) => [child.path, child.type === "number" ? null : ""]));
+    onChange([...entries, next]);
+  }
+
+  function update(index: number, path: string, next: unknown) {
+    onChange(entries.map((entry, current) => (current === index ? setPath(entry, path, next) : entry)));
+  }
+
+  function remove(index: number) {
+    onChange(entries.filter((_, current) => current !== index));
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <label className="text-[12px] font-medium" style={{ color: "var(--ink-soft)" }}>
+          {f.label} {f.required && <span style={{ color: "var(--error-ink)" }}>*</span>}
+        </label>
+        <button type="button" className="btn-secondary" style={{ padding: "4px 8px", fontSize: 11 }} onClick={add}>
+          <Plus className="w-3 h-3" /> Add
+        </button>
+      </div>
+      {f.help && <p className="text-[11px] mb-2" style={{ color: "var(--ink-muted)" }}>{f.help}</p>}
+      <div className="space-y-3">
+        {entries.map((entry, index) => (
+          <div
+            key={String(entry.id || index)}
+            className="rounded-md p-3"
+            style={{ background: "var(--surface-muted)", border: "1px solid var(--border-subtle)" }}
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <span className="label-eyebrow">{f.label.replace(/s$/, "")} {index + 1}</span>
+              <button type="button" className="btn-ghost" style={{ padding: 4 }} onClick={() => remove(index)} aria-label={`Remove ${f.label} ${index + 1}`}>
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {(f.children ?? []).map((child) => (
+                <FieldInput
+                  key={child.path}
+                  f={child}
+                  value={String(getPath(entry, child.path) ?? "")}
+                  onChange={(next) => update(index, child.path, next)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

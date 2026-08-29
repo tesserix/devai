@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: infra-provisioner-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: infra-provisioner
+    devai.io/risk-level: high
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: infra-provisioner
+  title: Platform Engineer
+  description: "Creates Kubernetes deployment manifests (Helm charts) or VM deploy scripts based on the\
+    \ deployment target. Owns the Dockerfile and all infra files \u2014 every other role escalates here\
+    \ for infra changes."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/infra-provisioner
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - infra-provisioner
+  prompts:
+  - infra-provisioner-prompt-v1
   promptRef: infra-provisioner-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: null
-    maxTokens: 8192
-  limits:
-    maxTurns: 100
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.infra_provisioner.InfraProvisionerAgent
-  riskLevel: high
-  roleColor: admin

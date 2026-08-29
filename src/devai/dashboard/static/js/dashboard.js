@@ -588,7 +588,7 @@ function renderGovernance() {
           <div class="form-group">
             <label class="form-label">Claude Model</label>
             <select class="form-select">
-              <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+              <option value="claude-sonnet-5">Claude Sonnet 5</option>
               <option value="claude-opus-4-6">Claude Opus 4.6</option>
             </select>
             <p class="form-helper">Model used for EM, Sr Dev, and QA agents.</p>

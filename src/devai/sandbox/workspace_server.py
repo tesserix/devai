@@ -14,18 +14,21 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+from collections.abc import AsyncIterator, Awaitable
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
+from pydantic import BaseModel, ConfigDict, Field
 
+from devai.sandbox.browser import BrowserError, BrowserSession
+from devai.sandbox.browser_desktop import BrowserDesktop
+from devai.sandbox.browser_proxy import TOKEN_HEADER, proxy_desktop_request, proxy_desktop_socket
 from devai.sandbox.preview import detect_ports
 from devai.sandbox.workspace import WORKSPACE_PORT, WORKSPACE_ROOT, WorkspaceError, WorkspaceFiles, run_shell
 
 logger = logging.getLogger(__name__)
-
-TOKEN_HEADER = "X-DevAI-Workspace-Token"
 
 
 class _Path(BaseModel):
@@ -58,12 +61,69 @@ class _Command(BaseModel):
     timeout: float = 120.0
 
 
-def create_workspace_app(*, root: Path | str = WORKSPACE_ROOT, token: str) -> FastAPI:
+class _BrowserNavigate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=1, max_length=4096)
+
+
+class _BrowserScreenshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    full_page: bool = False
+
+
+class _BrowserSelector(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selector: str = Field(min_length=1, max_length=4096)
+
+
+class _BrowserType(_BrowserSelector):
+    text: str = Field(max_length=1_000_000)
+
+
+class _BrowserScroll(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    delta_x: float = Field(default=0, ge=-100_000, le=100_000)
+    delta_y: float = Field(default=600, ge=-100_000, le=100_000)
+
+
+class _BrowserContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selector: str = Field(default="", max_length=4096)
+
+
+class _BrowserController(Protocol):
+    async def navigate(self, url: str) -> dict[str, Any]: ...
+
+    async def screenshot(self, *, full_page: bool = False) -> dict[str, Any]: ...
+
+    async def click(self, selector: str) -> dict[str, Any]: ...
+
+    async def type(self, selector: str, text: str) -> dict[str, Any]: ...
+
+    async def scroll(self, *, delta_x: float = 0, delta_y: float = 600) -> dict[str, Any]: ...
+
+    async def get_content(self, *, selector: str = "") -> dict[str, Any]: ...
+
+
+def create_workspace_app(
+    *, root: Path | str = WORKSPACE_ROOT, token: str, browser: _BrowserController | None = None
+) -> FastAPI:
     if not token:
         raise ValueError("a workspace needs a capability token; refusing to serve without one")
 
     files = WorkspaceFiles(root=root)
-    app = FastAPI(title="DevAI sandbox workspace", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        start = getattr(browser, "start", None)
+        if start is not None:
+            await start()
+        yield
+        close = getattr(browser, "close", None)
+        if close is not None:
+            await close()
+
+    app = FastAPI(title="DevAI sandbox workspace", docs_url=None, redoc_url=None, lifespan=lifespan)
 
     def authorize(supplied: str | None) -> None:
         if not supplied or not hmac.compare_digest(supplied, token):
@@ -74,6 +134,20 @@ def create_workspace_app(*, root: Path | str = WORKSPACE_ROOT, token: str) -> Fa
             return fn()
         except WorkspaceError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+
+    def require_browser() -> _BrowserController:
+        if browser is None:
+            raise HTTPException(status_code=409, detail="this workspace has no browser")
+        return browser
+
+    async def drive(awaitable: Awaitable[dict[str, Any]]) -> dict[str, Any]:
+        try:
+            return await awaitable
+        except BrowserError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001 — dependency detail must not cross the workspace boundary
+            logger.warning("browser operation failed")
+            raise HTTPException(status_code=502, detail="browser operation failed") from error
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -141,17 +215,87 @@ def create_workspace_app(*, root: Path | str = WORKSPACE_ROOT, token: str) -> Fa
         # A non-zero exit is a result, not a server error — the caller is a model.
         return run_shell(body.command, root=files.root, timeout=body.timeout)
 
+    @app.post("/browser/navigate")
+    async def browser_navigate(
+        body: _BrowserNavigate, x_devai_workspace_token: str | None = Header(default=None)
+    ) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        return await drive(require_browser().navigate(body.url))
+
+    @app.post("/browser/screenshot")
+    async def browser_screenshot(
+        body: _BrowserScreenshot, x_devai_workspace_token: str | None = Header(default=None)
+    ) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        return await drive(require_browser().screenshot(full_page=body.full_page))
+
+    @app.post("/browser/click")
+    async def browser_click(
+        body: _BrowserSelector, x_devai_workspace_token: str | None = Header(default=None)
+    ) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        return await drive(require_browser().click(body.selector))
+
+    @app.post("/browser/type")
+    async def browser_type(
+        body: _BrowserType, x_devai_workspace_token: str | None = Header(default=None)
+    ) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        return await drive(require_browser().type(body.selector, body.text))
+
+    @app.post("/browser/scroll")
+    async def browser_scroll(
+        body: _BrowserScroll, x_devai_workspace_token: str | None = Header(default=None)
+    ) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        return await drive(require_browser().scroll(delta_x=body.delta_x, delta_y=body.delta_y))
+
+    @app.post("/browser/content")
+    async def browser_content(
+        body: _BrowserContent, x_devai_workspace_token: str | None = Header(default=None)
+    ) -> dict[str, Any]:
+        authorize(x_devai_workspace_token)
+        return await drive(require_browser().get_content(selector=body.selector))
+
+    @app.api_route("/browser/desktop/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+    async def browser_desktop(
+        request: Request,
+        path: str = "",
+        x_devai_workspace_token: str | None = Header(default=None),
+    ) -> Response:
+        authorize(x_devai_workspace_token)
+        if browser is None:
+            raise HTTPException(status_code=409, detail="this workspace has no browser")
+        return await proxy_desktop_request(request, path)
+
+    @app.websocket("/browser/desktop/{path:path}")
+    async def browser_desktop_socket(websocket: WebSocket, path: str = "") -> None:
+        try:
+            authorize(websocket.headers.get(TOKEN_HEADER))
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
+        if browser is None:
+            await websocket.close(code=1008)
+            return
+        await proxy_desktop_socket(websocket, path)
+
     return app
 
 
 def main() -> None:
     import uvicorn
 
+    root = os.getenv("DEVAI_WORKSPACE_ROOT", WORKSPACE_ROOT)
+    browser_enabled = os.getenv("DEVAI_WORKSPACE_BROWSER", "").lower() == "true"
     app = create_workspace_app(
-        root=os.getenv("DEVAI_WORKSPACE_ROOT", WORKSPACE_ROOT),
+        root=root,
         token=os.getenv("DEVAI_WORKSPACE_TOKEN", ""),
+        browser=BrowserSession(root=root) if browser_enabled else None,
     )
-    uvicorn.run(app, host="0.0.0.0", port=WORKSPACE_PORT)  # noqa: S104 — pod-local; reached via ClusterIP only
+    desktop = BrowserDesktop() if browser_enabled else nullcontext()
+    with desktop:
+        uvicorn.run(app, host="0.0.0.0", port=WORKSPACE_PORT)  # noqa: S104 — pod-local; ClusterIP only
 
 
 if __name__ == "__main__":

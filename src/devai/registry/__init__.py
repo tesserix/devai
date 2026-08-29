@@ -11,11 +11,11 @@ Design points:
   agentregistry's gRPC port; one wire format is enough.
 * ``RegistryClient`` holds a small in-memory TTL cache (30s default)
   so a dashboard page render isn't 4 round-trips.
-* Every read returns a typed list/dict; no raw JSON leaks into callers.
-* On failure (network, 5xx, schema mismatch) the client returns ``[]``
-  and emits a structured log. Specialization loader has its own local-
-  YAML fallback for the runtime case, so a registry blip never wedges
-  a pipeline.
+* Catalog browsing uses the small TTL cache; governed ``/resolved`` reads are
+  fresh for each admission decision.
+* Failures raise ``RegistryError`` with upstream response bodies redacted.
+  Governed execution treats Registry as critical and never falls back to an
+  unresolved local-only composition.
 * Optional bearer auth — when the cluster runs aregistry with
   anonymous-auth enabled (today's prod config), the token is empty
   and the client sends no Authorization header.
@@ -24,7 +24,7 @@ Public surface:
 
     RegistryClient                — HTTP client; instantiate per process
     Skill, Prompt, McpServer,
-    Agent                         — typed record dataclasses
+    Agent, ResolvedAgent          — typed record dataclasses
     create_registry_client(settings) — factory; reads DEVAI_REGISTRY_*
 
 The factory's signature mirrors the adapter family — same lazy / never-
@@ -37,7 +37,9 @@ from devai.registry.client import (
     Prompt,
     RegistryClient,
     RegistryError,
+    ResolvedAgent,
     Skill,
+    UnresolvedRef,
     create_registry_client,
 )
 
@@ -45,8 +47,10 @@ __all__ = [
     "Agent",
     "McpServer",
     "Prompt",
+    "ResolvedAgent",
     "RegistryClient",
     "RegistryError",
     "Skill",
+    "UnresolvedRef",
     "create_registry_client",
 ]

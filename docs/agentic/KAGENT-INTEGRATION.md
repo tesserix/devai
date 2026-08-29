@@ -1,17 +1,16 @@
-# kagent Integration — long-lived agents over A2A
+# kagent integration — Substrate Actors over A2A
 
-> **Status (2026-06-17): integration works end-to-end, but DORMANT on prod by
-> design.** kagent agents are **always-warm standing pods** (one Deployment per
-> labelled-agent × enabled-model), not per-call. On the current **3-node** prod
-> cluster that doesn't pay off, so **no agent is labelled `devai.io/runtime=kagent`**
-> today and **everything runs on-demand as Jobs** (see §0). The code + the dynamic
-> Settings UI stay in place (default-off) for a future genuinely-hot agent once
-> there's node headroom — see [§0a](#0a-re-enabling-kagent) to switch it back on.
->
-> **Going further — Agent Substrate:** the path to re-enable kagent in a way that
-> *fits* (Actors multiplexed in a gVisor WorkerPool, not a pod per agent) is the
-> **Agent Substrate**. Full prod setup runbook + decision log + the hard-won
-> gotchas: **[`SUBSTRATE-SETUP.md`](./SUBSTRATE-SETUP.md)**. Tracking: devai #69–#78.
+> **Status (2026-08-20): implemented, default-off after a NO-GO capacity decision.**
+> A registry agent labelled `devai.io/runtime=kagent` is reconciled as a kagent
+> `SandboxAgent` and dispatched through `/api/a2a-sandboxes/{namespace}/{agent}`.
+> Substrate multiplexes Actors in a gVisor WorkerPool instead of keeping one pod
+> per agent. Production stays behind `DEVAI_KAGENT_ENABLED=false` until the
+> readiness and cold-start acceptance in #70 and #76 pass. A failure known to
+> occur before kagent accepts a request uses the existing ephemeral Job path.
+> An accepted or ambiguous dispatch fails closed to prevent duplicate tool calls.
+
+The security boundary and required cross-tenant proofs are defined in
+[SUBSTRATE-THREAT-MODEL.md](SUBSTRATE-THREAT-MODEL.md).
 
 ---
 
@@ -20,46 +19,64 @@
 DevAI runs every agent **on-demand** by default: `JobRunnerStage`
 (`src/devai/pipeline/stages/job_runner.py`) submits **one ephemeral K8s Job per
 agent run** — it spins up when the pipeline calls the agent, does the work, and
-terminates. **Zero standing footprint.** kagent is the opposite: a resident
-Deployment that's always running so it can be addressed over A2A with no
-cold-start.
+terminates. **Zero standing footprint.** The opt-in path addresses a Substrate
+Actor through a `SandboxAgent`; the shared WorkerPool owns the runtime footprint
+and can wake scaled-to-zero Actors on first dispatch.
 
-|                    | **Ephemeral Job** (default)            | **kagent** (opt-in)                         |
+|                    | **Ephemeral Job** (default)            | **Substrate Actor** (opt-in)                |
 |--------------------|----------------------------------------|---------------------------------------------|
-| Lifecycle          | pops up on call → runs → terminates     | always-running standing pod                 |
-| Idle footprint     | **zero**                                | 1 pod per (labelled agent × enabled model)  |
-| Cold start         | yes (Job scheduling, seconds)           | none (pod is warm)                          |
+| Lifecycle          | pops up on call → runs → terminates     | Actor wakes on demand in a shared WorkerPool|
+| Idle footprint     | **zero**                                | shared WorkerPool; no pod per agent          |
+| Cold start         | yes (Job scheduling, seconds)           | first dispatch wakes a scaled-to-zero Actor  |
 | Per-user LLM keys  | ✅ `PrincipalLLMResolver`               | ✅ ModelConfig `apiKeyPassthrough`          |
-| Multi-model + fallback | ✅ `role_llm_*` / resolver          | ✅ per-model variants + dispatch chain      |
-| Fits a 3-node cluster | ✅ always                            | only for a few hot agents with headroom     |
+| Multi-model selection | ✅ `role_llm_*` / resolver          | ✅ bounded per-model variants                |
+| Failure fallback      | ✅ provider chain                   | pre-acceptance only; never replay accepted work |
+| Fits a 3-node cluster | ✅ always                            | ❌ not accepted in the current runtime        |
 
-**Why kagent is off here.** Each kagent agent pod requests ~384Mi. Labelling all
-40 registry agents × 4 enabled models = ~160 standing pods ≈ 60Gi — it doesn't fit
-3 nodes, and most pipeline agents run briefly per-run (a perfect Job fit, a poor
-standing-pod fit). Crucially, **per-user keys, multi-provider, and fallback already
-work on the Job path** via `PrincipalLLMResolver` — so running on Jobs loses none
-of that. kagent's *only* unique win is zero cold-start, which is worth a standing
-pod only for an agent hit constantly (e.g. an interactive chat agent) **and** only
-when the cluster has room.
-
-**Rule of thumb:** default everything to Jobs. Reach for kagent for a specific,
-constantly-hit agent where cold-start hurts — and label *just that one*.
+**Why the switch remains off.** #70 records a NO-GO for the current runtime. The
+production canary is accepted but is not ready, the WorkerPool is privileged and
+unbounded, and the required 5/20/50 concurrency and cold-start measurements cannot
+run. The unused `sandbox-gvisor` node pool has zero nodes and autoscaling disabled;
+the current nested-gVisor WorkerPool does not schedule onto it anyway. Per-user keys,
+multi-provider selection, and fallback continue to work on the Job path through
+`PrincipalLLMResolver`, so keeping the switch off is safe.
 
 ### 0a. Re-enabling kagent
 
-1. **Resolve the prompt at export time first.** 39 of 40 registry agents keep their
-   system prompt in a referenced `Prompt` artifact (`spec.promptRef`), not inline.
-   kagent requires a non-empty `systemMessage`, and the export does **not** resolve
-   `promptRef` today — so labelling a promptRef-only agent renders an *invalid* CR
-   (empty systemMessage, controller rejects it). Before labelling such an agent, add
-   the one-line export resolution in `agentic-registry`: `kagent.Build` Options gain
-   a `SystemPrompt`, set from a `resolveSystemPrompt` helper (follows `spec.promptRef`
-   → `Prompt.spec.systemPrompt`), wired in both `v0ExportKagent*` handlers. (Agents
-   with an inline `spec.systemPrompt`, like the old document-analyzer target, don't
-   need this.)
-2. **Label the one hot agent** (§2) — not all of them.
-3. **Mind the pod budget** — pods = labelled agents × the models users enable in
-   Settings. Keep both small on a 3-node cluster.
+1. Complete the Substrate readiness, capacity, isolation, and cold-start gates in
+   #70 and #76.
+2. Label the intended registry agent (§2) and let `kagent-agent-sync` reconcile
+   its `SandboxAgent`, `RemoteMCPServer`, and model variants.
+3. Turn on the scoped Settings switch only after the canary is `Ready=True`.
+
+### 0b. DevAI sandbox capability matrix
+
+A DevAI `SandboxSpec` and a kagent `SandboxAgent` are not equivalent. The runtime
+label is sufficient for ordinary registry-agent dispatch, but it must not be used
+as a blanket default for sandbox sessions until the blocked rows below have a
+sandbox-scoped implementation.
+
+| `SandboxSpec` capability | Current kagent mapping | Status |
+|---|---|---|
+| immutable agent + model pins | Static registry export and ModelConfig variant | Adaptable, not sandbox-scoped |
+| prompt version | Static `systemMessage` | Adaptable, not per-sandbox |
+| dataset version | None | Blocked |
+| ADK runtime version | Controller-owned runtime image | Blocked |
+| unpublished draft Agent | Registry export requires a published Agent | Blocked |
+| tool `real/mock/replay/block` modes | Static MCP references only | Blocked |
+| token, cost, wall-clock limits | DevAI sandbox ledger is not enforced inside Actor dispatch | Blocked |
+| confirmed personal LLM connector | `apiKeyPassthrough` for the caller's USER-scoped key | Partial |
+| TTL create/teardown | Standing reconciled Actor lifecycle | Blocked |
+| workspace + pinned repo | No per-sandbox workspace contract | Blocked |
+| IDE and browser | None | Blocked |
+| extra egress domains | Static cluster policy, not a per-sandbox grant | Blocked |
+| credential scopes | No equivalent per-run tool credential grant | Blocked |
+
+The required lifecycle is: create an Actor from the immutable sandbox record,
+wait for `Accepted=True` and `Ready=True`, dispatch with a deterministic sandbox/run
+idempotency key, and tear it down at TTL. A Job may be selected before Actor
+acceptance; after possible acceptance, the run must surface an uncertain outcome
+instead of executing the same work elsewhere.
 
 ---
 
@@ -68,22 +85,27 @@ constantly-hit agent where cold-start hurts — and label *just that one*.
 ```
 AUTHORING            label agent  devai.io/runtime=kagent   (registry seed)
    │
-REGISTRY (aregistry) GET /v0/export/kagent  → renders a kagent Agent CR
-   │                 (adapters/kagent — emits kagent.dev/v1alpha2 spec.declarative)
-RECONCILE            kagent-agent-sync CronJob (*/5)  → kubectl apply  → Agent CR
+REGISTRY (aregistry) GET /v0/export/kagent  → renders SandboxAgent + RemoteMCPServer
+   │                 (kagent.dev/v1alpha2; tools route through the private gateway)
+RECONCILE            kagent-agent-sync CronJob (*/5)  → applies managed CRs
    │
-CONTROLLER (kagent)  reconciles Agent → Deployment + A2A endpoint
-   │                 {kagent_url}/api/a2a/{ns}/{agent}
+CONTROLLER (kagent)  reconciles SandboxAgent → Substrate Actor
+   │                 {kagent_url}/api/a2a-sandboxes/{ns}/{agent}
 DISPATCH (DevAI)     JobRunnerStage._maybe_dispatch_kagent → KagentClient (A2A)
-                     …when the kagent switch is ON; else a K8s Job. Degrades to
-                     Job on any kagent error (never a SPOF).
+                     …when the kagent switch is ON; else a K8s Job. Uses a Job
+                     only before acceptance; ambiguous dispatches fail closed.
 ```
+
+NATS and Substrate operate at different layers and compose. The optional NATS
+WorkQueue first assigns a pipeline run to a worker. Once that worker owns the run,
+`JobRunnerStage` selects the labelled Substrate Actor or the default ephemeral Job.
+Turning either feature off does not silently enable the other.
 
 **Two halves:**
 
 - **DevAI side** (this repo) — routing + the dynamic switch. Done & live.
   - `src/devai/pipeline/stages/job_runner.py::_maybe_dispatch_kagent` — routes a
-    labelled agent over A2A; falls back to a Job on any error.
+    labelled agent over A2A; falls back only on a definite pre-acceptance error.
   - `src/devai/agentic/kagent_client.py` — A2A `message/send` client + `extract_a2a_text`.
   - `src/devai/registry/client.py` — surfaces `metadata.labels` on the Agent model.
   - The **switch**: a `kagent` Settings connector (`on`/`off` → `kagent_enabled`),
@@ -108,11 +130,11 @@ DISPATCH (DevAI)     JobRunnerStage._maybe_dispatch_kagent → KagentClient (A2A
    `tesserix-k8s/charts/apps/devai-registry-bootstrap/values.yaml` (re-runs the
    bootstrap, which clones devai@main and POSTs the seeds), or `argocd app sync
    devai-registry-bootstrap`.
-3. `kagent-agent-sync` (every 5 min) reconciles it into a kagent Deployment.
+3. `kagent-agent-sync` (every 5 min) reconciles it into a `SandboxAgent`.
 4. **Turn the switch on** — dashboard **Settings → kagent → on** (per user), or
    platform-wide via `DEVAI_KAGENT_ENABLED=true` in the `devai-api` chart.
-5. Trigger a run that uses the agent → it routes over A2A; the api log shows
-   `dispatched to kagent agent <name>`.
+5. Trigger a run that uses the agent → it routes through `/api/a2a-sandboxes`; the
+   result carries `runtime: kagent` and `execution_target: substrate`.
 
 **Current state:** **no agent is labelled** — `document-analyzer-agent` was the
 reference target but was unlabelled (devai `7fa91f0`) when kagent went dormant, so
@@ -152,12 +174,11 @@ apply** with 256Mi headroom for the multi-version CRDs; (c) the export pins
 ## 4. Verifying on the cluster
 
 ```bash
-# reconciled agent + Deployment
-kubectl -n kagent-system get agents.kagent.dev document-analyzer-agent    # READY/ACCEPTED True
-kubectl -n kagent-system get deploy document-analyzer-agent               # 1/1
+# reconciled SandboxAgent; both conditions must be true before enabling dispatch
+kubectl -n kagent-system get sandboxagents.kagent.dev document-analyzer-agent -o yaml
 # the A2A endpoint DevAI dispatches to (port-forward + JSON-RPC message/send)
 kubectl -n kagent-system port-forward deploy/kagent-controller 18083:8083 &
-curl -s -X POST localhost:18083/api/a2a/kagent-system/document-analyzer-agent \
+curl -s -X POST localhost:18083/api/a2a-sandboxes/kagent-system/document-analyzer-agent \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"role":"user","parts":[{"kind":"text","text":"ping"}],"messageId":"m1"}}}'
 ```
@@ -166,8 +187,8 @@ curl -s -X POST localhost:18083/api/a2a/kagent-system/document-analyzer-agent \
 
 ## 5. Operational notes
 
-- **Labelling an agent stands up a real kagent Deployment** (the reconciler acts
-  regardless of the DevAI switch). The switch only gates DevAI's *dispatch* decision.
+- **Labelling an agent creates managed runtime CRs** (the reconciler acts regardless
+  of the DevAI switch). The switch only gates DevAI's dispatch decision.
 - **Multi-version CRD:** always **client-side** `kubectl apply` for kagent Agents
   (the agent-sync now does). Server-side apply breaks on the v1alpha1/v1alpha2 split.
 - **Re-seeding:** the bootstrap re-runs only when its chart changes (it lives in
@@ -217,7 +238,7 @@ own key").** kagent ModelConfig has a boolean **`apiKeyPassthrough`**:
 > as the API key … for federated identity, to avoid separate secret management."*
 > (mutually exclusive with `apiKeySecret`.)
 
-This is purpose-built for exactly this. **One shared kagent agent Deployment** serves
+This is purpose-built for exactly this. **One shared Substrate Actor definition** serves
 every user, and each A2A request carries *that user's* key as the `Authorization:
 Bearer` token, which kagent forwards to the provider. **No per-user Deployments, no
 syncing per-user secrets into `kagent-system`.** It reuses DevAI's existing per-user
@@ -232,7 +253,7 @@ DevAI dispatch (JobRunnerStage._maybe_dispatch_kagent)
      — already done for the Job path (settings_overlay / PrincipalLLMResolver)
   2. KagentClient.dispatch sends Authorization: Bearer <user's LLM key>
      (today it only sends X-Forwarded-User + the bff service token)
-        │  POST {kagent}/api/a2a/kagent-system/<agent>
+        │  POST {kagent}/api/a2a-sandboxes/kagent-system/<agent>
         ▼
 kagent agent  (ModelConfig: apiKeyPassthrough=true, provider=Anthropic, claude-sonnet-4)
   3. forwards the Bearer token to the provider as the API key → user's own key, billed to them
@@ -280,7 +301,7 @@ which A's run forwards B's key.
 | Guardrail | Effect |
 |---|---|
 | **Human-principal only** | system/webhook/cron runs never forward a key (they'd resolve a service/global key) → they fall back to the Job path |
-| **Connector-scoped only** | `_kagent_user_key` returns a key only when it came from the principal's connector overlay (`overlaid_attrs`) — **never the platform base key** (`DEVAI_ANTHROPIC_API_KEY`), which is not an overlay override |
+| **Personal connector only** | `_kagent_user_key` returns a key only when overlay provenance marks it `Scope.USER` (`user_overlaid_attrs`) — **never** a platform, global, tenant, org, or team key |
 | **Per-principal** | the overlay is built from the run's authenticated `Principal`; no user receives another user's personal key (their connector is keyed to their uid/email) |
 | **Provider-matched** | only the key for `kagent_model_provider` is forwarded — a user on a different provider → no key → Job |
 | **No own key → Job** | a kagent run is never billed to a shared/platform key under passthrough |
@@ -288,7 +309,7 @@ which A's run forwards B's key.
 
 **Trust assumptions / defense-in-depth (infra — recommended):**
 
-1. **The key transits the kagent controller** (DevAI → `/api/a2a/…` → agent → LLM).
+1. **The key transits the kagent controller** (DevAI → `/api/a2a-sandboxes/…` → Actor → LLM).
    So the kagent control plane sees the Bearer. Mesh traffic is mTLS-encrypted
    (Istio); **verify the kagent controller/agent does not log `Authorization`
    headers** (upstream solo.io component — a trust assumption of passthrough).
@@ -296,7 +317,7 @@ which A's run forwards B's key.
    unauthenticated cluster-internal and `allow-mesh-internal` is permissive — any
    meshed pod can reach it. This does **not** let anyone use another user's key (key
    possession still governs), but to stop resource abuse / identity-header spoofing,
-   add an Istio `AuthorizationPolicy` in `kagent-system` allowing `/api/a2a/*` only
+   add an Istio `AuthorizationPolicy` in `kagent-system` allowing `/api/a2a-sandboxes/*` only
    from the **devai-api ServiceAccount**, plus a matching `NetworkPolicy`. (Not yet
    implemented — recommended next infra step; pattern in
    `tesserix-k8s/manifests/agentic-istio/authorization-policy.yaml`.)
@@ -306,7 +327,8 @@ which A's run forwards B's key.
 ## 8. Multi-provider, multi-model & fallback (roadmap)
 
 **Goal:** a user picks their provider(s) + model(s) in Settings (OpenAI, Vertex,
-Anthropic, …) and kagent uses them, with fallback — just like the Job path.
+Anthropic, …) and kagent uses the matching bounded variant. Unlike the Job path,
+an accepted Actor task is not replayed against a fallback provider.
 
 **What already exists (reuse, don't rebuild):**
 - The LLM connector carries `provider`, per-provider model fields, `enabled_models`
@@ -322,7 +344,7 @@ Anthropic, …) and kagent uses them, with fallback — just like the Job path.
 provider/model** — only the *key* varies per request (passthrough). So per-user
 provider/model means **pre-provisioned ModelConfig variants**, not free-form.
 
-**Design — a bounded ModelConfig catalog + provider/model-aware dispatch + fallback:**
+**Design — a bounded ModelConfig catalog + provider/model-aware dispatch:**
 
 ```
 Settings (per user)            kagent (pre-provisioned, passthrough)        DevAI dispatch
@@ -331,23 +353,25 @@ provider: openai               kagent-anthropic-sonnet-4-5  ┐               1.
 model: gpt-4.1                 kagent-openai-gpt-4-1        ├ one Agent      +fallback from the overlay
 enabled_models: [...]          kagent-vertex-gemini-2-5     ┘ variant each   2. pick the matching variant
 fallback_model: claude-…                                                    3. forward user key (Bearer)
-                                                                            4. on failure → next (fallback)
+                                                                            4. never replay accepted work
 ```
 
 - The agent-sync renders **one agent variant per catalog ModelConfig** (e.g.
   `document-analyzer-agent`, `…-openai`, `…-vertex`), each an `apiKeyPassthrough`
   ModelConfig for that provider+model. The catalog is **bounded** — the platform's
   offered models, not per-user — so no explosion.
-- DevAI's `_maybe_dispatch_kagent` resolves the user's `(provider, model)` + fallback
-  from the overlay, dispatches to the matching variant with the user's key, and on a
-  provider/model error **re-dispatches to the fallback** variant.
+- DevAI's `_maybe_dispatch_kagent` resolves the user's `(provider, model)` and
+  ordered alternatives from the overlay, then dispatches to the matching variant
+  with the user's key. It may select another variant only after a definite
+  pre-connection rejection. A returned failure, timeout, 5xx, invalid response,
+  or JSON-RPC error is not replayed because tools may already have run.
 - **Settings UI:** surface which providers/models kagent supports (the catalog ∩
   `/settings/models/{provider}` for the user) so users only enable what they have a
   key for.
 
 **Phasing:** Phase 1 (done) — single Anthropic passthrough, per-user key. Phase 2 —
-per-**provider** catalog (anthropic/openai/vertex) + provider-aware dispatch + fallback
-across providers (bounded). Phase 3 — per-(provider, model) granularity honoring
+per-**provider** catalog (anthropic/openai/vertex) + provider-aware selection across
+a bounded set. Phase 3 — per-(provider, model) granularity honoring
 `enabled_models`/`fallback_model`, + the Settings UI catalog. Full *arbitrary* per-user
 model is impractical (ModelConfig/agent explosion) — the bounded catalog is the sweet
 spot.

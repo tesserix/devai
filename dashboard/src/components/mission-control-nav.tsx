@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { InfoHint } from "@/components/guidance";
+import { NEW_RUN_HREF } from "@/lib/run-entry";
 
 /**
  * Fiber-style mission-control left nav.
@@ -62,7 +63,7 @@ type NavItem = {
 const START: NavItem[] = [
   { href: "/repos", label: "Repositories", Icon: FolderGit2, description: "Step 1 — connect the repos DevAI may work on" },
   { href: "/workflows", label: "Workflows", Icon: Workflow, description: "Step 2 — pick a workflow and run it" },
-  { href: "/compose", label: "Describe a task", Icon: Sparkles, description: "Or just say what you want in plain English" },
+  { href: NEW_RUN_HREF, label: "Describe a task", Icon: Sparkles, description: "Or just say what you want in plain English" },
 ];
 
 // 2. YOUR WORK — where a run in flight is watched and tracked.
@@ -71,6 +72,7 @@ const WORK: NavItem[] = [
   { href: "/runs", label: "Run history", Icon: ListChecks, description: "Every run, past and present" },
   { href: "/board", label: "Task board", Icon: FolderKanban, description: "Your GitHub issues as a Kanban" },
   { href: "/sandboxes", label: "Sandboxes", Icon: PackageOpen, description: "The workspace a run happened in — its diff and what it built" },
+  { href: "/feedback", label: "Feedback", Icon: MessageSquareText, description: "Share a story, bug, or task with the product team" },
 ];
 
 // 3. BUILDING BLOCKS — the shared registry, one page per artifact kind.
@@ -145,7 +147,7 @@ export function MissionControlNav({
   // The "New task" CTA opens the lifecycle home (Workflows), where the
   // blueprint picker + trigger dialog live — NOT the old /control stub (DASH-9).
   function newTask() {
-    router.push("/workflows?action=new");
+    router.push(NEW_RUN_HREF);
   }
 
   return (

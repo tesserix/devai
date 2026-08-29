@@ -15,7 +15,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from devai.kit.versions import AdkVersionCatalogue, UnknownAdkVersion
-from devai.sandbox.models import SandboxRecord, SandboxSpec, SandboxStatus
+from devai.sandbox.models import AgentRef, ImportSnapshot, SandboxRecord, SandboxSpec, SandboxStatus, ToolMode
+from devai.services.database import SandboxQuotaExceeded
 
 if TYPE_CHECKING:
     from devai.services.database import Database
@@ -46,15 +47,38 @@ class SandboxService:
         self._adk_catalogue = adk_catalogue
         self._reaper_task: asyncio.Task[None] | None = None
 
-    async def create(self, spec: SandboxSpec, *, owner: str) -> SandboxRecord:
+    async def create(
+        self,
+        spec: SandboxSpec,
+        *,
+        owner: str,
+        tenant_id: str = "",
+        user_id: str = "",
+        sandbox_id: str | None = None,
+    ) -> SandboxRecord:
         if not owner:
             raise SandboxError("a sandbox needs an owner")
+        if spec.import_snapshot is not None:
+            raise SandboxError("import_snapshot is server-managed")
+        if sandbox_id:
+            existing = await self.get(sandbox_id, owner=owner, is_admin=False)
+            if existing is not None:
+                if not _same_sandbox_request(existing.spec, spec):
+                    raise SandboxError("idempotency key was already used for a different sandbox request")
+                if existing.status in {SandboxStatus.DESTROYING, SandboxStatus.DESTROYED}:
+                    raise SandboxError("idempotent sandbox request already reached a terminal cleanup state")
+                if existing.status is SandboxStatus.READY or self._provisioner is None:
+                    return existing
+                return await self._provision(existing)
+        spec = await self._materialize_import(spec, owner_scope=tenant_id or owner)
         self._assert_refs_published(spec)
         spec = await self._pin_adk_version(spec)
+        if spec.agent is None:  # guarded by SandboxSpec and import hydration
+            raise SandboxError("sandbox agent is unresolved")
 
         now = datetime.now(UTC)
         record = SandboxRecord(
-            id=str(uuid.uuid4()),
+            id=sandbox_id or str(uuid.uuid4()),
             owner=owner,
             spec=spec,
             status=SandboxStatus.PENDING,
@@ -62,15 +86,26 @@ class SandboxService:
             expires_at=now + timedelta(seconds=spec.ttl_seconds),
             last_access_at=now,
         )
-        await self._db.create_sandbox(
-            sandbox_id=record.id,
-            owner=owner,
-            spec=spec.model_dump(mode="json"),
-            status=record.status.value,
-            created_at=record.created_at,
-            expires_at=record.expires_at,
-            last_access_at=record.last_access_at,
-        )
+        try:
+            await self._db.create_sandbox(
+                sandbox_id=record.id,
+                owner=owner,
+                spec=spec.model_dump(mode="json"),
+                status=record.status.value,
+                created_at=record.created_at,
+                expires_at=record.expires_at,
+                last_access_at=record.last_access_at,
+                tenant_id=tenant_id,
+                user_id=user_id or owner,
+                max_live_per_tenant=int(getattr(self._settings, "sandbox_max_live_per_tenant", 5) or 0),
+                monthly_cost_limit_usd=float(getattr(self._settings, "sandbox_monthly_cost_limit_usd", 100.0) or 0.0),
+            )
+        except SandboxQuotaExceeded as exc:
+            from devai.adapters.telemetry import get_global_telemetry
+
+            quota = "monthly_cost" if "monthly" in str(exc).lower() else "concurrent"
+            get_global_telemetry().incr("devai.sandbox.quota_rejections", attrs={"quota": quota})
+            raise SandboxError(str(exc)) from exc
         logger.info("sandbox %s created for %s (agent=%s@%s)", record.id, owner, spec.agent.name, spec.agent.version)
         return await self._provision(record)
 
@@ -174,15 +209,52 @@ class SandboxService:
 
     # ── reference validation ──────────────────────────────────────────
 
+    async def _materialize_import(self, spec: SandboxSpec, *, owner_scope: str) -> SandboxSpec:
+        if spec.import_id is None:
+            return spec
+        try:
+            imported = await self._db.get_agent_import(owner_scope, spec.import_id)
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxError("agent import storage unavailable") from exc
+        if imported is None:
+            raise SandboxError(f"agent import {spec.import_id} not found")
+        if imported.get("state") != "ready":
+            raise SandboxError(f"agent import {spec.import_id} is not ready")
+        conformance = imported.get("conformance") or {}
+        if conformance.get("level") not in {"callable", "sandbox_runnable", "verified"}:
+            raise SandboxError(f"agent import {spec.import_id} is not callable")
+        agent = imported.get("agent") or {}
+        exact_agent = AgentRef(
+            name=str(agent.get("name") or ""),
+            version=str(agent.get("version") or ""),
+        )
+        if spec.agent is not None and spec.agent != exact_agent:
+            raise SandboxError("sandbox agent override does not match the immutable import")
+        permissions = imported.get("permissions") or {}
+        if not isinstance(permissions, dict):
+            raise SandboxError("agent import permissions are invalid")
+        _assert_permissions_not_widened(spec, permissions)
+        snapshot = ImportSnapshot(
+            import_id=spec.import_id,
+            registry_ref=str(imported.get("registry_ref") or ""),
+            agent_digest=str(agent.get("digest") or ""),
+            dependency_lock=list(imported.get("dependency_lock") or []),
+            runtime=dict(agent.get("runtime") or {}),
+            permissions=permissions,
+        )
+        return spec.model_copy(update={"agent": exact_agent, "import_snapshot": snapshot})
+
     def _assert_refs_published(self, spec: SandboxSpec) -> None:
         """Refuse a spec pointing at an artifact that isn't published.
 
         `artifact_exists` returns None when the registry can't answer; an
         unreachable registry must not block sandbox creation.
         """
-        if self._registry is None:
+        if self._registry is None or spec.import_snapshot is not None:
             return
         # A draft is unpublished by definition — that is what it is being tested for.
+        if spec.agent is None:
+            raise SandboxError("sandbox agent is unresolved")
         refs: list[tuple[str, str]] = [] if spec.draft else [("agents", spec.agent.name)]
         if spec.prompt is not None:
             refs.append(("prompts", spec.prompt.ref))
@@ -194,6 +266,32 @@ class SandboxService:
                 continue
             if exists is False:
                 raise SandboxError(f"{plural[:-1]} {name} is not published")
+
+
+def _assert_permissions_not_widened(spec: SandboxSpec, permissions: dict[str, Any]) -> None:
+    network = permissions.get("network") or {}
+    if not isinstance(network, dict):
+        raise SandboxError("agent import network permissions are invalid")
+    allowed_domains = set(network.get("domains") or [])
+    if not set(spec.allow_domains).issubset(allowed_domains):
+        raise SandboxError("sandbox network domains exceed the imported permission lock")
+
+    allowed_scopes = set(permissions.get("scopes") or [])
+    if not set(spec.allow_scopes).issubset(allowed_scopes):
+        raise SandboxError("sandbox credential scopes exceed the imported permission lock")
+    for field in ("workspace", "browser", "ide"):
+        if getattr(spec, field) and permissions.get(field) is not True:
+            raise SandboxError(f"sandbox {field} exceeds the imported permission lock")
+
+    tool_permissions = permissions.get("tools") or {}
+    if not isinstance(tool_permissions, dict):
+        raise SandboxError("agent import tool permissions are invalid")
+    real_tools = set(tool_permissions.get("real") or [])
+    if spec.tools.default_mode is ToolMode.REAL and "*" not in real_tools:
+        raise SandboxError("sandbox default real tool mode exceeds the imported permission lock")
+    requested_real = {name for name, mode in spec.tools.overrides.items() if mode is ToolMode.REAL}
+    if "*" not in real_tools and not requested_real.issubset(real_tools):
+        raise SandboxError("sandbox real tools exceed the imported permission lock")
 
 
 def _jsonb(value: Any) -> Any:
@@ -212,6 +310,18 @@ def _to_record(row: dict[str, Any]) -> SandboxRecord:
         last_access_at=row.get("last_access_at"),
         detail=_jsonb(row.get("detail")) or {},
     )
+
+
+def _same_sandbox_request(stored: SandboxSpec, requested: SandboxSpec) -> bool:
+    stored_body = stored.model_dump(mode="json")
+    requested_body = requested.model_dump(mode="json")
+    if requested.import_snapshot is None:
+        stored_body["import_snapshot"] = None
+    if requested.agent is None:
+        stored_body["agent"] = None
+    if requested.adk_version is None:
+        stored_body["adk_version"] = None
+    return stored_body == requested_body
 
 
 __all__ = ["SandboxError", "SandboxService"]

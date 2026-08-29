@@ -47,15 +47,21 @@ async def _authorize(request: Request, principal: Principal, scope: Scope, scope
     - team:   you must be a TEAM ADMIN of that team (membership alone is not
               enough — a shared team credential is admin-managed).
     - org:    you must be an ORG ADMIN (admin of a team in that org).
-    - tenant/global: platform admin only.
-    A global ``admin`` role overrides all of these.
+    - tenant: an ``admin`` of that exact tenant.
+    - global: ``platform-admin`` only.
+    A ``platform-admin`` role overrides all scopes.
     """
-    is_admin = "admin" in (principal.roles or [])
+    roles = set(principal.roles or [])
+    is_tenant_admin = "admin" in roles
+    is_platform_admin = "platform-admin" in roles
     if scope == Scope.USER:
-        if scope_id and scope_id not in (principal.uid, principal.email):
-            raise HTTPException(status_code=403, detail="Cannot manage another user's settings")
+        own_ids = {principal.user_scope_id}
+        if not principal.tenant_id:
+            own_ids.update({principal.uid, principal.email})
+        if scope_id and scope_id not in own_ids:
+            raise HTTPException(status_code=404, detail="Settings connector not found")
         return
-    if is_admin:
+    if is_platform_admin:
         return
     team_service = getattr(request.app.state, "team_service", None)
     user_key = principal.uid or principal.email
@@ -69,12 +75,19 @@ async def _authorize(request: Request, principal: Principal, scope: Scope, scope
         if not ok:
             raise HTTPException(status_code=403, detail="Org admin role required to manage org settings")
         return
-    # tenant / global
+    if scope == Scope.TENANT:
+        if is_tenant_admin and scope_id == principal.tenant_id:
+            return
+        if scope_id != principal.tenant_id:
+            raise HTTPException(status_code=404, detail="Settings connector not found")
+        raise HTTPException(status_code=403, detail="Tenant admin role required to manage tenant settings")
+    if scope == Scope.GLOBAL:
+        raise HTTPException(status_code=403, detail="Platform admin role required to manage global settings")
     raise HTTPException(status_code=403, detail="Admin role required for tenant/global settings")
 
 
 def _scope_default(principal: Principal) -> tuple[Scope, str]:
-    return Scope.USER, (principal.uid or principal.email)
+    return Scope.USER, principal.user_scope_id
 
 
 # ── catalog ───────────────────────────────────────────────────────────────
@@ -102,12 +115,8 @@ def _kagent_supported_catalog() -> list[dict[str, str]]:
 async def _kagent_user_enabled_models(principal: Principal, svc: Any) -> list[str]:
     """The model ids THIS user enabled for kagent (their kagent connector's
     prefs.enabled_models). Drives which variants get provisioned."""
-    email = getattr(principal, "email", "") or ""
-    lister = getattr(svc, "list_user_connectors_by_email", None)
-    if lister is None or not email:
-        return []
     try:
-        for c in await lister(email):
+        for c in await svc.list_connectors(Scope.USER, principal.user_scope_id):
             if c.connector_key == "kagent":
                 em = (c.prefs or {}).get("enabled_models")
                 if isinstance(em, list):
@@ -292,8 +301,10 @@ async def list_my_settings(request: Request) -> dict[str, Any]:
     principal = await _require_principal(request)
     svc = _svc(request)
     team_service = getattr(request.app.state, "team_service", None)
-    user_key = principal.uid or principal.email
-    is_admin = "admin" in (principal.roles or [])
+    user_key = principal.user_scope_id
+    membership_key = principal.uid or principal.email
+    roles = set(principal.roles or [])
+    is_admin = bool({"admin", "platform-admin"} & roles)
 
     scopes: list[tuple[Scope, str]] = [(Scope.USER, user_key)]
     for team_id in principal.team_ids or []:
@@ -308,11 +319,17 @@ async def list_my_settings(request: Request) -> dict[str, Any]:
     # whether an inherited connector shows as editable). Team/org need admin.
     writable_scopes: list[dict[str, str]] = [{"scope": "user", "scope_id": user_key, "label": "Just me"}]
     for team_id in principal.team_ids or []:
-        if is_admin or (team_service is not None and await team_service.is_team_admin(team_id, user_key)):
+        if is_admin or (team_service is not None and await team_service.is_team_admin(team_id, membership_key)):
             writable_scopes.append({"scope": "team", "scope_id": team_id, "label": f"Team {team_id}"})
     for org_id in getattr(principal, "org_ids", []) or []:
-        if is_admin or (team_service is not None and await team_service.is_org_admin(org_id, user_key)):
+        if is_admin or (team_service is not None and await team_service.is_org_admin(org_id, membership_key)):
             writable_scopes.append({"scope": "org", "scope_id": org_id, "label": f"Org {org_id}"})
+    if "admin" in roles and principal.tenant_id:
+        writable_scopes.append(
+            {"scope": "tenant", "scope_id": principal.tenant_id, "label": f"Tenant {principal.tenant_id}"}
+        )
+    if "platform-admin" in roles:
+        writable_scopes.append({"scope": "global", "scope_id": "", "label": "Global"})
 
     out: list[dict[str, Any]] = []
     # shared[connector_key] = the broadest non-user scope that already provides
@@ -360,16 +377,22 @@ async def upsert_connector(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"invalid scope: {scope_raw}") from None
 
     if scope == Scope.USER and not body.get("scope_id"):
-        scope_id = principal.uid or principal.email
+        scope_id = principal.user_scope_id
     else:
         scope_id = body.get("scope_id", "")
+    if scope == Scope.USER and scope_id in {principal.uid, principal.email, principal.user_scope_id}:
+        scope_id = principal.user_scope_id
     await _authorize(request, principal, scope, scope_id)
 
+    provider = str(body.get("provider", "") or "")
+    spec = CONNECTOR_BY_KEY[connector_key]
+    if provider not in spec.providers:
+        raise HTTPException(status_code=400, detail=f"unsupported provider {provider!r} for {connector_key}")
     secret_values = body.get("secrets") or {}
     if secret_values and not await svc.secrets_writable():
         raise HTTPException(
             status_code=409,
-            detail="Secrets backend is read-only — set DEVAI_SECRETS_PROVIDER=gcp_sm and grant write IAM",
+            detail="Secrets backend is read-only — configure the OpenBao secret-service broker",
         )
 
     try:
@@ -377,7 +400,7 @@ async def upsert_connector(request: Request) -> dict[str, Any]:
             scope=scope,
             scope_id=scope_id,
             connector_key=connector_key,
-            provider=body.get("provider", ""),
+            provider=provider,
             instance_id=body.get("instance_id", "default"),
             prefs=body.get("prefs") or {},
             secret_values=secret_values,
@@ -515,7 +538,7 @@ async def llm_capabilities(request: Request) -> dict[str, Any]:
     try:
         from devai.settings.llm_resolver import PrincipalLLMResolver
 
-        overlay = await PrincipalLLMResolver(base_settings, svc).settings_for_email(principal.email or principal.uid)
+        overlay = await PrincipalLLMResolver(base_settings, svc).settings_for_principal(principal)
     except Exception:  # noqa: BLE001 — degrade to platform view, never 500
         logger.warning("llm capabilities: overlay resolution failed — using platform config", exc_info=True)
 

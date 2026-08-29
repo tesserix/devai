@@ -1,0 +1,26 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-browser-screenshot
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: low
+  annotations:
+    mcp.devai.io/wire-name: browser_screenshot
+spec:
+  displayName: Browser Screenshot
+  description: Capture the sandbox browser as a PNG image.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      full_page:
+        type: boolean
+    required: []
+  tags: [sandbox, mcp-tool, browser]

@@ -74,6 +74,7 @@ class InstrumentedLLMAdapter(LLMAdapter):
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         request = self._coerce_model(request)
+        request = self._with_turn_context(request)
         started = time.perf_counter()
         try:
             # Two child trace planes, both nesting under the executor's stage
@@ -103,6 +104,8 @@ class InstrumentedLLMAdapter(LLMAdapter):
                     "devai.agent": str(extra.get("agent", "") or ""),
                     "devai.run_id": str(extra.get("run_id", "") or ""),
                     "devai.triggered_by": str(extra.get("triggered_by", "") or ""),
+                    "devai.tenant_id": str(extra.get("tenant_id", "") or ""),
+                    "devai.user_id": str(extra.get("user_id", "") or ""),
                 },
             )
         except Exception:  # noqa: BLE001 — tracing must never break the call
@@ -121,23 +124,17 @@ class InstrumentedLLMAdapter(LLMAdapter):
             from langsmith.run_helpers import trace
 
             extra = request.extra or {}
-            last_user = next(
-                (m.content for m in reversed(request.messages) if getattr(m.role, "value", m.role) == "user"),
-                "",
-            )
             return trace(
                 name=f"llm:{extra.get('agent') or self.provider_name}",
                 run_type="llm",
-                inputs={
-                    "model": request.model or self.default_model,
-                    "system": (request.system or "")[:1500],
-                    "prompt": str(last_user)[:3000],
-                },
+                inputs={"model": request.model or self.default_model},
                 metadata={
                     "provider": self.provider_name,
                     "run_id": str(extra.get("run_id", "") or ""),
                     "agent": str(extra.get("agent", "") or ""),
                     "triggered_by": str(extra.get("triggered_by", "") or ""),
+                    "tenant_id": str(extra.get("tenant_id", "") or ""),
+                    "user_id": str(extra.get("user_id", "") or ""),
                 },
             )
         except Exception:  # noqa: BLE001 — tracing must never break the call
@@ -151,7 +148,6 @@ class InstrumentedLLMAdapter(LLMAdapter):
             usage = response.usage
             rt.end(
                 outputs={
-                    "text": (response.text or "")[:4000],
                     "tokens_in": getattr(usage, "prompt_tokens", 0) or 0,
                     "tokens_out": getattr(usage, "completion_tokens", 0) or 0,
                 }
@@ -161,6 +157,7 @@ class InstrumentedLLMAdapter(LLMAdapter):
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMResponse]:
         request = self._coerce_model(request)
+        request = self._with_turn_context(request)
         started = time.perf_counter()
         last: LLMResponse | None = None
         try:
@@ -240,9 +237,12 @@ class InstrumentedLLMAdapter(LLMAdapter):
                 cost_usd=cost,
                 duration_ms=duration_ms,
                 triggered_by=str(extra.get("triggered_by", "") or ""),
+                tenant_id=str(extra.get("tenant_id", "") or ""),
+                user_id=str(extra.get("user_id", "") or ""),
                 agent=str(extra.get("agent", "") or ""),
                 run_id=str(extra.get("run_id", "") or ""),
                 status=status,
+                sandbox_id=str(extra.get("sandbox_id", "") or ""),
             )
             loop = asyncio.get_running_loop()
             loop.create_task(coro)
@@ -260,6 +260,9 @@ class InstrumentedLLMAdapter(LLMAdapter):
                     status=status,
                     agent=str(extra.get("agent", "") or ""),
                     run_id=str(extra.get("run_id", "") or ""),
+                    tenant_id=str(extra.get("tenant_id", "") or ""),
+                    user_id=str(extra.get("user_id", "") or ""),
+                    triggered_by=str(extra.get("triggered_by", "") or ""),
                 )
             )
         except RuntimeError:
@@ -278,6 +281,9 @@ class InstrumentedLLMAdapter(LLMAdapter):
         status: str,
         agent: str,
         run_id: str,
+        tenant_id: str,
+        user_id: str,
+        triggered_by: str,
     ) -> None:
         try:
             from devai.services.database import get_global_db
@@ -295,9 +301,23 @@ class InstrumentedLLMAdapter(LLMAdapter):
                 cost_usd=cost,
                 duration_ms=duration_ms,
                 status=status,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                triggered_by=triggered_by,
             )
         except Exception:  # noqa: BLE001 — analytics persistence is best-effort
             pass
+
+    @staticmethod
+    def _with_turn_context(request: LLMRequest) -> LLMRequest:
+        from dataclasses import replace
+
+        from devai.services.agent_turns import get_turn_context
+
+        ambient = get_turn_context()
+        if not ambient:
+            return request
+        return replace(request, extra={**ambient, **dict(request.extra or {})})
 
     # ── Pass-throughs ────────────────────────────────────────────────
 

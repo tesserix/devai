@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import httpx
 import pytest
 
 from devai.a2a import A2AClient, A2AError, AgentCard
@@ -107,11 +108,24 @@ def test_discover_filters_by_capability() -> None:
     assert [c.name for c in sre] == ["oncall"]
 
 
-def test_find_for_capability_returns_first_match() -> None:
+def test_find_for_capability_returns_the_only_match() -> None:
     reg = FakeRegistry({"oncall": _card_dict("oncall")})
     client = A2AClient(reg)
     assert client.find_for_capability("triage").name == "oncall"
     assert client.find_for_capability("nonexistent") is None
+
+
+def test_find_for_capability_rejects_ambiguous_matches() -> None:
+    reg = FakeRegistry(
+        {
+            "oncall-a": _card_dict("oncall-a"),
+            "oncall-b": _card_dict("oncall-b"),
+        }
+    )
+    client = A2AClient(reg)
+
+    with pytest.raises(A2AError, match="ambiguous"):
+        client.find_for_capability("triage")
 
 
 # --------------------------------------------------------------------- #
@@ -123,7 +137,11 @@ def test_send_message_builds_jsonrpc_envelope() -> None:
     reg = FakeRegistry({"oncall": _card_dict("oncall")})
     # verify_cards=False: this test exercises the JSON-RPC envelope mechanics,
     # not the trust guards (those are covered in test_a2a_security.py).
-    client = A2AClient(reg, verify_cards=False)
+    client = A2AClient(
+        reg,
+        gateway_base_url="https://ai-gateway.svc.cluster.local:8080/v1",
+        verify_cards=False,
+    )
     card = client.fetch_card("oncall")
 
     captured: dict = {}
@@ -137,7 +155,7 @@ def test_send_message_builds_jsonrpc_envelope() -> None:
     client._rpc = fake_rpc  # type: ignore[method-assign]
     out = client.send_message(card, "Pod is CrashLoopBackOff — propose a fix.")
 
-    assert captured["url"] == "https://agent.svc/a2a/v1"
+    assert captured["url"] == "https://ai-gateway.svc.cluster.local:8080/a2a/v1"
     assert captured["method"] == "message/send"
     msg = captured["params"]["message"]
     assert msg["role"] == "user"
@@ -147,7 +165,39 @@ def test_send_message_builds_jsonrpc_envelope() -> None:
 
 
 def test_send_message_requires_url() -> None:
-    client = A2AClient(FakeRegistry(), verify_cards=False)
+    client = A2AClient(
+        FakeRegistry(),
+        gateway_base_url="https://ai-gateway.svc.cluster.local:8080",
+        verify_cards=False,
+    )
     card = AgentCard.from_dict({"name": "no-endpoint"})
     with pytest.raises(A2AError):
         client.send_message(card, "hi")
+
+
+def test_send_message_fails_closed_without_a2a_gateway() -> None:
+    client = A2AClient(FakeRegistry(), verify_cards=False)
+    card = AgentCard.from_dict(_card_dict("oncall"))
+
+    with pytest.raises(A2AError, match="gateway is not configured"):
+        client.send_message(card, "hi")
+
+
+def test_a2a_gateway_error_does_not_expose_upstream_body(monkeypatch) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *args, **kwargs: httpx.Response(502, text="internal host plus bearer-secret"),
+    )
+    client = A2AClient(
+        FakeRegistry(),
+        gateway_base_url="https://ai-gateway.svc.cluster.local:8080",
+        verify_cards=False,
+    )
+    card = AgentCard.from_dict(_card_dict("oncall"))
+
+    with pytest.raises(A2AError) as caught:
+        client.send_message(card, "hi")
+
+    assert str(caught.value) == "a2a: gateway returned 502"
+    assert "bearer-secret" not in str(caught.value)

@@ -6,6 +6,7 @@ description: >-
   the user's answer, and continues until requirements are concrete
   enough to proceed. Parks the task between turns.
 category: specialist
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: engineering-manager-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: planning
     devai.io/skill: engineering-manager
+    devai.io/risk-level: medium
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: engineering-manager
+  title: Engineering Manager
+  description: Create per-story technical implementation plans. Each plan declares the files to create/modify,
+    the approach, dependencies on other stories, and the estimated complexity. Output drives the collaborative
+    parallel implementation model.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/engineering-manager
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - engineering-manager
+  prompts:
+  - engineering-manager-prompt-v1
   promptRef: engineering-manager-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: null
-    maxTokens: 8192
-  limits:
-    maxTurns: 60
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.engineering_manager.EngineeringManagerAgent
-  riskLevel: medium
-  roleColor: engineer

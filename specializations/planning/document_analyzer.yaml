@@ -5,6 +5,7 @@ description: >-
   functional + non-functional requirement, plus any tech-stack hints
   buried in the input. Output is consumed by requirements_analyst.
 category: planning
+runtime: tesserix_adk
 
 llm_provider: gemini
 llm_model: gemini-3.1-pro-preview

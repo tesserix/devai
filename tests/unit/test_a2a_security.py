@@ -142,18 +142,25 @@ def test_send_message_secure_verifies_then_calls() -> None:
     priv, pub = _keypair()
     card = _signed_card(priv)
     client = A2AClient(
-        SigningRegistry(_signing_key(pub), card), verify_cards=True, allowed_url_suffixes=[".svc.cluster.local"]
+        SigningRegistry(_signing_key(pub), card),
+        gateway_base_url="https://ai-gateway.svc.cluster.local:8080/v1",
+        verify_cards=True,
+        allowed_url_suffixes=[".svc.cluster.local"],
     )
     called = {}
     client._rpc = lambda url, method, params: called.setdefault("url", url) or {"ok": True}  # type: ignore[method-assign]
     client.send_message(card, "hello")
-    assert called["url"] == card.url
+    assert called["url"] == "https://ai-gateway.svc.cluster.local:8080/a2a/v1"
 
 
 def test_send_message_secure_refuses_unsigned_card_before_calling() -> None:
     priv, pub = _keypair()
     unsigned = AgentCard.from_dict({"name": "oncall", "url": "https://oncall.svc.cluster.local/a2a"})
-    client = A2AClient(SigningRegistry(_signing_key(pub), unsigned), verify_cards=True)
+    client = A2AClient(
+        SigningRegistry(_signing_key(pub), unsigned),
+        gateway_base_url="https://ai-gateway.svc.cluster.local:8080",
+        verify_cards=True,
+    )
 
     def boom(*_a, **_k):
         raise AssertionError("must not call the agent when verification fails")
@@ -167,7 +174,10 @@ def test_send_message_secure_refuses_disallowed_url_even_if_signed() -> None:
     priv, pub = _keypair()
     card = _signed_card(priv, url="https://evil.example.com/a2a")
     client = A2AClient(
-        SigningRegistry(_signing_key(pub), card), verify_cards=True, allowed_url_suffixes=[".svc.cluster.local"]
+        SigningRegistry(_signing_key(pub), card),
+        gateway_base_url="https://ai-gateway.svc.cluster.local:8080",
+        verify_cards=True,
+        allowed_url_suffixes=[".svc.cluster.local"],
     )
     client._rpc = lambda *a, **k: pytest.fail("must not call a disallowed url")  # type: ignore[method-assign]
     with pytest.raises(A2AError, match="allowed suffix"):

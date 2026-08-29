@@ -5,9 +5,10 @@ description: >-
   or autonomously fixes a broken workflow. Owns `.github/workflows/`
   — every other role escalates to ci_monitor for CI changes.
 category: review
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 
 allowed_tools:
   - scm_get_file_content

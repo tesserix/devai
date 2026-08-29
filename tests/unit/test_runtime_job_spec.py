@@ -63,11 +63,15 @@ def test_job_spec_carries_keyless_llm_config_from_dispatcher_env(monkeypatch):
     monkeypatch.setenv("DEVAI_VERTEX_LOCATION", "asia-south1")
     monkeypatch.setenv("DEVAI_LLM_FALLBACK_PROVIDER", "vertex_gemini")
     monkeypatch.setenv("DEVAI_LLM_TIER_HEAVY", "anthropic:claude-sonnet-4-20250514")
+    monkeypatch.setenv("DEVAI_LLM_GATEWAY_BASE_URL", "http://ai-gateway:8080")
+    monkeypatch.setenv("DEVAI_LLM_GATEWAY_REQUIRED", "true")
     spec = build_job_spec(_cfg(), _inputs())
     env = _env_of(spec)
     assert env["DEVAI_VERTEX_PROJECT"]["value"] == "proj-1"
     assert env["DEVAI_VERTEX_LOCATION"]["value"] == "asia-south1"
     assert env["DEVAI_LLM_TIER_HEAVY"]["value"] == "anthropic:claude-sonnet-4-20250514"
+    assert env["DEVAI_LLM_GATEWAY_BASE_URL"]["value"] == "http://ai-gateway:8080"
+    assert env["DEVAI_LLM_GATEWAY_REQUIRED"]["value"] == "true"
 
 
 def test_job_spec_omits_unset_passthrough_vars(monkeypatch):

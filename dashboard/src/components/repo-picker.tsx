@@ -64,7 +64,10 @@ export function RepoPicker({
   // Close on outside click.
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery(""); // typed-but-unpicked text isn't a selection — don't imply it is
+      }
     }
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
@@ -136,7 +139,7 @@ export function RepoPicker({
               setOpen(false);
             }
           }}
-          placeholder={value ? value : placeholder}
+          placeholder={value ? `${value} — type to change` : placeholder}
           className="w-full rounded-md py-1.5 pl-7 pr-2 text-sm outline-none focus:border-[var(--ink-strong)]"
           style={inputStyle}
         />

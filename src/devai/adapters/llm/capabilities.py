@@ -5,9 +5,9 @@ tier — and that detects which providers are actually CONNECTED for a given
 settings/overlay (i.e. have credentials that build a non-noop adapter).
 
 Used by ``create_role_llm`` so each agent runs on the tier-appropriate model
-of whatever provider the tenant actually has: an Anthropic tenant keeps the
-Claude ids; an OpenAI(Codex)+Groq tenant gets ``o3`` for heavy roles and
-``llama-3.3-70b`` as the fallback — never a Claude id forced onto OpenAI.
+of every provider in the configured primary/fallback order. An Anthropic
+model preference therefore becomes the configured Gemini tier model while
+Vertex is primary, then returns to the exact Claude model on Anthropic fallback.
 
 The configured ``llm_model_<role>`` stays the source of truth for the TIER
 (via :func:`tier_for_model`) and for the exact id when its own provider is
@@ -77,7 +77,7 @@ def tier_for_model(model: str) -> str:
         return DEFAULT_TIER
     if "opus" in m or m.startswith(("o1", "o3", "o4")) or "gpt-5" in m:
         return "heavy"
-    if "haiku" in m or "mini" in m or "nano" in m or "flash-lite" in m or "flash-8b" in m:
+    if "haiku" in m or "-mini" in m or "nano" in m or "flash-lite" in m or "flash-8b" in m:
         return "light"
     return DEFAULT_TIER
 
@@ -103,24 +103,57 @@ def model_for(provider: str, tier: str) -> str:
     return PROVIDER_TIER_MODELS.get((provider or "").lower(), {}).get((tier or DEFAULT_TIER).lower(), "")
 
 
+def model_for_provider(settings: Any, provider: str, requested_model: str) -> str:
+    """Map a requested model onto ``provider`` without changing provider order."""
+    from devai.adapters.llm.model_policy import provider_serves
+
+    requested = normalize_model(requested_model)
+    tier = tier_for_model(requested)
+    raw = str(getattr(settings, f"llm_tier_{tier}", "") or "")
+    configured_provider, separator, configured_model = raw.partition(":")
+    if separator and configured_provider.strip().lower() == provider.lower() and configured_model.strip():
+        return normalize_model(configured_model.strip())
+    if requested and provider_serves(provider, requested):
+        return requested
+    return model_for(provider, tier)
+
+
 def ordered_providers(settings: Any, prefer: str | None = None) -> list[str]:
     """Provider preference order for this settings/overlay (deduped, known).
 
-    ``prefer`` (the role model's natural provider) first so the configured id
-    is honored on its own backend; then the global default ``llm_provider``,
-    the claude-preserving gateway (``llm_role_chain_provider``), and the
-    ``llm_fallback_provider`` order (default openai → vertex_gemini → groq).
+    The configured ``llm_provider`` is always first, followed by the explicit
+    ``llm_fallback_provider`` order. A role's natural provider is only a hint
+    when no provider order exists; model preferences must never silently move
+    a fallback ahead of the product's primary. ``llm_role_chain_provider`` is
+    retained only for deployments that do not already require Agent Gateway.
     """
     from devai.adapters.llm.factory import llm_registry
 
-    order: list[str] = []
-    if prefer:
-        order.append(prefer.lower())
-    order.append(str(getattr(settings, "llm_provider", "") or "").lower())
-    gw = str(getattr(settings, "llm_role_chain_provider", "") or "").lower()
-    if gw:
-        order.append(gw)
-    order += [n.strip().lower() for n in str(getattr(settings, "llm_fallback_provider", "") or "").split(",")]
+    authorized_raw = getattr(settings, "llm_authorized_providers", None)
+    if isinstance(authorized_raw, str):
+        authorized = [p.strip().lower() for p in authorized_raw.split(",") if p.strip()]
+    elif authorized_raw is not None:
+        authorized = [str(p).strip().lower() for p in authorized_raw if str(p).strip()]
+    else:
+        authorized = []
+
+    primary = str(getattr(settings, "llm_provider", "") or "").strip().lower()
+    fallbacks = [
+        name.strip().lower()
+        for name in str(getattr(settings, "llm_fallback_provider", "") or "").split(",")
+        if name.strip()
+    ]
+    order = [primary, *fallbacks]
+    if not any(provider and provider != "noop" for provider in order) and prefer:
+        order.append(prefer.strip().lower())
+    if not bool(getattr(settings, "llm_gateway_required", False)):
+        gateway = str(getattr(settings, "llm_role_chain_provider", "") or "").strip().lower()
+        if gateway:
+            order.append(gateway)
+    if authorized_raw is not None:
+        order += authorized
+        allowed = set(authorized)
+        order = [p for p in order if p in allowed]
     out: list[str] = []
     seen: set[str] = set()
     for p in order:
@@ -168,6 +201,7 @@ def describe_capabilities(settings: Any, roles: list[str] | None = None) -> dict
     return {
         "connected": connected,
         "primary": connected[0] if connected else "",
+        "gateway_required": bool(getattr(settings, "llm_gateway_required", False)),
         "roles": resolved,
     }
 
@@ -184,12 +218,8 @@ def resolve_primary(settings: Any, role: str) -> tuple[str, str]:
     live = connected_providers(settings, prefer=natural_provider(model))
     if not live:
         return ("", model)
-    from devai.adapters.llm.model_policy import provider_serves
-
     primary = live[0]
-    if model and provider_serves(primary, model):
-        return (primary, model)
-    return (primary, model_for(primary, tier) or model)
+    return (primary, model_for_provider(settings, primary, model) or model_for(primary, tier) or model)
 
 
 __all__ = [
@@ -199,6 +229,7 @@ __all__ = [
     "connected_providers",
     "describe_capabilities",
     "model_for",
+    "model_for_provider",
     "natural_provider",
     "ordered_providers",
     "resolve_primary",

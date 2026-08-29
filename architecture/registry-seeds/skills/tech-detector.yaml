@@ -15,10 +15,9 @@ spec:
     the skill_profile_name selection.
   category: planning
   tools:
-  - file_tree
+  - scm_get_repo_tree
+  - list_directory
   - read_file
-  - repo_profile
-  - detect_repo_state
   handoverSchema:
     language:
       type: string

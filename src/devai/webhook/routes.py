@@ -176,16 +176,10 @@ async def _trigger_from_normalized_event(
         f"## Description\n\n{body_text}"
     )
 
-    # Guardrail: sanitize requirements before feeding to agents
-    try:
-        from devai.services.guardrails import InputSanitizer
+    # Guardrail: fence issue content as data before it reaches an agent.
+    from devai.services.guardrails import sanitize_untrusted_text
 
-        sanitizer = InputSanitizer()
-        requirements, warnings = sanitizer.sanitize_requirements(requirements)
-        for w in warnings:
-            logger.warning("Webhook guardrail: %s", w)
-    except Exception:
-        pass
+    requirements = sanitize_untrusted_text(requirements, "issue")
 
     logger.info(
         "Pipeline triggered from %s issue #%s on %s",
@@ -307,7 +301,12 @@ async def _trigger_from_issue_comment(
     parts = comment_body.split(maxsplit=2)
     override_reqs = parts[2] if len(parts) > 2 else ""
 
-    requirements = override_reqs or _build_requirements_from_issue(issue)
+    if override_reqs:
+        from devai.services.guardrails import sanitize_untrusted_text
+
+        requirements = sanitize_untrusted_text(override_reqs, "comment")
+    else:
+        requirements = _build_requirements_from_issue(issue)
 
     logger.info("Pipeline triggered from comment on #%d on %s (by %s)", issue_number, repo, principal.email)
 
@@ -410,7 +409,9 @@ def _build_requirements_from_issue(issue: dict[str, Any]) -> str:
 
     parts.append(f"\n## Description\n\n{body}")
 
-    return "\n".join(parts)
+    from devai.services.guardrails import sanitize_untrusted_text
+
+    return sanitize_untrusted_text("\n".join(parts), "issue")
 
 
 async def _post_trigger_comment(request: Request, repo: str, issue_number: int) -> None:
