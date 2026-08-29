@@ -102,3 +102,38 @@ async def test_upstream_failure_degrades_to_disabled(monkeypatch):
     out = await fetch_overview(_config(), 30)
     assert out["enabled"] is False
     assert "unavailable" in out["reason"]
+
+
+@pytest.mark.asyncio
+async def test_upstream_enabled_key_cannot_override_our_marker(monkeypatch):
+    """An upstream body carrying its own `enabled` must not flip the section off."""
+
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {"enabled": False, "visitors": 7}
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            return _Response()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    out = await fetch_overview(_config(), 7)
+
+    assert out["enabled"] is True
+    assert out["visitors"] == 7
