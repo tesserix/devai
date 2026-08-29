@@ -196,3 +196,17 @@ async def test_record_login_is_not_deduplicated():
     await record_login(state, "user@example.com")
     await record_login(state, "user@example.com")
     assert len(db.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_record_login_survives_a_failing_database():
+    """A sign-in must never be blocked by the analytics write behind it."""
+    from devai.admin.activity import record_login
+
+    class _BrokenDatabase:
+        async def audit(self, *_a, **_kw):
+            raise RuntimeError("postgres down")
+
+    state = SimpleNamespace(analytics_db=_BrokenDatabase())
+
+    assert await record_login(state, "user@example.com") is False
