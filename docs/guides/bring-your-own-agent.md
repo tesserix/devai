@@ -56,8 +56,8 @@ registry://acme/agents/acme-ai/support-agent@1.2.0
 Authenticate to DevAI separately, then search or paste the exact reference:
 
 ```bash
-export DEVAI_API_URL=https://api.devai.tesserix.app
-export DEVAI_API_TOKEN='<short-lived DevAI token>'
+devai auth login --api-url https://devai.tesserix.app
+devai auth status
 
 devai adk registry search "support ticket triage" --kind Agent
 devai adk registry import \
@@ -66,6 +66,8 @@ devai adk registry import \
   --idempotency-key import-support-1 \
   --output json
 ```
+
+The browser sign-in creates a one-hour DevAI CLI session. The encrypted session is stored only in the operating-system keychain; the ADK commands load it automatically and never write it to a project file. Run `devai auth login` again after it expires and `devai auth logout` to remove it immediately.
 
 DevAI verifies the Registry signature, resolves every caller-visible dependency to an exact version/digest, computes conformance findings, and stores an immutable project-owned import. A later Registry outage does not rewrite the stored lock.
 
@@ -98,8 +100,6 @@ Use the failing case's `trace_url` to inspect model/tool/MCP causality. Export a
 ```bash
 devai adk compare <baseline-run-id> <candidate-run-id> --output json
 devai adk publish agent-1.2.1.yaml \
-  --api-url "$DEVAI_API_URL" \
-  --api-token "$DEVAI_API_TOKEN" \
   --eval-run-id <candidate-run-id>
 ```
 

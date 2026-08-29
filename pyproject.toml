@@ -20,6 +20,7 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "PyGithub>=2.6.0",
     "httpx>=0.28.1",
+    "keyring>=25.6.0",
     "jsonschema>=4.26.0",
     "structlog>=26.1.0",
     "opentelemetry-api>=1.29.0",

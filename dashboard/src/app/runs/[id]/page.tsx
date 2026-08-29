@@ -550,7 +550,6 @@ export default function RunDetailPage() {
 
         {tab === "preview" && (
           <PreviewTab
-            runId={runId}
             repo={run?.repo}
             pipelineUrl={previewUrl}
             blueprint={blueprint}
@@ -752,13 +751,11 @@ function derivePhase(session: PreviewSession | null, diagnoses: PreviewDiagnosis
 }
 
 function PreviewTab({
-  runId,
   repo,
   pipelineUrl,
   blueprint,
   blueprintHasPreview,
 }: {
-  runId: string;
   repo?: string;
   pipelineUrl: string;
   blueprint?: string;
