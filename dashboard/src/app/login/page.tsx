@@ -178,9 +178,6 @@ function LoginPageInner() {
             <p className="mt-4 text-xs text-red-600 dark:text-red-400 text-center">{error}</p>
           )}
 
-          <p className="mt-5 text-center text-xs text-[var(--ink-muted)]">
-            New users can sign up with Google. Samyak Rout and Mahesh Sangawar own the product board.
-          </p>
         </div>
 
         <p className="mt-6 text-center text-xs text-[var(--ink-muted)]">

@@ -23,6 +23,9 @@ const CONNECT_SRC = [
   "https://securetoken.googleapis.com",
   "https://*.tesserix.app",
   "wss://*.tesserix.app",
+  // Native CLI sign-in posts its state-bound proof to a random loopback port.
+  // Keep this IPv4-only: parseCLIAuthRequest rejects localhost, IPv6 and LAN hosts.
+  "http://127.0.0.1:*",
 ].join(" ");
 
 // Firebase Auth (GIP) Google sign-in loads the gapi loader script and runs its
