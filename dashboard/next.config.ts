@@ -126,6 +126,10 @@ const nextConfig: NextConfig = {
         destination: `${API_INTERNAL_URL}/api/analytics/:path*`,
       },
       {
+        source: "/api/sre-studio/:path*",
+        destination: `${API_INTERNAL_URL}/api/sre-studio/:path*`,
+      },
+      {
         source: "/api/specializations/:path*",
         destination: `${API_INTERNAL_URL}/api/specializations/:path*`,
       },
