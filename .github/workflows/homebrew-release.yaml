@@ -168,9 +168,12 @@ jobs:
             --amd64-sha256 "$amd64_sha" \
             --arm64-sha256 "$arm64_sha" \
             --output tap/Formula/devai.rb
+          tap_root="$(brew --repository)/Library/Taps/tesserix/homebrew-tap"
+          mkdir -p "$(dirname "$tap_root")"
+          ln -s "$PWD/tap" "$tap_root"
           brew style tap/Formula/devai.rb
-          brew audit --strict tap/Formula/devai.rb
-          brew install --formula tap/Formula/devai.rb
+          brew audit --strict tesserix/tap/devai
+          brew install --formula tesserix/tap/devai
           "$(brew --prefix)/bin/devai" --help
 
       - name: Commit formula update
