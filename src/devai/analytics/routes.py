@@ -47,7 +47,7 @@ async def _tasks(request: Request, *, blueprint: str | None = None, repo: str | 
         return []
 
 
-async def _db(request: Request):
+async def get_db(request: Request):
     """Lazily connect + cache a Database for agent/LLM/SRE rollups.
 
     Returns None when the DB is unreachable; callers degrade to empty.
@@ -112,7 +112,7 @@ async def stages(request: Request) -> list[dict[str, Any]]:
 async def agents(request: Request, days: int = Query(30, ge=1, le=365)) -> list[dict[str, Any]]:
     """Per-agent executions, avg duration, tokens, cost, failures."""
     tenant_id, user_id, _ = await _usage_scope(request)
-    db = await _db(request)
+    db = await get_db(request)
     if db is None:
         return []
     try:
@@ -126,7 +126,7 @@ async def agents(request: Request, days: int = Query(30, ge=1, le=365)) -> list[
 async def llm_cost(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
     """Token + USD cost by provider/model and over time."""
     tenant_id, user_id, _ = await _usage_scope(request)
-    db = await _db(request)
+    db = await get_db(request)
     if db is None:
         return {"by_model": [], "timeseries": []}
     by_model: list[dict[str, Any]] = []
@@ -221,7 +221,7 @@ async def pricing(request: Request) -> dict[str, Any]:
 async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
     """Quality eval scores the caller may see — their OWN runs, or (admin)
     everyone's. Pass-rate, average score, by-evaluator, recent."""
-    db = await _db(request)
+    db = await get_db(request)
     if db is None:
         return {
             "summary": {"evals": 0, "avg_score": 0, "pass_rate": 0},
@@ -242,7 +242,7 @@ async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[s
 @router.get("/sre/summary")
 async def sre_summary(request: Request) -> dict[str, Any]:
     """Best-effort SRE counts from the shared devai_db SRE tables."""
-    db = await _db(request)
+    db = await get_db(request)
     if db is None:
         return {}
     try:
@@ -303,7 +303,7 @@ async def memory(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[
     except Exception:  # noqa: BLE001
         logger.debug("memory analytics: recent recall failed", exc_info=True)
 
-    db = await _db(request)
+    db = await get_db(request)
     if db is not None:
         try:
             out["totals"] = await db.analytics_memory_summary()
@@ -587,7 +587,7 @@ async def slo(request: Request, days: int = Query(7, ge=1, le=90)) -> dict[str, 
 
     incidents: dict[str, Any] = {}
     apps: list[dict[str, Any]] = []
-    db = await _db(request)
+    db = await get_db(request)
     if db is not None:
         try:
             incidents = await db.analytics_incident_slo(days)
