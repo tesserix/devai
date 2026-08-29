@@ -11,6 +11,8 @@ test("CSP permits the validated IPv4 loopback CLI callback", async () => {
 
   assert.ok(csp);
   assert.match(csp, /connect-src [^;]*http:\/\/127\.0\.0\.1:\*/);
+  assert.match(csp, /script-src [^;]*https:\/\/static\.cloudflareinsights\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/cloudflareinsights\.com/);
   assert.doesNotMatch(csp, /http:\/\/localhost/);
   assert.doesNotMatch(csp, /http:\/\/\[::1\]/);
 });
