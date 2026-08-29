@@ -256,6 +256,12 @@ func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
+	// GET stays for browser navigation, but a cross-site GET (e.g. a hostile
+	// <img> tag) must not be able to force-clear the session.
+	if r.Method == http.MethodGet && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		http.Error(w, `{"error":"cross_site_request_rejected"}`, http.StatusForbidden)
+		return
+	}
 	h.session.Clear(w)
 	if r.Method == http.MethodGet {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
