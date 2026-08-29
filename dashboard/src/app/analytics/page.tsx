@@ -28,6 +28,7 @@ import {
   type StageStat,
   type TelemetryHealth,
 } from "@/lib/api";
+import { AdminPanel } from "@/components/admin-panel";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Donut, HBarChart, LineChart } from "@/components/charts";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
@@ -42,6 +43,7 @@ const TABS = [
   { key: "cost", label: "Cost" },
   { key: "quality", label: "Usage & Quality" },
   { key: "platform", label: "Platform" },
+  { key: "admin", label: "Admin" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -85,6 +87,16 @@ export default function AnalyticsPage() {
   const [slo, setSlo] = useState<SLOReport | null>(null);
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.analytics.usage>> | null>(null);
   const [evals, setEvals] = useState<Awaited<ReturnType<typeof api.analytics.evals>> | null>(null);
+
+  // Admin tab exists only if the API grants it. A non-admin gets 403 and
+  // never sees the button; there is no client-side role check.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    api.admin
+      .overview(1)
+      .then(() => setIsAdmin(true))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,7 +180,7 @@ export default function AnalyticsPage() {
 
       {/* Tab bar — one concern per view */}
       <div className="seg" role="tablist" aria-label="Analytics sections" style={{ width: "fit-content" }}>
-        {TABS.map((t) => (
+        {TABS.filter((t) => t.key !== "admin" || isAdmin).map((t) => (
           <button
             key={t.key}
             role="tab"
@@ -564,6 +576,9 @@ export default function AnalyticsPage() {
           <MemoryPanel mem={mem} days={days} onChanged={load} />
         </>
       )}
+
+      {/* ════ ADMIN — platform-owner view, authorized server-side ════ */}
+      {tab === "admin" && isAdmin && <AdminPanel days={days} />}
     </div>
   );
 }
