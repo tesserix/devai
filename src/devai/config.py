@@ -296,6 +296,16 @@ class Settings(BaseSettings):
     # personal usage view and the global/by-user rollups are unreachable.
     admin_emails: str = ""
 
+    # --- openpanel (web analytics) ---
+    # OpenPanel runs in-cluster (tesserix-k8s charts/thirdparty/openpanel) and
+    # answers page-level questions the backend can't: hits, sessions,
+    # referrers. Read server-side only so the client secret never reaches a
+    # browser. Any of the three unset leaves /api/admin/openpanel reporting
+    # {"enabled": false} — DevAI is not onboarded as an OpenPanel project yet.
+    openpanel_api_url: str = ""  # e.g. https://analytics.tesserix.app/api
+    openpanel_client_id: str = ""
+    openpanel_client_secret: str = ""
+
     # Shared secret the auth-bff includes (header X-Auth-Bff-Secret) so the
     # backend only trusts X-Forwarded-* identity headers from the bff. When
     # empty, X-Forwarded-* is trusted unconditionally (today's behavior).

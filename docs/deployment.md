@@ -141,21 +141,12 @@ User → devai.tesserix.app/dashboard/auth/login
 | `argocd/prod/infrastructure/kustomization.yaml` | References redis-devai |
 | `argocd/prod/apps/kustomization.yaml` | References devai-app-of-apps |
 
-## Helm Chart (in devai repo)
+## Helm Chart (in tesserix-k8s)
 
-```
-helm/devai/
-├── Chart.yaml
-├── values.yaml          # Base config (NATS URL, Redis URL, ports)
-├── values-prod.yaml     # Prod overrides (SA annotation, resources)
-└── templates/
-    ├── deployment.yaml         # Pod spec with probes, annotations
-    ├── service.yaml            # ClusterIP:8080
-    ├── serviceaccount.yaml     # With WIF annotation
-    ├── configmap.yaml          # Non-secret env vars
-    ├── externalsecret.yaml     # Maps GCP secrets → K8s Secret
-    └── virtualservice.yaml     # Istio routing for devai.tesserix.app
-```
+The prod Helm chart (Chart.yaml, values, deployment/service/serviceaccount
+templates, ExternalSecret, VirtualService for devai.tesserix.app) lives in
+the `tesserix-k8s` repo, not here. This repo carries only the local/sandbox
+chart at `k8s/chart/`, used by `sandboxctl` for kind-based development.
 
 ## CI/CD Pipeline
 

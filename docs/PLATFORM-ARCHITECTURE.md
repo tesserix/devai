@@ -567,6 +567,44 @@ per run, stage durations, fallback rates. **Data caveat:** Fiber-style runs pers
 
 **Audit:** `audit_log` table + registry publish audit; SRE scan history.
 
+### Admin analytics and the trial allowance
+
+`/api/admin/*` is gated by a router-level admin-role dependency
+(`src/devai/admin/routes.py`), granted through `DEVAI_ADMIN_EMAILS`. It
+reports daily active users (exact, from `audit_log`), sign-ins, per-user
+LLM spend (from the Redis usage ledger), and — when configured — page-level
+stats proxied from OpenPanel.
+
+Production never observes a login: auth-bff terminates OAuth outside the
+pod, so the backend counts *active users*, not sign-ins. The dashboard
+labels the two separately rather than conflating them.
+
+The trial allowance (`src/devai/settings/trial.py`) defaults to inert:
+with `DEVAI_LLM_REQUIRE_USER_CONNECTOR=false`, `applicable` is always
+false and the dashboard shows nothing. Flipping that flag to `true` both
+reveals the meter and starts enforcing it.
+
+Trial counters are permanent by design — exhaustion revokes the shared keys
+for that user for good. `trial_enabled` is only the global budget flag: the
+per-user gate is `applicable` (`strict and not has_own`,
+`src/devai/settings/routes.py:519`), true only when strict mode is on and
+the caller has no connector of their own. Because that gate, not the
+permanent counter, decides visibility, a user who exhausts the trial and
+later adds their own connector stops being `applicable` rather than
+staying exhausted forever — which is why the dashboard checks `applicable`.
+
+This repo's local/sandbox chart (`k8s/chart/values.yaml`) carries local
+defaults for all three env vars. Prod does not source config from this
+repo — `DEVAI_ADMIN_EMAILS`, `DEVAI_LLM_TRIAL_TOKEN_BUDGET`, and
+`DEVAI_LLM_REQUIRE_USER_CONNECTOR` need setting in the devai chart values
+in the `tesserix-k8s` repo before the admin tab or trial meter are live
+in production.
+
+Onboarding OpenPanel requires a `devai` project in
+`tesserix-k8s/charts/thirdparty/openpanel/values-prod.yaml` and its client
+ID in the `openpanel-client-ids` secret; until then the section reports
+`enabled: false`.
+
 ---
 
 ## 14. Dashboards & Auth

@@ -6,6 +6,7 @@ import { Menu, ShieldHalf } from "lucide-react";
 import { MissionControlNav } from "@/components/mission-control-nav";
 import { StatusBar } from "@/components/status-bar";
 import { CommandPalette } from "@/components/command-palette";
+import { TrialBanner } from "@/components/trial-banner";
 import { NEW_RUN_HREF } from "@/lib/run-entry";
 
 /**
@@ -89,7 +90,10 @@ export function MissionControlShell({ children }: { children: React.ReactNode })
               </span>
             </span>
           </header>
-          <main className="flex-1 min-w-0 overflow-y-auto">{children}</main>
+          <main className="flex-1 min-w-0 overflow-y-auto">
+            <TrialBanner />
+            {children}
+          </main>
         </div>
       </div>
       <StatusBar />
