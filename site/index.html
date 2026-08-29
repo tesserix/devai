@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevAI — Agent Lifecycle Platform</title>
+<meta name="description" content="DevAI is an agentic application-lifecycle and SRE platform: versioned agents, isolated sandboxes, evaluation gates, a governed registry, and owner-attributed model usage in one control plane.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <div class="inner">
+    <a class="brand" href="index.html">Dev<span>AI</span></a>
+    <nav>
+      <a class="active" href="index.html">Overview</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="agents.html">Build Agents</a>
+      <a href="https://github.com/tesserix/devai">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main>
+
+<section class="hero">
+  <h1>Ship agents you can <em>trust</em>, from draft to production.</h1>
+  <p class="lede">
+    DevAI is an agentic application-lifecycle and SRE platform. It combines versioned
+    agents, prompts, skills, MCP tools, isolated sandboxes, evaluation gates, durable
+    workflow orchestration, traces, and owner-attributed model usage in one control plane.
+  </p>
+  <a class="cta" href="agents.html">Create your first agent</a>
+  <a class="cta ghost" href="architecture.html">See the architecture</a>
+</section>
+
+<h2>Why DevAI</h2>
+<p>
+  Agents are non-deterministic software with side effects. A plausible chat reply is not
+  evidence that an agent is safe or useful. DevAI makes the evidence loop the product:
+</p>
+<div class="flow">author → sandbox → evaluate → inspect trace → fix → re-evaluate → compare → promote</div>
+<p>
+  Every promoted agent version is one that passed a pinned evaluation suite, with its
+  quality, safety, latency, token use, and cost recorded and explainable. Nothing reaches
+  the catalog on vibes.
+</p>
+
+<h2>What the platform does</h2>
+<div class="grid">
+  <div class="card">
+    <h3>ALM pipeline</h3>
+    <p>14 orchestrated agents take work from requirement ingestion through planning,
+    implementation, review, security scanning, tests, infrastructure, and release —
+    with bounded review loops and hard security gates.</p>
+  </div>
+  <div class="card">
+    <h3>SRE autonomy</h3>
+    <p>7 SRE agents run a discover → monitor → correlate → respond → learn loop on a
+    schedule. Discovery auto-maps Kubernetes namespaces, services, and dependencies;
+    incidents get correlated and answered, and the loop learns from outcomes.</p>
+  </div>
+  <div class="card">
+    <h3>Isolated sandboxes</h3>
+    <p>Every candidate agent runs in an owner-scoped sandbox that pins prompt, model,
+    dataset, tool policy, budgets, and expiry. Tools run in mock, replay, block, or
+    deliberately-allowed real mode — side effects are a boundary, not an accident.</p>
+  </div>
+  <div class="card">
+    <h3>Evaluation gates</h3>
+    <p>Versioned datasets and suites score deterministic outcomes, tool trajectories,
+    model-graded quality, and the operational envelope. Publication is refused unless
+    the exact tested draft passed the exact pinned suite.</p>
+  </div>
+  <div class="card">
+    <h3>Governed registry &amp; gateway</h3>
+    <p>Agents, blueprints, datasets, and suites are versioned records in a registry.
+    All model traffic flows through AgentGateway for policy enforcement, usage
+    attribution, and cost recording — provider keys never enter a sandbox.</p>
+  </div>
+  <div class="card">
+    <h3>Traces over scores</h3>
+    <p>A score locates a problem; a trace explains it. Every run keeps the pinned
+    prompt, model turns, tool inputs and outcomes, blocked calls, tokens, latency,
+    and cost — in order, owned by the same principal.</p>
+  </div>
+  <div class="card">
+    <h3>Dashboards &amp; chat</h3>
+    <p>An ALM dashboard for pipeline runs, agent activity, approvals, and evaluation
+    comparisons, plus an SRE dashboard for cluster health and incidents. A tool-calling
+    chat agent drives the same APIs conversationally.</p>
+  </div>
+  <div class="card">
+    <h3>Multi-provider, multi-SCM</h3>
+    <p>Adapters keep vendors swappable by configuration: multiple LLM providers behind
+    one gateway, GitHub / GitLab / Azure DevOps behind one SCM interface, and pluggable
+    memory, storage, and event backends.</p>
+  </div>
+</div>
+
+<h2>The lifecycle in one paragraph</h2>
+<p>
+  You author an agent as a small YAML manifest, validate it, and create a sandbox that
+  pins everything the run depends on. You evaluate it against a versioned dataset —
+  happy paths, prompt injection, tool failures, refusals, boundaries — and read the
+  failing traces instead of tuning aggregates. When a candidate beats its baseline on
+  an unchanged dataset, you publish: the gate verifies the evaluation run belongs to
+  you, tested this exact draft, used the suite's dataset version, and met every
+  threshold. Only then does the agent appear in the catalog, stamped with the evidence
+  that admitted it.
+</p>
+<p><a href="agents.html">Walk through the full loop →</a></p>
+
+</main>
+<footer class="site">DevAI · an agent lifecycle platform · <a href="https://github.com/tesserix/devai">github.com/tesserix/devai</a></footer>
+</body>
+</html>

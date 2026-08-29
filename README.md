@@ -8,6 +8,8 @@ orchestration, traces, and owner-attributed model usage in one control plane.
 
 ## Start here
 
+- [Documentation site](https://tesserix.github.io/devai/) — overview, architecture,
+  and the agent-building walkthrough in one place.
 - [Install and authenticate the DevAI CLI](docs/guides/install-and-authenticate.md) —
   install or upgrade the macOS CLI with Homebrew and create a secure session.
 - [Feedback and support](docs/guides/feedback-and-support.md) — create a request,
