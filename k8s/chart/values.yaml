@@ -33,6 +33,11 @@ env:
   DEVAI_GITHUB_ORG: "tesserix"
   DEVAI_CLAUDE_MODEL: "claude-sonnet-5"
   DEVAI_GROQ_MODEL: "llama-3.3-70b-versatile"
+  DEVAI_ADMIN_EMAILS: "samyak.rout@gmail.com,mahesh.sangawar@gmail.com"
+  # Meter is visible but unenforced until DEVAI_LLM_REQUIRE_USER_CONNECTOR=true.
+  # Trial counters never reset, so exhaustion revokes the shared keys for good.
+  DEVAI_LLM_TRIAL_TOKEN_BUDGET: "200000"
+  DEVAI_LLM_REQUIRE_USER_CONNECTOR: "false"
   # Local = fewer moving parts: no NATS, no LangSmith, no K8s job runtime.
   # Memory runs on the sandbox Redis so the learn/inject loop is actually
   # exercised in dev (noop would silently discard every write).
