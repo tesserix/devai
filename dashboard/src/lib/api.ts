@@ -11,6 +11,36 @@ export interface PipelineRun {
   agents: Record<string, { status: string; error?: string; updated_at?: number }>;
 }
 
+export interface FeedbackReply {
+  id: string;
+  body: string;
+  author: string;
+  author_role: "user" | "support";
+  created_at: string;
+  url: string;
+}
+
+export interface FeedbackThread {
+  id: string;
+  type: "story" | "bug" | "task";
+  title: string;
+  description: string;
+  status: "open" | "closed";
+  issue_number: number;
+  issue_url: string;
+  submitter: string;
+  created_at: string;
+  updated_at: string;
+  can_reply: boolean;
+  can_manage: boolean;
+  replies?: FeedbackReply[];
+}
+
+export interface FeedbackInbox {
+  threads: FeedbackThread[];
+  can_manage: boolean;
+}
+
 export type SandboxStatus = "pending" | "provisioning" | "ready" | "destroying" | "destroyed" | "failed";
 export type SandboxToolMode = "real" | "mock" | "replay" | "block";
 
@@ -491,9 +521,22 @@ export const api = {
   // Auth
   me: () => apiFetch<{ login: string; name: string; avatar_url: string }>("/me"),
   submitFeedback: (body: { type: "story" | "bug" | "task"; title: string; description: string }) =>
-    apiFetch<{ issue_url: string; issue_number: number; type: string }>("/feedback", {
+    apiFetch<FeedbackThread>("/feedback", {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+  listFeedback: () => apiFetch<FeedbackInbox>("/feedback"),
+  getFeedback: (threadId: string) =>
+    apiFetch<FeedbackThread>(`/feedback/${encodeURIComponent(threadId)}`),
+  replyToFeedback: (threadId: string, message: string) =>
+    apiFetch<FeedbackReply>(`/feedback/${encodeURIComponent(threadId)}/replies`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+  setFeedbackStatus: (threadId: string, status: "open" | "closed") =>
+    apiFetch<FeedbackThread>(`/feedback/${encodeURIComponent(threadId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
     }),
 
   // ── Settings (per-user/per-tenant connectors + secrets) ─────────────

@@ -299,6 +299,15 @@ class SCMClient(ABC):
         """Add a comment to an issue/work item."""
         ...
 
+    async def list_issue_comments(
+        self,
+        repo: str,
+        issue_id: int | str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List issue comments in chronological order when supported."""
+        return []
+
     @abstractmethod
     async def add_labels(self, repo: str, issue_id: int | str, labels: list[str]) -> None:
         """Add labels/tags to an issue."""

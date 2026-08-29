@@ -17,16 +17,15 @@ from devai.authz import resolve_principal as _require_principal
 from devai.dashboard.auth import GitHubOAuth
 from devai.dashboard.keycloak_auth import KeycloakOIDC
 from devai.dashboard.templates import INDEX_HTML
+from devai.feedback import FeedbackService
 from devai.identity import Principal, trace_id_from_request
+from devai.scm import create_scm_client
 from devai.services.request_limits import enforce_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 STATIC_DIR = Path(__file__).parent / "static"
-
-_FEEDBACK_TYPES = {"story": "user story", "bug": "bug report", "task": "task"}
-
 
 # --- Dashboard Page ---
 
@@ -155,37 +154,88 @@ async def oauth_logout(request: Request) -> RedirectResponse:
 
 @router.post("/api/feedback")
 async def submit_feedback(request: Request) -> dict[str, Any]:
-    """File authenticated product feedback as a classified GitHub issue."""
-    principal = await _require_principal(request)
+    """Create an authenticated, user-owned support thread."""
+    principal = await _require_feedback_principal(request)
     await enforce_rate_limit(request, "feedback", principal)
     payload = await request.json()
-    kind = str(payload.get("type", "")).strip().lower()
-    title = str(payload.get("title", "")).strip()
-    description = str(payload.get("description", "")).strip()
-    if kind not in _FEEDBACK_TYPES:
-        raise HTTPException(status_code=422, detail="type must be story, bug, or task")
-    if not title or len(title) > 200 or not description or len(description) > 10000:
-        raise HTTPException(status_code=422, detail="title and description are required and bounded")
-
-    config = request.app.state.config
-    repo = getattr(config, "feedback_repo", "tesserix/devai")
-    labels = ["feedback", f"type:{kind}"]
-    body = (
-        f"## {_FEEDBACK_TYPES[kind].title()}\n\n{description}\n\n"
-        f"---\nSubmitted by: {principal.email or principal.login or 'authenticated user'}\n"
-        "This issue was created from the public DevAI feedback form."
-    )
-    from devai.scm import create_scm_client
-
-    scm = create_scm_client(config)
+    service, scm = _feedback_service(request)
     try:
-        issue = await scm.create_issue(repo, f"[{kind}] {title}", body, labels)
-        assign = getattr(scm, "assign_issue", None)
-        if callable(assign) and issue.get("number"):
-            await assign(repo, int(issue["number"]), list(getattr(config, "feedback_assignees", [])))
+        return await service.create(
+            principal,
+            kind=str(payload.get("type", "")),
+            title=str(payload.get("title", "")),
+            description=str(payload.get("description", "")),
+        )
     finally:
         await scm.close()
-    return {"issue_url": issue.get("html_url", ""), "issue_number": issue.get("number"), "type": kind}
+
+
+@router.get("/api/feedback")
+async def list_feedback(request: Request) -> dict[str, Any]:
+    """List the caller's threads, or the full inbox for support staff."""
+    principal = await _require_feedback_principal(request)
+    service, scm = _feedback_service(request)
+    try:
+        return await service.list(principal)
+    finally:
+        await scm.close()
+
+
+@router.get("/api/feedback/{thread_id}")
+async def get_feedback(request: Request, thread_id: str) -> dict[str, Any]:
+    """Return one authorized support conversation."""
+    principal = await _require_feedback_principal(request)
+    service, scm = _feedback_service(request)
+    try:
+        return await service.get(principal, thread_id)
+    finally:
+        await scm.close()
+
+
+@router.post("/api/feedback/{thread_id}/replies")
+async def reply_to_feedback(request: Request, thread_id: str) -> dict[str, Any]:
+    """Append a user or support reply while the issue remains open."""
+    principal = await _require_feedback_principal(request)
+    await enforce_rate_limit(request, "feedback", principal)
+    payload = await request.json()
+    service, scm = _feedback_service(request)
+    try:
+        return await service.reply(principal, thread_id, str(payload.get("message", "")))
+    finally:
+        await scm.close()
+
+
+@router.patch("/api/feedback/{thread_id}/status")
+async def set_feedback_status(request: Request, thread_id: str) -> dict[str, Any]:
+    """Close or reopen a feedback thread; support staff only."""
+    principal = await _require_feedback_principal(request)
+    payload = await request.json()
+    service, scm = _feedback_service(request)
+    try:
+        return await service.set_status(principal, thread_id, str(payload.get("status", "")))
+    finally:
+        await scm.close()
+
+
+def _feedback_service(request: Request) -> tuple[FeedbackService, Any]:
+    config = request.app.state.config
+    scm = create_scm_client(config)
+    return (
+        FeedbackService(
+            scm,
+            repo=getattr(config, "feedback_repo", "tesserix/devai"),
+            assignees=list(getattr(config, "feedback_assignees", [])),
+            support_identities=list(getattr(config, "feedback_support_identities", [])),
+        ),
+        scm,
+    )
+
+
+async def _require_feedback_principal(request: Request) -> Principal:
+    principal = await _require_principal(request)
+    if principal is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return principal
 
 
 async def _get_session(request: Request) -> dict[str, Any] | None:
