@@ -74,6 +74,16 @@ async def test_distinct_users_each_get_a_row():
 
 
 @pytest.mark.asyncio
+async def test_different_cased_spellings_collapse_to_one_row():
+    db = _Database()
+    state = _state(db, _Redis())
+    await record_active(state, Principal(email="User@Example.com", uid="u-1"))
+    await record_active(state, Principal(email="user@example.com", uid="u-1"))
+    assert len(db.rows) == 1
+    assert db.rows[0]["actor"] == "user@example.com"
+
+
+@pytest.mark.asyncio
 async def test_redis_failure_does_not_raise():
     db = _Database()
     state = _state(db, _BrokenRedis())
@@ -108,6 +118,19 @@ async def test_webhook_principal_is_ignored():
     db = _Database()
     state = _state(db, _Redis())
     principal = Principal.webhook(provider="github", sender_login="octocat")
+    assert await record_active(state, principal) is False
+    assert db.rows == []
+
+
+@pytest.mark.asyncio
+async def test_service_token_principal_is_ignored():
+    db = _Database()
+    state = _state(db, _Redis())
+    principal = Principal(
+        email="mcp-hub@service.devai.internal",
+        uid="svc-mcp-hub",
+        auth_provider="service-token",
+    )
     assert await record_active(state, principal) is False
     assert db.rows == []
 

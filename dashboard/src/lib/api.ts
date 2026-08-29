@@ -1676,7 +1676,6 @@ export interface AdminOverview {
   signins: number;
   user_activity: AdminUserActivity[];
   by_user: AdminUserUsage[];
-  enabled: boolean;
 }
 
 export interface AdminOpenPanel {

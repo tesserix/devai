@@ -46,9 +46,16 @@ async def record_active(app_state: Any, principal: Principal | None) -> bool:
     actor = getattr(principal, "email", "") or getattr(principal, "uid", "")
     if not actor or not isinstance(actor, str):
         return False
+    # Normalized so the stored value matches the dedup key below — an IdP
+    # that varies casing must not split one user into two rollup rows.
+    actor = actor.lower()
     # Synthetic principals are machines, not users on a dashboard.
     auth_provider = getattr(principal, "auth_provider", "") or ""
-    if auth_provider == "system" or auth_provider.startswith("webhook:"):
+    if (
+        auth_provider == "system"
+        or auth_provider.startswith("webhook:")
+        or auth_provider == "service-token"
+    ):
         return False
 
     database = getattr(app_state, "analytics_db", None)

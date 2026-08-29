@@ -44,13 +44,6 @@ router = APIRouter(
 )
 
 
-async def _db(request: Request):
-    """The analytics Postgres handle, or None when unreachable."""
-    from devai.analytics.routes import get_db as analytics_db
-
-    return await analytics_db(request)
-
-
 @router.get("/overview")
 async def overview(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
     """Platform activity: active users, sign-ins, and per-user LLM usage.
@@ -59,7 +52,9 @@ async def overview(request: Request, days: int = Query(30, ge=1, le=365)) -> dic
     `active_users`/`user_activity` are exact (audit_log), while `by_user`
     carries real spend from the Redis usage ledger.
     """
-    database = await _db(request)
+    from devai.analytics.routes import get_db as analytics_db
+
+    database = await analytics_db(request)
     ledger = getattr(request.app.state, "usage_ledger", None)
 
     by_user: list[dict[str, Any]] = []
@@ -75,7 +70,6 @@ async def overview(request: Request, days: int = Query(30, ge=1, le=365)) -> dic
         "signins": await signin_count(database, days),
         "user_activity": await active_user_totals(database, days),
         "by_user": by_user,
-        "enabled": True,
     }
 
 

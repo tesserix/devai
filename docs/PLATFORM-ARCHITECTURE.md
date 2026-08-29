@@ -579,9 +579,11 @@ Production never observes a login: auth-bff terminates OAuth outside the
 pod, so the backend counts *active users*, not sign-ins. The dashboard
 labels the two separately rather than conflating them.
 
-The trial allowance (`src/devai/settings/trial.py`) is visible but
-unenforced. `DEVAI_LLM_TRIAL_TOKEN_BUDGET` sets what the meter shows;
-enforcement additionally requires `DEVAI_LLM_REQUIRE_USER_CONNECTOR=true`.
+The trial allowance (`src/devai/settings/trial.py`) defaults to inert:
+with `DEVAI_LLM_REQUIRE_USER_CONNECTOR=false`, `applicable` is always
+false and the dashboard shows nothing. Flipping that flag to `true` both
+reveals the meter and starts enforcing it.
+
 Trial counters are permanent by design — exhaustion revokes the shared keys
 for that user for good. `trial_enabled` is only the global budget flag: the
 per-user gate is `applicable` (`strict and not has_own`,
