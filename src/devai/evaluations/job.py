@@ -49,7 +49,9 @@ class JobEvaluationInvoker:
         return "kubernetes_job" if self._job_enabled() else "inline"
 
     async def invoke(self, record: SandboxRecord, *, message: str, triggered_by: str) -> Invocation:
-        if not self._job_enabled():
+        # A draft envelope has no Registry record yet, so governed Job dispatch
+        # would fail closed; the inline invoker is the draft-aware path.
+        if not self._job_enabled() or record.spec.draft:
             if self._fallback is None:
                 raise RuntimeError("evaluation Job runtime unavailable")
             invocation = await self._fallback.invoke(record, message=message, triggered_by=triggered_by)

@@ -101,6 +101,31 @@ async def test_evaluation_case_dispatches_through_the_sandboxed_job_stage_and_pe
     assert persisted.execution_backend == "kubernetes_job"
 
 
+async def test_draft_sandbox_bypasses_the_job_stage_for_the_inline_invoker() -> None:
+    class _Fallback:
+        async def invoke(self, record: SandboxRecord, *, message: str, triggered_by: str):
+            del message, triggered_by
+            from devai.sandbox.trace import Invocation
+
+            return Invocation(id="inline-draft", sandbox_id=record.id, agent="measure-mate")
+
+    record = _record()
+    record = record.model_copy(
+        update={"spec": record.spec.model_copy(update={"draft": {"metadata": {"name": "measure-mate"}, "spec": {}}})}
+    )
+    invoker = JobEvaluationInvoker(
+        deps=StageDeps(config=Settings(), extra={"k8s_runtime": object(), "job_watcher": object()}),
+        traces=TraceStore(None),
+        fallback=_Fallback(),  # type: ignore[arg-type]
+    )
+
+    invocation = await invoker.invoke(record, message="go", triggered_by="tenant-a:alice")
+
+    assert invoker.execution_backend == "kubernetes_job"
+    assert invocation.id == "inline-draft"
+    assert invocation.execution_backend == "inline"
+
+
 async def test_missing_job_runtime_uses_the_explicit_local_fallback() -> None:
     class _Fallback:
         async def invoke(self, record: SandboxRecord, *, message: str, triggered_by: str):
