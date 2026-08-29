@@ -45,8 +45,15 @@ class LLMProvider(str, Enum):
             return default if default is not None else cls.AUTO
         if isinstance(value, cls):
             return value
+        normalized = str(value).lower()
+        normalized = {
+            "anthropic": cls.CLAUDE.value,
+            "google": cls.GEMINI.value,
+            "vertex": cls.GEMINI.value,
+            "vertex_gemini": cls.GEMINI.value,
+        }.get(normalized, normalized)
         try:
-            return cls(str(value).lower())
+            return cls(normalized)
         except ValueError:
             return default if default is not None else cls.AUTO
 
@@ -78,6 +85,22 @@ class RiskLevel(str, Enum):
     @property
     def needs_human_gate(self) -> bool:
         return self in {RiskLevel.HIGH, RiskLevel.CRITICAL}
+
+
+class AgentRuntime(str, Enum):
+    """Execution engine selected by a specialization manifest."""
+
+    AUTO = "auto"
+    LEGACY = "legacy"
+    TESSERIX_ADK = "tesserix_adk"
+
+    @classmethod
+    def parse(cls, value: Any) -> AgentRuntime:
+        if value is None or value == "":
+            return cls.AUTO
+        if isinstance(value, cls):
+            return value
+        return cls(str(value).strip().lower().replace("-", "_"))
 
 
 @dataclass(slots=True, frozen=True)
@@ -168,6 +191,7 @@ class Specialization:
     # ── Governance ──────────────────────────────────────────────────
     risk_level: RiskLevel = RiskLevel.MEDIUM
     role_color: str = "engineer"  # engineer | ux | security | qa | product | admin
+    runtime: AgentRuntime = AgentRuntime.AUTO
 
     # ── Backward bridge ─────────────────────────────────────────────
     # When set, the runner delegates execution to this Python class
@@ -185,11 +209,19 @@ class Specialization:
             raise ValueError(
                 f"specialization name {self.name!r} must be lowercase snake_case (regex: {_VALID_ROLE_NAME.pattern})"
             )
+        if self.runtime is AgentRuntime.LEGACY and not self.legacy_python_class:
+            raise ValueError("legacy runtime requires legacy_python_class")
         if not self.output_key:
             object.__setattr__(self, "output_key", f"{self.name}_output")
 
     def required_handover_fields(self) -> list[HandoverField]:
         return [f for f in self.handover_schema.values() if f.required]
+
+    @property
+    def uses_legacy_runtime(self) -> bool:
+        return self.runtime is AgentRuntime.LEGACY or (
+            self.runtime is AgentRuntime.AUTO and bool(self.legacy_python_class)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -214,9 +246,10 @@ class Specialization:
             },
             "risk_level": self.risk_level.value,
             "role_color": self.role_color,
+            "runtime": self.runtime.value,
             "legacy_python_class": self.legacy_python_class,
             "metadata": dict(self.metadata),
         }
 
 
-__all__ = ["HandoverField", "LLMProvider", "RiskLevel", "Specialization"]
+__all__ = ["AgentRuntime", "HandoverField", "LLMProvider", "RiskLevel", "Specialization"]

@@ -48,3 +48,24 @@ async def test_evaluate_stage_surfaces_score() -> None:
     assert res.data["run_quality_score"] == 1.0
     assert res.data["run_quality_passed"] is True
     assert "completion" in res.data["run_quality"]
+
+
+async def test_evaluate_stage_attributes_the_row_to_tenant_and_subject(monkeypatch) -> None:
+    calls = []
+
+    class _Database:
+        async def record_eval(self, **kwargs):
+            calls.append(kwargs)
+
+    async def _database():
+        return _Database()
+
+    monkeypatch.setattr("devai.services.database.get_global_db", _database)
+    task = _task(pr=7, completed=["a"])
+    task.triggered_by = "same@example.com"
+    task.principal = {"tenant_id": "tenant-a", "uid": "shared-uid"}
+
+    await EvaluateStage(StageDeps(config=None, scm=None, state_manager=None, llm=None)).execute(task)
+
+    assert calls[0]["tenant_id"] == "tenant-a"
+    assert calls[0]["user_id"] == "shared-uid"

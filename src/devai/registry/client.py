@@ -1,8 +1,8 @@
 """HTTP client for the aregistry v0 catalog API.
 
-One client per process. Constructed via :func:`create_registry_client`
-from settings; never raises on construction so the rest of the app can
-degrade gracefully when the catalog is unreachable.
+One client per process. Constructed via :func:`create_registry_client` from
+settings. Catalog callers choose whether a failure is degradable; governed
+agent admission treats resolution failures as terminal.
 
 Threading: methods are sync ``def`` (not ``async``). The FastAPI routes
 that wrap this run the call in a threadpool via Starlette's default
@@ -17,10 +17,14 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote, urlencode
 
 logger = logging.getLogger(__name__)
+
+type RegistryJSON = dict[str, Any] | list[Any]
 
 
 # --------------------------------------------------------------------------- #
@@ -29,11 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class RegistryError(Exception):
-    """Any failure reaching aregistry or parsing its response.
-
-    Specialization loader catches this and falls back to local YAML so a
-    transient registry blip never crashes the pipeline.
-    """
+    """Any failure reaching aregistry or parsing its response."""
 
 
 # --------------------------------------------------------------------------- #
@@ -101,6 +101,45 @@ class Agent:
     # `devai.io/runtime=kagent` marks an agent the kagent controller manages as
     # a long-lived Deployment — the dispatcher routes those over A2A.
     labels: dict[str, str] = field(default_factory=dict)
+    annotations: dict[str, str] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class UnresolvedRef:
+    kind: str
+    ref: str
+    reason: str
+
+
+@dataclass(slots=True)
+class ResolvedAgent:
+    agent: Agent
+    resolved: dict[str, list[dict[str, Any]]]
+    unresolved: list[UnresolvedRef]
+    # Full server-owned Agent envelope. Importers need the Registry digest,
+    # signature, scope, and exact tag; `_parse_agent` intentionally exposes
+    # only the runtime-friendly projection.
+    envelope: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class Dataset:
+    name: str
+    description: str
+    version: str
+    case_count: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class EvalSuite:
+    name: str
+    description: str
+    version: str
+    dataset_ref: dict[str, str] = field(default_factory=dict)
+    scorers: list[str] = field(default_factory=list)
+    thresholds: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -145,7 +184,7 @@ class RegistryClient:
         self._token_provider = token_provider
         self._timeout = timeout_seconds
         self._ttl = ttl_seconds
-        self._cache: dict[str, tuple[float, Any]] = {}
+        self._cache: dict[str, tuple[float, RegistryJSON]] = {}
 
     def _bearer(self) -> str:
         if self._token_provider is not None:
@@ -166,7 +205,7 @@ class RegistryClient:
         probe should hit the network.
         """
         try:
-            data = self._get("/v0/health", use_cache=False)
+            data = self._get_dict("/v0/health", use_cache=False)
             return {"reachable": True, **data}
         except RegistryError as e:
             return {"reachable": False, "error": str(e)}
@@ -202,6 +241,14 @@ class RegistryClient:
         raw = self._get_collection(self._ns("/v0/agents"), "agents")
         return [_parse_agent(_unwrap(d, "agent")) for d in raw]
 
+    def list_datasets(self) -> list[Dataset]:
+        raw = self._get_collection(self._ns("/v0/datasets"), "datasets")
+        return [_parse_dataset(_unwrap(d, "dataset")) for d in raw]
+
+    def list_eval_suites(self) -> list[EvalSuite]:
+        raw = self._get_collection(self._ns("/v0/evalsuites"), "evalsuites")
+        return [_parse_eval_suite(_unwrap(d, "evalsuite")) for d in raw]
+
     def list_tool_artifacts(self) -> list[dict[str, Any]]:
         """Raw ``kind:Tool`` envelopes (metadata.labels/annotations preserved).
 
@@ -218,6 +265,34 @@ class RegistryClient:
         except RegistryError:
             logger.warning("registry: list_tool_artifacts failed", exc_info=True)
             return []
+
+    def search_capabilities(
+        self,
+        query: str,
+        *,
+        kinds: Iterable[str] | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Return Agent Registry's authorized, secret-safe discovery stubs."""
+        normalized_query = query.strip()
+        if not normalized_query:
+            raise ValueError("query must not be empty")
+        if len(normalized_query) > 512:
+            raise ValueError("query must be at most 512 characters")
+        if not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50")
+        selected_kinds = [kind.strip() for kind in (kinds or ()) if kind.strip()]
+        params: dict[str, str | int] = {
+            "q": normalized_query,
+            "view": "stub",
+            "limit": limit,
+        }
+        if self._namespace:
+            params["namespace"] = self._namespace
+        if selected_kinds:
+            params["kinds"] = ",".join(selected_kinds)
+        path = f"/v0/search?{urlencode(params)}"
+        return self._get_collection(path, "items")
 
     def get_skill(self, name: str) -> Skill | None:
         for s in self.list_skills():
@@ -243,6 +318,49 @@ class RegistryClient:
                 return a
         return None
 
+    def resolve_agent(self, name: str, *, namespace: str = "", tag: str = "") -> ResolvedAgent:
+        path = f"/v0/agents/{quote(name, safe='')}"
+        if tag:
+            path += f"/{quote(tag, safe='')}"
+        path += "/resolved"
+        ns = namespace or self._namespace
+        if ns:
+            path += f"?namespace={quote(ns, safe='')}"
+        body = self._get_dict(path, use_cache=False)
+        agent_value = body.get("agent")
+        resolved_value = body.get("resolved", {})
+        unresolved_value = body.get("unresolved", [])
+        if not isinstance(agent_value, dict):
+            raise RegistryError(f"registry: GET {path} returned an invalid resolved agent")
+        if not isinstance(resolved_value, dict) or not isinstance(unresolved_value, list):
+            raise RegistryError(f"registry: GET {path} returned an invalid resolution result")
+
+        resolved: dict[str, list[dict[str, Any]]] = {}
+        for field_name, entries in resolved_value.items():
+            if not isinstance(field_name, str) or not isinstance(entries, list):
+                raise RegistryError(f"registry: GET {path} returned an invalid resolution result")
+            if not all(isinstance(entry, dict) for entry in entries):
+                raise RegistryError(f"registry: GET {path} returned an invalid resolution result")
+            resolved[field_name] = [dict(entry) for entry in entries]
+
+        unresolved: list[UnresolvedRef] = []
+        for entry in unresolved_value:
+            if not isinstance(entry, dict):
+                raise RegistryError(f"registry: GET {path} returned an invalid unresolved reference")
+            unresolved.append(
+                UnresolvedRef(
+                    kind=str(entry.get("kind") or ""),
+                    ref=str(entry.get("ref") or ""),
+                    reason=str(entry.get("reason") or ""),
+                )
+            )
+        return ResolvedAgent(
+            agent=_parse_agent(_unwrap(agent_value, "agent")),
+            resolved=resolved,
+            unresolved=unresolved,
+            envelope=deepcopy(agent_value),
+        )
+
     def get_agent_card(self, name: str, *, namespace: str = "", tag: str = "") -> dict[str, Any]:
         """Fetch the A2A (Agent2Agent) Agent Card for an agent.
 
@@ -257,7 +375,7 @@ class RegistryClient:
         ns = namespace or self._namespace
         if ns:
             path += f"?namespace={ns}"
-        return self._get(path)
+        return self._get_dict(path)
 
     def kagent_validate(self, name: str, *, namespace: str = "", model_config: str = "") -> dict[str, Any]:
         """Cross-validate an agent against the **kagent Agent CRD contract**.
@@ -293,7 +411,7 @@ class RegistryClient:
         ``enabled=false`` means the registry isn't attesting artifacts, so a
         consumer cannot verify card authenticity. Cached like other reads.
         """
-        return self._get("/v0/signing-key")
+        return self._get_dict("/v0/signing-key")
 
     def refresh(self, *keys: str) -> None:
         """Drop cached entries. With no args, drops everything."""
@@ -310,6 +428,8 @@ class RegistryClient:
             "prompts": len(self.list_prompts()),
             "mcp_servers": len(self.list_mcp_servers()),
             "agents": len(self.list_agents()),
+            "datasets": len(self.list_datasets()),
+            "eval_suites": len(self.list_eval_suites()),
         }
 
     # ---- write surface ----------------------------------------------------
@@ -326,6 +446,12 @@ class RegistryClient:
     def publish_agent(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/agents", body)
 
+    def publish_dataset(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/datasets", self._artifact_envelope("Dataset", body))
+
+    def publish_eval_suite(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/evalsuites", self._artifact_envelope("EvalSuite", body))
+
     def publish_blueprint(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/blueprints", body)
 
@@ -335,6 +461,46 @@ class RegistryClient:
     def publish_tool(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/tools", body)
 
+    def get_artifact_envelope(self, plural: str, name: str, tag: str = "") -> dict[str, Any] | None:
+        """Return one raw artifact in this client's namespace.
+
+        The registry proxy uses the unflattened metadata labels for object-level
+        authorization before an overwrite. A 404 is a normal miss; transport,
+        authorization, and malformed-response failures raise so callers fail
+        closed instead of accidentally authorizing a write.
+        """
+        collection = {"mcp-servers": "servers", "eval-suites": "evalsuites"}.get(plural, plural)
+        path = f"/v0/{quote(collection, safe='')}/{quote(name, safe='')}"
+        if tag and tag != "latest":
+            path += f"/{quote(tag, safe='')}"
+        if self._namespace:
+            path += f"?namespace={quote(self._namespace, safe='')}"
+        try:
+            import httpx
+        except ImportError as e:
+            raise RegistryError(f"registry: httpx not installed: {e}") from e
+        headers: dict[str, str] = {"Accept": "application/json"}
+        bearer = self._bearer()
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+        try:
+            response = httpx.get(f"{self._base_url}{path}", headers=headers, timeout=self._timeout)
+        except httpx.HTTPError as e:
+            raise RegistryError(f"registry: network error GET {path}: {e}") from e
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            raise RegistryError(f"registry: {response.status_code} on GET {path}")
+        try:
+            body: object = response.json()
+        except json.JSONDecodeError as e:
+            raise RegistryError(f"registry: invalid JSON on GET {path}: {e}") from e
+        if not isinstance(body, dict):
+            raise RegistryError(f"registry: GET {path} did not return an object")
+        if not all(isinstance(key, str) for key in body):
+            raise RegistryError(f"registry: GET {path} returned an object with non-string keys")
+        return {str(key): value for key, value in body.items()}
+
     def artifact_exists(self, plural: str, name: str) -> bool | None:
         """Does ``name`` already exist in this client's tenant namespace?
 
@@ -343,33 +509,49 @@ class RegistryClient:
         block a publish on a transient blip. Scoped to the tenant namespace —
         the registry enforces name uniqueness per namespace across all kinds.
         """
-        path = f"/v0/{plural}/{name}"
-        if self._namespace:
-            path += f"?namespace={self._namespace}"
         try:
-            import httpx  # type: ignore[import-untyped]
-        except ImportError:
+            return self.get_artifact_envelope(plural, name) is not None
+        except RegistryError:
             return None
-        headers: dict[str, str] = {"Accept": "application/json"}
-        bearer = self._bearer()
-        if bearer:
-            headers["Authorization"] = f"Bearer {bearer}"
-        try:
-            r = httpx.get(f"{self._base_url}{path}", headers=headers, timeout=self._timeout)
-        except httpx.HTTPError:
-            return None
-        if r.status_code == 200:
-            return True
-        if r.status_code == 404:
-            return False
-        return None
 
     def delete(self, plural: str, name: str, tag: str = "latest") -> None:
-        self._request("DELETE", f"/v0/{plural}/{name}/{tag}", body=None, raise_on_error=True)
+        collection = {"mcp-servers": "servers", "eval-suites": "evalsuites"}.get(plural, plural)
+        path = f"/v0/{quote(collection, safe='')}/{quote(name, safe='')}/{quote(tag, safe='')}"
+        if self._namespace:
+            path += f"?namespace={quote(self._namespace, safe='')}"
+        self._request("DELETE", path, body=None, raise_on_error=True)
 
     # ---- private ----------------------------------------------------------
 
-    def _get(self, path: str, *, use_cache: bool = True) -> dict[str, Any]:
+    def _artifact_envelope(self, kind: str, body: dict[str, Any]) -> dict[str, Any]:
+        if all(key in body for key in ("apiVersion", "kind", "metadata", "spec")):
+            envelope = deepcopy(body)
+            if envelope.get("kind") != kind:
+                raise RegistryError(f"registry: expected {kind}, got {envelope.get('kind')}")
+            metadata = envelope.get("metadata")
+            if not isinstance(metadata, dict) or not metadata.get("name"):
+                raise RegistryError(f"registry: {kind} metadata.name is required")
+            if not isinstance(envelope.get("spec"), dict):
+                raise RegistryError(f"registry: {kind} spec must be an object")
+            if self._namespace and not metadata.get("namespace"):
+                metadata["namespace"] = self._namespace
+            return envelope
+        spec = dict(body)
+        name = str(spec.pop("name", ""))
+        tag = str(spec.pop("version", "") or "latest")
+        if not name:
+            raise RegistryError(f"registry: {kind} name is required")
+        metadata = {"name": name, "tag": tag}
+        if self._namespace:
+            metadata["namespace"] = self._namespace
+        return {
+            "apiVersion": "registry.agentic.dev/v1alpha1",
+            "kind": kind,
+            "metadata": metadata,
+            "spec": spec,
+        }
+
+    def _get(self, path: str, *, use_cache: bool = True) -> RegistryJSON:
         if use_cache:
             cached = self._cache_get(path)
             if cached is not None:
@@ -377,6 +559,12 @@ class RegistryClient:
         data = self._request("GET", path, body=None)
         if use_cache:
             self._cache_set(path, data)
+        return data
+
+    def _get_dict(self, path: str, *, use_cache: bool = True) -> dict[str, Any]:
+        data = self._get(path, use_cache=use_cache)
+        if not isinstance(data, dict):
+            raise RegistryError(f"registry: GET {path} returned a non-object body")
         return data
 
     def _get_collection(self, path: str, item_key: str) -> list[dict[str, Any]]:
@@ -397,15 +585,18 @@ class RegistryClient:
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         # Publishes must surface 4xx (conflict/forbidden) — unlike read fallbacks.
-        return self._request("POST", path, body=body, raise_on_error=True)
+        result = self._request("POST", path, body=body, raise_on_error=True)
+        if not isinstance(result, dict):
+            raise RegistryError(f"registry: POST {path} returned a non-object body")
+        return result
 
     def _request(
         self, method: str, path: str, *, body: dict[str, Any] | None, raise_on_error: bool = False
-    ) -> dict[str, Any]:
+    ) -> RegistryJSON:
         # Lazy-imported so a pod that never talks to the registry (e.g.
         # local unit tests) doesn't pay the httpx import cost.
         try:
-            import httpx  # type: ignore[import-untyped]
+            import httpx
         except ImportError as e:
             raise RegistryError(f"registry: httpx not installed: {e}") from e
 
@@ -428,18 +619,21 @@ class RegistryClient:
             raise RegistryError(f"registry: network error {method} {path}: {e}") from e
 
         if r.status_code >= 500:
-            raise RegistryError(f"registry: {r.status_code} on {method} {path}: {r.text[:200]}")
+            raise RegistryError(f"registry: {r.status_code} on {method} {path}")
         if r.status_code >= 400 and (raise_on_error or method != "POST"):
-            raise RegistryError(f"registry: {r.status_code} on {method} {path}: {r.text[:200]}")
+            raise RegistryError(f"registry: {r.status_code} on {method} {path}")
 
         if r.headers.get("content-type", "").startswith("application/json") and r.text:
             try:
-                return r.json()
+                result: Any = r.json()
+                if not isinstance(result, (dict, list)):
+                    raise RegistryError(f"registry: JSON on {method} {path} is not an object or array")
+                return result
             except json.JSONDecodeError as e:
                 raise RegistryError(f"registry: invalid JSON on {method} {path}: {e}") from e
         return {}
 
-    def _cache_get(self, key: str) -> Any:
+    def _cache_get(self, key: str) -> RegistryJSON | None:
         hit = self._cache.get(key)
         if hit is None:
             return None
@@ -449,7 +643,7 @@ class RegistryClient:
             return None
         return value
 
-    def _cache_set(self, key: str, value: Any) -> None:
+    def _cache_set(self, key: str, value: RegistryJSON) -> None:
         self._cache[key] = (time.monotonic() + self._ttl, value)
 
 
@@ -480,12 +674,16 @@ def _unwrap(item: dict[str, Any], key: str) -> dict[str, Any]:
                 flat["name"] = meta["name"]
             if meta.get("tag") and "version" not in flat:
                 flat["version"] = meta["tag"]
+            if meta.get("visibility") and "visibility" not in flat:
+                flat["visibility"] = meta["visibility"]
             # Project metadata.labels up too. The flatten otherwise drops them,
             # but the dispatcher needs `devai.io/runtime` to decide whether an
             # agent is kagent-managed — the same label the kagent-agent-sync
             # reconciler selects on, so DevAI and the reconciler agree.
             if isinstance(meta.get("labels"), dict) and "labels" not in flat:
                 flat["labels"] = meta["labels"]
+            if isinstance(meta.get("annotations"), dict) and "annotations" not in flat:
+                flat["annotations"] = meta["annotations"]
         return flat
     return item
 
@@ -535,8 +733,10 @@ def _parse_mcp_server(d: dict[str, Any]) -> McpServer:
 def _parse_agent(d: dict[str, Any]) -> Agent:
     # Composition shape: spec.model.{provider,name}. Legacy/seed shapes used
     # top-level modelProvider/modelName or an `llm` block — accept all.
-    model = d.get("model") if isinstance(d.get("model"), dict) else {}
-    llm = d.get("llm") if isinstance(d.get("llm"), dict) else {}
+    model_value = d.get("model")
+    llm_value = d.get("llm")
+    model: dict[str, Any] = model_value if isinstance(model_value, dict) else {}
+    llm: dict[str, Any] = llm_value if isinstance(llm_value, dict) else {}
     provider = model.get("provider") or d.get("modelProvider") or llm.get("provider") or ""
     name_field = model.get("name") or d.get("modelName") or llm.get("model") or ""
     # The seed agents use spec.skill (singular) + spec.promptRef; the new
@@ -564,6 +764,31 @@ def _parse_agent(d: dict[str, Any]) -> Agent:
         mcp_servers=list(d.get("mcpServers") or []),
         a2a=dict(d.get("a2a") or {}),
         labels={str(k): str(v) for k, v in (d.get("labels") or {}).items()},
+        annotations={str(k): str(v) for k, v in (d.get("annotations") or {}).items()},
+        raw=d,
+    )
+
+
+def _parse_dataset(d: dict[str, Any]) -> Dataset:
+    return Dataset(
+        name=str(d.get("name") or ""),
+        description=str(d.get("description") or ""),
+        version=str(d.get("version") or ""),
+        case_count=len(d.get("cases") or []),
+        raw=d,
+    )
+
+
+def _parse_eval_suite(d: dict[str, Any]) -> EvalSuite:
+    dataset_ref_value = d.get("datasetRef")
+    dataset_ref: dict[str, Any] = dataset_ref_value if isinstance(dataset_ref_value, dict) else {}
+    return EvalSuite(
+        name=str(d.get("name") or ""),
+        description=str(d.get("description") or ""),
+        version=str(d.get("version") or ""),
+        dataset_ref={str(key): str(value) for key, value in dataset_ref.items()},
+        scorers=[str(scorer) for scorer in d.get("scorers") or []],
+        thresholds=dict(d.get("thresholds") or {}),
         raw=d,
     )
 
@@ -576,9 +801,8 @@ def _parse_agent(d: dict[str, Any]) -> Agent:
 def create_registry_client(settings: Any) -> RegistryClient | None:
     """Build a RegistryClient from settings. Never raises.
 
-    Returns ``None`` when configuration is missing or the URL is empty —
-    callers treat ``None`` as "registry not wired up" and fall back to
-    local YAML.
+    Returns ``None`` when configuration is missing or the URL is empty. Each
+    caller owns the failure policy; governed execution fails closed.
     """
     base_url = getattr(settings, "registry_url", "") or ""
     if not base_url:
@@ -593,7 +817,7 @@ def create_registry_client(settings: Any) -> RegistryClient | None:
     token_provider: Callable[[], str] | None = None
     if getattr(settings, "registry_oidc_token_url", "") or getattr(settings, "registry_client_id", ""):
         try:
-            from devai.adapters.registry.oidc import resolve_registry_token  # type: ignore
+            from devai.adapters.registry.oidc import resolve_registry_token
 
             token_provider = lambda: resolve_registry_token(settings) or token  # noqa: E731
         except Exception:  # noqa: BLE001
@@ -623,3 +847,5 @@ def iter_all(client: RegistryClient) -> Iterable[tuple[str, list[Any]]]:
     yield "prompts", client.list_prompts()
     yield "mcp_servers", client.list_mcp_servers()
     yield "agents", client.list_agents()
+    yield "datasets", client.list_datasets()
+    yield "eval_suites", client.list_eval_suites()

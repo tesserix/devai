@@ -17,7 +17,7 @@ spec:
     "what is Tesserix / what can it do / how do I start" via get_platform_overview
     and the shared knowledge base, and captures sales/contact leads with
     submit_contact_lead. No per-customer order data.
-  endpoint: http://platform-mcp.tesserix.svc.cluster.local:8765/mcp
+  endpoint: http://platform-mcp.support-platform.svc.cluster.local:8765/mcp
   authMode: apikey
   tools:
   - get_platform_overview

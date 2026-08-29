@@ -8,6 +8,7 @@ provider selection degrades gracefully. The Temporal path's deterministic logic
 
 from __future__ import annotations
 
+import base64
 import builtins
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from devai.adapters.workflow import (
     NoopWorkflowAdapter,
     create_workflow_adapter,
 )
+from devai.adapters.workflow.temporal import TemporalWorkflowAdapter, workflow_id_for_task
 from devai.blueprint.executor import BlueprintExecutor
 from devai.blueprint.loader import (
     StageSpec,
@@ -27,6 +29,7 @@ from devai.blueprint.loader import (
 from devai.blueprint.planner import should_continue_on_failure, topological_levels
 from devai.blueprint.registry import StageRegistry
 from devai.config import Settings
+from devai.orchestration.payload_codec import EncryptedPayloadCodec, temporal_data_converter
 from devai.orchestration.serde import (
     blueprint_from_dict,
     blueprint_to_dict,
@@ -36,7 +39,7 @@ from devai.orchestration.serde import (
     task_to_dict,
 )
 from devai.pipeline.interfaces import PipelineStage, StageDeps
-from devai.pipeline.types import DevAITask, StageResult, TaskState
+from devai.pipeline.types import DevAITask, StageEvent, StageEventPhase, StageResult, TaskState
 
 # ── Fakes ────────────────────────────────────────────────────────────────
 
@@ -170,6 +173,183 @@ def test_factory_temporal_without_sdk_degrades(monkeypatch):
     ex = BlueprintExecutor(_registry(), StageDeps(config=settings))
     adapter = create_workflow_adapter(settings, executor=ex)
     assert isinstance(adapter, InProcWorkflowAdapter)
+
+
+def test_temporal_workflow_id_is_opaque_and_principal_scoped():
+    first = DevAITask(
+        id="same-task",
+        principal={"tenant_id": "tenant-a", "uid": "user-1", "email": "a@example.test"},
+    )
+    second = DevAITask(
+        id="same-task",
+        principal={"tenant_id": "tenant-b", "uid": "user-1", "email": "b@example.test"},
+    )
+
+    first_id = workflow_id_for_task(first)
+    second_id = workflow_id_for_task(second)
+
+    assert first_id != second_id
+    assert first_id.endswith("-same-task")
+    assert "tenant-a" not in first_id
+    assert "a@example.test" not in first_id
+
+
+class _RecordingFallback(NoopWorkflowAdapter):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_blueprint(self, blueprint, task):
+        self.calls += 1
+        return task
+
+
+@pytest.mark.asyncio
+async def test_temporal_connect_failure_does_not_replay_in_fail_closed_mode(monkeypatch):
+    fallback = _RecordingFallback()
+    adapter = TemporalWorkflowAdapter(
+        Settings(temporal_fail_closed=True),
+        fallback=fallback,
+    )
+
+    async def fail_connect():
+        raise ConnectionError("unavailable")
+
+    monkeypatch.setattr(adapter, "_ensure_client", fail_connect)
+    task = DevAITask(blueprint="t-linear")
+    result = await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert result is task
+    assert result.state == TaskState.STAGE_FAILED
+    assert result.error == "durable workflow backend unavailable"
+    assert fallback.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_temporal_connect_failure_keeps_local_fallback_when_not_strict(monkeypatch):
+    fallback = _RecordingFallback()
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=fallback)
+
+    async def fail_connect():
+        raise ConnectionError("unavailable")
+
+    monkeypatch.setattr(adapter, "_ensure_client", fail_connect)
+    task = DevAITask(blueprint="t-linear")
+    result = await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert result is task
+    assert fallback.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_temporal_already_started_reuses_the_scoped_workflow():
+    from temporalio.common import WorkflowIDReusePolicy
+    from temporalio.exceptions import WorkflowAlreadyStartedError
+
+    task = DevAITask(
+        blueprint="t-linear",
+        principal={"tenant_id": "tenant-a", "uid": "user-1"},
+    )
+    expected_id = workflow_id_for_task(task)
+
+    class Handle:
+        async def result(self):
+            return task_to_dict(task)
+
+    class Client:
+        requested_id = ""
+        requested_policy = None
+
+        async def start_workflow(self, *_args, **kwargs):
+            self.requested_policy = kwargs.get("id_reuse_policy")
+            raise WorkflowAlreadyStartedError(kwargs["id"], "BlueprintWorkflow")
+
+        def get_workflow_handle(self, workflow_id):
+            self.requested_id = workflow_id
+            return Handle()
+
+    client = Client()
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=NoopWorkflowAdapter())
+    adapter._client = client
+
+    await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert client.requested_id == expected_id
+    assert client.requested_policy == WorkflowIDReusePolicy.REJECT_DUPLICATE
+
+
+@pytest.mark.asyncio
+async def test_temporal_resume_allows_a_new_execution_after_business_failure():
+    from temporalio.common import WorkflowIDReusePolicy
+
+    task = DevAITask(blueprint="t-linear")
+    task.agent_context["resumed_from_failure_at"] = 123.0
+
+    class Handle:
+        async def result(self):
+            return task_to_dict(task)
+
+    class Client:
+        requested_policy = None
+
+        async def start_workflow(self, *_args, **kwargs):
+            self.requested_policy = kwargs.get("id_reuse_policy")
+            return Handle()
+
+    client = Client()
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=NoopWorkflowAdapter())
+    adapter._client = client
+
+    await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert client.requested_policy == WorkflowIDReusePolicy.ALLOW_DUPLICATE
+
+
+@pytest.mark.asyncio
+async def test_temporal_result_updates_the_original_queued_task():
+    task = DevAITask(blueprint="t-linear")
+    completed = DevAITask.from_dict(task.to_dict())
+    completed.stages_completed = ["a", "b"]
+    completed.transition(TaskState.COMPLETED)
+
+    class Handle:
+        async def result(self):
+            return task_to_dict(completed)
+
+    class Client:
+        async def start_workflow(self, *_args, **_kwargs):
+            return Handle()
+
+    adapter = TemporalWorkflowAdapter(Settings(), fallback=NoopWorkflowAdapter())
+    adapter._client = Client()
+
+    result = await adapter.run_blueprint(load_blueprint_from_string(_LINEAR_BP), task)
+
+    assert result is task
+    assert task.state == TaskState.COMPLETED
+    assert task.stages_completed == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_temporal_payload_codec_roundtrip_hides_plaintext():
+    from temporalio.api.common.v1 import Payload
+
+    key = base64.b64encode(b"k" * 32).decode()
+    codec = EncryptedPayloadCodec.from_base64(key)
+    original = Payload(metadata={"encoding": b"json/plain"}, data=b"secret@example.test")
+
+    encoded = await codec.encode([original])
+    assert b"secret@example.test" not in encoded[0].data
+    assert encoded[0].metadata["encoding"] == b"binary/encrypted"
+
+    decoded = await codec.decode(encoded)
+    assert decoded == [original]
+
+
+def test_temporal_payload_encryption_key_is_required_when_configured():
+    with pytest.raises(ValueError, match="payload encryption key is required"):
+        temporal_data_converter(
+            Settings(temporal_payload_encryption_required=True),
+        )
 
 
 # ── inproc execution = executor behaviour ──────────────────────────────────
@@ -397,6 +577,35 @@ async def test_service_set_run_control_sets_flag_and_signals():
     assert svc._pipeline.signals == [("t1", "stop", None)]  # type: ignore[attr-defined]
 
 
+class _FakeDeleteSM(_FakeSMControl):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deleted: list[tuple[str, str]] = []
+
+    async def ack_task(self, task_id: str) -> None:
+        self.deleted.append(("ack", task_id))
+
+    async def delete_pipeline_task(self, task_id: str) -> None:
+        self.deleted.append(("pipeline", task_id))
+
+    async def delete_run(self, task_id: str) -> None:
+        self.deleted.append(("legacy", task_id))
+
+
+@pytest.mark.asyncio
+async def test_service_delete_stops_remote_executor_and_keeps_stop_flag():
+    from devai.pipeline.service import PipelineService
+
+    svc = PipelineService(Settings())
+    svc.state_manager = _FakeDeleteSM()
+    svc._pipeline = _FakePipelineSig()  # type: ignore[assignment]
+
+    assert await svc.delete_run("t1") is True
+    assert svc.state_manager.controls == [("t1", "stopped")]
+    assert svc._pipeline.signals == [("t1", "stop", None)]  # type: ignore[attr-defined]
+    assert svc.state_manager.deleted == [("ack", "t1"), ("pipeline", "t1"), ("legacy", "t1")]
+
+
 @pytest.mark.asyncio
 async def test_service_approve_gate_signals_workflow():
     from devai.pipeline.service import PipelineService
@@ -408,3 +617,50 @@ async def test_service_approve_gate_signals_workflow():
     sigs = svc._pipeline.signals  # type: ignore[attr-defined]
     assert ("t1", "approve", ["deploy-release"]) in sigs
     assert ("t1", "reject", ["deploy-release"]) in sigs
+
+
+# ── Regression: the Temporal round-trip must not lose live observability ──
+
+
+def _task_with_timeline() -> DevAITask:
+    task = DevAITask(id="devai-timeline", repo="tesserix/test-repo", blueprint="alm-pipeline")
+    task.record_event(
+        StageEvent(
+            "analyze-requirements",
+            StageEventPhase.COMPLETED,
+            agent="requirements_analyst",
+            lane="plan",
+        )
+    )
+    task.agents["requirements_analyst"] = {"status": "completed", "stage": "analyze-requirements"}
+    task.stages_completed.append("analyze-requirements")
+    return task
+
+
+def test_task_round_trip_preserves_stage_events_and_agents():
+    """serde must be an exact inverse of task_to_dict.
+
+    task_from_dict used to omit stage_events/agents, so every Temporal
+    round-trip silently wiped the run timeline and the dashboard's agent
+    cards — the run showed "no agents yet" while agents were demonstrably
+    running.
+    """
+    restored = task_from_dict(task_to_dict(_task_with_timeline()))
+
+    assert [e.stage for e in restored.stage_events] == ["analyze-requirements"]
+    assert restored.stage_events[0].agent == "requirements_analyst"
+    assert restored.stage_events[0].lane == "plan"
+    assert restored.agents == {"requirements_analyst": {"status": "completed", "stage": "analyze-requirements"}}
+
+
+def test_task_round_trip_preserves_timestamps():
+    task = _task_with_timeline()
+    task.started_at = 1000.0
+    task.finished_at = 2000.0
+    task.created_at = 900.0
+
+    restored = task_from_dict(task_to_dict(task))
+
+    assert restored.started_at == 1000.0
+    assert restored.finished_at == 2000.0
+    assert restored.created_at == 900.0

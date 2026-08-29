@@ -27,6 +27,7 @@ from devai.adapters.llm.base import (
     LLMUsage,
     ToolCall,
 )
+from devai.adapters.llm.gateway_routing import gateway_headers
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
         embedding_model: str = "text-embedding-005",
         base_url: str = "",
         api_key: str = "",
+        gateway_routed: bool = False,
     ) -> None:
         if not project:
             raise AdapterNotConfigured("vertex_gemini adapter requires DEVAI_VERTEX_PROJECT")
@@ -54,6 +56,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
         self._embedding_model = embedding_model or "text-embedding-005"
         self._api_key = api_key
         self._gateway = bool(base_url)
+        self._gateway_routed = gateway_routed
         self._creds: Any = None
         if not api_key and not base_url:
             # Keyless direct mode is the only one that needs google-auth.
@@ -76,8 +79,10 @@ class VertexGeminiLLMAdapter(LLMAdapter):
 
     # ── auth ──────────────────────────────────────────────────────────
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, extra: dict[str, Any] | None = None) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
+        if self._gateway_routed:
+            headers.update(gateway_headers(extra, provider=self.provider_name))
         if self._api_key:
             headers["x-goog-api-key"] = self._api_key
             return headers
@@ -223,7 +228,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
         async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
             resp = await client.post(
                 f"{self._base}/{model}:generateContent",
-                headers=self._headers(),
+                headers=self._headers(request.extra),
                 json=self._body(request),
             )
         latency_ms = (time.monotonic() - started) * 1000.0

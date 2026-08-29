@@ -6,6 +6,7 @@ description: >-
   Final stage in the ALM pipeline. Hard-gated by risk_level=critical
   in production.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: groq
 llm_model: llama-3.3-70b-versatile

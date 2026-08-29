@@ -852,21 +852,30 @@ class _PostReportStage(PipelineStage):
 
     async def execute(self, task: DevAITask) -> StageResult:
         report = self._render(task)
+        produced_work, no_work_reason = assess_work(task)
         # Pull preview URLs off the handover bag so the StageResult.data
         # surfaces them to subscribers (dashboard SSE, task event payload).
         preview_url = str(task.agent_context.get("preview_url") or "")
         editor_url = str(task.agent_context.get("editor_url") or "")
         triggered_by = task.triggered_by or task.agent_context.get("trigger_actor") or ""
 
-        result_data = {
+        result_data: dict[str, Any] = {
             "report_markdown": report,
             "preview_url": preview_url,
             "editor_url": editor_url,
             "triggered_by": triggered_by,
         }
+        # A run where every substantive stage stubbed/skipped used to finish
+        # DONE with nothing to show for it. Report that honestly instead.
+        if not produced_work:
+            logger.error("post_report: run %s produced no work — %s", task.id, no_work_reason)
+            result_data.update({"ok": False, "run_verdict": "no_work", "no_work_reason": no_work_reason})
 
         if self.target == "none" or self.deps.scm is None:
-            return StageResult(message="rendered report (not posted)", data=result_data)
+            return StageResult(
+                message=no_work_reason if not produced_work else "rendered report (not posted)",
+                data=result_data,
+            )
 
         try:
             # SCMClient's comment surface is add_comment(repo, issue_id, body)
@@ -881,7 +890,10 @@ class _PostReportStage(PipelineStage):
             logger.exception("post_report: failed to post comment")
             return StageResult(message=f"render ok, post failed: {e}", data=result_data)
 
-        return StageResult(message="report posted", data=result_data)
+        return StageResult(
+            message=no_work_reason if not produced_work else "report posted",
+            data=result_data,
+        )
 
     def _render(self, task: DevAITask) -> str:
         lines = [f"## {self.title}", "", f"**Run:** `{task.id}`", f"**Blueprint:** `{task.blueprint}`"]
@@ -902,6 +914,10 @@ class _PostReportStage(PipelineStage):
                 lines.append(f"- Editor: <{editor_url}>")
             lines.append("")
 
+        produced_work, no_work_reason = assess_work(task)
+        if not produced_work:
+            lines += ["> ⚠️ **This run produced no work.** " + no_work_reason, ""]
+
         if task.stages_completed:
             lines.append("### Stages completed")
             for s in task.stages_completed:
@@ -915,11 +931,46 @@ class _PostReportStage(PipelineStage):
         return "\n".join(lines)
 
 
+# Handover keys that only ever mean "a stage degraded", never "work happened".
+_STUB_SUFFIXES = ("_stub", "_error", "_skipped")
+
+
+def assess_work(task: DevAITask) -> tuple[bool, str]:
+    """Did this run actually produce something, or did every stage degrade?
+
+    A run whose stages all stubbed out (no LLM, no SCM, no crew) used to end
+    DONE with an empty report. This is the check post_report uses to say so.
+    Returns ``(produced_work, reason_when_not)``.
+    """
+    if task.pr_number is not None or (task.issue_number or 0) > 0:
+        return True, ""
+    context = task.agent_context or {}
+    if context.get("checkpoints") or context.get("files_changed"):
+        return True, ""
+
+    for key, value in context.items():
+        if key.endswith(_STUB_SUFFIXES) or key in {"report_markdown", "requirements", "context_refs", "attachments"}:
+            continue
+        if isinstance(value, dict):
+            # A stub payload is `{"<name>_stub": True, ...}` — not real output.
+            if any(str(k).endswith("_stub") for k in value):
+                continue
+            if value:
+                return True, ""
+        elif isinstance(value, list) and value or isinstance(value, str) and value.strip():
+            return True, ""
+    return (
+        False,
+        "No stage produced output — every agent/crew stage degraded to a stub (check LLM provider, SCM credentials, and crew configuration).",
+    )
+
+
 def post_report_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
     return _PostReportStage(deps, config)
 
 
 __all__ = [
+    "assess_work",
     "alm_learn_stage",
     "plan_approval_stage",
     "await_merge_stage",

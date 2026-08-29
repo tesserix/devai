@@ -15,7 +15,7 @@ a single env var (``DEVAI_WORKFLOW_PROVIDER``); the rest of the code is identica
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from devai.blueprint.loader import Blueprint
@@ -39,7 +39,12 @@ class WorkflowAdapter(ABC):
     @abstractmethod
     def provider_name(self) -> str: ...
 
-    async def signal(self, task_id: str, signal_name: str, args: list | None = None) -> bool:
+    async def signal(
+        self,
+        task: DevAITask | str,
+        signal_name: str,
+        args: list[Any] | None = None,
+    ) -> bool:
         """Send a control Signal to a running run (pause/resume/stop/approve…).
 
         Default: unsupported (returns False) — the in-process backends drive

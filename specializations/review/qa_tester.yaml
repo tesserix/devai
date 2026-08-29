@@ -5,9 +5,10 @@ description: >-
   criteria pass against the real running app (when a preview is up) or
   the deployed branch. Loops back to senior_developer on test failures.
 category: review
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 max_tokens: 8192
 
 allowed_tools:

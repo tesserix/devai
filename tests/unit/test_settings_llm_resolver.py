@@ -229,6 +229,92 @@ async def test_overlay_bridges_uid_keyed_connector_to_email_at_runtime():
     assert overlay.anthropic_api_key == "sk-ant-mine"
 
 
+@pytest.mark.asyncio
+async def test_resolver_chains_only_the_users_connected_providers():
+    """A user's provider fallback must not borrow a platform credential."""
+    from devai.settings.models import Scope
+    from devai.settings.overlay import PrincipalSettingsOverlay, build_overlay
+
+    class _PlatformSettings:
+        llm_provider = "anthropic"
+        llm_fallback_provider = "anthropic,openai,groq"
+        llm_role_chain_provider = ""
+        llm_noop_canned_text = "[noop]"
+        llm_require_user_connector = True
+        anthropic_api_key = "sk-ant-platform"
+
+    svc = SettingsService(secrets=_MemSecrets())
+    await svc.upsert_connector(
+        scope=Scope.USER,
+        scope_id="owner@example.com",
+        connector_key="llm",
+        provider="vertex_gemini",
+        prefs={
+            "vertex_project": "user-project",
+            "vertex_location": "global",
+            "vertex_gemini_model": "gemini-2.5-flash",
+            "groq_model": "llama-3.3-70b-versatile",
+        },
+        secret_values={
+            "vertex_api_key": "AQ.user-vertex",
+            "groq_api_key": "gsk_user-groq",
+        },
+        updated_by="owner@example.com",
+    )
+
+    base = _PlatformSettings()
+    overlay = await build_overlay(base, Principal(email="owner@example.com"), svc)
+    assert isinstance(overlay, PrincipalSettingsOverlay)
+    assert overlay.llm_authorized_providers == ("vertex_gemini", "groq")
+    assert overlay.llm_fallback_provider == "groq"
+
+    adapter = await PrincipalLLMResolver(base, svc).resolve_for_email("owner@example.com")
+    assert adapter is not None
+    assert adapter.provider_name == "vertex_gemini→groq"
+
+
+@pytest.mark.asyncio
+async def test_overlay_persists_explicit_primary_and_fallback_order():
+    from devai.settings.models import Scope
+    from devai.settings.overlay import PrincipalSettingsOverlay, build_overlay
+
+    class _PlatformSettings:
+        llm_provider = "anthropic"
+        llm_fallback_provider = ""
+        anthropic_api_key = "sk-ant-platform"
+
+    svc = SettingsService(secrets=_MemSecrets())
+    await svc.upsert_connector(
+        scope=Scope.USER,
+        scope_id="owner@example.com",
+        connector_key="llm",
+        provider="vertex_gemini",
+        prefs={
+            "fallback_providers": "anthropic,groq",
+            "vertex_project": "user-project",
+        },
+        secret_values={
+            "vertex_api_key": "AQ.user-vertex",
+            "anthropic_api_key": "sk-ant-user",
+            "groq_api_key": "gsk_user-groq",
+        },
+        updated_by="owner@example.com",
+    )
+
+    overlay = await build_overlay(_PlatformSettings(), Principal(email="owner@example.com"), svc)
+
+    assert isinstance(overlay, PrincipalSettingsOverlay)
+    assert overlay.llm_provider == "vertex_gemini"
+    assert overlay.llm_authorized_providers == ("vertex_gemini", "anthropic", "groq")
+    assert overlay.llm_fallback_provider == "anthropic,groq"
+
+
+def test_llm_connector_catalog_exposes_ordered_fallback_setting():
+    field = next(field for field in CONNECTOR_BY_KEY["llm"].fields if field.key == "fallback_providers")
+    assert field.settings_attr == "llm_fallback_provider"
+    assert field.secret is False
+
+
 # ─────────────────────────────────────────────────────────────────────
 # role_llm_for_principal — the one LLM-selection policy
 # ─────────────────────────────────────────────────────────────────────
@@ -296,14 +382,29 @@ async def test_role_llm_user_connector_skips_the_meter():
     from devai.settings.trial import TrialLLMAdapter
 
     class _Overlay:
-        llm_provider = "noop"
+        llm_provider = "anthropic"
         llm_noop_canned_text = "[noop]"
         overlaid_attrs = ("llm_provider", "anthropic_api_key")
+        llm_authorized_providers = ("anthropic",)
         anthropic_api_key = "sk-ant-user-own"
 
     deps = _policy_deps(strict=True, budget=50_000, has_own=True, overlay=_Overlay())
     adapter = await deps.role_llm_for_principal("owner@example.com", "utility")
-    assert adapter is not None and not isinstance(adapter, TrialLLMAdapter)
+    assert adapter is not None and adapter.provider_name == "anthropic"
+    assert not isinstance(adapter, TrialLLMAdapter)
+
+
+@pytest.mark.asyncio
+async def test_role_llm_strict_mode_never_borrows_platform_for_broken_connector():
+    class _IncompleteOverlay:
+        llm_provider = "anthropic"
+        llm_noop_canned_text = "[noop]"
+        llm_authorized_providers = ("anthropic",)
+        overlaid_attrs = ("llm_provider",)
+        anthropic_api_key = ""
+
+    deps = _policy_deps(strict=True, budget=50_000, has_own=True, overlay=_IncompleteOverlay())
+    assert await deps.role_llm_for_principal("owner@example.com", "utility") is None
 
 
 def test_role_chain_cache_is_isolated_per_credentials():
@@ -322,6 +423,22 @@ def test_role_chain_cache_is_isolated_per_credentials():
     assert _role_cache_key(_A(), "utility") != _role_cache_key(_B(), "utility")
     # Same credentials → same slot (the cache still deduplicates).
     assert _role_cache_key(_A(), "utility") == _role_cache_key(_A(), "utility")
+
+
+def test_role_chain_cache_is_isolated_per_vertex_credentials():
+    from devai.adapters.llm.factory import _role_cache_key
+
+    class _A:
+        llm_provider = "vertex_gemini"
+        vertex_project = "shared-project"
+        vertex_api_key = "AQ.tenant-a"
+
+    class _B:
+        llm_provider = "vertex_gemini"
+        vertex_project = "shared-project"
+        vertex_api_key = "AQ.tenant-b"
+
+    assert _role_cache_key(_A(), "utility") != _role_cache_key(_B(), "utility")
 
 
 @pytest.mark.asyncio

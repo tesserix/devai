@@ -6,6 +6,7 @@ description: >-
   performance, security, error handling, testability. Loops up to 3
   iterations on changes_requested then escalates to human.
 category: review
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: o3

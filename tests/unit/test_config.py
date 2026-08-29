@@ -14,7 +14,7 @@ def test_default_settings():
     assert s.nats_url == "nats://localhost:4222"
     assert s.redis_url == "redis://localhost:6379"
     assert s.nats_stream == "DEVAI"
-    assert s.claude_model == "claude-sonnet-4-20250514"
+    assert s.claude_model == "claude-sonnet-5"
     assert s.openai_model == "gpt-4.1"
     assert s.max_review_iterations == 3
     assert s.pipeline_label == "devai:automate"
@@ -63,3 +63,9 @@ def test_a_real_key_turns_tracing_on(key, _clean_langsmith_env):
     s.export_langsmith_env()
     assert os.environ["LANGCHAIN_TRACING_V2"] == "true"
     assert os.environ["LANGCHAIN_API_KEY"] == key
+
+
+def test_auth_bff_shared_secret_strips_header_invalid_whitespace():
+    s = Settings(_env_file=None, auth_bff_shared_secret="s3cret\n")
+
+    assert s.auth_bff_shared_secret == "s3cret"

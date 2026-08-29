@@ -22,6 +22,7 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react";
+import { newRunHref } from "@/lib/run-entry";
 
 /**
  * ⌘K / Ctrl+K command palette.
@@ -33,8 +34,8 @@ import {
  *
  * Typing `@` switches to repo mode: it lists only the repos already
  * ONBOARDED to DevAI (onboarding store, state="onboarded") and Enter
- * opens the chosen one in Compose, pre-selected, ready to point a crew
- * at. Onboarding a *new* repo is a deliberate, separate step on /Repos —
+ * opens the shared run dialog with that repo pre-selected. Onboarding a *new*
+ * repo is a deliberate, separate step on /Repos —
  * the palette is for jumping to what's already enrolled, not enrolling.
  *
  * Mounting: rendered once at layout level; opens on the global
@@ -195,7 +196,7 @@ export function CommandPalette({
       const repo = repos[active];
       if (!repo) return;
       setOpen(false);
-      router.push(`/compose?repo=${encodeURIComponent(repo.full_name)}`);
+      router.push(newRunHref(repo.full_name));
       return;
     }
     const cmd = filtered[active];

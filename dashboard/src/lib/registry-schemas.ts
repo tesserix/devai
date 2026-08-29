@@ -9,8 +9,10 @@ export const API_VERSION = "registry.agentic.dev/v1alpha1";
 export type FieldType =
   | "text"
   | "textarea"
+  | "number"
   | "select"
   | "checkbox"
+  | "ref" // one catalog artifact name (itemKind = the plural)
   | "refList" // multi-select of catalog artifact names (itemKind = the plural)
   | "group" // a nested object rendered from `children`
   | "objectList"; // a list of records, each rendered from `children`
@@ -22,8 +24,12 @@ export interface Field {
   placeholder?: string;
   help?: string;
   options?: string[];
+  optionLabels?: Record<string, string>;
   required?: boolean;
   mono?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
   itemKind?: string; // for "refList": the plural to query, e.g. "skills"
   children?: Field[]; // for "group" / "objectList": nested field shapes (paths are RELATIVE)
 }
@@ -32,8 +38,21 @@ export interface Field {
 const META: Field[] = [
   { path: "metadata.name", label: "Name", type: "text", placeholder: "my-artifact", required: true, mono: true, help: "Unique identifier within the collection." },
   { path: "metadata.tag", label: "Version", type: "text", placeholder: "auto · v0.0.1", mono: true, help: "Leave blank to auto-increment (v0.0.1, v0.0.2, …); set one (e.g. v1.2.0) to pin." },
-  { path: "metadata.visibility", label: "Visibility", type: "select", options: ["public", "internal", "private"] },
+  {
+    path: "metadata.visibility",
+    label: "Visibility",
+    type: "select",
+    options: ["private"],
+    help: "User-authored artifacts stay private to your account while tenant sharing is being hardened.",
+  },
 ];
+
+const AGENT_MODEL_PROVIDER_OPTIONS = ["anthropic", "openai", "google", "vertex_gemini", "groq"];
+const AGENT_RISK_LEVEL_OPTIONS = ["low", "medium", "high", "critical"];
+const AGENT_MODEL_PROVIDERS = new Set([...AGENT_MODEL_PROVIDER_OPTIONS, "claude", "gemini", "vertex"]);
+const AGENT_RISK_LEVELS = new Set(AGENT_RISK_LEVEL_OPTIONS);
+export const AGENT_RUNTIME_FIELD = "metadata.labels.devai.io/runtime";
+const AGENT_RUNTIME_LABEL = "devai.io/runtime";
 
 // Spec fields per kind.
 const SPEC: Record<string, Field[]> = {
@@ -59,6 +78,47 @@ const SPEC: Record<string, Field[]> = {
     { path: "spec.description", label: "Description", type: "textarea", placeholder: "What this prompt produces." },
     { path: "spec.template", label: "Template", type: "textarea", placeholder: "Summarize the following:\n\n{{input}}", mono: true, help: "Use {{variables}} for runtime values." },
   ],
+  Dataset: [
+    { path: "spec.description", label: "Description", type: "textarea", placeholder: "What behavior this immutable dataset version verifies." },
+    {
+      path: "spec.cases",
+      label: "Cases",
+      type: "objectList",
+      required: true,
+      help: "Add the core case fields here. Expected tools, forbidden tools, context, and tags can be added in the live manifest.",
+      children: [
+        { path: "id", label: "Case ID", type: "text", required: true, mono: true },
+        { path: "input", label: "Input", type: "textarea", required: true },
+        { path: "expectedOutput", label: "Expected output", type: "textarea" },
+      ],
+    },
+  ],
+  EvalSuite: [
+    { path: "spec.description", label: "Description", type: "textarea", placeholder: "What this release gate verifies." },
+    {
+      path: "spec.datasetRef",
+      label: "Pinned dataset",
+      type: "group",
+      required: true,
+      help: "Both the dataset name and immutable version are required.",
+      children: [
+        { path: "ref", label: "Dataset", type: "text", required: true, mono: true },
+        { path: "version", label: "Version", type: "text", required: true, mono: true },
+      ],
+    },
+    {
+      path: "spec.thresholds",
+      label: "Thresholds",
+      type: "group",
+      children: [
+        { path: "success", label: "Success rate", type: "number", min: 0, max: 1, step: 0.01 },
+        { path: "safety", label: "Safety rate", type: "number", min: 0, max: 1, step: 0.01 },
+        { path: "hallucination", label: "Hallucination rate", type: "number", min: 0, max: 1, step: 0.01 },
+        { path: "p95_latency_s", label: "P95 latency (s)", type: "number", min: 0.1, step: 0.1 },
+        { path: "cost_per_run_usd", label: "Cost / run (USD)", type: "number", min: 0, step: 0.001 },
+      ],
+    },
+  ],
   Workflow: [
     { path: "spec.title", label: "Title", type: "text", placeholder: "Release Train", required: true },
     { path: "spec.description", label: "Description", type: "textarea", placeholder: "What this workflow orchestrates." },
@@ -71,10 +131,39 @@ const SPEC: Record<string, Field[]> = {
     { path: "spec.title", label: "Title", type: "text", placeholder: "On-Call Responder", required: true },
     { path: "spec.description", label: "Description", type: "textarea", placeholder: "What the agent does autonomously." },
     {
+      path: AGENT_RUNTIME_FIELD,
+      label: "Execution runtime",
+      type: "select",
+      options: ["job", "kagent"],
+      optionLabels: {
+        job: "On-demand Job",
+        kagent: "Substrate Actor (gated)",
+      },
+      help: "Jobs are isolated and available now. Substrate publishes devai.io/runtime=kagent and remains fail-closed until the platform isolation gate passes.",
+    },
+    {
       path: "spec.model", label: "Model", type: "group", help: "The LLM this agent reasons with.", children: [
-        { path: "provider", label: "Provider", type: "select", options: ["", "anthropic", "openai", "google", "groq"] },
-        { path: "name", label: "Model name", type: "text", placeholder: "claude-sonnet-4", mono: true },
-        { path: "temperature", label: "Temperature", type: "text", placeholder: "0.3", mono: true, help: "0–2." },
+        { path: "provider", label: "Provider", type: "select", options: ["", ...AGENT_MODEL_PROVIDER_OPTIONS], required: true },
+        { path: "name", label: "Model name", type: "text", placeholder: "claude-sonnet-4", mono: true, required: true },
+        { path: "temperature", label: "Temperature", type: "number", placeholder: "0.3", mono: true, min: 0, max: 2, step: 0.1, help: "0–2." },
+      ],
+    },
+    {
+      path: "spec.promptRef",
+      label: "Prompt reference",
+      type: "ref",
+      itemKind: "prompts",
+      placeholder: "incident-responder-prompt-v1",
+      help: "Choose a registry Prompt, or provide an inline system prompt below. One is required.",
+    },
+    {
+      path: "spec.evalSuite",
+      label: "Evaluation suite",
+      type: "group",
+      help: "Pin the immutable suite version that must pass before publication.",
+      children: [
+        { path: "ref", label: "Suite", type: "text", mono: true, required: true },
+        { path: "version", label: "Version", type: "text", mono: true, required: true },
       ],
     },
     { path: "spec.systemPrompt", label: "System prompt", type: "textarea", placeholder: "You are an on-call SRE. …", help: "The agent's base instruction. References to Prompts below are available at runtime." },
@@ -82,6 +171,19 @@ const SPEC: Record<string, Field[]> = {
     { path: "spec.tools", label: "Tools", type: "refList", itemKind: "tools", help: "Registry Tools the agent may call." },
     { path: "spec.mcpServers", label: "MCP servers", type: "refList", itemKind: "mcp-servers", help: "MCP servers the agent connects to for tools." },
     { path: "spec.prompts", label: "Prompts", type: "refList", itemKind: "prompts", help: "Reusable Prompts available to the agent." },
+    {
+      path: "spec.limits", label: "Execution limits", type: "group", help: "Hard bounds applied to each agent run.", children: [
+        { path: "maxTurns", label: "Maximum turns", type: "number", min: 1, max: 1000, step: 1, required: true },
+        { path: "timeoutSeconds", label: "Timeout (seconds)", type: "number", min: 1, max: 86400, step: 1, required: true },
+      ],
+    },
+    {
+      path: "spec.riskLevel",
+      label: "Risk level",
+      type: "select",
+      options: AGENT_RISK_LEVEL_OPTIONS,
+      help: "High and critical agents require a human approval gate before consequential actions.",
+    },
     {
       path: "spec.a2a", label: "A2A (advanced)", type: "group", help: "Agent-to-agent protocol config (optional).", children: [
         { path: "url", label: "Service URL", type: "text", placeholder: "https://…", mono: true, help: "Where consumers reach this agent over A2A." },
@@ -98,7 +200,7 @@ export function fieldsFor(kind: string): Field[] {
 // starter returns a fresh, minimal doc for a kind with sensible defaults so the
 // editor and the live manifest are never empty.
 export function starter(kind: string): Record<string, unknown> {
-  const meta = { name: "", tag: "", visibility: "public", labels: {} as Record<string, string> };
+  const meta = { name: "", tag: "", visibility: "private", labels: {} as Record<string, string> };
   const specByKind: Record<string, Record<string, unknown>> = {
     Skill: { title: "", description: "", source: { repository: "" } },
     Tool: { title: "", description: "" },
@@ -109,17 +211,40 @@ export function starter(kind: string): Record<string, unknown> {
       packages: [{ registryType: "npm", identifier: "", transport: { type: "stdio" } }],
     },
     Prompt: { title: "", description: "", template: "" },
+    Dataset: { description: "", cases: [] },
+    EvalSuite: {
+      description: "",
+      datasetRef: { ref: "", version: "" },
+      scorers: [],
+      thresholds: {
+        success: null,
+        safety: null,
+        hallucination: null,
+        p95_latency_s: null,
+        cost_per_run_usd: null,
+      },
+    },
     Workflow: { title: "", description: "", nodes: [], edges: [] },
     Blueprint: { title: "", description: "", nodes: [], edges: [] },
     Agent: {
       title: "", description: "",
-      model: { provider: "", name: "", temperature: "" },
+      model: { provider: "", name: "", temperature: null },
+      promptRef: "",
       systemPrompt: "",
       skills: [], tools: [], mcpServers: [], prompts: [],
+      limits: { maxTurns: 20, timeoutSeconds: 900 },
+      riskLevel: "medium",
       a2a: { url: "", preferredTransport: "" },
     },
   };
   return { apiVersion: API_VERSION, kind, metadata: meta, spec: specByKind[kind] ?? specByKind.Skill };
+}
+
+export function editorDocument(
+  kind: string,
+  published?: Record<string, unknown>,
+): Record<string, unknown> {
+  return structuredClone(published ?? starter(kind));
 }
 
 // ── Manifest linting / safety scan ──────────────────────────────────────────
@@ -194,10 +319,146 @@ export function lintManifest(doc: unknown, expectedKind: string): LintIssue[] {
   if (d.spec == null || typeof d.spec !== "object" || Array.isArray(d.spec)) {
     err("missing required field: spec");
   } else {
+    const spec = d.spec as Record<string, unknown>;
     for (const f of requiredPaths(expectedKind)) {
       if (f.path.startsWith("metadata.")) continue;
       const v = getPath(d, f.path);
       if (v == null || (typeof v === "string" && !v.trim())) err(`missing required field: ${f.path} (${f.label})`);
+    }
+    if (expectedKind === "Agent") {
+      const runtime = (meta?.labels as Record<string, unknown> | undefined)?.[AGENT_RUNTIME_LABEL];
+      if (runtime != null && runtime !== "" && runtime !== "kagent") {
+        err("metadata.labels.devai.io/runtime must be absent or kagent");
+      }
+      const systemPrompt = spec.systemPrompt;
+      const promptRef = spec.promptRef;
+      if (systemPrompt != null && typeof systemPrompt !== "string") err("spec.systemPrompt must be a string");
+      if (promptRef != null && typeof promptRef !== "string") err("spec.promptRef must be a string");
+      const hasInline = typeof systemPrompt === "string" && systemPrompt.trim().length > 0;
+      const hasReference = typeof promptRef === "string" && promptRef.trim().length > 0;
+      if (!hasInline && !hasReference) {
+        err("agent requires an inline system prompt or a prompt reference");
+      }
+
+      const model = spec.model;
+      if (model == null || typeof model !== "object" || Array.isArray(model)) {
+        err("spec.model must be an object");
+      } else {
+        const typedModel = model as Record<string, unknown>;
+        if (typeof typedModel.provider !== "string" || !typedModel.provider.trim()) {
+          err("spec.model.provider is required");
+        } else if (!AGENT_MODEL_PROVIDERS.has(typedModel.provider)) {
+          err(`spec.model.provider must be one of ${[...AGENT_MODEL_PROVIDERS].join(", ")}`);
+        }
+        if (typeof typedModel.name !== "string" || !typedModel.name.trim()) {
+          err("spec.model.name is required");
+        }
+        if (
+          typedModel.temperature != null &&
+          (typeof typedModel.temperature !== "number" ||
+            !Number.isFinite(typedModel.temperature) ||
+            typedModel.temperature < 0 ||
+            typedModel.temperature > 2)
+        ) {
+          err("spec.model.temperature must be a number between 0 and 2");
+        }
+      }
+
+      const limits = spec.limits;
+      if (limits == null || typeof limits !== "object" || Array.isArray(limits)) {
+        err("spec.limits must be an object");
+      } else {
+        const typedLimits = limits as Record<string, unknown>;
+        if (!Number.isInteger(typedLimits.maxTurns) || Number(typedLimits.maxTurns) < 1 || Number(typedLimits.maxTurns) > 1000) {
+          err("spec.limits.maxTurns must be an integer between 1 and 1000");
+        }
+        if (
+          !Number.isInteger(typedLimits.timeoutSeconds) ||
+          Number(typedLimits.timeoutSeconds) < 1 ||
+          Number(typedLimits.timeoutSeconds) > 86400
+        ) {
+          err("spec.limits.timeoutSeconds must be an integer between 1 and 86400");
+        }
+      }
+
+      if (!AGENT_RISK_LEVELS.has(String(spec.riskLevel ?? ""))) {
+        err("spec.riskLevel must be one of low, medium, high, critical");
+      }
+      const evalSuite = spec.evalSuite;
+      if (evalSuite != null) {
+        if (typeof evalSuite !== "object" || Array.isArray(evalSuite)) {
+          err("spec.evalSuite must be an object");
+        } else {
+          const ref = evalSuite as Record<string, unknown>;
+          if (typeof ref.ref !== "string" || !ref.ref.trim()) err("spec.evalSuite.ref is required");
+          if (typeof ref.version !== "string" || !ref.version.trim()) {
+            err("spec.evalSuite.version is required");
+          }
+        }
+      }
+    }
+    if (expectedKind === "Dataset") {
+      if (!Array.isArray(spec.cases) || spec.cases.length === 0) {
+        err("spec.cases must contain at least one versioned case");
+      } else {
+        const ids = new Set<string>();
+        for (const value of spec.cases) {
+          if (value == null || typeof value !== "object" || Array.isArray(value)) {
+            err("spec.cases entries must be objects");
+            continue;
+          }
+          const item = value as Record<string, unknown>;
+          const id = typeof item.id === "string" ? item.id.trim() : "";
+          if (!id) err("spec.cases[].id is required");
+          else if (ids.has(id)) err(`spec.cases contains duplicate id "${id}"`);
+          else ids.add(id);
+          if (typeof item.input !== "string" || !item.input.trim()) err(`spec.cases[${id || "?"}].input is required`);
+        }
+      }
+    }
+    if (expectedKind === "EvalSuite") {
+      const datasetRef = spec.datasetRef;
+      if (datasetRef == null || typeof datasetRef !== "object" || Array.isArray(datasetRef)) {
+        err("spec.datasetRef must pin a dataset name and version");
+      } else {
+        const ref = datasetRef as Record<string, unknown>;
+        if (typeof ref.ref !== "string" || !ref.ref.trim()) err("spec.datasetRef.ref is required");
+        if (typeof ref.version !== "string" || !ref.version.trim()) err("spec.datasetRef.version is required");
+      }
+      if (!Array.isArray(spec.scorers) || spec.scorers.length === 0) {
+        err("spec.scorers must contain at least one scorer");
+      } else {
+        const scorerNames = new Set<string>();
+        for (const scorer of spec.scorers) {
+          if (typeof scorer !== "string" || !scorer.trim()) {
+            err("spec.scorers entries must be non-empty strings");
+          } else if (scorerNames.has(scorer)) {
+            err(`spec.scorers contains duplicate scorer "${scorer}"`);
+          } else {
+            scorerNames.add(scorer);
+          }
+        }
+      }
+      const thresholds = spec.thresholds;
+      if (thresholds != null && (typeof thresholds !== "object" || Array.isArray(thresholds))) {
+        err("spec.thresholds must be an object");
+      } else if (thresholds != null) {
+        const values = thresholds as Record<string, unknown>;
+        for (const name of ["success", "safety", "hallucination"] as const) {
+          const value = values[name];
+          if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)) {
+            err(`spec.thresholds.${name} must be a number between 0 and 1`);
+          }
+        }
+        const latency = values.p95_latency_s;
+        if (latency != null && (typeof latency !== "number" || !Number.isFinite(latency) || latency <= 0)) {
+          err("spec.thresholds.p95_latency_s must be a positive number");
+        }
+        const cost = values.cost_per_run_usd;
+        if (cost != null && (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0)) {
+          err("spec.thresholds.cost_per_run_usd must be a non-negative number");
+        }
+      }
     }
   }
 
@@ -228,6 +489,34 @@ export function setPath(obj: Record<string, unknown>, path: string, value: unkno
   return clone;
 }
 
+export function agentRuntimeTarget(doc: Record<string, unknown>): "job" | "kagent" {
+  const metadata = doc.metadata;
+  const labels = metadata && typeof metadata === "object"
+    ? (metadata as Record<string, unknown>).labels
+    : undefined;
+  return labels && typeof labels === "object" && (labels as Record<string, unknown>)[AGENT_RUNTIME_LABEL] === "kagent"
+    ? "kagent"
+    : "job";
+}
+
+export function setAgentRuntimeTarget(
+  doc: Record<string, unknown>,
+  target: unknown,
+): Record<string, unknown> {
+  const clone = structuredClone(doc);
+  const metadata = clone.metadata && typeof clone.metadata === "object"
+    ? clone.metadata as Record<string, unknown>
+    : {};
+  clone.metadata = metadata;
+  const labels = metadata.labels && typeof metadata.labels === "object" && !Array.isArray(metadata.labels)
+    ? metadata.labels as Record<string, unknown>
+    : {};
+  metadata.labels = labels;
+  if (target === "kagent") labels[AGENT_RUNTIME_LABEL] = "kagent";
+  else delete labels[AGENT_RUNTIME_LABEL];
+  return clone;
+}
+
 /** plural collection name for a kind (matches the registry HTTP routes). */
 export function pluralForKind(kind: string): string {
   switch (kind) {
@@ -245,6 +534,10 @@ export function pluralForKind(kind: string): string {
       return "blueprints";
     case "Agent":
       return "agents";
+    case "Dataset":
+      return "datasets";
+    case "EvalSuite":
+      return "eval-suites";
     default:
       return `${kind.toLowerCase()}s`;
   }

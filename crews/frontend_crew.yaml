@@ -6,6 +6,28 @@ description: >
   the result. Members are equipped with terminal, git checkpoints, and web
   search so they can build, test, and snapshot their work autonomously.
 
+tags: [alm, frontend]
+
+# Intent words that make this the right crew when the composer's crew is "Dynamic".
+keywords:
+  - ui
+  - frontend
+  - react
+  - next.js
+  - nextjs
+  - component
+  - page
+  - css
+  - tailwind
+  - dashboard
+  - button
+  - form
+  - style
+  - layout
+  - tsx
+  - design
+  - responsive
+
 lead: senior_developer
 
 members:

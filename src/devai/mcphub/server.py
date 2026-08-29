@@ -21,10 +21,10 @@ import logging
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
+from devai.identity import Principal
 from devai.mcphub.profile import ToolProfile
 
 if TYPE_CHECKING:
-    from devai.identity import Principal
     from devai.mcphub.hub import MCPHub
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ _CURRENT_PROFILE: ContextVar[ToolProfile | None] = ContextVar("mcphub_profile", 
 
 # The caller's email, set alongside the profile by the ASGI middleware. Drives
 # per-user MCP federation (their own connected servers). "" = anonymous/system.
-_CURRENT_EMAIL: ContextVar[str] = ContextVar("mcphub_email", default="")
+_CURRENT_PRINCIPAL: ContextVar[Principal | str | None] = ContextVar("mcphub_principal", default=None)
 
 
 def set_current_profile(profile: ToolProfile) -> None:
@@ -48,11 +48,20 @@ def current_profile() -> ToolProfile:
 
 
 def set_current_email(email: str) -> None:
-    _CURRENT_EMAIL.set(email or "")
+    _CURRENT_PRINCIPAL.set(email or "")
 
 
 def current_email() -> str:
-    return _CURRENT_EMAIL.get() or ""
+    principal = _CURRENT_PRINCIPAL.get()
+    return str(getattr(principal, "email", "") or principal or "")
+
+
+def set_current_principal(principal: Principal | None) -> None:
+    _CURRENT_PRINCIPAL.set(principal)
+
+
+def current_principal() -> Principal | str | None:
+    return _CURRENT_PRINCIPAL.get()
 
 
 # Roles/emails that get the full (still budget-capped) surface. Kept tiny and
@@ -99,7 +108,7 @@ def build_hub_server(hub: MCPHub) -> Any:
     @server.list_tools()
     async def _list_tools() -> list[Any]:
         # Shared registry surface + the caller's OWN connected MCP servers.
-        budget = await hub.list_tools_for(current_email(), current_profile())
+        budget = await hub.list_tools_for(current_principal(), current_profile())
         if budget.truncated:
             logger.info(
                 "mcphub: served %d tools (%d cut to budget)", len(budget.selected), len(budget.dropped_by_budget)
@@ -111,7 +120,7 @@ def build_hub_server(hub: MCPHub) -> Any:
 
     @server.call_tool()
     async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
-        result = await hub.call_tool(name, arguments, email=current_email())
+        result = await hub.call_tool(name, arguments, identity=current_principal())
         # Pass the downstream's content blocks straight through; if a leg returns
         # a bare value, wrap it so the client always gets valid content.
         content = getattr(result, "content", None)

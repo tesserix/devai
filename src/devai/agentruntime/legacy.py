@@ -109,22 +109,25 @@ class LegacyAgent:
     # ── Agent protocol ─────────────────────────────────────────────────
 
     async def run(self, ctx: RunContext) -> AgentResult:
-        agent = self._resolve_agent(ctx)
-        if agent is None:
-            logger.warning("LegacyAgent[%s]: agent unavailable — returning stub", self.name)
-            return AgentResult(
-                ok=False,
-                stub=True,
-                output_key=self.output_key,
-                message=f"{self.name} skipped — agent unavailable",
-                handover={f"{self.name}_stub": True},
-            )
+        from devai.adapters.llm.legacy_bridge import bind_legacy_llm
 
-        state = build_alm_state(ctx)
-        # A failure inside the agent is a real stage failure — let it propagate
-        # so the blueprint executor's on_failure / retry / heal policy applies.
-        patch = await agent.run(state)
-        return alm_patch_to_result(patch, output_key=self.output_key, message=f"{self.name} completed")
+        with bind_legacy_llm(ctx.llm):
+            agent = self._resolve_agent(ctx)
+            if agent is None:
+                logger.warning("LegacyAgent[%s]: agent unavailable — returning stub", self.name)
+                return AgentResult(
+                    ok=False,
+                    stub=True,
+                    output_key=self.output_key,
+                    message=f"{self.name} skipped — agent unavailable",
+                    handover={f"{self.name}_stub": True},
+                )
+
+            state = build_alm_state(ctx)
+            # A failure inside the agent is a real stage failure — let it propagate
+            # so the blueprint executor's on_failure / retry / heal policy applies.
+            patch = await agent.run(state)
+            return alm_patch_to_result(patch, output_key=self.output_key, message=f"{self.name} completed")
 
     # ── Construction ───────────────────────────────────────────────────
 

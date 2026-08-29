@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: supervisor-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: supervisor
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: supervisor
+  title: Supervisor Architect
+  description: Senior technical architect that plans the run before execution starts. Reviews requirements
+    + repo + memory + governance, produces a delegation plan (which roles run, in what order, with what
+    depends_on). The orchestrator_pre stage hands off to it.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/supervisor
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - supervisor
+  prompts:
+  - supervisor-prompt-v1
   promptRef: supervisor-prompt-v1
-  llm:
-    provider: openai
-    model: o3
-    temperature: 0.3
-    maxTokens: null
-  limits:
-    maxTurns: 30
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.supervisor.SupervisorAgent
-  riskLevel: low
-  roleColor: admin

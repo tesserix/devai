@@ -15,6 +15,7 @@ from typing import Any
 import yaml
 
 from devai.specializations.base import (
+    AgentRuntime,
     HandoverField,
     LLMProvider,
     RiskLevel,
@@ -47,6 +48,7 @@ _ALLOWED_TOP_KEYS = {
     "handover_schema",
     "risk_level",
     "role_color",
+    "runtime",
     "legacy_python_class",
     "metadata",
 }
@@ -206,6 +208,7 @@ def load_specialization_from_string(text: str, *, source: str = "<inline>", auth
             handover_schema=_parse_handover_schema(raw.get("handover_schema"), source=source),
             risk_level=RiskLevel.parse(raw.get("risk_level"), default=RiskLevel.MEDIUM),
             role_color=str(raw.get("role_color", "engineer")),
+            runtime=AgentRuntime.parse(raw.get("runtime")),
             legacy_python_class=legacy_class,
             metadata=dict(metadata),
         )

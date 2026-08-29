@@ -14,9 +14,10 @@ spec:
     and dependencies. Maps the topology and stores it as semantic memory for downstream SRE agents.
   category: sre
   tools:
-  - kubectl_get
-  - kubectl_describe
-  - prometheus_query
+  - k8s_get_deployments
+  - k8s_get_pod_status
+  - k8s_get_events
+  - prom_query
   handoverSchema:
     apps:
       type: array

@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+from devai.specializations.base import AgentRuntime
 from devai.tools import registry as tool_registry
 
 if TYPE_CHECKING:
@@ -59,6 +60,7 @@ class AgentRunResult:
     tool_calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    trace_steps: list[dict[str, Any]] = field(default_factory=list)
     stub: bool = False
     error: str = ""
 
@@ -129,28 +131,61 @@ class AgentRunner:
         # Tests / callers may inject a dispatcher via deps.extra; otherwise
         # build the real one with this run's rich tool context.
         dispatcher = (self.deps.extra or {}).get("tool_dispatcher")
+        gateway = None
         if dispatcher is None:
             # In a sandbox pod the env carries the pinned tool modes; outside
             # one `from_env` returns None and dispatch is unchanged.
             from devai.sandbox.gateway import ToolGateway
             from devai.tools.dispatch import ToolDispatcher
 
+            gateway = ToolGateway.from_env(os.environ)
             dispatcher = ToolDispatcher(
                 scm,
                 dry_run=getattr(task, "dry_run", False),
                 triggered_by=task.triggered_by or "",
                 tool_context=ctx,
-                gateway=ToolGateway.from_env(os.environ),
+                gateway=gateway,
             )
-        tools = dispatcher.build_tool_specs(list(spec.allowed_tools))
-
         system = self._build_system_prompt(spec)
         if system_suffix:
             system = f"{system}\n\n{system_suffix}"
         user = self._build_user_prompt(spec, task, extra_context, instruction)
         images = await self._hydrate_images(task)
-        messages: list[LLMMessage] = [LLMMessage(role=LLMRole.USER, content=user, images=images)]
+        if spec.runtime is AgentRuntime.TESSERIX_ADK:
+            from devai.agentruntime.tesserix import TesserixSpecRuntime
 
+            try:
+                result = await TesserixSpecRuntime(llm=llm, dispatcher=dispatcher).run(
+                    spec,
+                    task,
+                    system_prompt=system,
+                    user_prompt=user,
+                    images=images,
+                )
+            except Exception as e:  # noqa: BLE001 — surface a bounded, redacted agent failure
+                from devai.services.redact import redact_secrets
+
+                safe_error = redact_secrets(str(e))[:500]
+                logger.error("Tesserix ADK run failed for %s: %s", spec.name, safe_error)
+                return AgentRunResult(error=f"adk_error: {safe_error}")
+
+            if gateway is not None:
+                result.trace_steps.extend(
+                    {
+                        "kind": "tool",
+                        "name": record.tool,
+                        "input": record.arguments,
+                        "output": record.response,
+                        "mode": record.mode.value,
+                        "error": record.error or "",
+                        "latency_ms": record.latency_ms,
+                    }
+                    for record in gateway.records
+                )
+            return result
+
+        tools = dispatcher.build_tool_specs(list(spec.allowed_tools))
+        messages: list[LLMMessage] = [LLMMessage(role=LLMRole.USER, content=user, images=images)]
         result = AgentRunResult()
         max_turns = min(max(1, spec.max_turns or 1), _MAX_TURNS_CEILING)
 
@@ -163,7 +198,6 @@ class AgentRunner:
                 model=spec.llm_model or "",
                 max_tokens=spec.max_tokens,
                 temperature=spec.temperature,
-                # Attribution for the usage ledger (cost per agent / user / run).
                 extra={
                     "agent": spec.name,
                     "run_id": task.id,
@@ -172,39 +206,47 @@ class AgentRunner:
             )
             try:
                 resp = await llm.generate(req)
-            except Exception as e:  # noqa: BLE001 — surface as a soft failure
-                logger.exception("AgentRunner: llm.generate failed for %s", spec.name)
-                result.error = f"llm_error: {e}"
+            except Exception as e:  # noqa: BLE001 — surface a soft failure
+                from devai.services.redact import redact_secrets
+
+                safe_error = redact_secrets(str(e))[:500]
+                logger.error("AgentRunner: llm.generate failed for %s: %s", spec.name, safe_error)
+                result.error = f"llm_error: {safe_error}"
                 break
 
             result.prompt_tokens += resp.usage.prompt_tokens
             result.completion_tokens += resp.usage.completion_tokens
-
-            # Record the assistant turn (carry tool_calls so the provider can
-            # bind the tool_results we append next round — see LLMMessage).
             messages.append(LLMMessage(role=LLMRole.ASSISTANT, content=resp.text, tool_calls=list(resp.tool_calls)))
 
             if not resp.tool_calls:
                 result.final_text = resp.text
                 break
 
-            for tc in resp.tool_calls:
+            for tool_call in resp.tool_calls:
                 result.tool_calls += 1
-                # ToolDispatcher.execute is self-contained: unknown tool →
-                # error string, tool exception → error string, mutating tool in
-                # a dry run → "[dry-run] blocked". It never raises, so a tool
-                # failure is reported to the model instead of killing the loop.
-                output = await dispatcher.execute(tc.name, dict(tc.arguments))
+                output = await dispatcher.execute(tool_call.name, dict(tool_call.arguments))
+                if gateway is not None and gateway.records:
+                    record = gateway.records[-1]
+                    result.trace_steps.append(
+                        {
+                            "kind": "tool",
+                            "name": record.tool,
+                            "input": record.arguments,
+                            "output": record.response,
+                            "mode": record.mode.value,
+                            "error": record.error or "",
+                            "latency_ms": record.latency_ms,
+                        }
+                    )
                 messages.append(
                     LLMMessage(
                         role=LLMRole.TOOL,
                         content=output if isinstance(output, str) else str(output),
-                        name=tc.name,
-                        tool_call_id=tc.id,
+                        name=tool_call.name,
+                        tool_call_id=tool_call.id,
                     )
                 )
         else:
-            # loop exhausted without a tool-free turn
             result.error = result.error or f"max_turns ({max_turns}) reached"
 
         result.patch = self._extract_handover(spec, result.final_text)
@@ -336,6 +378,7 @@ class AgentRunner:
             web_search=(self.deps.extra or {}).get("web_search"),
             object_store=(self.deps.extra or {}).get("object_store"),
             workdir=(self.deps.extra or {}).get("workdir", ""),
+            extra={"principal": dict(task.principal or {})},
         )
 
 

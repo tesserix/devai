@@ -8,16 +8,22 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from devai.sandbox.invoke import SandboxInvoker
-from devai.sandbox.routes import router
+from devai.sandbox.routes import router, trace_router
 from devai.sandbox.service import SandboxService
 from devai.sandbox.trace import TraceStore
 from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.registry import SpecializationRegistry
 from tests.unit.test_sandbox import _FakeDB
-from tests.unit.test_sandbox_invoke import _ScriptedLLM
+from tests.unit.test_sandbox_invoke import _GrantedSandboxLLM, _ScriptedLLM
 
 _SAM = {"X-Forwarded-Email": "sam@example.com"}
 _MALLORY = {"X-Forwarded-Email": "mallory@example.com"}
+_TENANT_A = {
+    "X-Forwarded-Email": "same@example.com",
+    "X-Forwarded-Uid": "same-subject",
+    "X-Forwarded-Tenant": "tenant-a",
+}
+_TENANT_B = {**_TENANT_A, "X-Forwarded-Tenant": "tenant-b"}
 _SPEC: dict[str, Any] = {
     "agent": {"name": "release-notes-writer", "version": "v1"},
     "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
@@ -51,21 +57,24 @@ def _client(*, invoker: bool = True, responses: list[Any] | None = None) -> Test
     app = FastAPI()
     app.state.sandbox_service = SandboxService(_FakeDB())
     app.state.sandbox_traces = TraceStore(None)
+    llm = _ScriptedLLM(responses or [LLMResponse(text="Here are the notes.")])
     app.state.sandbox_invoker = (
         SandboxInvoker(
             specializations=specs,
-            deps=StageDeps(config=Settings(), llm=_ScriptedLLM(responses or [LLMResponse(text="Here are the notes.")])),
+            deps=StageDeps(config=Settings(), llm=llm),
             traces=app.state.sandbox_traces,
+            credentials=_GrantedSandboxLLM(llm),
         )
         if invoker
         else None
     )
     app.include_router(router)
+    app.include_router(trace_router)
     return TestClient(app)
 
 
-def _sandbox(client: TestClient) -> str:
-    return client.post("/api/sandboxes", json=_SPEC, headers=_SAM).json()["id"]
+def _sandbox(client: TestClient, *, headers: dict[str, str] = _SAM) -> str:
+    return client.post("/api/sandboxes", json=_SPEC, headers=headers).json()["id"]
 
 
 def test_invoke_returns_the_answer_and_a_trace_id() -> None:
@@ -91,6 +100,19 @@ def test_the_trace_is_listed_and_readable_afterwards() -> None:
 
     assert [t["id"] for t in listed.json()] == [inv_id]
     assert [s["kind"] for s in one.json()["steps"]][0] == "prompt"
+
+
+def test_global_trace_read_authorizes_the_owning_sandbox_and_tenant() -> None:
+    client = _client()
+    sid = _sandbox(client, headers=_TENANT_A)
+    inv_id = client.post(f"/api/sandboxes/{sid}/invoke", json={"message": "go"}, headers=_TENANT_A).json()["id"]
+
+    own = client.get(f"/api/traces/{inv_id}", headers=_TENANT_A)
+    foreign = client.get(f"/api/traces/{inv_id}", headers=_TENANT_B)
+
+    assert own.status_code == 200
+    assert own.json()["sandbox_id"] == sid
+    assert foreign.status_code == 404
 
 
 def test_an_empty_message_is_refused() -> None:

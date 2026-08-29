@@ -73,7 +73,7 @@ class _RunSpecializationStage(PipelineStage):
                 missing_inputs,
             )
 
-        if spec.legacy_python_class:
+        if spec.uses_legacy_runtime:
             return await self._run_legacy_bridge(spec, task)
 
         return await self._run_yaml_spec(spec, task)

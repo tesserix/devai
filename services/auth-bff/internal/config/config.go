@@ -43,6 +43,9 @@ type Config struct {
 
 	// Authorization
 	AdminAllowedEmails string // comma-separated
+	// PublicSignup allows any verified GIP user to mint a session. Operators
+	// remain admins through the separate allow-list; this only opens onboarding.
+	PublicSignup bool
 
 	// SharedSecret is stamped as X-Auth-Bff-Secret on proxied requests so the
 	// upstream (devai identity._forward_trusted) can confirm the X-Forwarded-*
@@ -92,6 +95,7 @@ func Load() (*Config, error) {
 		SessionSecure:        getEnv("DEVAI_BFF_SESSION_SECURE", "true") == "true",
 		SessionEncryptKey:    os.Getenv("DEVAI_BFF_SESSION_ENCRYPT_KEY"),
 		AdminAllowedEmails:   os.Getenv("DEVAI_BFF_ADMIN_ALLOWED_EMAILS"),
+		PublicSignup:         os.Getenv("DEVAI_BFF_PUBLIC_SIGNUP") == "true",
 		SharedSecret:         firstEnv("DEVAI_AUTH_BFF_SHARED_SECRET", "DEVAI_BFF_SHARED_SECRET"),
 		KagentUpstreamURL:    os.Getenv("DEVAI_BFF_KAGENT_UPSTREAM_URL"),
 		AregistryUpstreamURL: os.Getenv("DEVAI_BFF_AREGISTRY_UPSTREAM_URL"),

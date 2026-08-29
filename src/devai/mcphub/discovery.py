@@ -43,10 +43,16 @@ class EndpointGuardError(ValueError):
     """A registry-supplied endpoint failed the SSRF/allowlist guard."""
 
 
-def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address, *, allow_private: bool = False) -> bool:
     """SSRF-prone address space: loopback/link-local (incl. 169.254.169.254 GKE
-    metadata)/private/unspecified/reserved/multicast."""
-    return ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_unspecified or ip.is_reserved or ip.is_multicast
+    metadata)/private/unspecified/reserved/multicast.
+
+    ``allow_private`` exempts RFC-1918 space only — every in-cluster Service
+    resolves to a private ClusterIP, so an explicitly allowlisted host must be
+    dialable there or enforcement drops the whole federated surface.
+    """
+    blocked = ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved or ip.is_multicast
+    return blocked or (ip.is_private and not allow_private)
 
 
 def check_endpoint_url(url: str, allowed_suffixes: list[str], *, resolve: bool = True) -> None:
@@ -61,6 +67,8 @@ def check_endpoint_url(url: str, allowed_suffixes: list[str], *, resolve: bool =
     callers fail closed.
 
     A suffix of ``"*"`` disables the allowlist (still blocks non-routable IPs).
+    A host matched by an explicit suffix may resolve into RFC-1918 space (that
+    is what a ClusterIP is); loopback, link-local and metadata stay blocked.
     """
     if not url:
         raise EndpointGuardError("mcphub: downstream has no endpoint url to call")
@@ -80,12 +88,14 @@ def check_endpoint_url(url: str, allowed_suffixes: list[str], *, resolve: bool =
         raise EndpointGuardError(f"mcphub: refusing to dial non-routable address {host} (SSRF guard)")
 
     # Host-suffix allowlist (a single "*" disables it, IP guards still apply).
+    allowlisted = False
     if "*" not in allowed_suffixes:
         host_l = host.lower()
-        if not any(
+        allowlisted = any(
             host_l == (s := suffix.lower()) or host_l == s.lstrip(".") or host_l.endswith(s)
             for suffix in allowed_suffixes
-        ):
+        )
+        if not allowlisted:
             raise EndpointGuardError(
                 f"mcphub: endpoint host {host!r} is not in the allowed suffix list {allowed_suffixes}; "
                 "add it to DEVAI_A2A_ALLOWED_URL_SUFFIXES to permit"
@@ -105,7 +115,7 @@ def check_endpoint_url(url: str, allowed_suffixes: list[str], *, resolve: bool =
                 resolved = ipaddress.ip_address(addr)
             except ValueError:
                 continue
-            if _is_blocked_ip(resolved):
+            if _is_blocked_ip(resolved, allow_private=allowlisted):
                 raise EndpointGuardError(f"mcphub: endpoint host {host!r} resolves to non-routable {addr} (SSRF guard)")
 
 

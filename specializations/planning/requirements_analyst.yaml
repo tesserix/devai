@@ -5,6 +5,7 @@ description: >-
   refined requirements with acceptance criteria, gaps, and assumptions.
   Output is consumed by product_director (epic + stories).
 category: planning
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1
