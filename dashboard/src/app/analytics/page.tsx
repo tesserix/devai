@@ -28,6 +28,7 @@ import {
   type StageStat,
   type TelemetryHealth,
 } from "@/lib/api";
+import { AdminPanel } from "@/components/admin-panel";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Donut, HBarChart, LineChart } from "@/components/charts";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
@@ -42,6 +43,7 @@ const TABS = [
   { key: "cost", label: "Cost" },
   { key: "quality", label: "Usage & Quality" },
   { key: "platform", label: "Platform" },
+  { key: "admin", label: "Admin" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -85,6 +87,16 @@ export default function AnalyticsPage() {
   const [slo, setSlo] = useState<SLOReport | null>(null);
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof api.analytics.usage>> | null>(null);
   const [evals, setEvals] = useState<Awaited<ReturnType<typeof api.analytics.evals>> | null>(null);
+
+  // Admin tab exists only if the API grants it. A non-admin gets 403 and
+  // never sees the button; there is no client-side role check.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    api.admin
+      .overview(1)
+      .then(() => setIsAdmin(true))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,7 +180,7 @@ export default function AnalyticsPage() {
 
       {/* Tab bar — one concern per view */}
       <div className="seg" role="tablist" aria-label="Analytics sections" style={{ width: "fit-content" }}>
-        {TABS.map((t) => (
+        {TABS.filter((t) => t.key !== "admin" || isAdmin).map((t) => (
           <button
             key={t.key}
             role="tab"
@@ -346,8 +358,9 @@ export default function AnalyticsPage() {
         </>
       )}
 
-      {/* LLM usage — per model and per user (the headline KPIs live above) */}
-      {tab === "cost" && usage?.enabled && (usage.by_model.length > 0 || usage.by_user.length > 0) && (
+      {/* LLM usage — per model, user and sandbox (the headline KPIs live above) */}
+      {tab === "cost" && usage?.enabled &&
+        (usage.by_model.length > 0 || usage.by_user.length > 0 || usage.by_sandbox.length > 0) && (
         <section className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="panel" style={{ padding: 16 }}>
@@ -424,6 +437,45 @@ export default function AnalyticsPage() {
               </p>
             </div>
           </div>
+          {usage.by_sandbox.length > 0 && (
+            <div className="panel" style={{ padding: 16 }}>
+              <div className="label-eyebrow mb-3">By sandbox — bounded evaluation spend</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left" style={{ color: "var(--ink-soft)" }}>
+                      <th className="pb-2 font-normal">Sandbox</th>
+                      <th className="pb-2 font-normal">User</th>
+                      <th className="pb-2 font-normal text-right">Calls</th>
+                      <th className="pb-2 font-normal text-right">Tokens</th>
+                      <th className="pb-2 font-normal text-right">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usage.by_sandbox.map((sandbox) => (
+                      <tr
+                        key={`${sandbox.tenant_id}:${sandbox.sandbox_id}`}
+                        className="border-t"
+                        style={{ borderColor: "var(--surface-border)" }}
+                      >
+                        <td className="py-1.5 font-mono text-xs" style={{ color: "var(--ink-strong)" }}>
+                          {sandbox.sandbox_id}
+                        </td>
+                        <td className="py-1.5">{sandbox.user_id || "—"}</td>
+                        <td className="py-1.5 text-right">{fmtNum(sandbox.calls)}</td>
+                        <td className="py-1.5 text-right">
+                          {fmtNum(sandbox.tokens_in + sandbox.tokens_out)}
+                        </td>
+                        <td className="py-1.5 text-right" style={{ color: "var(--accent)" }}>
+                          {fmtUsd(sandbox.cost_usd)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -524,6 +576,9 @@ export default function AnalyticsPage() {
           <MemoryPanel mem={mem} days={days} onChanged={load} />
         </>
       )}
+
+      {/* ════ ADMIN — platform-owner view, authorized server-side ════ */}
+      {tab === "admin" && isAdmin && <AdminPanel days={days} />}
     </div>
   );
 }

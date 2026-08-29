@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: security-auditor-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: security-auditor
+    devai.io/risk-level: medium
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: security-auditor
+  title: Security Auditor
+  description: "Scans the running cluster for security posture issues \u2014 publicly exposed services,\
+    \ expiring TLS certificates, risky workload settings, and Google Cloud Recommender security findings.\
+    \ Read-only: it reports and ranks, it never changes anything."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/security-auditor
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - security-auditor
+  prompts:
+  - security-auditor-prompt-v1
   promptRef: security-auditor-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: 0.1
-    maxTokens: null
-  limits:
-    maxTurns: 24
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: medium
-  roleColor: security

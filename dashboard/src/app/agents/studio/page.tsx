@@ -1,16 +1,24 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Bot, Check, FlaskConical, Rocket } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, Check, FlaskConical, Play, Rocket } from "lucide-react";
 
 import { EvalPanel, type EvalCase } from "@/components/eval-panel";
 import { ModelCompare } from "@/components/model-compare";
 import { ModelPicker } from "@/components/model-picker";
 import { SandboxConsole } from "@/components/sandbox-console";
 import { useToast } from "@/components/toast";
-import { api } from "@/lib/api";
+import {
+  AGENT_LIFECYCLE_STAGES,
+  agentLifecycle,
+  gateAllowsAdminOverride,
+  gateFailureMessages,
+  lifecycleGateFromError,
+  type AgentGateResult,
+} from "@/lib/agent-lifecycle";
+import { api, lifecycleMutationHeaders } from "@/lib/api";
 import { lintManifest } from "@/lib/registry-schemas";
 
 /**
@@ -22,6 +30,19 @@ import { lintManifest } from "@/lib/registry-schemas";
  */
 
 const STEPS = ["Define", "Test", "Publish"] as const;
+
+type EvalSuite = {
+  name: string;
+  version: string;
+  description?: string;
+  dataset_ref: { ref?: string; version?: string };
+};
+
+type DurableEvalRun = {
+  id: string;
+  results?: { name: string; passed: boolean; failures?: string[] }[];
+  summary?: { cases?: number; passed?: number; failed?: number; pass_rate?: number };
+};
 
 /** Starter definitions — a blank system prompt is the slowest way to begin. */
 const TEMPLATES: { label: string; title: string; prompt: string; tools: string; check: EvalCase }[] = [
@@ -101,21 +122,58 @@ export default function AgentStudioPage() {
   const [skills, setSkills] = useState("");
   const [maxTurns, setMaxTurns] = useState(8);
   const [cases, setCases] = useState<EvalCase[]>([]);
+  const [suites, setSuites] = useState<EvalSuite[]>([]);
+  const [suiteKey, setSuiteKey] = useState("");
 
   const [sandboxId, setSandboxId] = useState("");
   const [testedDefinition, setTestedDefinition] = useState("");
+  const [evalRun, setEvalRun] = useState<DurableEvalRun | null>(null);
+  const [gate, setGate] = useState<AgentGateResult | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState("");
   const [conflict, setConflict] = useState<Record<string, unknown> | null>(null);
 
   const agentName = name || slug(title);
+  const selectedSuite = suites.find((suite) => `${suite.name}@${suite.version}` === suiteKey);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listRegistry("eval-suites")
+      .then((items) => {
+        if (cancelled) return;
+        const available = items.filter(
+          (item): item is EvalSuite =>
+            typeof item.name === "string" &&
+            typeof item.version === "string" &&
+            item.dataset_ref != null &&
+            typeof item.dataset_ref === "object",
+        );
+        setSuites(available);
+        setSuiteKey((current) => current || (available[0] ? `${available[0].name}@${available[0].version}` : ""));
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const manifest = useMemo(
     () => ({
       apiVersion: "registry.agentic.dev/v1alpha1",
       kind: "Agent",
-      metadata: { name: agentName, visibility: "private", labels: {} },
+      metadata: {
+        name: agentName,
+        visibility: "private",
+        labels: {},
+        annotations: evalRun?.id
+          ? { "devai.tesserix.app/eval-run-id": evalRun.id }
+          : {},
+      },
       spec: {
         title: title || agentName,
         description,
@@ -123,35 +181,54 @@ export default function AgentStudioPage() {
         systemPrompt,
         builtinTools: list(tools),
         skills: list(skills),
-        maxTurns,
+        limits: { maxTurns, timeoutSeconds: 900 },
+        riskLevel: "medium",
+        evalSuite: selectedSuite
+          ? { ref: selectedSuite.name, version: selectedSuite.version }
+          : undefined,
         // Checks travel with the definition, so a published agent can be
         // re-tested later without anyone remembering what it was for.
         evals: cases,
       },
     }),
-    [agentName, title, description, provider, model, systemPrompt, tools, skills, maxTurns, cases],
+    [agentName, title, description, provider, model, systemPrompt, tools, skills, maxTurns, cases, selectedSuite, evalRun?.id],
   );
 
   const issues = lintManifest(manifest, "Agent");
   const blocking = issues.filter((i) => i.level === "error");
-  const definable = Boolean(agentName && systemPrompt.trim()) && blocking.length === 0;
+  const definable = Boolean(agentName && systemPrompt.trim() && selectedSuite) && blocking.length === 0;
   // A sandbox pins the definition it was created with, so an edited draft needs
   // a fresh one — otherwise the trace answers a question you stopped asking.
   // Checks are not pinned: adding one is a new question about the same agent.
   const pinned = JSON.stringify({ ...manifest.spec, evals: undefined });
   const stale = Boolean(sandboxId) && testedDefinition !== pinned;
+  const lifecycle = agentLifecycle({
+    evaluationRunId: evalRun?.id,
+    gateStatus: gate?.status,
+    published: Boolean(published),
+  });
 
   async function startTest() {
+    if (!selectedSuite?.dataset_ref.ref || !selectedSuite.dataset_ref.version) {
+      setError("Select an evaluation suite with an immutable dataset version.");
+      return;
+    }
     setBusy(true);
     setError(null);
+    setGate(null);
+    setEvalRun(null);
     try {
       const res = await fetch("/api/sandboxes", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
         body: JSON.stringify({
           agent: { name: agentName, version: "draft" },
           model: { provider, model },
+          dataset: {
+            ref: selectedSuite.dataset_ref.ref,
+            version: selectedSuite.dataset_ref.version,
+          },
           draft: manifest,
           tools: { default_mode: "mock" },
           ttl_seconds: 3600,
@@ -169,14 +246,47 @@ export default function AgentStudioPage() {
     }
   }
 
-  async function publish(overwrite = false) {
+  async function runReleaseGate() {
+    if (!sandboxId || !selectedSuite) return;
+    setBusy(true);
+    setError(null);
+    setGate(null);
+    try {
+      const res = await fetch("/api/evaluations", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
+        body: JSON.stringify({
+          suite: { name: selectedSuite.name, version: selectedSuite.version },
+          sandbox_id: sandboxId,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
+      }
+      setEvalRun(body as DurableEvalRun);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publish(overwrite = false, override = false) {
     setBusy(true);
     setError(null);
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      Object.assign(headers, lifecycleMutationHeaders());
+      if (override) {
+        headers["x-devai-eval-gate-override"] = "true";
+        headers["x-devai-eval-gate-override-reason"] = overrideReason;
+      }
       const res = await fetch(`/api/registry/agents${overwrite ? "?overwrite=true" : ""}`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(manifest),
       });
       // A name that already exists is not an error — it is the next version of
@@ -192,8 +302,16 @@ export default function AgentStudioPage() {
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        const blockedGate = lifecycleGateFromError(body);
+        if (blockedGate) {
+          setGate(blockedGate);
+          setError("Publication blocked by the agent lifecycle gate.");
+          return;
+        }
         throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
       }
+      const body = await res.json().catch(() => ({}));
+      if (body.gate) setGate(body.gate as AgentGateResult);
       setConflict(null);
       setPublished(agentName);
       toast.success(`Published agent "${agentName}" to the registry.`);
@@ -241,6 +359,22 @@ export default function AgentStudioPage() {
           </li>
         ))}
       </ol>
+
+      <div className="flex flex-wrap items-center gap-2 text-[11px]" aria-label="Agent lifecycle">
+        {AGENT_LIFECYCLE_STAGES.map((stage) => (
+          <span
+            key={stage}
+            className={`rounded-full border px-2 py-0.5 capitalize ${
+              lifecycle.completed.includes(stage)
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : "border-[var(--surface-border)] text-[var(--ink-500)]"
+            }`}
+            aria-current={lifecycle.current === stage ? "step" : undefined}
+          >
+            {stage}
+          </span>
+        ))}
+      </div>
 
       {error && (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 font-mono">
@@ -350,6 +484,28 @@ export default function AgentStudioPage() {
             </div>
           </div>
 
+          <div>
+            <label htmlFor="ag-suite" className="label-eyebrow">
+              Immutable evaluation suite
+            </label>
+            <select
+              id="ag-suite"
+              value={suiteKey}
+              onChange={(event) => setSuiteKey(event.target.value)}
+              className={field}
+            >
+              {suites.length === 0 && <option value="">No evaluation suites available</option>}
+              {suites.map((suite) => (
+                <option key={`${suite.name}@${suite.version}`} value={`${suite.name}@${suite.version}`}>
+                  {suite.name}@{suite.version} · {suite.dataset_ref.ref}@{suite.dataset_ref.version}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-[var(--ink-500)]">
+              The sandbox and release gate both pin this suite and its exact dataset version.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="ag-tools" className="label-eyebrow">
@@ -416,6 +572,41 @@ export default function AgentStudioPage() {
           </div>
 
           {sandboxId && <EvalPanel sandboxId={sandboxId} cases={cases} onCasesChange={setCases} />}
+          <section className="panel px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="label-eyebrow">Release gate</div>
+                <p className="text-xs text-[var(--ink-300)]">
+                  Run {selectedSuite?.name}@{selectedSuite?.version} and retain the durable result used at publish.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={runReleaseGate}
+                disabled={busy || stale}
+                className="btn-primary !py-1 !px-2 !text-[11px] disabled:opacity-50"
+              >
+                <Play className="w-3 h-3" /> {busy ? "Running…" : "Run release gate"}
+              </button>
+            </div>
+            {evalRun && (
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs">
+                <span className="text-emerald-300">
+                  {evalRun.summary?.passed ?? 0}/{evalRun.summary?.cases ?? 0} cases passed
+                </span>{" "}
+                <span className="font-mono text-[var(--ink-500)]">{evalRun.id}</span>
+                {(evalRun.results ?? []).some((result) => !result.passed) && (
+                  <ul className="mt-1 text-red-300">
+                    {(evalRun.results ?? []).filter((result) => !result.passed).map((result) => (
+                      <li key={result.name}>
+                        {result.name}: {(result.failures ?? []).join(" · ") || "failed"}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </section>
           {sandboxId && (
             <ModelCompare
               sandboxId={sandboxId}
@@ -432,7 +623,12 @@ export default function AgentStudioPage() {
             <button type="button" onClick={() => setStep(0)} className="btn-secondary !py-1.5 !px-3 !text-xs">
               <ArrowLeft className="w-3.5 h-3.5" /> Edit definition
             </button>
-            <button type="button" onClick={() => setStep(2)} className="btn-primary !py-1.5 !px-3 !text-xs">
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              disabled={!evalRun?.id || stale}
+              className="btn-primary !py-1.5 !px-3 !text-xs disabled:opacity-50"
+            >
               It behaves — publish <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -482,6 +678,45 @@ export default function AgentStudioPage() {
                       </div>
                     ))}
                   </dl>
+                </div>
+              )}
+
+              {(gate?.status === "blocked" || gate?.status === "approval_required") && (
+                <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 space-y-2">
+                  <p className="text-xs font-medium text-red-200">
+                    {gate.status === "approval_required"
+                      ? "Human approval required before publication"
+                      : "Agent lifecycle gate blocked publication"}
+                  </p>
+                  <ul className="list-disc pl-4 text-xs text-red-300 font-mono">
+                    {gateFailureMessages(gate).map((failure) => (
+                      <li key={failure}>{failure}</li>
+                    ))}
+                  </ul>
+                  {gateAllowsAdminOverride(gate) && (
+                    <>
+                      <label htmlFor="gate-override-reason" className="label-eyebrow">
+                        Admin approval reason
+                      </label>
+                      <textarea
+                        id="gate-override-reason"
+                        value={overrideReason}
+                        onChange={(event) => setOverrideReason(event.target.value)}
+                        maxLength={1000}
+                        rows={2}
+                        placeholder="Required, audited, and stamped on the published version."
+                        className={`${field} font-mono`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => publish(Boolean(conflict), true)}
+                        disabled={busy || !overrideReason.trim()}
+                        className="btn-secondary !py-1.5 !px-3 !text-xs text-amber-200 disabled:opacity-50"
+                      >
+                        Publish with audited admin approval
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 

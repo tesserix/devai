@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: remediation-planner-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: remediation-planner
+    devai.io/risk-level: medium
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: remediation-planner
+  title: Remediation Planner
+  description: "Turns a root-cause hypothesis into a concrete, ordered remediation plan \u2014 separating\
+    \ safe auto-remediations from changes that need human approval. It plans; the Incident Responder executes.\
+    \ Read-only with respect to the cluster."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/remediation-planner
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - remediation-planner
+  prompts:
+  - remediation-planner-prompt-v1
   promptRef: remediation-planner-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: 0.2
-    maxTokens: null
-  limits:
-    maxTurns: 16
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: medium
-  roleColor: admin

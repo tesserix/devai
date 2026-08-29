@@ -49,9 +49,16 @@ class _CrewRunnerStage(PipelineStage):
     async def execute(self, task: DevAITask) -> StageResult:
         crew = await self._resolve_crew(task)
         if crew is None:
+            # A crew-less run used to return a *successful* StageResult, so the
+            # whole pipeline reported DONE having built nothing. Signal failure
+            # (ok=False) so the executor honors on_failure and the run says so.
+            logger.error("run_crew: no crew could be resolved for task %s (repo=%s)", task.id, task.repo)
             return StageResult(
-                message="no crew resolved (set task.crew_id, config.crew, or agent_context['crew'])",
-                data={"crew_error": "no_crew"},
+                message=(
+                    "no crew available — no crew assigned to the run, no crew named in the blueprint, "
+                    "and no seed crews found in the crews/ catalog"
+                ),
+                data={"ok": False, "crew_error": "no_crew"},
             )
 
         from devai.agentruntime.runner import AgentRunner
@@ -127,10 +134,16 @@ class _CrewRunnerStage(PipelineStage):
             seeds = load_seed_crews(crews_dir)
         if wanted and wanted in seeds:
             return seeds[wanted]
-        # last resort: if exactly one seed exists, use it
-        if len(seeds) == 1:
-            return next(iter(seeds.values()))
-        return None
+        if wanted:
+            logger.warning("crew %r not found in the seed catalog — picking dynamically", wanted)
+
+        # 3. dynamic pick — "Dynamic" in the composer promises DevAI chooses a
+        #    crew, so the run must never silently do nothing.
+        default_crew = str(getattr(self.deps.config, "default_crew", "") or "")
+        picked = select_crew(task, seeds, default_crew=default_crew)
+        if picked is not None:
+            logger.info("run_crew: dynamically selected crew %s for task %s", picked.name, task.id)
+        return picked
 
     def _resolve_member_spec(self, crew, specialization: str):
         spec = self._spec(specialization)
@@ -223,6 +236,48 @@ class _CrewRunnerStage(PipelineStage):
             logger.debug("crew trail publish failed", exc_info=True)
 
 
+def select_crew(task: DevAITask, seeds: dict[str, Any], *, default_crew: str = "") -> Any | None:
+    """Pick the crew that best fits a task when none was explicitly chosen.
+
+    Scores each seed crew's `keywords` (and its tags/name) against the task's
+    intent, repo and detected tech stack; the highest score wins. With no
+    signal at all it falls back to the configured `default_crew`, then to a
+    crew tagged `default`, then to any non-SRE crew — an ALM run must not be
+    handed to the SRE investigation crew just because it sorted first.
+    """
+    if not seeds:
+        return None
+
+    haystack = " ".join(
+        str(part).lower()
+        for part in (
+            task.intent,
+            task.repo,
+            (task.agent_context or {}).get("tech_stack", ""),
+            (task.agent_context or {}).get("languages", ""),
+        )
+        if part
+    )
+
+    def score(crew: Any) -> int:
+        terms = [str(k).lower() for k in (getattr(crew, "keywords", None) or [])]
+        terms += [str(t).lower() for t in (getattr(crew, "tags", None) or []) if t not in {"default", "alm"}]
+        return sum(1 for term in terms if term and term in haystack)
+
+    ranked = sorted(seeds.values(), key=lambda c: (-score(c), c.name))
+    best = ranked[0]
+    if score(best) > 0:
+        return best
+
+    if default_crew and default_crew in seeds:
+        return seeds[default_crew]
+    tagged_default = next((c for c in ranked if "default" in (getattr(c, "tags", None) or [])), None)
+    if tagged_default is not None:
+        return tagged_default
+    non_sre = next((c for c in ranked if "sre" not in (getattr(c, "tags", None) or [])), None)
+    return non_sre or ranked[0]
+
+
 def _msg(from_agent: str, to_agent: str, kind: str, body: str) -> dict[str, Any]:
     return {
         "id": uuid.uuid4().hex[:12],
@@ -246,4 +301,4 @@ def crew_runner_stage(deps: StageDeps, config: dict[str, str]) -> PipelineStage:
     return _CrewRunnerStage(deps, config)
 
 
-__all__ = ["crew_runner_stage"]
+__all__ = ["crew_runner_stage", "select_crew"]

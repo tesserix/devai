@@ -14,21 +14,29 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_USERS = "devai:usage:users"
+_USERS = "devai:usage:users"  # legacy tenantless user set
+_IDENTITIES = "devai:usage:identities"
+_SANDBOXES = "devai:usage:sandboxes"
 _RECENT_MAX = 300
+_MONTH_TTL_SECONDS = 62 * 24 * 60 * 60
+
+SpendAlertSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 
-def _ns(user: str = "") -> str:
-    """Key namespace: global, or per-user when ``user`` is given.
+def _ns(user: str = "", *, tenant: str = "") -> str:
+    """Key namespace: global, per-tenant, or per-tenant user.
 
-    Per-user keys (``devai:usage:u:<email>:…``) are what make analytics
-    tenant-isolated — a non-admin only ever reads their own namespace.
+    Tenant qualification is mandatory whenever the authenticated principal has
+    one. The tenantless shape remains readable for local/service identities and
+    pre-migration data.
     """
-    return f"devai:usage:u:{user}:" if user else "devai:usage:"
+    prefix = f"devai:usage:t:{tenant}:" if tenant else "devai:usage:"
+    return f"{prefix}u:{user}:" if user else prefix
 
 
 def _micro(usd: float) -> int:
@@ -39,12 +47,30 @@ def _from_micro(v: Any) -> float:
     return round(int(v or 0) / 1_000_000, 6)
 
 
+def _text(value: Any) -> str:
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+def _hash_text(values: dict[Any, Any]) -> dict[str, Any]:
+    return {_text(key): value for key, value in values.items()}
+
+
 class UsageLedger:
     """Redis-backed usage accumulator. Best-effort: never raises."""
 
-    def __init__(self, redis_url: str) -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        *,
+        sandbox_monthly_cost_limit_usd: float = 0.0,
+        sandbox_spend_alert_ratio: float = 0.8,
+        alert_sink: SpendAlertSink | None = None,
+    ) -> None:
         self._url = redis_url
         self._redis: Any = None
+        self._sandbox_monthly_cost_limit_usd = max(0.0, sandbox_monthly_cost_limit_usd)
+        self._sandbox_spend_alert_ratio = min(1.0, max(0.0, sandbox_spend_alert_ratio))
+        self._alert_sink = alert_sink
 
     async def _client(self) -> Any:
         if self._redis is None and self._url:
@@ -68,9 +94,12 @@ class UsageLedger:
         cost_usd: float,
         duration_ms: float,
         triggered_by: str = "",
+        tenant_id: str = "",
+        user_id: str = "",
         agent: str = "",
         run_id: str = "",
         status: str = "ok",
+        sandbox_id: str = "",
     ) -> None:
         client = await self._client()
         if client is None:
@@ -100,10 +129,21 @@ class UsageLedger:
 
             pipe = client.pipeline(transaction=False)
             _bump_scope(pipe, _ns())  # global (admin view)
-            user = triggered_by if (triggered_by and "@" in triggered_by) else ""
+            user = (user_id or (triggered_by if triggered_by and "@" in triggered_by else "")).strip()
+            tenant = tenant_id.strip()
+            if tenant:
+                _bump_scope(pipe, _ns(tenant=tenant))
             if user:
-                _bump_scope(pipe, _ns(user))  # tenant-isolated view
-                pipe.sadd(_USERS, user)
+                _bump_scope(pipe, _ns(user, tenant=tenant))
+                identity_key = f"{tenant}\x1f{user}"
+                pipe.hset(_IDENTITIES, identity_key, triggered_by or user)
+                if not tenant:
+                    pipe.sadd(_USERS, user)
+            sandbox = sandbox_id.strip()
+            if sandbox:
+                sandbox_prefix = f"{_ns(tenant=tenant)}sandbox:{sandbox}:"
+                _bump_scope(pipe, sandbox_prefix)
+                pipe.hset(_SANDBOXES, f"{tenant}\x1f{sandbox}", user)
             rec = json.dumps(
                 {
                     "ts": day,
@@ -112,26 +152,66 @@ class UsageLedger:
                     "agent": agent,
                     "run_id": run_id,
                     "user": user,
+                    "user_id": user,
+                    "tenant_id": tenant,
                     "tokens_in": int(tokens_in or 0),
                     "tokens_out": int(tokens_out or 0),
                     "cost_usd": round(cost_usd, 6),
                     "duration_ms": round(duration_ms, 1),
                     "status": status,
+                    "sandbox_id": sandbox,
                 }
             )
             pipe.lpush(f"{_ns()}recent", rec)
             pipe.ltrim(f"{_ns()}recent", 0, _RECENT_MAX - 1)
+            if tenant:
+                pipe.lpush(f"{_ns(tenant=tenant)}recent", rec)
+                pipe.ltrim(f"{_ns(tenant=tenant)}recent", 0, _RECENT_MAX - 1)
             if user:
-                pipe.lpush(f"{_ns(user)}recent", rec)
-                pipe.ltrim(f"{_ns(user)}recent", 0, _RECENT_MAX - 1)
+                pipe.lpush(f"{_ns(user, tenant=tenant)}recent", rec)
+                pipe.ltrim(f"{_ns(user, tenant=tenant)}recent", 0, _RECENT_MAX - 1)
             await pipe.execute()
+            if sandbox and tenant and cost_u:
+                await self._maybe_alert_sandbox_spend(client, tenant=tenant, day=day, cost_micro=cost_u)
         except Exception:  # noqa: BLE001
             logger.debug("usage ledger: record failed", exc_info=True)
+
+    async def _maybe_alert_sandbox_spend(self, client: Any, *, tenant: str, day: str, cost_micro: int) -> None:
+        limit_usd = self._sandbox_monthly_cost_limit_usd
+        ratio = self._sandbox_spend_alert_ratio
+        if limit_usd <= 0 or ratio <= 0:
+            return
+        month = day[:7]
+        spend_key = f"{_ns(tenant=tenant)}sandbox-spend:{month}"
+        spent_micro = int(await client.incrby(spend_key, cost_micro))
+        await client.expire(spend_key, _MONTH_TTL_SECONDS)
+        if spent_micro < _micro(limit_usd * ratio):
+            return
+        marker_key = f"{spend_key}:alert:{ratio:.4f}"
+        if not await client.set(marker_key, "1", ex=_MONTH_TTL_SECONDS, nx=True):
+            return
+        event = {
+            "action": "sandbox_monthly_spend_threshold",
+            "tenant_id": tenant,
+            "month": month,
+            "spent_usd": _from_micro(spent_micro),
+            "limit_usd": round(limit_usd, 6),
+            "threshold_ratio": ratio,
+        }
+        logger.warning(
+            "sandbox monthly spend threshold reached for tenant %s: $%.6f of $%.6f",
+            tenant,
+            event["spent_usd"],
+            limit_usd,
+        )
+        if self._alert_sink is not None:
+            await self._alert_sink(event)
 
     # ── reads (analytics) ─────────────────────────────────────────────
 
     @staticmethod
     def _row(h: dict[str, Any]) -> dict[str, Any]:
+        h = _hash_text(h)
         return {
             "calls": int(h.get("calls", 0) or 0),
             "tokens_in": int(h.get("tokens_in", 0) or 0),
@@ -141,24 +221,24 @@ class UsageLedger:
             "errors": int(h.get("errors", 0) or 0),
         }
 
-    async def summary(self, user: str = "") -> dict[str, Any]:
+    async def summary(self, user: str = "", tenant: str = "") -> dict[str, Any]:
         client = await self._client()
         if client is None:
             return self._row({})
         try:
-            return self._row(await client.hgetall(f"{_ns(user)}total"))
+            return self._row(await client.hgetall(f"{_ns(user, tenant=tenant)}total"))
         except Exception:  # noqa: BLE001
             return self._row({})
 
-    async def by_model(self, user: str = "") -> list[dict[str, Any]]:
+    async def by_model(self, user: str = "", tenant: str = "") -> list[dict[str, Any]]:
         client = await self._client()
         if client is None:
             return []
         try:
-            ids = sorted(await client.smembers(f"{_ns(user)}models"))
+            ids = sorted(_text(item) for item in await client.smembers(f"{_ns(user, tenant=tenant)}models"))
             out = []
             for mid in ids:
-                h = await client.hgetall(f"{_ns(user)}model:{mid}")
+                h = _hash_text(await client.hgetall(f"{_ns(user, tenant=tenant)}model:{mid}"))
                 row = self._row(h)
                 row["model"] = mid
                 row["provider"] = h.get("provider", "")
@@ -167,43 +247,71 @@ class UsageLedger:
         except Exception:  # noqa: BLE001
             return []
 
-    async def by_user(self) -> list[dict[str, Any]]:
-        """All users' totals — ADMIN ONLY (global cross-tenant view)."""
+    async def by_user(self, tenant: str = "") -> list[dict[str, Any]]:
+        """User totals in one tenant, or all tenants for a platform admin."""
         client = await self._client()
         if client is None:
             return []
         try:
-            users = sorted(await client.smembers(_USERS))
+            identities = {_text(key): _text(value) for key, value in (await client.hgetall(_IDENTITIES)).items()}
+            if not identities:
+                identities = {f"\x1f{_text(user)}": _text(user) for user in await client.smembers(_USERS)}
             out = []
-            for u in users:
-                row = self._row(await client.hgetall(f"{_ns(u)}total"))
-                row["user"] = u
+            for identity_key, display in sorted(identities.items()):
+                identity_tenant, _, user = identity_key.partition("\x1f")
+                if tenant and identity_tenant != tenant:
+                    continue
+                row = self._row(await client.hgetall(f"{_ns(user, tenant=identity_tenant)}total"))
+                row["user"] = display or user
+                row["user_id"] = user
+                row["tenant_id"] = identity_tenant
                 out.append(row)
             return sorted(out, key=lambda r: r["cost_usd"], reverse=True)
         except Exception:  # noqa: BLE001
             return []
 
-    async def timeseries(self, days: int = 30, user: str = "") -> list[dict[str, Any]]:
+    async def by_sandbox(self, tenant: str = "", user: str = "") -> list[dict[str, Any]]:
+        """Sandbox totals visible to one user, one tenant admin, or platform admin."""
         client = await self._client()
         if client is None:
             return []
         try:
-            ds = sorted(await client.zrange(f"{_ns(user)}days", -days, -1))
+            sandboxes = {_text(key): _text(value) for key, value in (await client.hgetall(_SANDBOXES)).items()}
+            out = []
+            for identity_key, owner in sorted(sandboxes.items()):
+                identity_tenant, _, sandbox_id = identity_key.partition("\x1f")
+                if tenant and identity_tenant != tenant:
+                    continue
+                if user and owner != user:
+                    continue
+                row = self._row(await client.hgetall(f"{_ns(tenant=identity_tenant)}sandbox:{sandbox_id}:total"))
+                row.update({"sandbox_id": sandbox_id, "tenant_id": identity_tenant, "user_id": owner})
+                out.append(row)
+            return sorted(out, key=lambda item: item["cost_usd"], reverse=True)
+        except Exception:  # noqa: BLE001
+            return []
+
+    async def timeseries(self, days: int = 30, user: str = "", tenant: str = "") -> list[dict[str, Any]]:
+        client = await self._client()
+        if client is None:
+            return []
+        try:
+            ds = sorted(_text(item) for item in await client.zrange(f"{_ns(user, tenant=tenant)}days", -days, -1))
             out = []
             for d in ds:
-                row = self._row(await client.hgetall(f"{_ns(user)}day:{d}"))
+                row = self._row(await client.hgetall(f"{_ns(user, tenant=tenant)}day:{d}"))
                 row["day"] = d
                 out.append(row)
             return out
         except Exception:  # noqa: BLE001
             return []
 
-    async def recent(self, limit: int = 100, user: str = "") -> list[dict[str, Any]]:
+    async def recent(self, limit: int = 100, user: str = "", tenant: str = "") -> list[dict[str, Any]]:
         client = await self._client()
         if client is None:
             return []
         try:
-            raw = await client.lrange(f"{_ns(user)}recent", 0, max(0, limit - 1))
+            raw = await client.lrange(f"{_ns(user, tenant=tenant)}recent", 0, max(0, limit - 1))
             return [json.loads(r) for r in raw]
         except Exception:  # noqa: BLE001
             return []

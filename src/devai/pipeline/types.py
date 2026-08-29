@@ -126,6 +126,15 @@ class StageEventPhase(str, Enum):
     SKIPPED = "skipped"
 
 
+#: Stage phase → the status shown on the dashboard's agent card.
+PHASE_TO_AGENT_STATUS = {
+    "started": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "skipped": "skipped",
+}
+
+
 @dataclass(slots=True)
 class StageEvent:
     """Per-stage telemetry record.
@@ -384,6 +393,24 @@ class DevAITask:
     def record_event(self, event: StageEvent) -> None:
         self.stage_events.append(event)
         self.updated_at = time.time()
+
+    def apply_agent_status(self, event: StageEvent, ts: float) -> str:
+        """Project a stage event onto the agent-card map.
+
+        Both execution backends need this: the pipeline service derives it for
+        the in-process executor, the Temporal workflow applies it inline. One
+        implementation so the two can't disagree about what the dashboard's
+        "N/M agents" counter means. Returns the status applied, or "".
+        """
+        status = PHASE_TO_AGENT_STATUS.get(event.phase.value, "")
+        agent = (event.agent or "").strip()
+        if not agent or not status:
+            return ""
+        entry: dict[str, Any] = {"status": status, "updated_at": ts, "stage": event.stage}
+        if event.error:
+            entry["error"] = event.error
+        self.agents[agent] = entry
+        return status
 
     def record_checkpoint(self, sha: str, label: str = "", stage: str = "") -> dict[str, Any]:
         """Append a git checkpoint (rollback point) to the timeline."""

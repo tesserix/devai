@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from devai.services.request_limits import enforce_rate_limit
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
@@ -73,11 +75,10 @@ async def _llm_preflight(request: Request, principal: Any) -> None:
 
         overlay = config
         svc = getattr(request.app.state, "settings_service", None)
-        email = (getattr(principal, "email", "") or getattr(principal, "uid", "")) if principal else ""
-        if svc is not None and email:
+        if svc is not None and principal is not None:
             from devai.settings.llm_resolver import PrincipalLLMResolver
 
-            overlay = await PrincipalLLMResolver(config, svc).settings_for_email(email)
+            overlay = await PrincipalLLMResolver(config, svc).settings_for_principal(principal)
         connected = connected_providers(overlay)
     except Exception:  # noqa: BLE001 — a preflight must never block on its own error
         logger.debug("llm preflight skipped (resolution error)", exc_info=True)
@@ -150,8 +151,8 @@ async def list_runs(
 ) -> list[dict[str, Any]]:
     """List recent pipeline tasks.
 
-    `source` — "auto" (in-memory then Redis), "memory" (in-memory only),
-    or "persisted" (Redis only). Defaults to auto.
+    `source` — "auto" (in-memory merged with Redis, newest wins), "memory"
+    (in-memory only), or "persisted" (Redis only). Defaults to auto.
     """
     svc = _service(request)
     if source == "memory":
@@ -159,12 +160,8 @@ async def list_runs(
     if source == "persisted":
         return await svc.list_persisted_tasks(limit=limit, blueprint=blueprint, repo=repo)
 
-    # auto: merge in-memory + persisted with in-memory winning on id collision
-    in_mem = svc.list_tasks_in_memory()
-    seen = {t["id"] for t in in_mem}
-    persisted = await svc.list_persisted_tasks(limit=limit, blueprint=blueprint, repo=repo)
-    out = in_mem[:limit] + [t for t in persisted if t["id"] not in seen]
-    return out[:limit]
+    # auto: merge in-memory + persisted, newest snapshot per run id wins
+    return await svc.list_runs(limit=limit, blueprint=blueprint, repo=repo)
 
 
 @router.get("/runs/{task_id}")
@@ -388,6 +385,7 @@ async def trigger(request: Request, body: TriggerBody) -> dict[str, Any]:
     if not intent:
         raise HTTPException(status_code=400, detail="requirements text is required")
     principal = await _require_principal(request)
+    await enforce_rate_limit(request, "pipeline_trigger", principal)
     await _llm_preflight(request, principal)
     agent_context: dict[str, Any] = {"requirements": intent}
     if body.issue_number is not None:
@@ -505,8 +503,8 @@ async def stop(request: Request, task_id: str) -> dict[str, Any]:
 @router.delete("/runs/{task_id}")
 async def delete_run(request: Request, task_id: str) -> dict[str, Any]:
     """Delete a run — stops it if live, then removes it from the pipeline-task
-    store, the legacy orchestrator store, and clears its control flag. Lets the
-    dashboard clean up old / zombie runs."""
+    store and the legacy orchestrator store while retaining a bounded stop
+    tombstone. Lets the dashboard clean up old / zombie runs."""
     svc = _service(request)
     task = await svc.get_task(task_id)
     if task is None:

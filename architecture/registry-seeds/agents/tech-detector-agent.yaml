@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: tech-detector-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: planning
     devai.io/skill: tech-detector
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: tech-detector
+  title: Tech Stack Detector
+  description: Inspect the repo file tree + key configuration files and identify the language, framework,
+    database, ORM, test framework, CI/CD platform, deployment target, and coding patterns. Output drives
+    the skill_profile_name selection.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/tech-detector
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - tech-detector
+  prompts:
+  - tech-detector-prompt-v1
   promptRef: tech-detector-prompt-v1
-  llm:
-    provider: gemini
-    model: gemini-3.1-pro-preview
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 20
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.tech_detector.TechDetectorAgent
-  riskLevel: low
-  roleColor: engineer

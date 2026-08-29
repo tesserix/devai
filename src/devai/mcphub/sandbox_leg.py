@@ -52,12 +52,48 @@ _TOOLS: dict[str, tuple[str, dict[str, Any]]] = {
     ),
 }
 
+_BROWSER_TOOLS: dict[str, tuple[str, dict[str, Any]]] = {
+    "browser_navigate": (
+        "Navigate the sandbox browser to an HTTP or HTTPS URL.",
+        {"type": "object", "properties": {"url": _STRING}, "required": ["url"]},
+    ),
+    "browser_screenshot": (
+        "Capture the sandbox browser as a PNG image.",
+        {"type": "object", "properties": {"full_page": {"type": "boolean"}}, "required": []},
+    ),
+    "browser_click": (
+        "Click an element in the sandbox browser by selector.",
+        {"type": "object", "properties": {"selector": _STRING}, "required": ["selector"]},
+    ),
+    "browser_type": (
+        "Replace an input's value in the sandbox browser.",
+        {
+            "type": "object",
+            "properties": {"selector": _STRING, "text": _STRING},
+            "required": ["selector", "text"],
+        },
+    ),
+    "browser_scroll": (
+        "Scroll the sandbox browser by pixel deltas.",
+        {
+            "type": "object",
+            "properties": {"delta_x": {"type": "number"}, "delta_y": {"type": "number"}},
+            "required": [],
+        },
+    ),
+    "browser_get_content": (
+        "Read the current page HTML or an element's visible text.",
+        {"type": "object", "properties": {"selector": _STRING}, "required": []},
+    ),
+}
+
 
 class WorkspaceLeg:
     """Federates one sandbox's workspace tools, for that sandbox only."""
 
-    def __init__(self, *, client: Any) -> None:
+    def __init__(self, *, client: Any, browser: bool = False) -> None:
         self._client = client
+        self._browser = browser
         self._healthy = True
 
     @classmethod
@@ -71,11 +107,15 @@ class WorkspaceLeg:
         token = (env.get("DEVAI_SANDBOX_WORKSPACE_TOKEN") or "").strip()
         if not env.get("DEVAI_SANDBOX_ID") or not endpoint or not token:
             return None
-        return cls(client=WorkspaceClient(endpoint, token=token))
+        return cls(
+            client=WorkspaceClient(endpoint, token=token),
+            browser=(env.get("DEVAI_SANDBOX_BROWSER") or "").lower() == "true",
+        )
 
     def tools(self) -> list[FederatedTool]:
         if not self._healthy:
             return []
+        tools = {**_TOOLS, **(_BROWSER_TOOLS if self._browser else {})}
         return [
             FederatedTool.build(
                 SANDBOX_SERVER,
@@ -84,7 +124,7 @@ class WorkspaceLeg:
                 input_schema=schema,
                 labels={"mcp.devai.io/server": SANDBOX_SERVER, "devai.io/tier": "core"},
             )
-            for wire, (description, schema) in _TOOLS.items()
+            for wire, (description, schema) in tools.items()
         ]
 
     def owns(self, name: str) -> bool:
@@ -114,6 +154,20 @@ class WorkspaceLeg:
             return await self._client.list(str(args.get("path", ".")))
         if wire == "file_search":
             return await self._client.search(str(args.get("needle", "")), str(args.get("path", ".")))
+        if wire == "browser_navigate" and self._browser:
+            return await self._client.browser_navigate(str(args.get("url", "")))
+        if wire == "browser_screenshot" and self._browser:
+            return await self._client.browser_screenshot(full_page=bool(args.get("full_page", False)))
+        if wire == "browser_click" and self._browser:
+            return await self._client.browser_click(str(args.get("selector", "")))
+        if wire == "browser_type" and self._browser:
+            return await self._client.browser_type(str(args.get("selector", "")), str(args.get("text", "")))
+        if wire == "browser_scroll" and self._browser:
+            return await self._client.browser_scroll(
+                delta_x=float(args.get("delta_x", 0)), delta_y=float(args.get("delta_y", 600))
+            )
+        if wire == "browser_get_content" and self._browser:
+            return await self._client.browser_get_content(selector=str(args.get("selector", "")))
         raise ValueError(f"mcphub: {name!r} is not a sandbox workspace tool ({wire!r})")
 
 

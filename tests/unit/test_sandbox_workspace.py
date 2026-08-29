@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from devai.sandbox.models import AgentRef, ModelRef, SandboxRecord, SandboxSpec, SandboxStatus
-from devai.sandbox.workspace import WorkspaceError, WorkspaceFiles, build_workspace_manifests
+from devai.sandbox.workspace import BROWSER_PORT, WorkspaceError, WorkspaceFiles, build_workspace_manifests
 
 
 def _record(sandbox_id: str = "sb-1") -> SandboxRecord:
@@ -137,6 +137,30 @@ def test_the_workspace_pod_runs_unprivileged_with_no_service_account_token() -> 
     sc = pod["spec"]["containers"][0]["securityContext"]
     assert sc["allowPrivilegeEscalation"] is False
     assert sc["capabilities"]["drop"] == ["ALL"]
+
+
+def test_a_browser_workspace_uses_the_browser_image_and_proxy() -> None:
+    record = _record().model_copy(
+        update={"spec": _record().spec.model_copy(update={"workspace": True, "browser": True})}
+    )
+    pod = _by_kind(build_workspace_manifests(record, namespace="devai", token="tok"), "Pod")
+    container = pod["spec"]["containers"][0]
+    env = {entry["name"]: entry.get("value") for entry in container["env"]}
+
+    assert container["image"] == "ghcr.io/tesserix/devai/devai-browser:latest"
+    assert env["DEVAI_WORKSPACE_BROWSER"] == "true"
+    assert env["HTTPS_PROXY"] == "http://devai-sandbox-proxy-sb-1.devai.svc.cluster.local:8118"
+    assert pod["spec"]["securityContext"]["seccompProfile"] == {"type": "RuntimeDefault"}
+    assert "unconfined" not in str(pod).lower()
+
+
+def test_a_browser_workspace_does_not_expose_novnc_on_its_cluster_service() -> None:
+    record = _record().model_copy(
+        update={"spec": _record().spec.model_copy(update={"workspace": True, "browser": True})}
+    )
+    service = _by_kind(build_workspace_manifests(record, namespace="devai", token="tok"), "Service")
+
+    assert BROWSER_PORT not in {port["port"] for port in service["spec"]["ports"]}
 
 
 def test_the_capability_token_reaches_the_pod_only_through_a_secret() -> None:

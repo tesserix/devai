@@ -1,11 +1,42 @@
 # Agent Harness — build → test → security → publish gate for custom agents
 
-**Status:** Planned — 2026-06-16
+**Status:** Static build/security/risk and durable evaluation gates implemented — 2026-08-20
 **Goal:** when a user authors a new agent (dashboard ArtifactEditor or `devai adk`),
 it must pass a real gate — **build** (refs resolve), **test** (eval dry-run),
 **security** (injection + tool/MCP grants + risk) — before it can be **published**
 to aregistry. The ALM pipeline already harnesses the *code agents write*; this
 harnesses the *agent artifact itself*, which today nothing does.
+
+## Delivered implementation
+
+The authenticated `POST /api/registry/agents` boundary now owns the harness so
+Agent Studio, the ADK CLI, and direct authenticated API clients cannot disagree
+about the decision:
+
+1. **Build** resolves `skill`, `skills`, `promptRef`, `prompts`, `tools`, and
+   `mcpServers` against the caller-visible registry view. Malformed lists,
+   dangling references, private cross-user references, and known
+   provider/model mismatches fail closed.
+2. **Test** is the durable sandbox evaluation gate from ADR 0003. When an Agent
+   declares `spec.evalSuite`, the exact owner-scoped run, immutable suite and
+   dataset versions, thresholds, and published baseline are verified before
+   publication.
+3. **Security** rejects instruction-override/secret-disclosure prompts and
+   wildcard tool or MCP grants. High and critical risk levels require an
+   authenticated admin approval reason and a successful append-only audit
+   write. Static security failures cannot be overridden.
+4. **Publish** stamps server-owned build, security, evaluation, and lifecycle
+   evidence. Client-supplied evidence is discarded.
+
+Agent Studio renders actionable static and evaluation failures and offers the
+approval action only for evaluation failures or high/critical risk holds. A
+published label is not runtime evidence: live `running` state comes from the
+Substrate status work in #77. User-authored `kagent` selection remains
+fail-closed until the isolation gate in #76 passes.
+
+The original design below is retained as the implementation history. The main
+change is intentional: the harness runs at the trusted server boundary rather
+than only in `adk/publisher.py`, because a client-side-only gate is bypassable.
 
 ---
 

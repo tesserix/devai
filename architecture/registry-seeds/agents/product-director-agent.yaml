@@ -1,26 +1,42 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: product-director-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: planning
     devai.io/skill: product-director
+    devai.io/risk-level: medium
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: product-director
+  title: Product Director
+  description: Turn analyzed requirements into a GitHub Epic plus a list of user stories. Each story has
+    acceptance criteria, priority, labels, and is sized for 1-3 days of work.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/product-director
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - product-director
+  prompts:
+  - product-director-prompt-v1
   promptRef: product-director-prompt-v1
-  llm:
-    provider: openai
-    model: o3
-    temperature: 0.4
-    maxTokens: null
-  limits:
-    maxTurns: 35
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.agents.product_director.ProductDirectorAgent
-  riskLevel: medium
-  roleColor: product

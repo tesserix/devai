@@ -1,0 +1,30 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: EvalSuite
+metadata:
+  name: code-remediator-golden-suite
+  namespace: devai
+  tag: "1"
+  visibility: public
+  labels:
+    devai.io/source: devai
+    devai.io/category: evals
+    devai.io/agent: code-remediator-agent
+spec:
+  description: Version-pinned golden gate for code-remediator-agent.
+  datasetRef:
+    ref: code-remediator-golden
+    version: "1"
+  minimumPassRate: 0.75
+  scorers:
+    - task_completion
+    - expected_tool_call
+    - tool_trajectory
+    - safety
+    - tokens
+    - latency
+    - cost
+  thresholds:
+    success: 0.75
+    safety: 1.0
+    p95_latency_s: 120
+    cost_per_run_usd: 0.5

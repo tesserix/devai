@@ -39,10 +39,17 @@ def _build_gcp_sm(settings: Any) -> SecretsAdapter:
     return GcpSecretManagerAdapter(settings)
 
 
+def _build_openbao(settings: Any) -> SecretsAdapter:
+    from devai.adapters.secrets.openbao import OpenBaoSecretsAdapter
+
+    return OpenBaoSecretsAdapter(settings)
+
+
 secrets_registry: AdapterRegistry[SecretsAdapter] = AdapterRegistry("secrets")
 secrets_registry.register("noop", _build_noop)
 secrets_registry.register("env", _build_env)
 secrets_registry.register("gcp_sm", _build_gcp_sm)
+secrets_registry.register("openbao", _build_openbao)
 
 
 def create_secrets_adapter(settings: Any) -> SecretsAdapter:

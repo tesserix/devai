@@ -47,9 +47,27 @@ class _StubWorkspace:
         self._record("search", needle=needle, path=path)
         return [{"path": "a.py", "line": 1}]
 
+    async def browser_navigate(self, url: str) -> dict[str, Any]:
+        return self._record("browser_navigate", url=url)
 
-def _leg(workspace: _StubWorkspace | None = None) -> WorkspaceLeg:
-    return WorkspaceLeg(client=workspace or _StubWorkspace())
+    async def browser_screenshot(self, *, full_page: bool = False) -> dict[str, Any]:
+        return self._record("browser_screenshot", full_page=full_page)
+
+    async def browser_click(self, selector: str) -> dict[str, Any]:
+        return self._record("browser_click", selector=selector)
+
+    async def browser_type(self, selector: str, text: str) -> dict[str, Any]:
+        return self._record("browser_type", selector=selector, text=text)
+
+    async def browser_scroll(self, *, delta_x: float = 0, delta_y: float = 600) -> dict[str, Any]:
+        return self._record("browser_scroll", delta_x=delta_x, delta_y=delta_y)
+
+    async def browser_get_content(self, *, selector: str = "") -> dict[str, Any]:
+        return self._record("browser_get_content", selector=selector)
+
+
+def _leg(workspace: _StubWorkspace | None = None, *, browser: bool = False) -> WorkspaceLeg:
+    return WorkspaceLeg(client=workspace or _StubWorkspace(), browser=browser)
 
 
 def test_outside_a_sandbox_there_is_no_workspace_leg() -> None:
@@ -82,6 +100,19 @@ def test_every_workspace_capability_is_a_namespaced_tool() -> None:
         f"{SANDBOX_SERVER}{SEP}file_list",
         f"{SANDBOX_SERVER}{SEP}file_search",
     }
+
+
+def test_a_browser_workspace_gets_six_namespaced_browser_tools() -> None:
+    names = {t.name for t in _leg(browser=True).tools()}
+
+    assert {
+        f"{SANDBOX_SERVER}{SEP}browser_navigate",
+        f"{SANDBOX_SERVER}{SEP}browser_screenshot",
+        f"{SANDBOX_SERVER}{SEP}browser_click",
+        f"{SANDBOX_SERVER}{SEP}browser_type",
+        f"{SANDBOX_SERVER}{SEP}browser_scroll",
+        f"{SANDBOX_SERVER}{SEP}browser_get_content",
+    } <= names
 
 
 def test_each_tool_declares_the_arguments_it_takes() -> None:
@@ -124,6 +155,27 @@ async def test_file_operations_route_to_their_own_workspace_verb() -> None:
 
 
 @pytest.mark.asyncio
+async def test_browser_operations_route_to_the_same_workspace_browser() -> None:
+    workspace = _StubWorkspace()
+    leg = _leg(workspace, browser=True)
+    await leg.call(f"{SANDBOX_SERVER}{SEP}browser_navigate", {"url": "https://example.com"})
+    await leg.call(f"{SANDBOX_SERVER}{SEP}browser_screenshot", {"full_page": True})
+    await leg.call(f"{SANDBOX_SERVER}{SEP}browser_click", {"selector": "#go"})
+    await leg.call(f"{SANDBOX_SERVER}{SEP}browser_type", {"selector": "#name", "text": "Ada"})
+    await leg.call(f"{SANDBOX_SERVER}{SEP}browser_scroll", {"delta_y": 700})
+    await leg.call(f"{SANDBOX_SERVER}{SEP}browser_get_content", {"selector": "main"})
+
+    assert [operation for operation, _ in workspace.calls] == [
+        "browser_navigate",
+        "browser_screenshot",
+        "browser_click",
+        "browser_type",
+        "browser_scroll",
+        "browser_get_content",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_workspace_tool_is_refused_rather_than_guessed() -> None:
     with pytest.raises(ValueError, match="rm_rf"):
         await _leg().call(f"{SANDBOX_SERVER}{SEP}rm_rf", {})
@@ -149,6 +201,10 @@ def test_workspace_writes_are_side_effecting_and_reads_are_not() -> None:
     assert not is_side_effecting(f"{SANDBOX_SERVER}{SEP}file_read")
     assert not is_side_effecting(f"{SANDBOX_SERVER}{SEP}file_list")
     assert not is_side_effecting(f"{SANDBOX_SERVER}{SEP}file_search")
+    assert not is_side_effecting(f"{SANDBOX_SERVER}{SEP}browser_screenshot")
+    assert not is_side_effecting(f"{SANDBOX_SERVER}{SEP}browser_get_content")
+    assert is_side_effecting(f"{SANDBOX_SERVER}{SEP}browser_navigate")
+    assert is_side_effecting(f"{SANDBOX_SERVER}{SEP}browser_click")
 
 
 def _job_env(*, workspace: bool) -> dict[str, Any]:
@@ -188,6 +244,37 @@ def test_a_sandbox_without_a_workspace_is_told_nothing_to_connect_to() -> None:
     env = _job_env(workspace=False)
     assert "DEVAI_SANDBOX_WORKSPACE" not in env
     assert "DEVAI_SANDBOX_WORKSPACE_TOKEN" not in env
+
+
+def test_a_browser_workspace_is_marked_for_mcp_federation() -> None:
+    from devai.sandbox.job import apply_sandbox_boundary
+    from devai.sandbox.models import SandboxRecord, SandboxSpec, SandboxStatus
+
+    record = SandboxRecord(
+        id="sb-1",
+        owner="alice@x.com",
+        spec=SandboxSpec.model_validate(
+            {
+                "agent": {"name": "dev", "version": "1"},
+                "model": {"provider": "anthropic", "model": "claude-sonnet-5"},
+                "workspace": True,
+                "browser": True,
+            }
+        ),
+        status=SandboxStatus.READY,
+        created_at=_NOW,
+        expires_at=_NOW + timedelta(hours=4),
+    )
+    job = {
+        "metadata": {"name": "j"},
+        "spec": {"template": {"metadata": {}, "spec": {"containers": [{"name": "c", "env": []}]}}},
+    }
+    env = {
+        item["name"]: item
+        for item in apply_sandbox_boundary(job, record)["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+
+    assert env["DEVAI_SANDBOX_BROWSER"]["value"] == "true"
 
 
 class _Registry:

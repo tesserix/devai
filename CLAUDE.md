@@ -2,6 +2,13 @@
 
 DevAI is an AI-powered Application Lifecycle Management (ALM) + SRE monitoring platform built with LangGraph, LangChain, and LangSmith. It orchestrates 14 ALM agents and 7 SRE agents to automate the full software development lifecycle — from requirement ingestion to production deployment and monitoring.
 
+## Documentation pointers
+
+- [Sandbox and evaluation concepts](docs/concepts/sandbox-and-evals.md) — the author, sandbox, evaluate, compare, and promote loop, including every dashboard metric.
+- [Platform architecture](docs/PLATFORM-ARCHITECTURE.md) — system boundaries and runtime data flow.
+- [Agent Registry publishing](docs/agentic/AGENT-REGISTRY-PUBLISHING.md) — gated user artifacts and GitOps-managed built-ins.
+- [Agentic integration](docs/agentic/AGENTIC-INTEGRATION.md) — AgentGateway, Agent Registry, MCP Hub, and provider routing.
+
 ---
 
 ## Critical Rules

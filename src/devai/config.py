@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -140,6 +140,12 @@ class Settings(BaseSettings):
     github_webhook_secret: str = ""
     github_org: str = "tesserix"
 
+    # Public product feedback is filed in this repository using the platform
+    # GitHub App. The two operators remain the default assignees.
+    feedback_repo: str = "tesserix/devai"
+    feedback_assignees: list[str] = Field(default_factory=lambda: ["sam123ben", "mahesh.sangawar"])
+    feedback_support_identities: list[str] = Field(default_factory=list)
+
     # --- Repo onboarding (Repos page) ---
     # When true, the API runs a reconcile ~30s after boot so the onboarding
     # cache self-heals from the `.platform/devai.yaml` markers (the source of
@@ -215,7 +221,9 @@ class Settings(BaseSettings):
 
     # --- Anthropic / Claude ---
     anthropic_api_key: str = ""
-    claude_model: str = "claude-sonnet-4-20250514"
+    # claude-sonnet-4-20250514 was retired and now 404s from /v1/messages,
+    # which took the whole fallback chain down with it.
+    claude_model: str = "claude-sonnet-5"
     claude_max_tokens: int = 8192
     # Default ceiling for any agent loop. Heavy code-generation roles
     # (Senior Developer, DB Engineer, Infra Provisioner, QA Tester) pass an
@@ -289,12 +297,27 @@ class Settings(BaseSettings):
     # personal usage view and the global/by-user rollups are unreachable.
     admin_emails: str = ""
 
+    # --- openpanel (web analytics) ---
+    # OpenPanel runs in-cluster (tesserix-k8s charts/thirdparty/openpanel) and
+    # answers page-level questions the backend can't: hits, sessions,
+    # referrers. Read server-side only so the client secret never reaches a
+    # browser. Any of the three unset leaves /api/admin/openpanel reporting
+    # {"enabled": false} — DevAI is not onboarded as an OpenPanel project yet.
+    openpanel_api_url: str = ""  # e.g. https://analytics.tesserix.app/api
+    openpanel_client_id: str = ""
+    openpanel_client_secret: str = ""
+
     # Shared secret the auth-bff includes (header X-Auth-Bff-Secret) so the
     # backend only trusts X-Forwarded-* identity headers from the bff. When
     # empty, X-Forwarded-* is trusted unconditionally (today's behavior).
     # When set, forwarded identity is ignored unless the secret matches —
     # closing header-spoofing if the pod is ever reachable without the edge.
     auth_bff_shared_secret: str = ""
+
+    @field_validator("auth_bff_shared_secret", mode="before")
+    @classmethod
+    def _strip_auth_bff_shared_secret(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     # Whether X-Forwarded-* identity is trusted when no shared secret is set.
     # Default True preserves today's behavior: with auth_bff_shared_secret
@@ -410,8 +433,16 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     temporal_task_queue: str = "devai"
     temporal_tls_enabled: bool = False
+    temporal_fail_closed: bool = False
+    temporal_payload_encryption_required: bool = False
+    temporal_payload_encryption_key: str = ""
     temporal_max_concurrent_activities: int = 50
     temporal_max_stage_attempts: int = 3  # per-stage Activity RetryPolicy
+    temporal_worker_dependencies_required: bool = False
+    temporal_worker_versioning_enabled: bool = False
+    temporal_worker_deployment_name: str = "devai"
+    temporal_worker_build_id: str = ""
+    temporal_worker_graceful_shutdown_seconds: int = 60
 
     # --- LangSmith ---
     langchain_tracing_v2: str = ""  # Set to "true" to enable
@@ -583,6 +614,9 @@ class Settings(BaseSettings):
 
     # --- Crews (AI agent teams; seed catalog) ---
     crews_dir: str = "crews"
+    # Crew used when a run picks "Dynamic" and the intent matches no crew's
+    # keywords. Empty = fall back to a crew tagged `default` in crews/*.yaml.
+    default_crew: str = "backend_crew"
 
     # --- Teams (human teams that own crews) ---
     teams_enabled: bool = True
@@ -602,6 +636,13 @@ class Settings(BaseSettings):
     # --- Terminal sandbox (runner pod git worktree + line-protocol) ---
     terminal_sandbox_enabled: bool = False
     terminal_sandbox_timeout_seconds: int = 3600
+
+    # --- Agent sandbox governance ---
+    sandbox_max_live_per_tenant: int = 5
+    sandbox_monthly_cost_limit_usd: float = 100.0
+    sandbox_max_eval_cases_per_run: int = 50
+    sandbox_eval_max_concurrency: int = 4
+    sandbox_spend_alert_ratio: float = 0.8
 
     # --- Agent Registry (aregistry HTTP client) ---
     # The shared catalog of skills + prompts + MCP servers + agents.
@@ -669,12 +710,16 @@ class Settings(BaseSettings):
     #
     # kagent_url points at the kagent controller's A2A endpoint. When set (and
     # kagent_enabled), an agent labelled `devai.io/runtime=kagent` is dispatched
-    # over A2A to its long-lived kagent Deployment instead of a one-shot Job.
+    # over A2A to its Substrate SandboxAgent instead of a one-shot Job.
     agentgateway_url: str = ""
+    # Operator-only health probes use the controller metrics endpoint, not the
+    # MCP data-plane URL above. AI gateway probes fall back to the LLM base URL.
+    agentgateway_controller_url: str = ""
+    ai_gateway_url: str = ""
     kagent_url: str = ""
-    # Namespace the kagent controller serves A2A agents under
-    # ({kagent_url}/api/a2a/{namespace}/{agent}); matches the kagent-agent-sync
-    # targetNamespace. Only consulted when dispatching to a kagent-managed agent.
+    # Namespace the kagent controller serves SandboxAgents under
+    # ({kagent_url}/api/a2a-sandboxes/{namespace}/{agent}); matches the
+    # kagent-agent-sync targetNamespace. Only consulted for kagent dispatch.
     kagent_default_namespace: str = "kagent-system"
     # Master switch for kagent A2A dispatch (binds DEVAI_KAGENT_ENABLED). Default
     # OFF — every agent runs as a K8s Job even if labelled kagent. Turn it on
@@ -685,7 +730,7 @@ class Settings(BaseSettings):
     # Per-user keys for kagent. When kagent_passthrough is true, the kagent
     # ModelConfig is set to `apiKeyPassthrough` (no shared secret) and DevAI
     # forwards the TRIGGERING USER's own LLM key as the A2A Bearer token, so a
-    # standing kagent agent runs on each user's own key (reusing the same
+    # shared Substrate actor runs on each user's own key (reusing the same
     # per-user connector overlay as the Job path). A user with no own key for
     # `kagent_model_provider` falls back to the Job path. False = shared-key
     # ModelConfig (no Bearer forwarded). kagent_model_provider names the
@@ -694,8 +739,9 @@ class Settings(BaseSettings):
     kagent_model_provider: str = "anthropic"
     # The provider variants the kagent catalog provisioned (matches
     # kagent-agent-sync values.kagentModels suffixes). A passthrough run
-    # dispatches to the variant `<agent>-<provider>` matching the user's Settings
-    # provider, then falls back across the rest of this list on failure.
+    # starts with the variant `<agent>-<provider>` matching the user's Settings.
+    # Another variant may be tried only when the first connection was definitely
+    # rejected; accepted or ambiguous dispatches are never replayed automatically.
     kagent_provider_variants: str = "anthropic,openai"
     # JSON catalog of the kagent (provider, model) variants — MUST mirror
     # kagent-agent-sync values.kagentModels. Each entry {suffix, provider, model}
@@ -737,9 +783,13 @@ class Settings(BaseSettings):
     # own config, authenticating to Vertex via Workload Identity (GSA
     # agentgateway-llm, terraform-new/stacks/12-vertex). Model names are
     # gateway-side aliases, so swapping backends never touches DevAI.
-    llm_gateway_base_url: str = ""  # e.g. http://ai-gateway.agentgateway-system.svc.cluster.local:8080/v1
+    llm_gateway_base_url: str = ""  # e.g. http://ai-gateway.agentgateway-system.svc.cluster.local:8080
     llm_gateway_api_key: str = ""  # optional; gateway-enforced auth token
     llm_gateway_model: str = ""  # default model alias the gateway resolves
+    # Fail closed in every provider builder when direct provider egress is not
+    # permitted. Users retain their provider choice; each maps to a dedicated
+    # route beneath llm_gateway_base_url.
+    llm_gateway_required: bool = False
 
     # --- vertex adapter ---
     # Vertex AI (Gemini) over REST with Application Default Credentials —
@@ -776,11 +826,9 @@ class Settings(BaseSettings):
     llm_fallback_provider: str = "openai,vertex_gemini,groq"
 
     # --- per-ROLE model routing ---
-    # Each role resolves to a model + a provider failover chain:
-    #   configured primary (anthropic) → llm_role_chain_provider — the
-    # gateway routes Claude on VERTEX server-side, so the SAME model id is
-    # preserved down the chain (Opus 4.8 on Anthropic → Opus 4.8 on Vertex).
-    # Unconfigured fallback links skip with a log; empty disables the link.
+    # Each role model selects a capability tier without changing the product's
+    # primary/fallback order. Retained for non-governed legacy deployments;
+    # governed production routes every concrete provider through Agent Gateway.
     llm_role_chain_provider: str = "gateway"
     # Frontend/UI implementation — strongest coding model. NO Fable: any
     # claude-fable-* id is force-mapped to 4.8 by adapters.llm.model_policy.
@@ -830,13 +878,20 @@ class Settings(BaseSettings):
 
     # --- Secrets adapter (per-user/per-tenant secret provisioning) ---
     # Backs the Settings capability. The Settings store keeps only secret
-    # references; the adapter writes/reads the actual values. gcp_sm
-    # auto-provisions into Google Secret Manager (needs write IAM on the
-    # devai SA); env is read-only; noop refuses writes loudly. Unknown
-    # provider / missing SDK / missing project degrades to noop.
-    secrets_provider: str = "noop"  # noop | env | gcp_sm
+    # references; the adapter writes/reads the actual values. openbao reads
+    # under a workload role and writes blindly through secret-service;
+    # gcp_sm remains available for migration; env is read-only; noop refuses
+    # writes. Unknown provider or missing config degrades to noop.
+    secrets_provider: str = "noop"  # noop | env | gcp_sm | openbao
     # GCP project for gcp_sm (falls back to gke_project / gcp_project).
     secrets_gcp_project: str = ""
+    secrets_openbao_addr: str = ""
+    secrets_openbao_mount: str = "kv"
+    secrets_openbao_role: str = "read-devai-api"
+    secrets_openbao_auth_mount: str = "kubernetes"
+    secrets_openbao_token_file: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    secrets_broker_url: str = ""
+    secrets_broker_token_file: str = "/var/run/secrets/devai/secret-service/token"
     # Enable the Settings capability (per-user connectors + secrets API).
     settings_enabled: bool = True
 
@@ -846,11 +901,11 @@ class Settings(BaseSettings):
     # no code changes. Missing SDKs / config degrade gracefully to "noop".
     memory_provider: str = "redis"  # noop | redis | pgvector | qdrant | mem0 | zep | hondo
 
-    # Embedding provider for memory semantic search (pgvector). `auto` uses
-    # OpenAI when DEVAI_OPENAI_API_KEY is set, otherwise disables embeddings
-    # and pgvector degrades to keyword recall. `none` disables explicitly.
+    # Embedding provider for memory semantic search. `auto` follows the
+    # configured LLM primary/fallback order and picks the first adapter that
+    # implements embeddings (Vertex/OpenAI/gateway). `none` disables explicitly.
     # Dimensions must match the agent_memories.embedding column: vector(1536).
-    embedding_provider: str = "auto"  # auto | openai | none
+    embedding_provider: str = "auto"  # auto | vertex_gemini | openai | gateway | none
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 

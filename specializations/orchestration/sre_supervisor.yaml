@@ -8,6 +8,7 @@ description: >-
   and what each should focus on. Pure planning — never touches the
   cluster. The multi-agent SRE blueprints hand off to it first.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: o3

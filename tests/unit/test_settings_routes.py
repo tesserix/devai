@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -46,10 +48,11 @@ class _FakeSvc:
         return True
 
 
-def _app(principal: Principal | None, writable=True):
+def _app(principal: Principal | None, writable=True, *, gateway_required=False):
     app = FastAPI()
     app.include_router(settings_routes.router)
     app.state.settings_service = _FakeSvc(writable)
+    app.state.config = SimpleNamespace(llm_gateway_required=gateway_required)
 
     async def _fake_extract(_request):
         return principal
@@ -59,7 +62,9 @@ def _app(principal: Principal | None, writable=True):
 
 
 ALICE = Principal(email="alice@x.com", uid="alice-uid", roles=[], team_ids=["teamA"])
-ADMIN = Principal(email="admin@x.com", uid="admin", roles=["admin"])
+TENANT_ALICE = Principal(email="alice@x.com", uid="alice-uid", tenant_id="tenant-a", roles=[])
+ADMIN = Principal(email="admin@x.com", uid="admin", roles=["platform-admin"])
+TENANT_ADMIN = Principal(email="admin@x.com", uid="admin", tenant_id="tenant-a", roles=["admin"])
 
 
 def test_requires_auth():
@@ -88,6 +93,49 @@ def test_user_can_save_own_scope():
     assert r.json()["status"] == "saved"
 
 
+def test_tenant_user_scope_is_saved_with_tenant_qualified_subject():
+    app = _app(TENANT_ALICE)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/settings/connectors",
+        json={"connector_key": "llm", "provider": "openai", "scope": "user"},
+    )
+
+    assert response.status_code == 200
+    assert app.state.settings_service.connectors[0].scope_id == "tenant-a:alice-uid"
+
+
+def test_tenant_user_cannot_manage_same_uid_in_another_tenant():
+    client = TestClient(_app(TENANT_ALICE))
+
+    response = client.delete("/api/settings/connectors/user/tenant-b%3Aalice-uid/llm")
+
+    assert response.status_code == 404
+
+
+def test_strict_gateway_mode_preserves_provider_choice():
+    client = TestClient(_app(TENANT_ALICE, gateway_required=True))
+
+    response = client.post(
+        "/api/settings/connectors",
+        json={"connector_key": "llm", "provider": "anthropic", "scope": "user"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_strict_gateway_mode_accepts_gateway_connector():
+    client = TestClient(_app(TENANT_ALICE, gateway_required=True))
+
+    response = client.post(
+        "/api/settings/connectors",
+        json={"connector_key": "llm", "provider": "gateway", "scope": "user"},
+    )
+
+    assert response.status_code == 200
+
+
 def test_user_cannot_save_global():
     client = TestClient(_app(ALICE))
     r = client.post(
@@ -104,6 +152,27 @@ def test_admin_can_save_global():
         json={"connector_key": "llm", "provider": "openai", "scope": "global"},
     )
     assert r.status_code == 200
+
+
+def test_tenant_admin_can_save_only_own_tenant():
+    client = TestClient(_app(TENANT_ADMIN))
+
+    own = client.post(
+        "/api/settings/connectors",
+        json={"connector_key": "llm", "provider": "openai", "scope": "tenant", "scope_id": "tenant-a"},
+    )
+    foreign = client.post(
+        "/api/settings/connectors",
+        json={"connector_key": "llm", "provider": "openai", "scope": "tenant", "scope_id": "tenant-b"},
+    )
+    global_response = client.post(
+        "/api/settings/connectors",
+        json={"connector_key": "llm", "provider": "openai", "scope": "global"},
+    )
+
+    assert own.status_code == 200
+    assert foreign.status_code == 404
+    assert global_response.status_code == 403
 
 
 def test_secret_write_blocked_when_readonly():

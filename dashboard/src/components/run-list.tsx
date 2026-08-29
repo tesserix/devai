@@ -285,8 +285,12 @@ export function RunList({
               >
                 {run.repo}
               </span>
-              <span className="text-xs shrink-0" style={{ color: "var(--ink-muted)" }}>
-                {completedAgents}/{agentCount || "?"}
+              <span
+                className="text-xs shrink-0"
+                style={{ color: "var(--ink-muted)" }}
+                title={agentCount ? "Agents finished / agents on this run" : "No agent has reported yet"}
+              >
+                {agentCount ? `${completedAgents}/${agentCount} agents` : "no agents yet"}
               </span>
             </div>
             {/* State on its own line; controls on a dedicated wrap-friendly row

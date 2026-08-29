@@ -345,7 +345,12 @@ class Pipeline:
         executor polls — so callers set the flag AND signal, and one of the two
         is honored depending on the active provider.
         """
-        return await self._workflow_adapter.signal(task_id, signal_name, args)
+        task = self._tasks.get(task_id)
+        if task is None:
+            snapshot = await self._load_snapshot(task_id)
+            if snapshot is not None:
+                task = DevAITask.from_dict(snapshot)
+        return await self._workflow_adapter.signal(task or task_id, signal_name, args)
 
     async def wait_for(self, task_id: str, *, timeout: float | None = None) -> DevAITask:
         evt = self._task_done.get(task_id)

@@ -5,9 +5,10 @@ description: >-
   scripts based on the deployment target. Owns the Dockerfile and all
   infra files — every other role escalates here for infra changes.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 max_tokens: 8192
 
 allowed_tools:

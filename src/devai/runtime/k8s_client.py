@@ -112,7 +112,7 @@ class RuntimeConfig:
             ),
             default_ttl_seconds=int(getattr(settings, "k8s_job_ttl_seconds", 3600)),
             default_backoff_limit=int(getattr(settings, "k8s_job_backoff_limit", 0)),
-            pod_security_context={"runAsNonRoot": True, "runAsUser": 1000},
+            pod_security_context={"runAsNonRoot": True, "runAsUser": 10001},
         )
 
 

@@ -22,6 +22,7 @@ from devai.sandbox.job import (
 )
 from devai.sandbox.models import (
     AgentRef,
+    ImportSnapshot,
     ModelRef,
     PromptRef,
     SandboxLimits,
@@ -31,6 +32,7 @@ from devai.sandbox.models import (
     ToolMode,
     ToolPolicy,
 )
+from devai.sandbox.portable import build_portable_runtime_manifests, portable_runtime_endpoint
 from devai.sandbox.provisioner import SandboxProvisioner
 
 _NS = "devai"
@@ -69,6 +71,32 @@ def _record(spec: SandboxSpec | None = None, sandbox_id: str = "sb-123") -> Sand
         status=SandboxStatus.PENDING,
         created_at=now,
         expires_at=now + timedelta(hours=4),
+    )
+
+
+def _imported_record(sandbox_id: str = "sb-portable") -> SandboxRecord:
+    snapshot = ImportSnapshot(
+        import_id="bf2ef27d-98a2-4ce4-b87a-c6952d2d5d09",
+        registry_ref="registry://acme/agents/acme/support@1.4.0",
+        agent_digest="sha256:" + "a" * 64,
+        dependency_lock=[],
+        runtime={
+            "type": "container",
+            "protocol": "a2a",
+            "image": "ghcr.io/acme/support@sha256:" + "c" * 64,
+            "port": 8080,
+            "path": "/a2a/v1",
+        },
+        permissions={},
+    )
+    return _record(
+        SandboxSpec(
+            agent=AgentRef(name="support", version="1.4.0"),
+            import_id=snapshot.import_id,
+            import_snapshot=snapshot,
+            model=ModelRef(provider="anthropic", model="claude-sonnet-4-20250514"),
+        ),
+        sandbox_id,
     )
 
 
@@ -287,6 +315,21 @@ def test_every_isolation_object_is_scoped_to_this_sandbox() -> None:
         assert m["metadata"]["labels"][SANDBOX_LABEL] == "sb-123"
 
 
+def test_portable_container_runtime_uses_only_the_pinned_image_and_restricted_identity() -> None:
+    manifests = build_portable_runtime_manifests(_imported_record(), namespace=_NS)
+    by_kind = _by_kind(manifests)
+    deployment = by_kind["Deployment"]
+    pod = deployment["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+
+    assert container["image"] == "ghcr.io/acme/support@sha256:" + "c" * 64
+    assert pod["serviceAccountName"] == "devai-sandbox"
+    assert pod["automountServiceAccountToken"] is False
+    assert container["securityContext"]["allowPrivilegeEscalation"] is False
+    assert by_kind["Service"]["spec"]["ports"][0]["targetPort"] == 8080
+    assert portable_runtime_endpoint(_imported_record(), namespace=_NS).endswith(":8080/a2a/v1")
+
+
 # ── provisioner ───────────────────────────────────────────────────────────
 
 
@@ -330,6 +373,17 @@ async def test_provisioning_walks_pending_to_ready() -> None:
     # quota, limits, egress policy, the sandbox's own Secret, then the proxy's
     # configmap/pod/service
     assert len(runtime.created) == 7
+
+
+@pytest.mark.asyncio
+async def test_provisioning_materializes_an_imported_container_runtime() -> None:
+    runtime, store = _FakeRuntime(), _FakeStore()
+
+    record = await SandboxProvisioner(runtime, store).provision(_imported_record())
+
+    assert {manifest["kind"] for manifest in runtime.created} >= {"Deployment", "Service"}
+    assert record.detail["agent_runtime"]["endpoint"].endswith(":8080/a2a/v1")
+    assert record.detail["agent_runtime"]["agent_digest"] == "sha256:" + "a" * 64
 
 
 @pytest.mark.asyncio

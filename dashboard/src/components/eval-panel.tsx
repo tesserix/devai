@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ListChecks, Play, Plus, Trash2, XCircle } from "lucide-react";
+import { formatEvalCost, type EvalCost } from "@/lib/eval-cost";
+import { lifecycleMutationHeaders } from "@/lib/api";
 
 /**
  * Checks — the saved inputs and expectations an agent has to keep satisfying.
@@ -33,7 +35,14 @@ type EvalRun = {
   id: string;
   created_at: string;
   results: CaseResult[];
-  summary: { cases: number; passed: number; failed: number; pass_rate: number; total_tokens: number; duration_ms: number };
+  summary: {
+    cases: number;
+    passed: number;
+    failed: number;
+    pass_rate: number;
+    total_tokens: number;
+    duration_ms: number;
+  } & EvalCost;
 };
 
 const field =
@@ -79,7 +88,7 @@ export function EvalPanel({
       const res = await fetch(`/api/sandboxes/${encodeURIComponent(sandboxId)}/evals`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
         body: JSON.stringify({ cases }),
       });
       const body = await res.json().catch(() => ({}));
@@ -205,7 +214,7 @@ export function EvalPanel({
         <div className="border-t border-[var(--surface-border)]">
           {runs.map((r) => (
             <article key={r.id} className="border-b border-[var(--surface-border)] last:border-0">
-              <div className="px-4 py-2 flex items-center gap-3 text-xs">
+              <div className="px-4 py-2 flex flex-wrap items-center gap-3 text-xs">
                 <span
                   className={`font-medium ${r.summary.failed === 0 ? "text-emerald-300" : "text-red-300"}`}
                 >
@@ -213,6 +222,7 @@ export function EvalPanel({
                 </span>
                 <span className="text-[var(--ink-500)]">{r.summary.total_tokens} tokens</span>
                 <span className="text-[var(--ink-500)]">{r.summary.duration_ms} ms</span>
+                <span className="text-[var(--ink-500)]">{formatEvalCost(r.summary)}</span>
                 <span className="ml-auto font-mono text-[var(--ink-500)]">{r.id}</span>
               </div>
               <ul className="pb-2">

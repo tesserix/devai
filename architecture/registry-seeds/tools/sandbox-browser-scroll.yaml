@@ -1,0 +1,28 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Tool
+metadata:
+  name: sandbox-browser-scroll
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    mcp.devai.io/server: sandbox
+    devai.io/domain: sandbox
+    devai.io/tier: core
+    devai.io/risk-level: medium
+  annotations:
+    mcp.devai.io/wire-name: browser_scroll
+spec:
+  displayName: Browser Scroll
+  description: Scroll the sandbox browser by pixel deltas.
+  version: '1'
+  server: sandbox
+  inputSchema:
+    type: object
+    properties:
+      delta_x:
+        type: number
+      delta_y:
+        type: number
+    required: []
+  tags: [sandbox, mcp-tool, browser]

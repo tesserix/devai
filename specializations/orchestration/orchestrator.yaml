@@ -6,6 +6,7 @@ description: >-
   decides whether to advance, loop back to senior_developer, or escalate
   to a human. Pure decision-making — no code edits.
 category: orchestration
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: o3

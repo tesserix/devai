@@ -15,7 +15,7 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # A sandbox is ephemeral by design; anything longer is a deployment.
 MAX_TTL_SECONDS = 24 * 60 * 60
@@ -90,8 +90,40 @@ class SandboxLimits(_Pinned):
     max_wall_clock_s: int = Field(default=900, gt=0)
 
 
+class SandboxCredentials(_Pinned):
+    """Named user connectors explicitly granted to this sandbox.
+
+    The connector is resolved in the control plane. Its secret is never
+    mounted into the sandbox Job or workspace.
+    """
+
+    llm_connector: str = Field(default="", max_length=128, pattern=r"^$|^[A-Za-z0-9._-]+$")
+    confirmed: bool = False
+
+    @model_validator(mode="after")
+    def connector_is_explicitly_confirmed(self) -> SandboxCredentials:
+        if bool(self.llm_connector) != self.confirmed:
+            raise ValueError("LLM connector and explicit confirmation must be supplied together")
+        return self
+
+
+class ImportSnapshot(_Pinned):
+    """Server-created immutable projection copied from an Agent import."""
+
+    import_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
+    registry_ref: str = Field(min_length=1)
+    agent_digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+    dependency_lock: list[dict[str, str]] = Field(default_factory=list)
+    runtime: dict[str, Any]
+    permissions: dict[str, Any] = Field(default_factory=dict)
+
+
 class SandboxSpec(_Pinned):
-    agent: AgentRef
+    agent: AgentRef | None = None
+    # Portable callers supply only import_id. The service resolves it within
+    # the authenticated tenant and materializes import_snapshot before storage.
+    import_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F-]{36}$")
+    import_snapshot: ImportSnapshot | None = None
     model: ModelRef
     prompt: PromptRef | None = None
     dataset: DatasetRef | None = None
@@ -103,6 +135,7 @@ class SandboxSpec(_Pinned):
     draft: dict[str, Any] | None = None
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
     limits: SandboxLimits = Field(default_factory=SandboxLimits)
+    credentials: SandboxCredentials = Field(default_factory=SandboxCredentials)
     ttl_seconds: int = Field(default=DEFAULT_TTL_SECONDS, gt=0, le=MAX_TTL_SECONDS)
     # A place to work — volume, shell and file service. Off by default: an eval
     # run that only needs an answer should not carry a PVC.
@@ -111,6 +144,9 @@ class SandboxSpec(_Pinned):
     repo: RepoRef | None = None
     # Run an IDE in the workspace pod so a person can take the run over.
     ide: bool = False
+    # Run Chromium in the workspace, driven by agents over CDP and observable
+    # by people through the authenticated noVNC proxy.
+    browser: bool = False
     # Hosts this run may reach on top of the platform allowlist, e.g. a private
     # package index. Additions are recorded so "what could it reach" is answerable.
     allow_domains: list[str] = Field(default_factory=list)
@@ -121,6 +157,17 @@ class SandboxSpec(_Pinned):
     # `model` shadows pydantic's protected namespace; the field name is part of
     # the published contract, so silence the warning rather than rename it.
     model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
+
+    @model_validator(mode="after")
+    def validate_sandbox_shape(self) -> SandboxSpec:
+        if self.agent is None and self.import_id is None:
+            raise ValueError("agent or import_id is required")
+        if self.import_snapshot is not None:
+            if self.import_id != self.import_snapshot.import_id or self.agent is None:
+                raise ValueError("import_snapshot must match a materialized import_id and agent")
+        if self.browser and not self.workspace:
+            raise ValueError("browser requires workspace=true")
+        return self
 
 
 class SandboxRecord(BaseModel):
@@ -139,6 +186,7 @@ __all__ = [
     "MAX_TTL_SECONDS",
     "AgentRef",
     "DatasetRef",
+    "ImportSnapshot",
     "ModelRef",
     "PromptRef",
     "RepoRef",

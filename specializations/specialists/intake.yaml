@@ -5,6 +5,7 @@ description: >-
   clarify, or propose an alternate plan? Acts as the human-friendly
   front door — never modifies code, never opens a PR.
 category: specialist
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

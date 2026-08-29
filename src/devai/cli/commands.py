@@ -39,10 +39,12 @@ app.add_typer(specializations_app, name="specializations")
 # `devai sdk ...` — quick smoke-tests for the consuming-side SDK.
 # `devai adk ...` — author + publish new catalog entries.
 from devai.cli.adk_commands import adk_app  # noqa: E402 — registered after the base app
+from devai.cli.auth_commands import auth_app  # noqa: E402 — registered after the base app
 from devai.cli.sdk_commands import sdk_app  # noqa: E402 — registered after the base app
 
 app.add_typer(sdk_app, name="sdk")
 app.add_typer(adk_app, name="adk")
+app.add_typer(auth_app, name="auth")
 
 
 @app.command()

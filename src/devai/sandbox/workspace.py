@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from devai.sandbox.egress import proxy_env
 from devai.sandbox.job import SANDBOX_LABEL
 
 if TYPE_CHECKING:
@@ -27,6 +28,8 @@ WORKSPACE_ROOT = "/workspace"
 WORKSPACE_PORT = 8100
 # code-server, for a human taking over the tree the agent left.
 IDE_PORT = 8118
+# noVNC, reachable only through the capability-token-gated workspace service.
+BROWSER_PORT = 8120
 
 _MAX_READ_BYTES = 2_000_000
 _SEARCH_MAX_HITS = 200
@@ -165,7 +168,7 @@ def build_workspace_manifests(
         "type": "Opaque",
         "stringData": {"token": token},
     }
-    pod = {
+    pod: dict[str, Any] = {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": meta,
@@ -173,11 +176,16 @@ def build_workspace_manifests(
             "restartPolicy": "Never",
             "serviceAccountName": "devai-sandbox",
             "automountServiceAccountToken": False,
-            "securityContext": {"runAsNonRoot": True, "runAsUser": 1000, "fsGroup": 1000},
+            "securityContext": {
+                "runAsNonRoot": True,
+                "runAsUser": 1000,
+                "fsGroup": 1000,
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
             "containers": [
                 {
                     "name": "workspace",
-                    "image": image or _default_image(),
+                    "image": image or (_browser_image() if record.spec.browser else _default_image()),
                     "command": ["python", "-m", "devai.sandbox.workspace_server"],
                     "ports": [{"containerPort": WORKSPACE_PORT, "name": "http"}],
                     "env": [
@@ -208,7 +216,12 @@ def build_workspace_manifests(
         pod["spec"]["initContainers"] = [seed]
     if record.spec.ide:
         pod["spec"]["containers"].append(_ide_container())
-    service = {
+    if record.spec.browser:
+        workspace: dict[str, Any] = pod["spec"]["containers"][0]
+        workspace["env"].append({"name": "DEVAI_WORKSPACE_BROWSER", "value": "true"})
+        workspace["env"].extend(proxy_env(sid, namespace=namespace))
+        workspace["resources"]["requests"] = {"cpu": "500m", "memory": "1Gi"}
+    service: dict[str, Any] = {
         "apiVersion": "v1",
         "kind": "Service",
         "metadata": meta,
@@ -288,7 +301,21 @@ def _default_image() -> str:
     return os.getenv("DEVAI_RUNNER_IMAGE", "ghcr.io/tesserix/devai/devai-runner:latest")
 
 
+def _browser_image() -> str:
+    """Keep the browser tag aligned with the Kargo-pinned runner release."""
+    import os
+
+    configured = os.getenv("DEVAI_BROWSER_IMAGE", "").strip()
+    if configured:
+        return configured
+    runner = _default_image()
+    if "/devai-runner:" in runner:
+        return runner.replace("/devai-runner:", "/devai-browser:", 1)
+    return "ghcr.io/tesserix/devai/devai-browser:latest"
+
+
 __all__ = [
+    "BROWSER_PORT",
     "IDE_PORT",
     "WORKSPACE_PORT",
     "WORKSPACE_ROOT",

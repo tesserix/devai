@@ -5,9 +5,10 @@ description: >-
   + shadcn UI from a screenshot / description, commits + pushes + opens
   PR before polishing. Used by the `prototype.yaml` blueprint.
 category: specialist
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 max_tokens: 8192
 
 allowed_tools:
