@@ -94,7 +94,7 @@ dependencies = [
 docs = [
     "pypdf>=6.15.0",
     "pdfplumber>=0.11.9",
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
 ]
 # The agent runtime. A direct reference because the kit repo is private and
 # publishes to GitHub releases rather than PyPI, so installing it needs a token.
