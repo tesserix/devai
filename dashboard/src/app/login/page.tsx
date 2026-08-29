@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithGoogle, exchangeForSession } from "@/lib/firebase";
+import { handoffCLISignIn, parseCLIAuthRequest } from "@/lib/cli-auth";
 import { safeReturn } from "@/lib/safe-return";
 
 // useSearchParams() forces this page out of the static-prerender path, so
@@ -25,6 +26,7 @@ function LoginPageInner() {
   const [mode, setMode] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [cliConnected, setCLIConnected] = useState(false);
 
   // Where to send the browser after a successful sign-in. The ?return_to=…
   // param is honoured ONLY after validation by safeReturn() — an unvalidated
@@ -33,6 +35,10 @@ function LoginPageInner() {
   // host is tesserix.app / *.tesserix.app (the session cookie is on
   // .tesserix.app so those are legitimately in-family). Anything else → "/".
   const returnTo = safeReturn(params.get("return_to"));
+  const cliRequest = parseCLIAuthRequest(
+    params.get("cli_callback"),
+    params.get("cli_state"),
+  );
 
   // Ask the backend which auth mode is active. local_db → password form;
   // anything else (or a failure) → the Google/GIP button.
@@ -54,8 +60,15 @@ function LoginPageInner() {
     setError(null);
     setPending(true);
     try {
-      const { idToken, pool, tenantId } = await signInWithGoogle();
+      const signIn = await signInWithGoogle();
+      const { idToken, pool, tenantId } = signIn;
       await exchangeForSession(idToken, pool, tenantId);
+      if (cliRequest) {
+        await handoffCLISignIn(cliRequest, signIn);
+        setCLIConnected(true);
+        setPending(false);
+        return;
+      }
       goHome();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
@@ -109,10 +122,14 @@ function LoginPageInner() {
 
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-7 shadow-sm">
           <h2 className="text-sm font-medium text-[var(--ink-soft)] text-center mb-5">
-            Sign in to continue
+            {cliConnected ? "CLI connected" : "Sign in to continue"}
           </h2>
 
-          {mode === "local_db" ? (
+          {cliConnected ? (
+            <p className="text-sm text-center text-[var(--ink-soft)]">
+              Return to your terminal. You may close this window.
+            </p>
+          ) : mode === "local_db" ? (
             <form onSubmit={handleLocalLogin} className="space-y-3">
               <input
                 className={inputCls}

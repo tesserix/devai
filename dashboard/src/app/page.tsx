@@ -360,7 +360,6 @@ export default function DashboardPage() {
                 <OverviewTab
                   run={{ ...selectedRun, agents: displayAgents }}
                   a2aMessages={a2aMessages}
-                  orchestratorRouting={orchestratorRouting}
                 />
               )}
               {tab === "hierarchy" && (
@@ -487,11 +486,9 @@ function GettingStartedStep({
 function OverviewTab({
   run,
   a2aMessages,
-  orchestratorRouting,
 }: {
   run: PipelineRun;
   a2aMessages: any[];
-  orchestratorRouting?: any;
 }) {
   const agents = run.agents || {};
   const coordinators = Object.entries(AGENT_INFO).filter(([, info]) => info.role === "coordinator");
@@ -586,7 +583,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
           </div>
         </div>
         <div className="mt-3 flex items-center gap-2">
-          <StatusBadgeInline status={agentStatus?.status} color={info.color} />
+          <StatusBadgeInline status={agentStatus?.status} />
           {info.role === "coordinator" && (
             <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-100 dark:border-indigo-900">
               COORDINATOR
@@ -622,7 +619,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
   );
 }
 
-function StatusBadgeInline({ status, color }: { status?: string; color: string }) {
+function StatusBadgeInline({ status }: { status?: string }) {
   if (!status) return <span className="text-xs px-2 py-0.5 rounded-md bg-[var(--surface-hover)] text-[var(--ink-muted)]">Idle</span>;
 
   const styles: Record<string, string> = {
@@ -750,7 +747,7 @@ function ConfigTab({ repo }: { repo: string }) {
         openai_model: data.openai_model ?? prev.openai_model,
         groq_model: (data as any).groq_model ?? prev.groq_model,
         max_review_iterations: data.max_review_iterations ?? prev.max_review_iterations,
-        gates: { ...prev.gates, ...(data.gates || {}) },
+        gates: { ...prev.gates, ...data.gates },
       }));
       setLoaded(true);
     }).catch(() => setLoaded(true));

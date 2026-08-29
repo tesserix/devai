@@ -84,7 +84,7 @@ export function BlueprintMesh({
     for (const e of graph.edges ?? []) addEdge(e.from, e.to);
     for (const n of graph.nodes) for (const d of n.depends_on ?? []) addEdge(d, n.name);
 
-    const deg = new Array(graph.nodes.length).fill(0);
+    const deg = Array.from({ length: graph.nodes.length }, () => 0);
     for (const [a, b] of edges) {
       deg[a]++;
       deg[b]++;

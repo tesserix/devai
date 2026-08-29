@@ -49,6 +49,7 @@ from devai.adk import (
     scaffold_prompt,
     scaffold_skill,
 )
+from devai.cli.auth_commands import load_stored_session
 from devai.config import settings
 from devai.services.redact import scrub_structure
 
@@ -260,9 +261,18 @@ def publish(
 
 
 def _new_sandbox_client(*, api_url: str = "", session_cookie: str = "", token: str = "") -> SandboxClient:
-    base_url = api_url or os.environ.get("DEVAI_API_URL", "") or settings.dashboard_base_url or "http://localhost:8080"
     cookie = session_cookie or os.environ.get("DEVAI_SESSION_COOKIE", "")
     bearer = token or os.environ.get("DEVAI_API_TOKEN", "")
+    stored = load_stored_session() if not cookie and not bearer else None
+    base_url = (
+        api_url
+        or os.environ.get("DEVAI_API_URL", "")
+        or (stored.base_url if stored is not None else "")
+        or settings.dashboard_base_url
+        or "http://localhost:8080"
+    )
+    if stored is not None and base_url.rstrip("/") == stored.base_url:
+        cookie = stored.cookie.get_secret_value()
     return SandboxClient(base_url=base_url, session_cookie=cookie, token=bearer)
 
 
