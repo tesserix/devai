@@ -5,7 +5,7 @@
  * persistent remaining-tokens meter, an >=80% warning, and an exhaustion
  * prompt pointing at Settings.
  *
- * All state comes from GET /api/settings/trial, via trialTone — never
+ * All state comes from GET /api/settings/trial, via trialSurface — never
  * re-derive. soft:true means a failed fetch (401 included) just renders
  * nothing rather than bouncing a signed-in user off the page they're on.
  */
@@ -16,7 +16,7 @@ import { usePathname } from "next/navigation";
 
 import { api, type TrialStatus } from "@/lib/api";
 import { trialTone } from "@/lib/admin-api";
-import { DEMO_IDEAS, shouldShowOnboarding } from "@/lib/demo-ideas";
+import { DEMO_IDEAS, trialSurface } from "@/lib/demo-ideas";
 
 const SEEN_KEY = "devai-trial-onboarding-seen";
 
@@ -36,15 +36,15 @@ export function TrialBanner() {
   // Settings already carries its own trial notice, and the exhaustion prompt links there.
   if (pathname === "/settings") return null;
 
-  const tone = trialTone(status);
-  if (tone === "hidden" || !status) return null;
+  const surface = trialSurface(seen, status);
+  if (surface === "none" || !status) return null;
 
   const dismiss = () => {
     window.localStorage.setItem(SEEN_KEY, "1");
     setSeen(true);
   };
 
-  if (tone === "ok" && shouldShowOnboarding(seen, status)) {
+  if (surface === "onboarding") {
     return (
       <div className="panel mb-4" style={{ padding: 16 }}>
         <div className="flex items-start justify-between gap-4">
@@ -76,7 +76,7 @@ export function TrialBanner() {
     );
   }
 
-  if (tone === "exhausted") {
+  if (surface === "exhausted") {
     return (
       <div className="panel mb-4" style={{ padding: 16 }}>
         <h3 className="font-display text-base" style={{ color: "var(--ink-strong)" }}>
@@ -101,7 +101,7 @@ export function TrialBanner() {
         <span className="block h-full" style={{ width: `${pct}%`, background: "var(--accent)" }} />
       </span>
       <span style={{ color: "var(--ink-strong)" }}>{status.remaining.toLocaleString()} left</span>
-      {tone === "warning" && (
+      {trialTone(status) === "warning" && (
         <Link href="/settings" className="ml-auto underline" style={{ color: "var(--ink-muted)" }}>
           Add own key
         </Link>

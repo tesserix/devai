@@ -1,4 +1,4 @@
-import type { TrialStatus } from "./admin-api";
+import { trialTone, type TrialStatus } from "./admin-api.ts";
 
 export interface DemoIdea {
   title: string;
@@ -34,4 +34,15 @@ export function shouldShowOnboarding(alreadySeen: boolean, status: TrialStatus |
   if (alreadySeen) return false;
   if (!status || !status.trial_enabled || !status.applicable) return false;
   return !status.exhausted;
+}
+
+export type TrialSurface = "onboarding" | "exhausted" | "meter" | "none";
+
+/** Which trial surface to render; onboarding yields to the warning meter once tokens run low. */
+export function trialSurface(seen: boolean, status: TrialStatus | null | undefined): TrialSurface {
+  const tone = trialTone(status);
+  if (tone === "hidden" || !status) return "none";
+  if (tone === "exhausted") return "exhausted";
+  if (tone === "ok" && shouldShowOnboarding(seen, status)) return "onboarding";
+  return "meter";
 }
