@@ -53,4 +53,8 @@ test("posts the GIP proof only to the validated loopback callback", async () => 
   assert.equal(calls[0].init?.method, "POST");
   assert.equal(calls[0].init?.redirect, "error");
   assert.equal(calls[0].init?.referrerPolicy, "no-referrer");
+  assert.equal(
+    (calls[0].init as RequestInit & { targetAddressSpace?: string }).targetAddressSpace,
+    "local",
+  );
 });
