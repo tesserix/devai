@@ -11,6 +11,10 @@ type SignInProof = {
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+type LocalNetworkRequestInit = RequestInit & {
+  targetAddressSpace: "local";
+};
+
 const STATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export function parseCLIAuthRequest(
@@ -48,7 +52,7 @@ export async function handoffCLISignIn(
   proof: SignInProof,
   fetcher: Fetcher = fetch,
 ): Promise<void> {
-  const response = await fetcher(request.callback, {
+  const init: LocalNetworkRequestInit = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -62,6 +66,8 @@ export async function handoffCLISignIn(
     redirect: "error",
     referrerPolicy: "no-referrer",
     signal: AbortSignal.timeout(10_000),
-  });
+    targetAddressSpace: "local",
+  };
+  const response = await fetcher(request.callback, init);
   if (!response.ok) throw new Error("DevAI CLI did not accept the sign-in proof");
 }
