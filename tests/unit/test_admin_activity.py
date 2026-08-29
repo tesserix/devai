@@ -3,8 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from devai.admin.activity import ACTION_ACTIVE, record_active
+from devai.admin.activity import ACTION_ACTIVE, ActivityMiddleware, record_active
 from devai.identity import Principal
 
 
@@ -90,4 +92,77 @@ async def test_anonymous_principal_is_ignored():
     db = _Database()
     state = _state(db, _Redis())
     assert await record_active(state, None) is False
+    assert db.rows == []
+
+
+@pytest.mark.asyncio
+async def test_system_principal_is_ignored():
+    db = _Database()
+    state = _state(db, _Redis())
+    assert await record_active(state, Principal.system()) is False
+    assert db.rows == []
+
+
+@pytest.mark.asyncio
+async def test_webhook_principal_is_ignored():
+    db = _Database()
+    state = _state(db, _Redis())
+    principal = Principal.webhook(provider="github", sender_login="octocat")
+    assert await record_active(state, principal) is False
+    assert db.rows == []
+
+
+def _middleware_client(db, redis, principal, monkeypatch) -> TestClient:
+    app = FastAPI()
+    app.add_middleware(ActivityMiddleware)
+    app.state.analytics_db = db
+    app.state.activity_redis = redis
+
+    @app.get("/api/thing")
+    async def _thing():
+        return {"ok": True}
+
+    @app.get("/healthz")
+    async def _health():
+        return {"ok": True}
+
+    async def _extract(_request):
+        return principal
+
+    import devai.identity as identity
+
+    monkeypatch.setattr(identity, "extract_principal", _extract)
+    return TestClient(app)
+
+
+def test_middleware_records_and_passes_through_response(monkeypatch):
+    db = _Database()
+    client = _middleware_client(db, _Redis(), _principal(), monkeypatch)
+    res = client.get("/api/thing")
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+    assert len(db.rows) == 1
+    assert db.rows[0]["actor"] == "user@example.com"
+
+
+def test_middleware_survives_recording_failure(monkeypatch):
+    client = _middleware_client(None, _BrokenRedis(), _principal(), monkeypatch)
+    res = client.get("/api/thing")
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+
+
+def test_middleware_skips_recording_on_skip_prefix(monkeypatch):
+    db = _Database()
+    client = _middleware_client(db, _Redis(), _principal(), monkeypatch)
+    res = client.get("/healthz")
+    assert res.status_code == 200
+    assert db.rows == []
+
+
+def test_middleware_skips_recording_for_anonymous(monkeypatch):
+    db = _Database()
+    client = _middleware_client(db, _Redis(), None, monkeypatch)
+    res = client.get("/api/thing")
+    assert res.status_code == 200
     assert db.rows == []

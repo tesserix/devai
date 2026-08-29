@@ -8,7 +8,7 @@ made at least one request on a given day. That's what the admin page
 labels it, rather than presenting it as a login count.
 
 Rows land in the existing append-only `audit_log` table (no new schema —
-CLAUDE.md forbids SQL here). A Redis `SET NX EX` guard collapses a user's
+repo policy keeps SQL out of this repo). A Redis `SET NX EX` guard collapses a user's
 whole day to a single row, so this costs one write per user per day, not
 one per request, and holds across pods.
 
@@ -47,7 +47,8 @@ async def record_active(app_state: Any, principal: Principal | None) -> bool:
     if not actor or not isinstance(actor, str):
         return False
     # Synthetic principals are machines, not users on a dashboard.
-    if actor.startswith(("webhook:", "system:")) or actor in {"system@devai", "webhook@devai"}:
+    auth_provider = getattr(principal, "auth_provider", "") or ""
+    if auth_provider == "system" or auth_provider.startswith("webhook:"):
         return False
 
     database = getattr(app_state, "analytics_db", None)
