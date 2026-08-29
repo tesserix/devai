@@ -11,9 +11,8 @@ name: Ensure image tags
 # image-build workflows to finish, then tags each image's freshly-built
 # `:latest` as `main-<sha7>`. Changed images get their new build's :latest;
 # unchanged images get their current :latest (the correct version at this
-# commit). Tagging on GHCR is enough — the GAR pull-through mirrors the tag the
-# first time a pod pulls it. Lightweight: `crane tag` adds a tag pointer, no
-# image rebuild or layer copy.
+# commit). Auth BFF and MCP Bridge are copied to direct GAR because production
+# must not depend on pull-through cache state or upstream package visibility.
 on:
   push:
     branches: [main]
@@ -22,6 +21,7 @@ on:
 
 permissions:
   contents: write # advance the `deploy` branch marker
+  id-token: write # exchange GitHub OIDC for GAR write access
   packages: write
 
 concurrency:
@@ -30,6 +30,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
+  GAR_REGISTRY: asia-south1-docker.pkg.dev
+  GAR_REPOSITORY: tesseracthub-480811/global
   OWNER_REPO: ${{ github.repository }} # tesserix/devai
 
 jobs:
@@ -46,19 +48,40 @@ jobs:
           # so we never tag a stale pre-build image.
           BUILD_WFS="ci.yaml runner-build.yaml dashboard-build.yaml sre-build.yaml sre-dashboard-build.yaml auth-bff-build.yaml mcpbridge-build.yaml"
           SHA="${{ github.sha }}"
+          settled=false
           for i in $(seq 1 60); do   # up to ~30 min
             pending=0
             for wf in $BUILD_WFS; do
               # runs of THIS workflow for THIS commit still in flight
               n=$(gh run list --repo "$OWNER_REPO" --workflow "$wf" --limit 30 \
                     --json headSha,status \
-                    -q "[.[] | select(.headSha==\"$SHA\" and (.status==\"in_progress\" or .status==\"queued\"))] | length" 2>/dev/null || echo 0)
+                    -q "[.[] | select(.headSha==\"$SHA\" and (.status==\"in_progress\" or .status==\"queued\"))] | length")
               pending=$((pending + n))
             done
-            if [ "$pending" -eq 0 ]; then echo "all builds settled"; break; fi
+            if [ "$pending" -eq 0 ]; then
+              settled=true
+              echo "all builds settled"
+              break
+            fi
             echo "  $pending build run(s) still in flight — waiting ($((i*30))s)"
             sleep 30
           done
+          if [ "$settled" != true ]; then
+            echo "::error::timed out waiting for image builds"
+            exit 1
+          fi
+
+          failed=0
+          for wf in $BUILD_WFS; do
+            n=$(gh run list --repo "$OWNER_REPO" --workflow "$wf" --limit 30 \
+                  --json headSha,status,conclusion \
+                  -q "[.[] | select(.headSha==\"$SHA\" and .status==\"completed\" and .conclusion != \"success\")] | length")
+            failed=$((failed + n))
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::$failed image build workflow(s) failed"
+            exit 1
+          fi
 
       - name: Install crane
         run: |
@@ -79,15 +102,40 @@ jobs:
         run: |
           set -euo pipefail
           SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
-          IMAGES="devai devai-sre devai-dashboard devai-sre-dashboard devai-auth-bff devai-runner devai-mcp-bridge"
+          IMAGES="devai devai-sre devai-dashboard devai-sre-dashboard devai-auth-bff devai-runner devai-browser devai-mcp-bridge"
+          missing=0
           for img in $IMAGES; do
             REPO="${REGISTRY}/${OWNER_REPO}/${img}"
             if crane manifest "${REPO}:latest" >/dev/null 2>&1; then
               echo "tag ${REPO}:latest -> main-${SHA}"
               crane tag "${REPO}:latest" "main-${SHA}"
             else
-              echo "skip ${REPO} (no :latest yet)"
+              echo "::error::missing required image ${REPO}:latest"
+              missing=1
             fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/849928263410/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-actions@tesseracthub-480811.iam.gserviceaccount.com
+          project_id: tesseracthub-480811
+
+      - name: Copy and verify runtime-critical images in direct GAR
+        run: |
+          set -euo pipefail
+          gcloud auth print-access-token | crane auth login "$GAR_REGISTRY" \
+            --username oauth2accesstoken --password-stdin
+          SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          DIRECT_GAR_IMAGES="devai-auth-bff devai-mcp-bridge"
+          for img in $DIRECT_GAR_IMAGES; do
+            source="${REGISTRY}/${OWNER_REPO}/${img}:main-${SHA}"
+            target="${GAR_REGISTRY}/${GAR_REPOSITORY}/${img}:main-${SHA}"
+            echo "copy $source -> $target"
+            crane copy "$source" "$target"
+            crane manifest "$target" >/dev/null
           done
 
       # Only NOW — once every image's main-<sha> tag exists — advance the

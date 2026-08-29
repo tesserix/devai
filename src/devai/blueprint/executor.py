@@ -198,6 +198,7 @@ def _record_stage_evals(spec: StageSpec, task: DevAITask, data: dict[str, Any] |
             db = await get_global_db()
             if db is None:
                 return
+            principal = task.principal or {}
             for evaluator, score, passed in evals:
                 await db.record_eval(
                     run_id=task.id,
@@ -207,6 +208,8 @@ def _record_stage_evals(spec: StageSpec, task: DevAITask, data: dict[str, Any] |
                     stage=spec.name,
                     agent_name=spec.resolved_agent() or "",
                     triggered_by=task.triggered_by or "",
+                    tenant_id=str(principal.get("tenant_id") or ""),
+                    user_id=str(principal.get("uid") or task.triggered_by or ""),
                 )
         except Exception:  # noqa: BLE001 — eval capture is best-effort
             logger.debug("eval persistence failed for stage %s", spec.name, exc_info=True)
@@ -452,7 +455,9 @@ class BlueprintExecutor:
             # re-runs. When recovery exhausts its rounds (or is rejected),
             # the runbook documents everything tried for the human.
             error, failure_state = payload
-            if heal_rounds_left > 0 and await self._heal_stage(spec, task, str(error), _ev):
+            # "unsafe" skips recovery too: healing re-runs the stage, which is
+            # exactly what an uncertain outcome forbids.
+            if outcome != "unsafe" and heal_rounds_left > 0 and await self._heal_stage(spec, task, str(error), _ev):
                 heal_rounds_left -= 1
                 max_attempts = 1  # one healed attempt per recovery round
                 continue
@@ -505,9 +510,15 @@ class BlueprintExecutor:
         # (set BEFORE create_task — task creation snapshots the context), so
         # per-turn envelopes (usage, narration, tool calls) land on the
         # run's event stream without the agents knowing about runs at all.
-        from devai.services.agent_turns import reset_turn_context, set_turn_context
+        from devai.services.agent_turns import reset_turn_context, set_turn_context, update_turn_context
 
         ctx_token = set_turn_context(task.id, spec.resolved_agent() or "", spec.name)
+        principal = task.principal or {}
+        update_turn_context(
+            triggered_by=task.triggered_by or "",
+            tenant_id=str(principal.get("tenant_id") or ""),
+            user_id=str(principal.get("uid") or task.triggered_by or ""),
+        )
 
         sm = self._deps.state_manager
         getter = getattr(sm, "get_pipeline_control", None) if sm is not None else None
@@ -584,8 +595,10 @@ class BlueprintExecutor:
         """Run the stage with transient retries.
 
         Returns ``("ok", result)``, ``("stopped", None)`` (task already
-        CANCELLED + event emitted), or ``("failed", (error, TaskState))``
-        when every attempt failed — the caller decides recovery/on_failure.
+        CANCELLED + event emitted), ``("failed", (error, TaskState))`` when
+        every attempt failed — the caller decides recovery/on_failure — or
+        ``("unsafe", (error, TaskState))`` for a failure that must not be
+        re-run at all, which also skips recovery.
         """
         for attempt in range(1, max_attempts + 1):
             try:
@@ -622,6 +635,11 @@ class BlueprintExecutor:
                 if attempt >= max_attempts:
                     return ("failed", (err, TaskState.AGENT_TIMEOUT))
             except Exception as e:  # noqa: BLE001 — we want to catch all stage errors
+                # A stage that may already have taken effect must not be
+                # re-run — replaying it can execute its tools twice (ADR-0004).
+                if getattr(e, "retry_unsafe", False):
+                    logger.error("stage %s: outcome uncertain — refusing to replay", spec.name)
+                    return ("unsafe", (str(e), TaskState.STAGE_FAILED))
                 logger.exception("stage %s raised (attempt %d/%d)", spec.name, attempt, max_attempts)
                 if attempt >= max_attempts:
                     return ("failed", (str(e), TaskState.STAGE_FAILED))

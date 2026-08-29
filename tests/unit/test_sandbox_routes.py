@@ -2,26 +2,38 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from devai.sandbox.routes import router
+from devai.identity import Principal
+from devai.sandbox.routes import _is_admin, router
 from devai.sandbox.service import SandboxService
 from tests.unit.test_sandbox import _FakeDB
 
 _SAM = {"X-Forwarded-Email": "sam@example.com"}
 _MALLORY = {"X-Forwarded-Email": "mallory@example.com"}
+_TENANT_A = {
+    "X-Forwarded-Email": "same@example.com",
+    "X-Forwarded-Uid": "same-subject",
+    "X-Forwarded-Tenant": "tenant-a",
+}
+_TENANT_B = {**_TENANT_A, "X-Forwarded-Tenant": "tenant-b"}
 _SPEC: dict[str, Any] = {
     "agent": {"name": "code-remediator-agent", "version": "v1.8.2"},
     "model": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
 }
 
 
-def _client(*, wired: bool = True) -> TestClient:
+def _client(*, wired: bool = True, db: Any | None = None, orchestrator: Any | None = None) -> TestClient:
     app = FastAPI()
-    app.state.sandbox_service = SandboxService(_FakeDB()) if wired else None
+    app.state.sandbox_service = SandboxService(db or _FakeDB()) if wired else None
+    app.state.agent_lifecycle_orchestrator = orchestrator
+    app.state.config = SimpleNamespace(temporal_fail_closed=True)
     app.include_router(router)
     return TestClient(app)
 
@@ -33,6 +45,16 @@ def test_create_returns_the_pinned_spec() -> None:
     assert body["status"] == "pending"
     assert body["spec"]["tools"]["default_mode"] == "mock"
     assert body["expires_at"] > body["created_at"]
+
+
+def test_create_derives_quota_identity_from_the_authenticated_tenant() -> None:
+    db = _FakeDB()
+    response = _client(db=db).post("/api/sandboxes", json=_SPEC, headers=_TENANT_A)
+
+    assert response.status_code == 201
+    row = next(iter(db.rows.values()))
+    assert row["tenant_id"] == "tenant-a"
+    assert row["user_id"] == "same-subject"
 
 
 def test_invalid_spec_is_rejected() -> None:
@@ -47,6 +69,41 @@ def test_another_owner_cannot_read_or_destroy() -> None:
     assert client.get(f"/api/sandboxes/{sid}", headers=_MALLORY).status_code == 404
     assert client.delete(f"/api/sandboxes/{sid}", headers=_MALLORY).status_code == 404
     assert client.get(f"/api/sandboxes/{sid}", headers=_SAM).status_code == 200
+
+
+def test_same_email_in_another_tenant_cannot_read_or_destroy() -> None:
+    client = _client()
+    sid = client.post("/api/sandboxes", json=_SPEC, headers=_TENANT_A).json()["id"]
+
+    assert client.get(f"/api/sandboxes/{sid}", headers=_TENANT_B).status_code == 404
+    assert client.delete(f"/api/sandboxes/{sid}", headers=_TENANT_B).status_code == 404
+    assert client.get(f"/api/sandboxes/{sid}", headers=_TENANT_A).status_code == 200
+
+
+def test_only_explicit_platform_admin_has_cross_owner_access() -> None:
+    assert _is_admin(Principal(email="admin@example.com", tenant_id="tenant-b", roles=["admin"])) is False
+    assert _is_admin(Principal(email="legacy-platform@example.com", roles=["admin"])) is True
+    assert _is_admin(Principal(email="platform@example.com", roles=["platform-admin"])) is True
+
+
+def test_platform_admin_session_can_read_across_owners() -> None:
+    class _Redis:
+        async def get(self, key: str) -> str:
+            assert key == "devai:session:platform-session"
+            return json.dumps(
+                {
+                    "user_email": "platform@example.com",
+                    "user_login": "platform-admin",
+                    "roles": ["platform-admin"],
+                }
+            )
+
+    client = _client()
+    client.app.state.state_manager = SimpleNamespace(redis=_Redis())
+    client.cookies.set("devai_session", "platform-session")
+    sid = client.post("/api/sandboxes", json=_SPEC, headers=_TENANT_A).json()["id"]
+
+    assert client.get(f"/api/sandboxes/{sid}").status_code == 200
 
 
 def test_list_is_owner_scoped() -> None:
@@ -67,3 +124,56 @@ def test_destroy_is_terminal() -> None:
 
 def test_routes_503_until_the_service_is_wired() -> None:
     assert _client(wired=False).post("/api/sandboxes", json=_SPEC, headers=_SAM).status_code == 503
+
+
+def test_create_and_cleanup_use_tenant_scoped_durable_workflows() -> None:
+    class _Orchestrator:
+        calls: list[tuple[str, str, str]] = []
+
+        async def provision(self, principal: Principal, spec: dict[str, Any], *, request_id: str) -> dict[str, Any]:
+            self.calls.append(("provision", principal.tenant_id, request_id))
+            now = datetime.now(UTC)
+            return {
+                "id": "sb-durable",
+                "owner": principal.user_scope_id,
+                "status": "ready",
+                "spec": spec,
+                "created_at": now.isoformat(),
+                "expires_at": (now + timedelta(hours=1)).isoformat(),
+                "last_access_at": now.isoformat(),
+                "detail": {},
+            }
+
+        async def cleanup(self, principal: Principal, sandbox_id: str, *, request_id: str) -> dict[str, Any]:
+            self.calls.append(("cleanup", principal.tenant_id, request_id))
+            return {"destroyed": sandbox_id}
+
+    orchestrator = _Orchestrator()
+    client = _client(orchestrator=orchestrator)
+    headers = {**_TENANT_A, "Idempotency-Key": "sandbox-request-42"}
+
+    created = client.post("/api/sandboxes", json=_SPEC, headers=headers)
+    client.app.state.sandbox_service._db.rows["sb-durable"] = {  # noqa: SLF001 - route authorization fixture
+        **created.json(),
+        "owner": "tenant-a:same-subject",
+    }
+    destroyed = client.delete(
+        "/api/sandboxes/sb-durable",
+        headers={**_TENANT_A, "Idempotency-Key": "cleanup-request-42"},
+    )
+
+    assert created.status_code == 201, created.text
+    assert destroyed.status_code == 200, destroyed.text
+    assert orchestrator.calls == [
+        ("provision", "tenant-a", "sandbox-request-42"),
+        ("cleanup", "tenant-a", "cleanup-request-42"),
+    ]
+
+
+def test_durable_sandbox_mutations_require_an_idempotency_key() -> None:
+    client = _client(orchestrator=object())
+
+    response = client.post("/api/sandboxes", json=_SPEC, headers=_TENANT_A)
+
+    assert response.status_code == 422
+    assert "Idempotency-Key" in response.text

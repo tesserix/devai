@@ -168,7 +168,10 @@ def _build_requirements(issue: dict[str, Any]) -> str:
     if labels:
         parts.append(f"**Labels:** {', '.join(labels)}")
     parts.append(f"\n## Description\n\n{body}")
-    return "\n".join(parts)
+
+    from devai.services.guardrails import sanitize_untrusted_text
+
+    return sanitize_untrusted_text("\n".join(parts), "issue")
 
 
 def _issue_principal(issue: dict[str, Any]) -> dict[str, Any] | None:

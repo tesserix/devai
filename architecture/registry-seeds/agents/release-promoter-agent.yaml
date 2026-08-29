@@ -1,26 +1,44 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: release-promoter-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: orchestration
     devai.io/skill: release-promoter
+    devai.io/risk-level: critical
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: release-promoter
+  title: Release Promoter
+  description: "Kargo promotion specialist. Moves a release through the delivery pipeline stage by stage\
+    \ (dev \u2192 staging \u2192 prod) by promoting freight \u2014 immutable artifact sets of image tags,\
+    \ chart versions and commits. Verifies each stage is healthy before promoting to the next, watches\
+    \ the Promotion to completion, and halts the train (never skips a stage) on any failure."
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/release-promoter
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - release-promoter
+  prompts:
+  - release-promoter-prompt-v1
   promptRef: release-promoter-prompt-v1
-  llm:
-    provider: claude
-    model: claude-sonnet-4-20250514
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 25
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: critical
-  roleColor: admin

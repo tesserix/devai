@@ -8,7 +8,7 @@ the long-standing gap where a YAML-only role could not run as a Job at all.
 
 from __future__ import annotations
 
-from devai.adapters.llm.base import LLMResponse
+from devai.adapters.llm.base import LLMResponse, LLMUsage
 from devai.config import Settings
 from devai.pipeline.interfaces import StageDeps
 from devai.specializations.loader import load_specialization_from_string
@@ -43,7 +43,10 @@ class _ScriptedLLM:
         self._text = text
 
     async def generate(self, request):  # noqa: ANN001
-        return LLMResponse(text=self._text)
+        return LLMResponse(
+            text=self._text,
+            usage=LLMUsage(prompt_tokens=7, completion_tokens=3),
+        )
 
 
 def _service(*specs: str) -> SpecializationService:
@@ -65,6 +68,14 @@ async def test_invoke_runs_yaml_spec_via_sdk():
     assert patch is not None
     assert patch["summary"] == "ran in a job"
     assert patch["ok"] is True
+    assert patch["final_text"] == '```json\n{"summary": "ran in a job"}\n```'
+    assert patch["usage"] == {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10,
+        "tool_calls": 0,
+        "turns": 1,
+    }
     # The raw text is surfaced under <name>_text for display/debug.
     assert "job_yaml_text" in patch
 
@@ -82,6 +93,11 @@ async def test_invoke_returns_none_for_unknown_agent():
 
 
 def test_task_from_state_maps_fields_and_context():
+    principal = {
+        "email": "u@example.com",
+        "uid": "user-1",
+        "tenant_id": "tenant-a",
+    }
     task = SpecializationService._task_from_state(
         {
             "run_id": "devai-abc",
@@ -90,6 +106,8 @@ def test_task_from_state_maps_fields_and_context():
             "trigger_actor": "u@example.com",
             "trace_id": "t1",
             "blueprint": "alm-pipeline",
+            "principal": principal,
+            "team_id": "team-a",
             "upstream_output": "PRIOR",  # non-reserved → handover context
         }
     )
@@ -97,6 +115,10 @@ def test_task_from_state_maps_fields_and_context():
     assert task.intent == "ship it"
     assert task.repo == "o/r"
     assert task.triggered_by == "u@example.com"
+    assert task.principal == principal
+    assert task.team_id == "team-a"
     assert task.agent_context["upstream_output"] == "PRIOR"
     # Reserved keys don't leak into the handover bag.
     assert "requirements" not in task.agent_context
+    assert "principal" not in task.agent_context
+    assert "team_id" not in task.agent_context

@@ -33,39 +33,79 @@ _SRE_RE = re.compile(r"^- \[([^\]]+)\]\((https://github\.com/[^)]+)\) - (.+?)\s*
 # carries devai.io/team + tags so it's filterable.
 TEAM_CATEGORY: dict[str, str] = {
     # ai / ml
-    "anthropics": "ai", "openai": "ai", "google-gemini": "ai", "google": "ai",
-    "fal-ai-community": "ai", "huggingface": "ai", "replicate": "ai", "veniceai": "ai",
-    "nvidia": "ai", "firebase": "ai", "minimax-ai": "ai", "modelcontextprotocol": "ai",
+    "anthropics": "ai",
+    "openai": "ai",
+    "google-gemini": "ai",
+    "google": "ai",
+    "fal-ai-community": "ai",
+    "huggingface": "ai",
+    "replicate": "ai",
+    "veniceai": "ai",
+    "nvidia": "ai",
+    "firebase": "ai",
+    "minimax-ai": "ai",
+    "modelcontextprotocol": "ai",
     # coding / platform
-    "microsoft": "coding", "wordpress": "coding", "garrytan": "coding", "obra": "coding",
+    "microsoft": "coding",
+    "wordpress": "coding",
+    "garrytan": "coding",
+    "obra": "coding",
     # security
     "trailofbits": "security",
     # infra / cloud
-    "hashicorp": "infra", "cloudflare": "infra", "netlify": "infra", "google-cloud": "infra",
+    "hashicorp": "infra",
+    "cloudflare": "infra",
+    "netlify": "infra",
+    "google-cloud": "infra",
     # frontend / design
-    "vercel-labs": "frontend", "angular": "frontend", "expo": "frontend", "flutter": "frontend",
-    "figma": "frontend", "google-labs-code": "frontend", "gsap": "frontend", "addyosmani": "frontend",
+    "vercel-labs": "frontend",
+    "angular": "frontend",
+    "expo": "frontend",
+    "flutter": "frontend",
+    "figma": "frontend",
+    "google-labs-code": "frontend",
+    "gsap": "frontend",
+    "addyosmani": "frontend",
     # data
-    "clickhouse": "data", "neondatabase": "data", "supabase": "data", "redis": "data",
-    "tinybirdco": "data", "mongodb": "data", "duckdb": "data",
+    "clickhouse": "data",
+    "neondatabase": "data",
+    "supabase": "data",
+    "redis": "data",
+    "tinybirdco": "data",
+    "mongodb": "data",
+    "duckdb": "data",
     # auth
-    "auth0": "auth", "better-auth": "auth",
+    "auth0": "auth",
+    "better-auth": "auth",
     # fintech / web3
-    "stripe": "fintech", "coinbase": "fintech", "binance": "fintech",
+    "stripe": "fintech",
+    "coinbase": "fintech",
+    "binance": "fintech",
     # marketing
-    "coreyhaines31": "marketing", "realkimbarrett": "marketing", "typefully": "marketing",
+    "coreyhaines31": "marketing",
+    "realkimbarrett": "marketing",
+    "typefully": "marketing",
     # product
-    "deanpeters": "product", "phuryn": "product",
+    "deanpeters": "product",
+    "phuryn": "product",
     # sre / observability
-    "getsentry": "sre", "datadog-labs": "sre",
+    "getsentry": "sre",
+    "datadog-labs": "sre",
     # review
     "coderabbitai": "review",
     # devtools / integrations
-    "composiohq": "devtools", "firecrawl": "devtools", "brave": "devtools",
-    "browserbase": "devtools", "apollographql": "devtools", "googleworkspace": "devtools",
-    "trycourier": "devtools", "resend": "devtools", "notion": "devtools",
+    "composiohq": "devtools",
+    "firecrawl": "devtools",
+    "brave": "devtools",
+    "browserbase": "devtools",
+    "apollographql": "devtools",
+    "googleworkspace": "devtools",
+    "trycourier": "devtools",
+    "resend": "devtools",
+    "notion": "devtools",
     # content
-    "sanity-io": "content", "remotion-dev": "content",
+    "sanity-io": "content",
+    "remotion-dev": "content",
     # agents
     "voltagent": "agents",
 }
@@ -80,8 +120,9 @@ def _title(skill_id: str) -> str:
     return skill_id.split("/")[-1].replace("-", " ").replace("_", " ").replace(".", " ").strip().title()
 
 
-def _envelope(team: str, skill_id: str, description: str, *, category: str,
-              origin: str, source: str, risk: str) -> dict:
+def _envelope(
+    team: str, skill_id: str, description: str, *, category: str, origin: str, source: str, risk: str
+) -> dict:
     name = _slug(f"{team}-{skill_id.split('/')[-1]}")
     return {
         "apiVersion": "registry.solo.io/v1alpha1",
@@ -132,9 +173,17 @@ def parse_voltagent(text: str) -> list[dict]:
         team_slug = _slug(team)
         category = TEAM_CATEGORY.get(team_slug, "general")
         source = "officialskills.sh" if "officialskills.sh" in url else "github"
-        out.append(_envelope(team, skill_id, desc, category=category,
-                             origin="voltagent-awesome-skills", source=source,
-                             risk=_risk_for(team_slug, category)))
+        out.append(
+            _envelope(
+                team,
+                skill_id,
+                desc,
+                category=category,
+                origin="voltagent-awesome-skills",
+                source=source,
+                risk=_risk_for(team_slug, category),
+            )
+        )
     return out
 
 
@@ -144,7 +193,7 @@ def parse_aisre(text: str) -> list[dict]:
         m = _SRE_RE.match(line)
         if not m:
             continue
-        name, url, desc = m.group(1).strip(), m.group(2), m.group(3).strip()
+        _, url, desc = m.group(1).strip(), m.group(2), m.group(3).strip()
         path = url.split("github.com/", 1)[1].strip("/")
         parts = path.split("/")
         if len(parts) < 2:
@@ -153,8 +202,11 @@ def parse_aisre(text: str) -> list[dict]:
         # Exclude curated "awesome-*" lists (they're indexes, not tools).
         if repo.lower().startswith("awesome") or owner.lower() == "features":
             continue
-        out.append(_envelope(owner, f"{owner}/{repo}", desc, category="sre",
-                             origin="awesome-ai-sre", source="github", risk="low"))
+        out.append(
+            _envelope(
+                owner, f"{owner}/{repo}", desc, category="sre", origin="awesome-ai-sre", source="github", risk="low"
+            )
+        )
     return out
 
 

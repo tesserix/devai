@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from datetime import datetime
+import uuid
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+class SandboxQuotaExceeded(RuntimeError):
+    """An atomic sandbox reservation crossed a tenant/user quota."""
 
 
 class Database:
@@ -173,6 +176,9 @@ class Database:
         cost_usd: float,
         duration_ms: float,
         status: str = "ok",
+        tenant_id: str = "",
+        user_id: str = "",
+        triggered_by: str = "",
     ) -> None:
         """Persist one LLM call as a completed agent_executions row.
 
@@ -186,8 +192,9 @@ class Database:
             await self.pool.execute(
                 """INSERT INTO agent_executions
                    (run_id, agent_name, status, started_at, completed_at, duration_ms,
-                    provider, model, tokens_input, tokens_output, llm_cost_usd)
-                   VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6, $7, $8, $9)""",
+                    provider, model, tokens_input, tokens_output, llm_cost_usd,
+                    tenant_id, user_id, triggered_by)
+                   VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
                 run_id,
                 agent_name or "unknown",
                 "completed" if status == "ok" else "failed",
@@ -197,6 +204,9 @@ class Database:
                 int(tokens_input),
                 int(tokens_output),
                 float(cost_usd),
+                tenant_id,
+                user_id,
+                triggered_by,
             )
         except Exception:  # noqa: BLE001 — accounting must never break an LLM call
             logger.debug("record_llm_call failed (agent=%s)", agent_name, exc_info=True)
@@ -608,7 +618,9 @@ class Database:
     # best-effort: callers wrap in try/except so a missing table → empty.
     # =========================================================================
 
-    async def analytics_agent_stats(self, days: int = 30) -> list[dict[str, Any]]:
+    async def analytics_agent_stats(
+        self, days: int = 30, *, tenant_id: str = "", user_id: str = ""
+    ) -> list[dict[str, Any]]:
         """Per-agent executions, avg duration, tokens, cost, failures."""
         rows = await self.pool.fetch(
             """SELECT agent_name,
@@ -620,13 +632,19 @@ class Database:
                       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)::int AS failures
                FROM agent_executions
                WHERE started_at >= NOW() - make_interval(days => $1)
+                 AND ($2 = '' OR tenant_id = $2)
+                 AND ($3 = '' OR user_id = $3)
                GROUP BY agent_name
                ORDER BY executions DESC""",
             days,
+            tenant_id,
+            user_id,
         )
         return [dict(r) for r in rows]
 
-    async def analytics_llm_cost_by_model(self, days: int = 30) -> list[dict[str, Any]]:
+    async def analytics_llm_cost_by_model(
+        self, days: int = 30, *, tenant_id: str = "", user_id: str = ""
+    ) -> list[dict[str, Any]]:
         """Calls, tokens, and USD cost grouped by provider/model."""
         rows = await self.pool.fetch(
             """SELECT COALESCE(provider, 'unknown')          AS provider,
@@ -637,13 +655,19 @@ class Database:
                       COALESCE(SUM(llm_cost_usd), 0)::float   AS cost_usd
                FROM agent_executions
                WHERE started_at >= NOW() - make_interval(days => $1)
+                 AND ($2 = '' OR tenant_id = $2)
+                 AND ($3 = '' OR user_id = $3)
                GROUP BY provider, model
                ORDER BY cost_usd DESC NULLS LAST""",
             days,
+            tenant_id,
+            user_id,
         )
         return [dict(r) for r in rows]
 
-    async def analytics_llm_cost_timeseries(self, days: int = 30) -> list[dict[str, Any]]:
+    async def analytics_llm_cost_timeseries(
+        self, days: int = 30, *, tenant_id: str = "", user_id: str = ""
+    ) -> list[dict[str, Any]]:
         """Daily LLM cost + token totals."""
         rows = await self.pool.fetch(
             """SELECT to_char(date_trunc('day', started_at), 'YYYY-MM-DD') AS date,
@@ -651,8 +675,12 @@ class Database:
                       COALESCE(SUM(tokens_input + tokens_output), 0)::bigint AS tokens
                FROM agent_executions
                WHERE started_at >= NOW() - make_interval(days => $1)
+                 AND ($2 = '' OR tenant_id = $2)
+                 AND ($3 = '' OR user_id = $3)
                GROUP BY 1 ORDER BY 1""",
             days,
+            tenant_id,
+            user_id,
         )
         return [dict(r) for r in rows]
 
@@ -668,7 +696,9 @@ class Database:
         stage: str = "",
         agent_name: str = "",
         triggered_by: str = "",
-        detail: dict | None = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        detail: dict[str, Any] | None = None,
     ) -> None:
         """Persist one quality eval (review/security/tests → 0..1 score).
 
@@ -676,6 +706,11 @@ class Database:
         swallowed so capturing an eval never breaks a run.
         """
         try:
+            scoped_detail = dict(detail or {})
+            if tenant_id:
+                scoped_detail["tenant_id"] = tenant_id
+            if user_id:
+                scoped_detail["user_id"] = user_id
             await self.pool.execute(
                 """INSERT INTO agent_evals
                    (run_id, stage, agent_name, evaluator, score, passed, triggered_by, detail)
@@ -687,23 +722,28 @@ class Database:
                 float(max(0.0, min(1.0, score))),
                 bool(passed),
                 triggered_by,
-                json.dumps(detail or {}),
+                json.dumps(scoped_detail),
             )
         except Exception:  # noqa: BLE001
             logger.debug("record_eval failed (evaluator=%s)", evaluator, exc_info=True)
 
-    async def analytics_evals(self, days: int = 30, user: str = "") -> dict[str, Any]:
-        """Eval summary + by-evaluator + recent, optionally scoped to a user.
-
-        When ``user`` is set, only that user's runs are included — this is
-        what makes the Evals analytics tenant-isolated.
-        """
+    async def analytics_evals(
+        self,
+        days: int = 30,
+        *,
+        tenant_id: str = "",
+        user_id: str = "",
+    ) -> dict[str, Any]:
+        """Eval summary scoped to a tenant and, for non-admins, one subject."""
         try:
             where = "created_at >= NOW() - make_interval(days => $1)"
             args: list[Any] = [days]
-            if user:
-                where += " AND triggered_by = $2"
-                args.append(user)
+            if tenant_id:
+                args.append(tenant_id)
+                where += f" AND detail->>'tenant_id' = ${len(args)}"
+            if user_id:
+                args.append(user_id)
+                where += f" AND detail->>'user_id' = ${len(args)}"
             summary = await self.pool.fetchrow(
                 f"""SELECT COUNT(*)::int AS evals,
                            COALESCE(AVG(score), 0)::float AS avg_score,
@@ -1051,6 +1091,373 @@ class Database:
         )
 
     # =========================================================================
+    # Evaluation datasets and suites — immutable, user-scoped versions (#184)
+    # =========================================================================
+
+    async def create_eval_dataset_version(
+        self,
+        *,
+        owner_scope: str,
+        tenant_id: str,
+        user_id: str,
+        name: str,
+        version: str,
+        description: str,
+        case_count: int,
+        content_hash: str,
+        blob_key: str,
+    ) -> dict[str, Any] | None:
+        async with self.pool.acquire() as connection, connection.transaction():
+            dataset = await connection.fetchrow(
+                """INSERT INTO eval_datasets
+                         (owner_scope, tenant_id, user_id, name, description)
+                       VALUES ($1, $2, $3, $4, $5)
+                       ON CONFLICT (owner_scope, name)
+                       DO UPDATE SET updated_at = eval_datasets.updated_at
+                       RETURNING id""",
+                owner_scope,
+                tenant_id,
+                user_id,
+                name,
+                description,
+            )
+            if dataset is None:
+                return None
+            row = await connection.fetchrow(
+                """WITH inserted AS (
+                         INSERT INTO eval_dataset_versions
+                             (dataset_id, version, description, case_count, content_hash, blob_key)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (dataset_id, version) DO NOTHING
+                         RETURNING *
+                       )
+                       SELECT d.name, i.version, i.description, i.case_count,
+                              i.content_hash, i.blob_key, d.owner_scope, i.created_at
+                         FROM inserted i
+                         JOIN eval_datasets d ON d.id = i.dataset_id""",
+                dataset["id"],
+                version,
+                description,
+                case_count,
+                content_hash,
+                blob_key,
+            )
+        return dict(row) if row else None
+
+    async def list_eval_datasets(self, owner_scope: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            """SELECT d.name, v.version, v.description, v.case_count,
+                      v.content_hash, v.blob_key, d.owner_scope, v.created_at
+                 FROM eval_datasets d
+                 JOIN eval_dataset_versions v ON v.dataset_id = d.id
+                WHERE d.owner_scope = $1
+                ORDER BY v.created_at DESC, d.name, v.version
+                LIMIT $2""",
+            owner_scope,
+            limit,
+        )
+        return [dict(row) for row in rows]
+
+    async def get_eval_dataset_version(
+        self,
+        owner_scope: str,
+        name: str,
+        version: str,
+    ) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT d.name, v.version, v.description, v.case_count,
+                      v.content_hash, v.blob_key, d.owner_scope, v.created_at
+                 FROM eval_datasets d
+                 JOIN eval_dataset_versions v ON v.dataset_id = d.id
+                WHERE d.owner_scope = $1 AND d.name = $2 AND v.version = $3""",
+            owner_scope,
+            name,
+            version,
+        )
+        return dict(row) if row else None
+
+    async def create_eval_suite(
+        self,
+        *,
+        owner_scope: str,
+        tenant_id: str,
+        user_id: str,
+        name: str,
+        version: str,
+        description: str,
+        dataset_name: str,
+        dataset_version: str,
+        scorers: list[str],
+        thresholds: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                """WITH selected AS (
+                         SELECT dv.id AS dataset_version_id
+                           FROM eval_datasets d
+                           JOIN eval_dataset_versions dv ON dv.dataset_id = d.id
+                          WHERE d.owner_scope = $1 AND d.name = $7 AND dv.version = $8
+                       ), inserted AS (
+                         INSERT INTO eval_suites
+                             (owner_scope, tenant_id, user_id, name, version, description,
+                              dataset_version_id, scorers, thresholds)
+                         SELECT $1, $2, $3, $4, $5, $6,
+                                selected.dataset_version_id, $9::text[], $10::jsonb
+                           FROM selected
+                         ON CONFLICT (owner_scope, name, version) DO NOTHING
+                         RETURNING *
+                       )
+                       SELECT i.name, i.version, i.description,
+                              d.name AS dataset_name, dv.version AS dataset_version,
+                              i.scorers, i.thresholds, i.owner_scope, i.created_at
+                         FROM inserted i
+                         JOIN eval_dataset_versions dv ON dv.id = i.dataset_version_id
+                         JOIN eval_datasets d ON d.id = dv.dataset_id""",
+                owner_scope,
+                tenant_id,
+                user_id,
+                name,
+                version,
+                description,
+                dataset_name,
+                dataset_version,
+                scorers,
+                json.dumps(thresholds),
+            )
+        return dict(row) if row else None
+
+    async def list_eval_suites(self, owner_scope: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            """SELECT s.name, s.version, s.description,
+                      d.name AS dataset_name, dv.version AS dataset_version,
+                      s.scorers, s.thresholds, s.owner_scope, s.created_at
+                 FROM eval_suites s
+                 JOIN eval_dataset_versions dv ON dv.id = s.dataset_version_id
+                 JOIN eval_datasets d ON d.id = dv.dataset_id
+                WHERE s.owner_scope = $1
+                ORDER BY s.created_at DESC, s.name, s.version
+                LIMIT $2""",
+            owner_scope,
+            limit,
+        )
+        return [dict(row) for row in rows]
+
+    async def get_eval_suite(self, owner_scope: str, name: str, version: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT s.name, s.version, s.description,
+                      d.name AS dataset_name, dv.version AS dataset_version,
+                      s.scorers, s.thresholds, s.owner_scope, s.created_at
+                 FROM eval_suites s
+                 JOIN eval_dataset_versions dv ON dv.id = s.dataset_version_id
+                 JOIN eval_datasets d ON d.id = dv.dataset_id
+                WHERE s.owner_scope = $1 AND s.name = $2 AND s.version = $3""",
+            owner_scope,
+            name,
+            version,
+        )
+        return dict(row) if row else None
+
+    async def save_eval_run(self, run: dict[str, Any]) -> None:
+        owner_scope = str(run["owner_scope"])
+        dataset = run.get("dataset") or None
+        suite = run.get("suite") or None
+        dataset_version_id = None
+        suite_id = None
+        async with self.pool.acquire() as connection, connection.transaction():
+            if suite:
+                if not dataset:
+                    raise RuntimeError("eval suite run is missing its pinned dataset version")
+                resolved = await connection.fetchrow(
+                    """SELECT s.id AS suite_id, dv.id AS dataset_version_id
+                         FROM eval_suites s
+                         JOIN eval_dataset_versions dv ON dv.id = s.dataset_version_id
+                         JOIN eval_datasets d ON d.id = dv.dataset_id
+                        WHERE s.owner_scope = $1
+                          AND s.name = $2 AND s.version = $3
+                          AND d.name = $4 AND dv.version = $5""",
+                    owner_scope,
+                    suite["name"],
+                    suite["version"],
+                    dataset["name"],
+                    dataset["version"],
+                )
+                if resolved is not None:
+                    suite_id = resolved["suite_id"]
+                    dataset_version_id = resolved["dataset_version_id"]
+            elif dataset:
+                resolved = await connection.fetchrow(
+                    """SELECT dv.id AS dataset_version_id
+                         FROM eval_datasets d
+                         JOIN eval_dataset_versions dv ON dv.dataset_id = d.id
+                        WHERE d.owner_scope = $1 AND d.name = $2 AND dv.version = $3""",
+                    owner_scope,
+                    dataset["name"],
+                    dataset["version"],
+                )
+                if resolved is not None:
+                    dataset_version_id = resolved["dataset_version_id"]
+            await connection.execute(
+                """INSERT INTO eval_runs
+                         (id, owner_scope, tenant_id, user_id, sandbox_id, agent,
+                          configuration, dataset_version_id, suite_id, dataset_ref,
+                          suite_ref, summary, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9,
+                               $10::jsonb, $11::jsonb, $12::jsonb, $13)""",
+                run["id"],
+                owner_scope,
+                run.get("tenant_id") or "",
+                run.get("user_id") or "",
+                run["sandbox_id"],
+                run.get("agent") or "",
+                json.dumps(run.get("configuration") or {}),
+                dataset_version_id,
+                suite_id,
+                json.dumps(dataset) if dataset else None,
+                json.dumps(suite) if suite else None,
+                json.dumps(run.get("summary") or {}),
+                datetime.fromisoformat(str(run["created_at"])),
+            )
+            for case_index, result in enumerate(run.get("results") or []):
+                await connection.execute(
+                    """INSERT INTO eval_case_results
+                             (eval_run_id, case_index, case_id, passed, result)
+                           VALUES ($1, $2, $3, $4, $5::jsonb)""",
+                    run["id"],
+                    case_index,
+                    result.get("name") or f"case-{case_index}",
+                    bool(result.get("passed")),
+                    json.dumps(result),
+                )
+
+    async def get_eval_run(self, owner_scope: str, sandbox_id: str, run_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            self._eval_run_select()
+            + " WHERE r.owner_scope = $1 AND r.sandbox_id = $2 AND r.id = $3"
+            + self._eval_run_group(),
+            owner_scope,
+            sandbox_id,
+            run_id,
+        )
+        return self._eval_run_record(row) if row else None
+
+    async def get_eval_run_by_id(self, owner_scope: str, run_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            self._eval_run_select() + " WHERE r.owner_scope = $1 AND r.id = $2" + self._eval_run_group(),
+            owner_scope,
+            run_id,
+        )
+        return self._eval_run_record(row) if row else None
+
+    async def list_eval_runs(
+        self,
+        owner_scope: str,
+        sandbox_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            self._eval_run_select()
+            + " WHERE r.owner_scope = $1 AND r.sandbox_id = $2"
+            + self._eval_run_group()
+            + " ORDER BY r.created_at DESC LIMIT $3",
+            owner_scope,
+            sandbox_id,
+            limit,
+        )
+        return [self._eval_run_record(row) for row in rows]
+
+    async def create_eval_comparison(self, **values: Any) -> dict[str, Any]:
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                """INSERT INTO eval_comparisons
+                         (id, owner_scope, tenant_id, user_id, baseline_run_id,
+                          candidate_run_id, axes, result)
+                       SELECT $1, $2, $3, $4, baseline.id, candidate.id,
+                              $7::jsonb, $8::jsonb
+                         FROM eval_runs baseline
+                         JOIN eval_runs candidate ON candidate.id = $6
+                        WHERE baseline.id = $5
+                          AND baseline.owner_scope = $2
+                          AND candidate.owner_scope = $2
+                       ON CONFLICT (id) DO UPDATE
+                         SET result = eval_comparisons.result
+                       WHERE eval_comparisons.owner_scope = EXCLUDED.owner_scope
+                         AND eval_comparisons.baseline_run_id = EXCLUDED.baseline_run_id
+                         AND eval_comparisons.candidate_run_id = EXCLUDED.candidate_run_id
+                       RETURNING id, result, created_at""",
+                values["id"],
+                values["owner_scope"],
+                values.get("tenant_id") or "",
+                values.get("user_id") or "",
+                values["baseline_run_id"],
+                values["candidate_run_id"],
+                json.dumps(values.get("axes") or []),
+                json.dumps(values.get("result") or {}),
+            )
+        if row is None:
+            raise RuntimeError("owned evaluation runs not found")
+        result = dict(row)
+        if isinstance(result.get("result"), str):
+            result["result"] = json.loads(result["result"])
+        return result
+
+    async def get_eval_comparison(self, owner_scope: str, comparison_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT id, result, created_at
+                 FROM eval_comparisons
+                WHERE owner_scope = $1 AND id = $2""",
+            owner_scope,
+            comparison_id,
+        )
+        if row is None:
+            return None
+        result = dict(row)
+        if isinstance(result.get("result"), str):
+            result["result"] = json.loads(result["result"])
+        return result
+
+    @staticmethod
+    def _eval_run_select() -> str:
+        return """SELECT r.id, r.owner_scope, r.tenant_id, r.user_id,
+                         r.sandbox_id, r.agent, r.configuration, r.created_at, r.summary,
+                         COALESCE(
+                           CASE WHEN dv.id IS NULL THEN NULL
+                                ELSE jsonb_build_object('name', d.name, 'version', dv.version) END,
+                           r.dataset_ref
+                         ) AS dataset,
+                         COALESCE(
+                           CASE WHEN s.id IS NULL THEN NULL
+                                ELSE jsonb_build_object('name', s.name, 'version', s.version) END,
+                           r.suite_ref
+                         ) AS suite,
+                         COALESCE(
+                           jsonb_agg(cr.result ORDER BY cr.case_index)
+                             FILTER (WHERE cr.id IS NOT NULL),
+                           '[]'::jsonb
+                         ) AS results
+                    FROM eval_runs r
+                    LEFT JOIN eval_dataset_versions dv ON dv.id = r.dataset_version_id
+                    LEFT JOIN eval_datasets d ON d.id = dv.dataset_id
+                    LEFT JOIN eval_suites s ON s.id = r.suite_id
+                    LEFT JOIN eval_case_results cr ON cr.eval_run_id = r.id"""
+
+    @staticmethod
+    def _eval_run_group() -> str:
+        return """ GROUP BY r.id, r.owner_scope, r.tenant_id, r.user_id,
+                            r.sandbox_id, r.agent, r.configuration, r.created_at, r.summary,
+                            r.dataset_ref, r.suite_ref,
+                            dv.id, d.name, dv.version, s.id, s.name, s.version"""
+
+    @staticmethod
+    def _eval_run_record(row: Any) -> dict[str, Any]:
+        result = dict(row)
+        for key in ("configuration", "summary", "dataset", "suite", "results"):
+            value = result.get(key)
+            if isinstance(value, str):
+                result[key] = json.loads(value)
+        return result
+
+    # =========================================================================
     # Agent sandboxes — one row per pinned agent configuration (#179)
     #
     # DDL lives in tesserix-k8s db-schema-bootstrap (sandboxes). The spec is
@@ -1067,19 +1474,60 @@ class Database:
         created_at: datetime,
         expires_at: datetime,
         last_access_at: datetime | None = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        max_live_per_tenant: int = 0,
+        monthly_cost_limit_usd: float = 0.0,
     ) -> None:
-        await self.pool.execute(
-            """INSERT INTO sandboxes
-                 (id, owner, spec, status, created_at, expires_at, last_access_at)
-               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)""",
-            sandbox_id,
-            owner,
-            json.dumps(spec),
-            status,
-            created_at,
-            expires_at,
-            last_access_at or created_at,
-        )
+        quota_key = tenant_id or user_id or owner
+        async with self.pool.acquire() as connection, connection.transaction():
+            if quota_key and (max_live_per_tenant > 0 or monthly_cost_limit_usd > 0):
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"sandbox-quota:{quota_key}",
+                )
+            if max_live_per_tenant > 0:
+                live = await connection.fetchval(
+                    """SELECT COUNT(*)
+                         FROM sandboxes
+                        WHERE status NOT IN ('destroyed', 'failed')
+                          AND (($1 <> '' AND split_part(owner, ':', 1) = $1)
+                               OR ($1 = '' AND owner = $2))""",
+                    tenant_id,
+                    owner,
+                )
+                if int(live or 0) >= max_live_per_tenant:
+                    scope = f"tenant {tenant_id}" if tenant_id else f"user {user_id or owner}"
+                    raise SandboxQuotaExceeded(f"{scope} reached its concurrent sandbox quota ({max_live_per_tenant})")
+            if monthly_cost_limit_usd > 0:
+                spent = await connection.fetchval(
+                    """SELECT COALESCE(SUM(llm_cost_usd), 0)
+                         FROM agent_executions
+                        WHERE run_id LIKE 'sandbox:%'
+                          AND started_at >= date_trunc('month', CURRENT_TIMESTAMP)
+                          AND (($1 <> '' AND (tenant_id = $1 OR (tenant_id = '' AND user_id = $3)))
+                               OR ($1 = '' AND user_id = $2))""",
+                    tenant_id,
+                    user_id or owner,
+                    owner,
+                )
+                if float(spent or 0.0) >= monthly_cost_limit_usd:
+                    scope = f"tenant {tenant_id}" if tenant_id else f"user {user_id or owner}"
+                    raise SandboxQuotaExceeded(
+                        f"{scope} reached its monthly sandbox cost quota (${monthly_cost_limit_usd:.2f})"
+                    )
+            await connection.execute(
+                """INSERT INTO sandboxes
+                     (id, owner, spec, status, created_at, expires_at, last_access_at)
+                   VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)""",
+                sandbox_id,
+                owner,
+                json.dumps(spec),
+                status,
+                created_at,
+                expires_at,
+                last_access_at or created_at,
+            )
 
     async def get_sandbox(self, sandbox_id: str) -> dict[str, Any] | None:
         row = await self.pool.fetchrow("SELECT * FROM sandboxes WHERE id = $1", sandbox_id)
@@ -1118,6 +1566,249 @@ class Database:
             limit,
         )
         return [dict(r) for r in rows]
+
+    async def record_agent_lifecycle_event(self, **values: Any) -> dict[str, Any]:
+        """Append one transition and its delivery intent atomically."""
+        columns = """id, workflow_id, sequence, owner_scope, tenant_id,
+                     operation, state, step, error_code, created_at"""
+        args = (
+            values["id"],
+            values["workflow_id"],
+            values["sequence"],
+            values["owner_scope"],
+            values.get("tenant_id", ""),
+            values["operation"],
+            values["state"],
+            values["step"],
+            values.get("error_code", ""),
+            values["created_at"],
+        )
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""INSERT INTO agent_lifecycle_events ({columns})
+                    VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (workflow_id, sequence) DO NOTHING
+                    RETURNING {columns}""",
+                *args,
+            )
+            if row is None:
+                row = await connection.fetchrow(
+                    f"""SELECT {columns}
+                          FROM agent_lifecycle_events
+                         WHERE workflow_id = $1 AND sequence = $2""",
+                    values["workflow_id"],
+                    values["sequence"],
+                )
+                if row is None:
+                    raise RuntimeError("agent lifecycle event idempotency winner disappeared")
+            event = dict(row)
+            payload = {
+                "event_id": str(event["id"]),
+                "workflow_id": event["workflow_id"],
+                "sequence": event["sequence"],
+                "operation": event["operation"],
+                "state": event["state"],
+                "step": event["step"],
+                "error_code": event["error_code"],
+            }
+            outbox_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"devai:lifecycle-outbox:{event['id']}"))
+            await connection.execute(
+                """INSERT INTO agent_lifecycle_outbox
+                     (id, event_id, owner_scope, event_type, payload, created_at)
+                   VALUES ($1::uuid, $2::uuid, $3, 'agent_lifecycle.transitioned', $4::jsonb, $5)
+                   ON CONFLICT (event_id, event_type) DO NOTHING""",
+                outbox_id,
+                str(event["id"]),
+                event["owner_scope"],
+                json.dumps(payload),
+                event["created_at"],
+            )
+        event["id"] = str(event["id"])
+        return event
+
+    async def pending_agent_lifecycle_outbox(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Read committed delivery intents oldest-first for at-least-once publication."""
+        rows = await self.pool.fetch(
+            """SELECT o.id, o.event_id, o.event_type, o.payload, o.created_at,
+                      e.tenant_id
+                 FROM agent_lifecycle_outbox AS o
+                 JOIN agent_lifecycle_events AS e ON e.id = o.event_id
+                WHERE o.published_at IS NULL
+                ORDER BY o.created_at, o.id
+                LIMIT $1""",
+            max(1, min(limit, 500)),
+        )
+        return [dict(row) for row in rows]
+
+    async def mark_agent_lifecycle_outbox_published(
+        self,
+        outbox_id: str,
+        *,
+        published_at: datetime,
+    ) -> None:
+        await self.pool.execute(
+            """UPDATE agent_lifecycle_outbox
+                  SET published_at = $2
+                WHERE id = $1::uuid AND published_at IS NULL""",
+            outbox_id,
+            published_at,
+        )
+
+    async def agent_lifecycle_operational_snapshot(self) -> dict[str, float]:
+        """Return low-cardinality backlog and capacity measurements for telemetry."""
+        row = await self.pool.fetchrow(
+            """WITH latest_workflows AS (
+                   SELECT DISTINCT ON (workflow_id) workflow_id, state
+                     FROM agent_lifecycle_events
+                    ORDER BY workflow_id, sequence DESC
+               )
+               SELECT
+                   (SELECT COUNT(*) FROM sandboxes WHERE status <> 'destroyed') AS live_sandboxes,
+                   (SELECT COUNT(*) FROM sandboxes WHERE status = 'pending') AS pending_sandboxes,
+                   (SELECT COUNT(*) FROM sandboxes WHERE status = 'destroying') AS destroying_sandboxes,
+                   (SELECT COUNT(*)
+                      FROM sandboxes
+                     WHERE status = 'destroying'
+                        OR (status <> 'destroyed' AND expires_at <= NOW())) AS cleanup_backlog,
+                   (SELECT COUNT(*) FROM latest_workflows WHERE state = 'stuck') AS stuck_workflows,
+                   (SELECT COUNT(*)
+                      FROM agent_lifecycle_outbox
+                     WHERE published_at IS NULL) AS outbox_pending,
+                   COALESCE((
+                       SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))
+                         FROM agent_lifecycle_outbox
+                        WHERE published_at IS NULL
+                   ), 0) AS outbox_oldest_age_seconds"""
+        )
+        if row is None:
+            return {}
+        return {str(key): float(value or 0.0) for key, value in dict(row).items()}
+
+    async def create_agent_import(self, **values: Any) -> dict[str, Any]:
+        """Atomically create one import snapshot and its publication intent."""
+        columns = """id, owner_scope, tenant_id, project_id, idempotency_key,
+                     request_fingerprint, registry_ref, state, agent,
+                     dependency_lock, permissions, conformance, created_by,
+                     created_at, updated_at"""
+        args = (
+            values["id"],
+            values["owner_scope"],
+            values.get("tenant_id", ""),
+            values["project_id"],
+            values["idempotency_key"],
+            values["request_fingerprint"],
+            values["registry_ref"],
+            values["state"],
+            json.dumps(values["agent"]),
+            json.dumps(values["dependency_lock"]),
+            json.dumps(values.get("permissions") or {}),
+            json.dumps(values["conformance"]),
+            values["created_by"],
+            values["created_at"],
+            values["updated_at"],
+        )
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""INSERT INTO agent_imports ({columns})
+                    VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8,
+                            $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb,
+                            $13, $14, $15)
+                    ON CONFLICT (owner_scope, project_id, idempotency_key) DO NOTHING
+                    RETURNING {columns}""",
+                *args,
+            )
+            if row is None:
+                row = await connection.fetchrow(
+                    f"""SELECT {columns}
+                          FROM agent_imports
+                         WHERE owner_scope = $1 AND project_id = $2 AND idempotency_key = $3""",
+                    values["owner_scope"],
+                    values["project_id"],
+                    values["idempotency_key"],
+                )
+                if row is None:
+                    raise RuntimeError("agent import idempotency winner disappeared")
+            else:
+                payload = {
+                    "import_id": values["id"],
+                    "project_id": values["project_id"],
+                    "registry_ref": values["registry_ref"],
+                    "agent_digest": values["agent"].get("digest", ""),
+                    "conformance": values["conformance"],
+                }
+                await connection.execute(
+                    """INSERT INTO agent_import_outbox
+                         (id, import_id, owner_scope, event_type, payload, created_at)
+                       VALUES ($1::uuid, $2::uuid, $3, 'agent_import.created', $4::jsonb, $5)""",
+                    str(uuid.uuid4()),
+                    values["id"],
+                    values["owner_scope"],
+                    json.dumps(payload),
+                    values["created_at"],
+                )
+        return _agent_import_row(dict(row))
+
+    async def get_agent_import_by_idempotency(
+        self,
+        owner_scope: str,
+        project_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT id, owner_scope, tenant_id, project_id, idempotency_key,
+                      request_fingerprint, registry_ref, state, agent,
+                      dependency_lock, permissions, conformance, created_by,
+                      created_at, updated_at
+                 FROM agent_imports
+                WHERE owner_scope = $1 AND project_id = $2 AND idempotency_key = $3""",
+            owner_scope,
+            project_id,
+            idempotency_key,
+        )
+        return _agent_import_row(dict(row)) if row else None
+
+    async def get_agent_import(self, owner_scope: str, import_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT id, owner_scope, tenant_id, project_id, idempotency_key,
+                      request_fingerprint, registry_ref, state, agent,
+                      dependency_lock, permissions, conformance, created_by,
+                      created_at, updated_at
+                 FROM agent_imports
+                WHERE owner_scope = $1 AND id = $2::uuid""",
+            owner_scope,
+            import_id,
+        )
+        return _agent_import_row(dict(row)) if row else None
+
+    async def list_agent_imports(
+        self,
+        owner_scope: str,
+        project_id: str,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            """SELECT id, owner_scope, tenant_id, project_id, idempotency_key,
+                      request_fingerprint, registry_ref, state, agent,
+                      dependency_lock, permissions, conformance, created_by,
+                      created_at, updated_at
+                 FROM agent_imports
+                WHERE owner_scope = $1 AND project_id = $2
+                ORDER BY created_at DESC, id DESC
+                LIMIT $3""",
+            owner_scope,
+            project_id,
+            limit,
+        )
+        return [_agent_import_row(dict(row)) for row in rows]
+
+
+def _agent_import_row(row: dict[str, Any]) -> dict[str, Any]:
+    row["id"] = str(row["id"])
+    for field in ("agent", "dependency_lock", "permissions", "conformance"):
+        value = row[field]
+        row[field] = json.loads(value) if isinstance(value, str) else value
+    return row
 
 
 # ─────────────────────────────────────────────────────────────────────────

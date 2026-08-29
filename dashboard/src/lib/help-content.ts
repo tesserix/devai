@@ -1,3 +1,5 @@
+import { NEW_RUN_HREF } from "./run-entry.ts";
+
 /**
  * help-content.ts — the single source of truth for in-context guidance.
  *
@@ -53,13 +55,13 @@ export const GUIDANCE: Record<string, GuidanceEntry> = {
     id: "home",
     title: "New here? Three steps to your first run",
     body: [
-      "1. Connect a repository under Repositories — DevAI can only work on repos you have onboarded. 2. Open Workflows and pick one, or use Compose to describe the job in plain English. 3. Come back here to watch it run step by step.",
+      "1. Connect a repository under Repositories — DevAI can only work on repos you have onboarded. 2. Open Workflows and pick one, or describe the job in plain English from the new-run dialog. 3. Open the live run to watch it work step by step.",
       "This page shows one run at a time. Pick a run on the left and the stages, agents and messages for it fill in on the right, live.",
     ],
     links: [
       { label: "Connect a repository", href: "/repos" },
       { label: "Pick a workflow", href: "/workflows" },
-      { label: "Describe a task instead", href: "/compose" },
+      { label: "Describe a task instead", href: NEW_RUN_HREF },
     ],
   },
 
@@ -96,6 +98,19 @@ export const GUIDANCE: Record<string, GuidanceEntry> = {
     links: [
       { label: "Skills an agent can use", href: "/skills" },
       { label: "Tools an agent can call", href: "/tools" },
+    ],
+  },
+
+  "agent-workbench": {
+    id: "agent-workbench",
+    title: "Develop an agent without touching the cluster",
+    body: [
+      "A sandbox pins one agent version, model, tool policy, budget and expiry. Playground turns and evaluation cases run through that same isolated configuration, so a comparison is about the agent change rather than a moving dependency.",
+      "Start in Playground, inspect the exact model and tool steps under Traces, run a versioned dataset under Evaluations, then compare the durable run with your production baseline. Destroying the sandbox removes its runtime but keeps the evidence.",
+    ],
+    links: [
+      { label: "Manage evaluation artifacts", href: "/registry" },
+      { label: "See all sandboxes", href: "/sandboxes" },
     ],
   },
 
@@ -420,6 +435,125 @@ export const HELP_TERMS: Record<string, HelpTerm> = {
       "A checkpoint is a git SHA captured during a run. It marks a point you can roll the working tree back to.",
   },
 
+  sandbox: {
+    term: "sandbox",
+    label: "Agent sandbox",
+    summary:
+      "An ephemeral, owner-scoped runtime with a pinned agent, model, prompt, dataset, tool policy, token/cost budget and TTL. It uses your explicitly selected user connector through AgentGateway; credentials are not mounted into the sandbox.",
+    points: [
+      "Mock or block side-effecting tools unless real access is explicitly selected.",
+      "The runtime expires automatically and can be destroyed at any time.",
+      "Traces and evaluation results are durable and remain after destruction.",
+    ],
+  },
+
+  evaluation: {
+    term: "evaluation",
+    label: "Agent evaluation",
+    summary:
+      "A versioned dataset of cases run against one pinned sandbox, scored for expected output, tool trajectory, safety, groundedness, latency, tokens and cost. A failing score links to the trace that explains it.",
+  },
+
+  "evaluation-pass-rate": {
+    term: "evaluation-pass-rate",
+    label: "Pass rate",
+    summary:
+      "The share of dataset cases that met every configured scorer and threshold; one failed required dimension makes that case fail.",
+    points: ["Read the failing case trace before changing the agent—the percentage only tells you where to look."],
+  },
+
+  "evaluation-deterministic-score": {
+    term: "evaluation-deterministic-score",
+    label: "Deterministic score",
+    summary:
+      "A direct check of an observable result, such as exact or regex output, valid JSON, task completion, or an expected tool call.",
+    points: ["These checks are fast and repeatable because no judge model is involved."],
+  },
+
+  "evaluation-scorer-dimension": {
+    term: "evaluation-scorer-dimension",
+    label: "Scorer dimension",
+    summary:
+      "The average 0–100% score for one configured quality dimension across all cases; its threshold, not the average alone, determines which cases pass.",
+    points: ["A high average can hide one important failure, so open the case-level trace."],
+  },
+
+  "evaluation-groundedness": {
+    term: "evaluation-groundedness",
+    label: "Groundedness",
+    summary:
+      "A judge-model score for how well factual claims are supported by the evidence supplied to the agent, rather than invented or assumed.",
+    points: ["Treat it as model-graded evidence, then inspect the trace and cited context for a failing case."],
+  },
+
+  "evaluation-safety-score": {
+    term: "evaluation-safety-score",
+    label: "Safety score",
+    summary:
+      "The share of cases without a forbidden, blocked, or policy-violating tool attempt; a blocked attempt still counts because intent matters.",
+    points: ["Safety is normally a hard gate: one unsafe case should block promotion."],
+  },
+
+  "evaluation-trajectory-score": {
+    term: "evaluation-trajectory-score",
+    label: "Tool trajectory",
+    summary:
+      "Whether the agent chose the expected tools, arguments, and order without redundant calls, and recovered safely when a tool failed.",
+    points: ["Trajectory can fail even when the final prose looks correct because the path produced unsafe or incorrect side effects."],
+  },
+
+  "evaluation-p95-latency": {
+    term: "evaluation-p95-latency",
+    label: "P95 latency",
+    summary:
+      "The case latency at the 95th percentile: about 95% of cases completed this quickly or faster, while the slowest tail may take longer.",
+    points: ["Small datasets make percentiles coarse; compare repeated runs before treating a small delta as real."],
+  },
+
+  "evaluation-tokens": {
+    term: "evaluation-tokens",
+    label: "Total tokens",
+    summary:
+      "All model input and output tokens consumed by the evaluation cases, used to spot prompt growth, loops, and likely cost changes.",
+    points: ["Judge-model tokens are reflected in attributed cost and may be reported separately from the agent's own usage."],
+  },
+
+  "evaluation-cost": {
+    term: "evaluation-cost",
+    label: "Attributed evaluation cost",
+    summary:
+      "The recorded evaluation spend split into agent model calls, judge model calls, and sandbox infrastructure so costs are not hidden or double-counted.",
+    points: ["This is owner-scoped usage for the pinned connector and sandbox configuration."],
+  },
+
+  "evaluation-delta": {
+    term: "evaluation-delta",
+    label: "Candidate delta",
+    summary:
+      "Candidate minus baseline for the same immutable dataset; higher is better for quality scores, while lower is better for latency, tokens, and cost.",
+  },
+
+  "evaluation-regression": {
+    term: "evaluation-regression",
+    label: "Regression",
+    summary:
+      "A case that passed in the baseline run but fails in the candidate run; open its candidate trace to find the first meaningful divergence.",
+  },
+
+  "evaluation-sample-size": {
+    term: "evaluation-sample-size",
+    label: "Sample-size caveat",
+    summary:
+      "One paired run shows directional change, not statistical certainty; small suites and non-deterministic models need repeated runs before promotion.",
+  },
+
+  "evaluation-comparison": {
+    term: "evaluation-comparison",
+    label: "Evaluation comparison",
+    summary:
+      "A baseline and candidate evaluation run over the same immutable dataset. DevAI shows metric deltas, newly passing cases and exact regressions; it refuses comparisons whose dataset versions differ.",
+  },
+
   onboarding: {
     term: "onboarding",
     label: "Repo onboarding",
@@ -435,4 +569,29 @@ export function getGuidance(id: string): GuidanceEntry | undefined {
 
 export function getHelpTerm(term: string): HelpTerm | undefined {
   return HELP_TERMS[term];
+}
+
+const EVALUATION_METRIC_TERMS: Record<string, string> = {
+  success: "evaluation-pass-rate",
+  pass_rate: "evaluation-pass-rate",
+  p95_latency_ms: "evaluation-p95-latency",
+  latency: "evaluation-p95-latency",
+  total_tokens: "evaluation-tokens",
+  tokens: "evaluation-tokens",
+  cost_usd: "evaluation-cost",
+  cost: "evaluation-cost",
+  exact_match: "evaluation-deterministic-score",
+  regex: "evaluation-deterministic-score",
+  json_schema: "evaluation-deterministic-score",
+  expected_tool_call: "evaluation-deterministic-score",
+  task_completion: "evaluation-deterministic-score",
+  tool_trajectory: "evaluation-trajectory-score",
+  safety: "evaluation-safety-score",
+  groundedness: "evaluation-groundedness",
+  hallucination: "evaluation-groundedness",
+};
+
+/** Resolve a runtime scorer/summary key to help that remains useful for custom dimensions. */
+export function evaluationMetricHelpTerm(metric: string): string {
+  return EVALUATION_METRIC_TERMS[metric.toLowerCase()] ?? "evaluation-scorer-dimension";
 }

@@ -4,6 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { Select } from "@/components/ui/select";
+import {
+  api,
+  lifecycleMutationHeaders,
+  type EvaluationDataset,
+  type RegistryItem,
+  type SettingsConnector,
+} from "@/lib/api";
+import {
+  canonicalSandboxProvider,
+  sandboxLlmConnectorOptions,
+  type SandboxConnectorOption,
+} from "@/lib/sandbox-connectors";
 
 type RegistryAgent = {
   name: string;
@@ -11,6 +23,8 @@ type RegistryAgent = {
   description?: string;
   model_provider: string;
   model_name: string;
+  tools?: unknown[];
+  prompts?: unknown[];
 };
 
 const TOOL_MODES = [
@@ -20,33 +34,65 @@ const TOOL_MODES = [
   { value: "real", label: "Real", description: "Calls reach the actual system." },
 ];
 
+function referenceName(reference: unknown): string {
+  if (typeof reference === "string") return reference;
+  if (reference && typeof reference === "object") {
+    const value = reference as Record<string, unknown>;
+    return String(value.name ?? value.ref ?? "");
+  }
+  return "";
+}
+
+function versionKey(item: { name: string; version?: string }): string {
+  return `${item.name}@${item.version || "latest"}`;
+}
+
 export function SandboxCreateDialog({
   open,
   onClose,
   onCreated,
+  initialAgent,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (id: string) => void;
+  initialAgent?: string;
 }) {
   const [agents, setAgents] = useState<RegistryAgent[]>([]);
+  const [prompts, setPrompts] = useState<RegistryItem[]>([]);
+  const [datasets, setDatasets] = useState<EvaluationDataset[]>([]);
   const [versions, setVersions] = useState<string[]>([]);
   const [agent, setAgent] = useState("");
   const [provider, setProvider] = useState("anthropic");
-  const [model, setModel] = useState("claude-sonnet-4-20250514");
+  const [model, setModel] = useState("claude-sonnet-5");
   const [adkVersion, setAdkVersion] = useState("");
   const [toolMode, setToolMode] = useState("mock");
+  const [toolOverrides, setToolOverrides] = useState<Record<string, string>>({});
+  const [promptKey, setPromptKey] = useState("");
+  const [datasetKey, setDatasetKey] = useState("");
+  const [connectorOptions, setConnectorOptions] = useState<SandboxConnectorOption[]>([]);
+  const [llmConnector, setLlmConnector] = useState("");
+  const [connectorConfirmed, setConnectorConfirmed] = useState(false);
   const [ttlHours, setTtlHours] = useState(4);
+  const [workspace, setWorkspace] = useState(false);
+  const [browser, setBrowser] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setConnectorConfirmed(false);
     fetch("/api/registry/agents", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: RegistryAgent[]) => {
         setAgents(data);
-        if (data.length > 0) setAgent((a) => a || data[0].name);
+        if (data.length > 0) {
+          setAgent((current) =>
+            initialAgent && data.some((candidate) => candidate.name === initialAgent)
+              ? initialAgent
+              : current || data[0].name,
+          );
+        }
       })
       .catch(() => setAgents([]));
     // The picker offers the latest few runtime releases; the first is the default.
@@ -57,7 +103,20 @@ export function SandboxCreateDialog({
         setAdkVersion((v) => v || d.default || d.versions?.[0] || "");
       })
       .catch(() => setVersions([]));
-  }, [open]);
+    api
+      .listSettings()
+      .then((data: { connectors: SettingsConnector[] }) => {
+        const options = sandboxLlmConnectorOptions(data.connectors ?? []);
+        setConnectorOptions(options);
+        setLlmConnector((current) => current || options[0]?.value || "");
+      })
+      .catch(() => {
+        setConnectorOptions([]);
+        setLlmConnector("");
+      });
+    api.listRegistryPrompts().then(setPrompts).catch(() => setPrompts([]));
+    api.listEvaluationDatasets().then(setDatasets).catch(() => setDatasets([]));
+  }, [initialAgent, open]);
 
   // Pinning an agent pre-fills the model it was published with — still editable,
   // because comparing the same agent across models is the point of a sandbox.
@@ -66,7 +125,18 @@ export function SandboxCreateDialog({
     if (!chosen) return;
     if (chosen.model_provider) setProvider(chosen.model_provider);
     if (chosen.model_name) setModel(chosen.model_name);
-  }, [agent, agents]);
+    const compatible = connectorOptions.filter(
+      (option) => option.provider === canonicalSandboxProvider(chosen.model_provider),
+    );
+    setLlmConnector((current) =>
+      compatible.some((option) => option.value === current) ? current : compatible[0]?.value || "",
+    );
+    setConnectorConfirmed(false);
+    setToolOverrides({});
+    const preferredPrompt = referenceName(chosen.prompts?.[0]);
+    const matchingPrompt = prompts.find((prompt) => prompt.name === preferredPrompt);
+    setPromptKey(matchingPrompt ? versionKey(matchingPrompt) : "");
+  }, [agent, agents, connectorOptions, prompts]);
 
   const agentOptions = useMemo(
     () =>
@@ -82,6 +152,12 @@ export function SandboxCreateDialog({
   if (!open) return null;
 
   const selected = agents.find((a) => a.name === agent);
+  const compatibleConnectorOptions = connectorOptions.filter(
+    (option) => option.provider === canonicalSandboxProvider(provider),
+  );
+  const selectedPrompt = prompts.find((prompt) => versionKey(prompt) === promptKey);
+  const selectedDataset = datasets.find((dataset) => versionKey(dataset) === datasetKey);
+  const selectedTools = (selected?.tools ?? []).map(referenceName).filter(Boolean);
 
   async function create() {
     setBusy(true);
@@ -90,13 +166,18 @@ export function SandboxCreateDialog({
       const res = await fetch("/api/sandboxes", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
         body: JSON.stringify({
           agent: { name: agent, version: selected?.version || "latest" },
           model: { provider, model },
+          credentials: { llm_connector: llmConnector, confirmed: connectorConfirmed },
           adk_version: adkVersion || null,
-          tools: { default_mode: toolMode },
+          prompt: selectedPrompt ? { ref: selectedPrompt.name, version: selectedPrompt.version || "latest" } : null,
+          dataset: selectedDataset ? { ref: selectedDataset.name, version: selectedDataset.version } : null,
+          tools: { default_mode: toolMode, overrides: toolOverrides },
           ttl_seconds: Math.round(ttlHours * 3600),
+          workspace,
+          browser,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -157,8 +238,91 @@ export function SandboxCreateDialog({
             onChange={(next) => {
               setProvider(next.provider);
               setModel(next.model);
+              const compatible = connectorOptions.filter(
+                (option) => option.provider === canonicalSandboxProvider(next.provider),
+              );
+              setLlmConnector(compatible[0]?.value || "");
+              setConnectorConfirmed(false);
             }}
           />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="sb-prompt" className="label-eyebrow">Prompt version</label>
+              <Select
+                id="sb-prompt"
+                value={promptKey}
+                onChange={setPromptKey}
+                options={[
+                  { value: "", label: "Agent default", description: "Use the prompt pinned by the Agent artifact" },
+                  ...prompts.map((prompt) => ({
+                    value: versionKey(prompt),
+                    label: versionKey(prompt),
+                    description: prompt.description,
+                  })),
+                ]}
+                searchable
+                mono
+                ariaLabel="Prompt version"
+              />
+            </div>
+            <div>
+              <label htmlFor="sb-dataset" className="label-eyebrow">Dataset version</label>
+              <Select
+                id="sb-dataset"
+                value={datasetKey}
+                onChange={setDatasetKey}
+                options={[
+                  { value: "", label: "No dataset", description: "Attach one later when running an evaluation" },
+                  ...datasets.map((dataset) => ({
+                    value: versionKey(dataset),
+                    label: versionKey(dataset),
+                    description: `${dataset.case_count} cases · ${dataset.description}`,
+                  })),
+                ]}
+                searchable
+                mono
+                ariaLabel="Dataset version"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="sb-llm-connector" className="label-eyebrow">
+              Sandbox LLM credential
+            </label>
+            <Select
+              id="sb-llm-connector"
+              value={llmConnector}
+              onChange={(value) => {
+                setLlmConnector(value);
+                setConnectorConfirmed(false);
+              }}
+              options={compatibleConnectorOptions}
+              placeholder={compatibleConnectorOptions.length === 0 ? `No personal ${provider} connector` : "Choose a connector"}
+              ariaLabel="Sandbox LLM credential"
+            />
+            {compatibleConnectorOptions.length === 0 && (
+              <p className="text-xs mt-1.5" style={{ color: "var(--ink-muted)" }}>
+                Add a personal connector with its own key in <a href="/settings" className="text-indigo-300 hover:underline">Settings</a>.
+                Shared team, tenant and platform credentials cannot enter a sandbox.
+              </p>
+            )}
+          </div>
+
+          <label className="flex items-start gap-2 text-xs" style={{ color: "var(--ink-soft)" }}>
+            <input
+              type="checkbox"
+              checked={connectorConfirmed}
+              disabled={!llmConnector}
+              onChange={(event) => setConnectorConfirmed(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              I authorize this sandbox to use the selected connector. Its key stays in the DevAI control plane,
+              calls go through AgentGateway, and no SCM, cloud or platform credential is inherited.
+            </span>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -200,6 +364,67 @@ export function SandboxCreateDialog({
               Tools
             </label>
             <Select id="sb-tools" value={toolMode} onChange={setToolMode} options={TOOL_MODES} ariaLabel="Tool mode" />
+            {selectedTools.length > 0 && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {selectedTools.map((tool) => (
+                  <div key={tool}>
+                    <label htmlFor={`sb-tool-${tool}`} className="text-[11px] font-mono text-[var(--ink-500)]">
+                      {tool}
+                    </label>
+                    <Select
+                      id={`sb-tool-${tool}`}
+                      value={toolOverrides[tool] ?? ""}
+                      onChange={(mode) =>
+                        setToolOverrides((current) => {
+                          if (!mode) {
+                            const next = { ...current };
+                            delete next[tool];
+                            return next;
+                          }
+                          return { ...current, [tool]: mode };
+                        })
+                      }
+                      options={[
+                        { value: "", label: `Default (${toolMode})` },
+                        ...TOOL_MODES,
+                      ]}
+                      ariaLabel={`${tool} mode`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex items-start gap-2 text-xs" style={{ color: "var(--ink-soft)" }}>
+              <input
+                type="checkbox"
+                checked={workspace}
+                onChange={(event) => {
+                  setWorkspace(event.target.checked);
+                  if (!event.target.checked) setBrowser(false);
+                }}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-medium" style={{ color: "var(--ink-strong)" }}>Workspace</span>
+                Files, shell and previews on an isolated volume.
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-xs" style={{ color: "var(--ink-soft)" }}>
+              <input
+                type="checkbox"
+                checked={browser}
+                disabled={!workspace}
+                onChange={(event) => setBrowser(event.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-medium" style={{ color: "var(--ink-strong)" }}>Browser</span>
+                Playwright controls with a live, owner-only desktop.
+              </span>
+            </label>
           </div>
 
           {error && (
@@ -215,7 +440,7 @@ export function SandboxCreateDialog({
             <button
               type="button"
               onClick={create}
-              disabled={busy || !agent}
+              disabled={busy || !agent || !llmConnector || !connectorConfirmed}
               className="btn-primary !py-1 !px-3 !text-xs disabled:opacity-50"
             >
               {busy ? "Creating…" : "Create sandbox"}

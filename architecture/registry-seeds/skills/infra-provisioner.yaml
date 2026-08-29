@@ -17,9 +17,8 @@ spec:
   tools:
   - scm_get_file_content
   - scm_commit_file
-  - validate_dockerfile
-  - validate_helm_lint
-  - validate_yaml
+  - validate_lint
+  - validate_format
   handoverSchema:
     deploy_target:
       type: string

@@ -182,9 +182,9 @@ async def test_org_write_requires_org_admin():
 
 
 @pytest.mark.asyncio
-async def test_global_admin_overrides_all_scopes():
+async def test_platform_admin_overrides_all_scopes():
     teams = _FakeTeams(team_admins={}, org_admins={})
-    gadmin = Principal(uid="g", email="g@x.com", roles=["admin"])
+    gadmin = Principal(uid="g", email="g@x.com", roles=["platform-admin"])
     await _authz(teams, gadmin, Scope.TEAM, "any-team")
     await _authz(teams, gadmin, Scope.ORG, "any-org")
     await _authz(teams, gadmin, Scope.TENANT, "alm")

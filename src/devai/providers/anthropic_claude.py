@@ -48,6 +48,7 @@ from devai.services.resilience import (
 )
 
 if TYPE_CHECKING:
+    from devai.adapters.llm.base import LLMAdapter
     from devai.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -90,9 +91,12 @@ class ClaudeProvider:
         """``model`` overrides the global default per role — the dev agent
         runs the UI model for UI work and claude-opus-4-8 for API work,
         reviewers run the review model, etc. (config llm_model_* fields)."""
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+        from devai.adapters.llm.legacy_bridge import current_legacy_llm
         from devai.services.tracing import wrap_anthropic_client
 
-        self.client = wrap_anthropic_client(AsyncAnthropic(api_key=config.anthropic_api_key))
+        self._gateway_required = gateway_required(config)
+        self._resolved_llm: LLMAdapter | None = current_legacy_llm()
         self.model = model or config.claude_model
         self.max_tokens = config.claude_max_tokens
         self.max_iterations = config.claude_max_iterations
@@ -100,6 +104,16 @@ class ClaudeProvider:
         self.max_sessions = max(1, int(getattr(config, "claude_max_sessions", 8) or 8))
         self.prompt_caching = bool(getattr(config, "claude_prompt_caching", True))
         self.total_timeout = int(getattr(config, "claude_agent_total_timeout", 14400) or 14400)
+        if self._resolved_llm is not None:
+            self.client = None
+            return
+        self.client = wrap_anthropic_client(
+            AsyncAnthropic(
+                api_key=config.anthropic_api_key,
+                base_url=gateway_base_url(config, "anthropic", getattr(config, "anthropic_base_url", "")),
+                default_headers={"x-devai-provider": "anthropic"} if gateway_required(config) else None,
+            )
+        )
 
     async def run_agent_loop(
         self,
@@ -338,6 +352,10 @@ class ClaudeProvider:
         through (e.g. concurrent calls from a different process) and
         waiting the API-suggested retry-after.
         """
+        resolved_llm: LLMAdapter | None = getattr(self, "_resolved_llm", None)
+        if resolved_llm is not None:
+            return await self._call_resolved_llm(system_prompt, tools, messages)
+
         # Budget estimate: with prompt caching only the NEW tokens since the
         # last turn are real spend — feeding the limiter the full (growing)
         # history made it sleep a whole window before every late turn, which
@@ -351,6 +369,11 @@ class ClaudeProvider:
         await get_claude_rate_limiter().acquire(estimated_input_tokens)
 
         system_param, tools_param = self._cache_params(system_prompt, tools, messages)
+        extra_headers = None
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            extra_headers = current_gateway_headers("anthropic")
 
         async def _api_call() -> Message:
             return await asyncio.wait_for(
@@ -360,11 +383,97 @@ class ClaudeProvider:
                     system=system_param,
                     tools=tools_param,
                     messages=messages,
+                    extra_headers=extra_headers,
                 ),
                 timeout=API_CALL_TIMEOUT,
             )
 
         return await _claude_breaker.call(_api_call)
+
+    async def _call_resolved_llm(
+        self,
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+    ) -> Any:
+        from types import SimpleNamespace
+
+        from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole, ToolCall, ToolSpec
+
+        canonical: list[LLMMessage] = []
+        tool_names: dict[str, str] = {}
+        for message in messages:
+            role = str(message.get("role", "user"))
+            content = message.get("content", "")
+            if role == "assistant":
+                text_parts: list[str] = []
+                calls: list[ToolCall] = []
+                for block in content if isinstance(content, list) else []:
+                    if isinstance(block, TextBlock):
+                        text_parts.append(block.text)
+                    elif isinstance(block, ToolUseBlock):
+                        calls.append(ToolCall(id=block.id, name=block.name, arguments=dict(block.input)))
+                        tool_names[block.id] = block.name
+                canonical.append(LLMMessage(role=LLMRole.ASSISTANT, content="\n".join(text_parts), tool_calls=calls))
+                continue
+            if isinstance(content, str):
+                canonical.append(LLMMessage(role=LLMRole.USER, content=content))
+                continue
+            text_parts = [
+                str(block.get("text", ""))
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            if text_parts:
+                canonical.append(LLMMessage(role=LLMRole.USER, content="\n".join(text_parts)))
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                tool_call_id = str(block.get("tool_use_id", ""))
+                canonical.append(
+                    LLMMessage(
+                        role=LLMRole.TOOL,
+                        content=str(block.get("content", "")),
+                        name=tool_names.get(tool_call_id, ""),
+                        tool_call_id=tool_call_id,
+                    )
+                )
+
+        resolved_llm: LLMAdapter | None = getattr(self, "_resolved_llm", None)
+        if resolved_llm is None:
+            raise RuntimeError("resolved LLM is not initialized")
+        response = await resolved_llm.generate(
+            LLMRequest(
+                system=system_prompt,
+                messages=canonical,
+                tools=[
+                    ToolSpec(
+                        name=str(tool.get("name", "")),
+                        description=str(tool.get("description", "")),
+                        parameters=dict(tool.get("input_schema") or {}),
+                    )
+                    for tool in tools
+                ],
+                max_tokens=self.max_tokens,
+            )
+        )
+        if response.finish_reason == "error":
+            raise RuntimeError("all authorized LLM providers failed")
+
+        content_blocks: list[Any] = []
+        if response.text:
+            content_blocks.append(TextBlock(type="text", text=response.text, citations=None))
+        content_blocks.extend(
+            ToolUseBlock(type="tool_use", id=call.id, name=call.name, input=dict(call.arguments))
+            for call in response.tool_calls
+        )
+        usage = SimpleNamespace(
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+            cache_read_input_tokens=response.usage.cached_tokens,
+            cache_creation_input_tokens=0,
+        )
+        return SimpleNamespace(content=content_blocks, usage=usage)
 
     @retry_async(max_attempts=3, base_delay=1.0)
     async def generate(
@@ -373,16 +482,39 @@ class ClaudeProvider:
         user_message: str,
     ) -> str:
         """Simple one-shot generation without tools."""
+        resolved_llm: LLMAdapter | None = getattr(self, "_resolved_llm", None)
+        if resolved_llm is not None:
+            from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+            resolved_response = await resolved_llm.generate(
+                LLMRequest(
+                    system=system_prompt,
+                    messages=[LLMMessage(role=LLMRole.USER, content=user_message)],
+                    max_tokens=self.max_tokens,
+                )
+            )
+            if resolved_response.finish_reason == "error":
+                raise RuntimeError("all authorized LLM providers failed")
+            return resolved_response.text
         # Same proactive throttle as the agent-loop path.
         estimated_input_tokens = estimate_token_count(system_prompt) + estimate_token_count(user_message)
         await get_claude_rate_limiter().acquire(estimated_input_tokens)
+        extra_headers = None
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
 
+            extra_headers = current_gateway_headers("anthropic")
+
+        client = self.client
+        if client is None:
+            raise RuntimeError("Anthropic client is not initialized")
         response = await asyncio.wait_for(
-            self.client.messages.create(
+            client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
+                extra_headers=extra_headers,
             ),
             timeout=API_CALL_TIMEOUT,
         )

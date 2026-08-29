@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type PipelineRun } from "@/lib/api";
 import { useRunEvents } from "@/lib/use-run-events";
@@ -15,10 +16,12 @@ import { ApprovalBanner } from "@/components/approval-banner";
 import { ChatPanel } from "@/components/chat-panel";
 import { useToast } from "@/components/toast";
 import { GuidanceInfo, GuidancePanel, HelpPopover } from "@/components/guidance";
+import { NEW_RUN_HREF, runDetailHref } from "@/lib/run-entry";
 
 type Tab = "overview" | "hierarchy" | "agents" | "a2a" | "events" | "chat" | "config";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const toast = useToast();
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>();
@@ -99,8 +102,7 @@ export default function DashboardPage() {
     // Forward the blueprint picked in the dialog (DASH-6) so the backend no
     // longer silently falls back to the default blueprint.
     const result = await api.triggerPipeline(repo, requirements, opts);
-    setSelectedRunId(result.run_id);
-    await fetchRuns();
+    router.push(runDetailHref(result.run_id));
   };
 
   const handleRetrigger = async (runId: string) => {
@@ -358,7 +360,6 @@ export default function DashboardPage() {
                 <OverviewTab
                   run={{ ...selectedRun, agents: displayAgents }}
                   a2aMessages={a2aMessages}
-                  orchestratorRouting={orchestratorRouting}
                 />
               )}
               {tab === "hierarchy" && (
@@ -416,7 +417,7 @@ export default function DashboardPage() {
                 <button onClick={() => setTriggerOpen(true)} className="btn-primary">
                   Start a run now
                 </button>
-                <Link href="/compose" className="btn-secondary">
+                <Link href={NEW_RUN_HREF} className="btn-secondary">
                   Describe a task instead
                 </Link>
               </div>
@@ -485,11 +486,9 @@ function GettingStartedStep({
 function OverviewTab({
   run,
   a2aMessages,
-  orchestratorRouting,
 }: {
   run: PipelineRun;
   a2aMessages: any[];
-  orchestratorRouting?: any;
 }) {
   const agents = run.agents || {};
   const coordinators = Object.entries(AGENT_INFO).filter(([, info]) => info.role === "coordinator");
@@ -584,7 +583,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
           </div>
         </div>
         <div className="mt-3 flex items-center gap-2">
-          <StatusBadgeInline status={agentStatus?.status} color={info.color} />
+          <StatusBadgeInline status={agentStatus?.status} />
           {info.role === "coordinator" && (
             <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-100 dark:border-indigo-900">
               COORDINATOR
@@ -620,7 +619,7 @@ function AgentsTab({ run }: { run: PipelineRun }) {
   );
 }
 
-function StatusBadgeInline({ status, color }: { status?: string; color: string }) {
+function StatusBadgeInline({ status }: { status?: string }) {
   if (!status) return <span className="text-xs px-2 py-0.5 rounded-md bg-[var(--surface-hover)] text-[var(--ink-muted)]">Idle</span>;
 
   const styles: Record<string, string> = {
@@ -729,7 +728,7 @@ function ConfigTab({ repo }: { repo: string }) {
       merge: true,
       createPR: false,
     },
-    claude_model: "claude-sonnet-4-20250514",
+    claude_model: "claude-sonnet-5",
     openai_model: "o3",
     groq_model: "llama-3.3-70b-versatile",
     max_review_iterations: 3,
@@ -748,7 +747,7 @@ function ConfigTab({ repo }: { repo: string }) {
         openai_model: data.openai_model ?? prev.openai_model,
         groq_model: (data as any).groq_model ?? prev.groq_model,
         max_review_iterations: data.max_review_iterations ?? prev.max_review_iterations,
-        gates: { ...prev.gates, ...(data.gates || {}) },
+        gates: { ...prev.gates, ...data.gates },
       }));
       setLoaded(true);
     }).catch(() => setLoaded(true));

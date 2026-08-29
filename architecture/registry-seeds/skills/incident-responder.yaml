@@ -14,11 +14,11 @@ spec:
     whether to create an incident, remediate automatically (where safe), or escalate to a human via PagerDuty/Slack.
   category: sre
   tools:
-  - kubectl_rollout_restart
-  - kubectl_scale
+  - k8s_get_pod_status
+  - k8s_get_events
+  - k8s_get_deployments
   - argocd_sync
-  - pagerduty_create_incident
-  - slack_post_message
+  - scm_create_issue
   handoverSchema:
     incidents_created:
       type: integer

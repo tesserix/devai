@@ -45,6 +45,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from devai.authz import authorize_run_read
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/runs", tags=["runs", "repo"])
@@ -102,6 +104,9 @@ async def _resolve_run(request: Request, run_id: str, branch_override: str = "")
     state = request.app.state.state_manager
     run = await state.get_run(run_id)
     if run:
+        # Serving a run's repo content is a run read — same team gate, and the
+        # same 404 for a run the caller may not see.
+        await authorize_run_read(request, run)
         ctx = run.get("context") or {}
         if isinstance(ctx, str):
             with contextlib.suppress(Exception):
@@ -125,6 +130,7 @@ async def _resolve_run(request: Request, run_id: str, branch_override: str = "")
     if svc is not None:
         task = await svc.get_task(run_id)
         if task:
+            await authorize_run_read(request, task)
             ag = task.get("agent_context") or {}
             branch = (
                 branch_override

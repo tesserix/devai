@@ -126,6 +126,10 @@ class TelemetryAdapter(Adapter):
     def observe(self, name: str, value: float, attrs: dict[str, str] | None = None) -> None:
         """Generic histogram / value-distribution escape hatch."""
 
+    @abstractmethod
+    def gauge(self, name: str, value: float, attrs: dict[str, str] | None = None) -> None:
+        """Record the current value of an operational measurement."""
+
     # ──────────────────────────────────────────────────────────────────
     # Adapter contract — defaults so subclasses can stay terse.
     # ──────────────────────────────────────────────────────────────────

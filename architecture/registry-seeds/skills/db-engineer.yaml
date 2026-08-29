@@ -18,7 +18,7 @@ spec:
   - scm_get_repo_tree
   - scm_get_file_content
   - scm_commit_file
-  - validate_sql
+  - validate_lint
   handoverSchema:
     db_decision:
       type: string

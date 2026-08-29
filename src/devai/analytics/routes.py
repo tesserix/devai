@@ -47,7 +47,7 @@ async def _tasks(request: Request, *, blueprint: str | None = None, repo: str | 
         return []
 
 
-async def _db(request: Request):
+async def get_db(request: Request):
     """Lazily connect + cache a Database for agent/LLM/SRE rollups.
 
     Returns None when the DB is unreachable; callers degrade to empty.
@@ -111,11 +111,12 @@ async def stages(request: Request) -> list[dict[str, Any]]:
 @router.get("/agents")
 async def agents(request: Request, days: int = Query(30, ge=1, le=365)) -> list[dict[str, Any]]:
     """Per-agent executions, avg duration, tokens, cost, failures."""
-    db = await _db(request)
+    tenant_id, user_id, _ = await _usage_scope(request)
+    db = await get_db(request)
     if db is None:
         return []
     try:
-        return await db.analytics_agent_stats(days)
+        return await db.analytics_agent_stats(days, tenant_id=tenant_id, user_id=user_id)
     except Exception:  # noqa: BLE001
         logger.debug("analytics: agent stats query failed", exc_info=True)
         return []
@@ -124,17 +125,18 @@ async def agents(request: Request, days: int = Query(30, ge=1, le=365)) -> list[
 @router.get("/llm/cost")
 async def llm_cost(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
     """Token + USD cost by provider/model and over time."""
-    db = await _db(request)
+    tenant_id, user_id, _ = await _usage_scope(request)
+    db = await get_db(request)
     if db is None:
         return {"by_model": [], "timeseries": []}
     by_model: list[dict[str, Any]] = []
     timeseries: list[dict[str, Any]] = []
     try:
-        by_model = await db.analytics_llm_cost_by_model(days)
+        by_model = await db.analytics_llm_cost_by_model(days, tenant_id=tenant_id, user_id=user_id)
     except Exception:  # noqa: BLE001
         logger.debug("analytics: llm cost-by-model query failed", exc_info=True)
     try:
-        timeseries = await db.analytics_llm_cost_timeseries(days)
+        timeseries = await db.analytics_llm_cost_timeseries(days, tenant_id=tenant_id, user_id=user_id)
     except Exception:  # noqa: BLE001
         logger.debug("analytics: llm cost timeseries query failed", exc_info=True)
     return {"by_model": by_model, "timeseries": timeseries}
@@ -150,17 +152,23 @@ def _ledger(request: Request):
     return getattr(request.app.state, "usage_ledger", None)
 
 
-async def _usage_scope(request: Request) -> tuple[str, bool]:
-    """(user_email_to_scope_to, is_admin). A non-admin only ever sees their
-    OWN usage; an admin sees the global view (and the per-user breakdown).
-    Unauthenticated → scope to "" which has no data."""
-    from devai.identity import extract_principal
+async def _usage_scope(request: Request) -> tuple[str, str, bool]:
+    """Return ``(tenant, subject, can_list_users)`` for the caller.
 
-    principal = await extract_principal(request)
-    if principal is None:
-        return "", False
-    is_admin = "admin" in (getattr(principal, "roles", None) or [])
-    return ("" if is_admin else (principal.email or principal.uid or "")), is_admin
+    Tenant admins see their tenant aggregate. Only an explicit platform-admin
+    may read the cross-tenant global aggregate. Anonymous callers are rejected
+    before any empty/global namespace can be selected.
+    """
+    from devai.authz import require_principal
+
+    principal = await require_principal(request)
+    roles = set(getattr(principal, "roles", None) or [])
+    tenant = principal.tenant_id or ""
+    if "platform-admin" in roles:
+        return "", "", True
+    if "admin" in roles:
+        return tenant, "", True
+    return tenant, (principal.uid or principal.email or ""), False
 
 
 @router.get("/usage")
@@ -170,16 +178,24 @@ async def usage(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[s
     per-user breakdown. All with real USD cost."""
     ledger = _ledger(request)
     if ledger is None:
-        return {"summary": {}, "by_model": [], "by_user": [], "timeseries": [], "enabled": False, "scope": "none"}
-    scope_user, is_admin = await _usage_scope(request)
+        return {
+            "summary": {},
+            "by_model": [],
+            "by_user": [],
+            "by_sandbox": [],
+            "timeseries": [],
+            "enabled": False,
+            "scope": "none",
+        }
+    scope_tenant, scope_user, can_list_users = await _usage_scope(request)
     return {
-        "summary": await ledger.summary(scope_user),
-        "by_model": await ledger.by_model(scope_user),
-        # Cross-tenant per-user table is admin-only; a regular user sees just themselves.
-        "by_user": await ledger.by_user() if is_admin else [],
-        "timeseries": await ledger.timeseries(days, scope_user),
+        "summary": await ledger.summary(scope_user, scope_tenant),
+        "by_model": await ledger.by_model(scope_user, scope_tenant),
+        "by_user": await ledger.by_user(scope_tenant) if can_list_users else [],
+        "by_sandbox": await ledger.by_sandbox(scope_tenant, "" if can_list_users else scope_user),
+        "timeseries": await ledger.timeseries(days, scope_user, scope_tenant),
         "enabled": True,
-        "scope": "all" if is_admin else "me",
+        "scope": "all" if can_list_users and not scope_tenant else ("tenant" if can_list_users else "me"),
     }
 
 
@@ -189,8 +205,8 @@ async def usage_recent(request: Request, limit: int = Query(100, ge=1, le=300)) 
     ledger = _ledger(request)
     if ledger is None:
         return []
-    scope_user, _ = await _usage_scope(request)
-    return await ledger.recent(limit, scope_user)
+    scope_tenant, scope_user, _ = await _usage_scope(request)
+    return await ledger.recent(limit, scope_user, scope_tenant)
 
 
 @router.get("/pricing")
@@ -205,7 +221,7 @@ async def pricing(request: Request) -> dict[str, Any]:
 async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
     """Quality eval scores the caller may see — their OWN runs, or (admin)
     everyone's. Pass-rate, average score, by-evaluator, recent."""
-    db = await _db(request)
+    db = await get_db(request)
     if db is None:
         return {
             "summary": {"evals": 0, "avg_score": 0, "pass_rate": 0},
@@ -213,16 +229,20 @@ async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[s
             "recent": [],
             "scope": "none",
         }
-    scope_user, is_admin = await _usage_scope(request)
-    out = await db.analytics_evals(days, scope_user)
-    out["scope"] = "all" if is_admin else "me"
+    scope_tenant, scope_user, can_list_users = await _usage_scope(request)
+    out: dict[str, Any] = await db.analytics_evals(
+        days,
+        tenant_id=scope_tenant,
+        user_id="" if can_list_users else scope_user,
+    )
+    out["scope"] = "all" if can_list_users and not scope_tenant else ("tenant" if can_list_users else "me")
     return out
 
 
 @router.get("/sre/summary")
 async def sre_summary(request: Request) -> dict[str, Any]:
     """Best-effort SRE counts from the shared devai_db SRE tables."""
-    db = await _db(request)
+    db = await get_db(request)
     if db is None:
         return {}
     try:
@@ -283,7 +303,7 @@ async def memory(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[
     except Exception:  # noqa: BLE001
         logger.debug("memory analytics: recent recall failed", exc_info=True)
 
-    db = await _db(request)
+    db = await get_db(request)
     if db is not None:
         try:
             out["totals"] = await db.analytics_memory_summary()
@@ -567,7 +587,7 @@ async def slo(request: Request, days: int = Query(7, ge=1, le=90)) -> dict[str, 
 
     incidents: dict[str, Any] = {}
     apps: list[dict[str, Any]] = []
-    db = await _db(request)
+    db = await get_db(request)
     if db is not None:
         try:
             incidents = await db.analytics_incident_slo(days)

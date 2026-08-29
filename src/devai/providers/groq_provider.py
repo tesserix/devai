@@ -67,12 +67,19 @@ class GroqProvider:
     """Groq Cloud provider for fast LLM inference with Claude fallback."""
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+
         self._config = config
+        self._gateway_required = gateway_required(config)
         api_key = config.groq_api_key
         if not api_key:
             api_key = self._fetch_from_gcp(config.gcp_secret_groq_api_key)
 
-        client = AsyncGroq(api_key=api_key)
+        client = AsyncGroq(
+            api_key=api_key,
+            base_url=gateway_base_url(config, "groq", getattr(config, "groq_base_url", "")),
+            default_headers={"x-devai-provider": "groq"} if gateway_required(config) else None,
+        )
         # Wrap for LangSmith tracing (Groq uses OpenAI-compatible API)
         self.client = wrap_openai_client(client)
         self.model = config.groq_model
@@ -112,6 +119,10 @@ class GroqProvider:
         }
         if response_format:
             kwargs["response_format"] = response_format
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            kwargs["extra_headers"] = current_gateway_headers("groq")
 
         try:
             response = await self.client.chat.completions.create(**kwargs)

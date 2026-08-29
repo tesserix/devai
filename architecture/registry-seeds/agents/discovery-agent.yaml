@@ -1,26 +1,42 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: discovery-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: sre
     devai.io/skill: discovery
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: discovery
+  title: SRE Discovery Agent
+  description: First agent in every SRE sweep. Auto-discovers all K8s namespaces, services, deployments,
+    and dependencies. Maps the topology and stores it as semantic memory for downstream SRE agents.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/discovery
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - discovery
+  prompts:
+  - discovery-prompt-v1
   promptRef: discovery-prompt-v1
-  llm:
-    provider: openai
-    model: gpt-4.1
-    temperature: 0.1
-    maxTokens: null
-  limits:
-    maxTurns: 30
-    timeoutSeconds: 900
-  runtime:
-    kind: python_class
-    pythonClass: devai.sre.agents.discovery_agent.DiscoveryAgent
-  riskLevel: low
-  roleColor: admin

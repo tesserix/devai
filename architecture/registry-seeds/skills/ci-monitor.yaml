@@ -17,8 +17,10 @@ spec:
   tools:
   - scm_get_file_content
   - scm_commit_file
-  - scm_get_workflow_runs
-  - scm_get_workflow_logs
+  - scm_get_pipeline_runs
+  - scm_ci_status
+  - scm_ci_failure_logs
+  - scm_rerun_failed_jobs
   handoverSchema:
     build_status:
       type: string

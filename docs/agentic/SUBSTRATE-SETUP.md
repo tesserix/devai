@@ -1,346 +1,316 @@
-# Agent Substrate — prod setup runbook
+# Agent Substrate — production runbook
 
-> **Status (2026-06-17): staged, NOT yet deployed.** Blocked on step 1 (a GKE-Sandbox
-> node pool). Everything below is verified against the live prod CRDs (a rendered
-> SandboxAgent passes server-side dry-run); the manifests in
-> `tesserix-k8s/argocd/prod/apps/substrate/` are ready but intentionally **not wired
-> into an auto-syncing app-of-apps**, so committing them can't deploy a broken
-> Substrate. Do the steps **in order**; do not enable substrate on the kagent
-> controller until the sandbox pool + substrate controller are up (step 4 last).
+> **Status (2026-08-20): NO-GO, user traffic disabled.** Substrate 0.0.8,
+> its CRDs, and the shared `kagent-default` WorkerPool are deployed through
+> Argo CD. The keyless `devai-substrate-canary` is accepted by kagent, but is
+> not ready because its golden ActorTemplate is assigned to a worker record for
+> a deleted pod. The operator switch `DEVAI_KAGENT_ENABLED` must remain false
+> until the canary is healthy and the isolation requirements in #76 are proven.
 
-Context: see `KAGENT-INTEGRATION.md` §0 (why kagent is dormant) and tracking issues
-**#70** (GO/NO-GO), **#71** (install), epic **#69**.
+Context: tracking issues [#69](https://github.com/tesserix/devai/issues/69),
+[#70](https://github.com/tesserix/devai/issues/70),
+[#71](https://github.com/tesserix/devai/issues/71), and
+[#76](https://github.com/tesserix/devai/issues/76).
 
-## Why this is needed
+The security boundary, attacker model, invariants, and mandatory cross-tenant
+negative tests are defined in
+[SUBSTRATE-THREAT-MODEL.md](SUBSTRATE-THREAT-MODEL.md).
 
-The Agent Substrate runs each agent as a gVisor-sandboxed **Actor** in a shared
-**WorkerPool** — low overhead, fast cold start, strong isolation (the model that
-makes kagent fit our budget and lets *users* run *their own* agents safely). The
-WorkerPool's worker (`ateom-gvisor`) runs under `runtimeClassName: gvisor`, which
-**only schedules on GKE-Sandbox nodes**. Our 3 `optimized-v2` nodes are NOT
-sandbox-enabled, so a WorkerPool pod would sit `Pending` forever. → we need a
-dedicated, **autoscale-to-zero** sandbox node pool.
+## Current architecture
 
-This does **not** need a separate cluster — a separate **node pool** in
-`tesseract-prod-in-gke` is enough. A separate cluster is a later hardening option
-(full tenant blast-radius isolation), not a requirement.
-
-## Cluster facts (measured)
-
-| | |
+| Component | Current production state |
 |---|---|
-| Cluster | `tesseract-prod-in-gke`, region `asia-south1` (zones a/b/c) |
-| Existing pool | `optimized-v2`, 3× `e2-standard-8` |
-| gVisor RuntimeClass | present (`gvisor`) |
-| SandboxAgent CRD | present (kagent-crds 0.9.7); WorkerPool CRD + substrate controller absent |
-| Project | `tesseracthub-480811` |
+| Substrate charts | CRDs and runtime pinned to 0.0.8 |
+| Runtime namespace | `ate-system` |
+| kagent namespace | `kagent-system` |
+| WorkerPool | `kagent-default`, one ready worker |
+| Worker image | Digest-pinned `ateom-gvisor:v0.0.8` |
+| Sandbox selection | `WorkerPool.spec.sandboxClass: gvisor` |
+| Canary | `Accepted=True`, `Ready=False`, `ActorTemplateNotReady` |
+| User traffic | Disabled by `DEVAI_KAGENT_ENABLED=false` |
 
----
+The WorkerPool pod is a privileged `ateom-gvisor` container. It runs on a
+regular GKE node and creates nested gVisor Actor sandboxes inside that worker.
+The WorkerPool pod itself does **not** set `runtimeClassName: gvisor` and does
+not schedule onto the `sandbox-gvisor` GKE node pool.
 
-## Step 1 — Create the GKE-Sandbox node pool (operator runs; cluster change, not GitOps)
+This distinction matters for both operations and the threat model. The nested
+gVisor boundary isolates Actors from one another, while the privileged worker
+remains a larger node-level blast radius. Do not describe the current topology
+as “one GKE Sandbox pod per Actor” or enable untrusted user code before #76
+proves the required tenant and workload-identity controls.
 
-A new, **dedicated** pool (gVisor can't share a node with normal workloads),
-pinned to **one zone**, **autoscale 0→1** so it costs nothing when idle and a
-single node only while agents actually run.
+## GO/NO-GO decision for the three-node budget
 
-```bash
-gcloud container node-pools create sandbox-gvisor \
-  --cluster=tesseract-prod-in-gke \
-  --region=asia-south1 \
-  --node-locations=asia-south1-a \
-  --sandbox type=gvisor \
-  --machine-type=e2-standard-4 \
-  --num-nodes=0 \
-  --enable-autoscaling --min-nodes=0 --max-nodes=1 \
-  --node-labels=workload=substrate \
-  --shielded-secure-boot --shielded-integrity-monitoring \
-  --project=tesseracthub-480811
-```
+The current decision for [#70](https://github.com/tesserix/devai/issues/70) is
+**NO-GO**. This is a measured safety decision, not a claim that the Actor model
+cannot work after its runtime and isolation dependencies mature.
 
-Notes:
-- `--sandbox type=gvisor` makes it a GKE-Sandbox pool; GKE auto-adds the taint
-  `sandbox.gke.io/runtime=gvisor:NoSchedule` and the runtime label, so only
-  gVisor (`runtimeClassName: gvisor`) pods land here — nothing else is disturbed.
-- `e2-standard-4` (4 vCPU / 16 GB) is plenty: the WorkerPool **multiplexes** many
-  Actors onto one node (it is NOT a node-per-agent). Resize later if needed.
-- `min-nodes=0` = **scale-to-zero** → baseline stays exactly 3 nodes; the sandbox
-  node appears on demand and drains when idle. This honors the 3-node constraint.
-- Single zone keeps it to **one** sandbox node max. Go regional later for HA.
-
-Verify:
-```bash
-kubectl get nodes -l sandbox.gke.io/runtime=gvisor   # 0 when idle (scaled to zero) — that's expected
-gcloud container node-pools describe sandbox-gvisor --cluster=tesseract-prod-in-gke --region=asia-south1
-```
-
-## Step 2 — Pin the substrate chart versions (before any prod sync)
-
-The substrate charts are young; do **not** float `latest` on prod. Resolve the
-real versions and set them in the app YAMLs:
-```bash
-helm show chart oci://ghcr.io/kagent-dev/substrate/helm/substrate-crds | grep ^version
-helm show chart oci://ghcr.io/kagent-dev/substrate/helm/substrate      | grep ^version
-```
-Put those in `argocd/prod/apps/substrate/substrate-crds.yaml` and `substrate.yaml`
-(`spec.source.targetRevision`).
-
-## Step 3 — Install Substrate via ArgoCD (CRDs → controller)
-
-Wire the staged apps into the app-of-apps and sync **in order**:
-```bash
-# add to tesserix-k8s/argocd/prod/apps/ai-apps/kustomization.yaml:
-#   - ../substrate/substrate-crds.yaml
-#   - ../substrate/substrate.yaml
-# commit + push; then:
-argocd app sync substrate-crds && argocd app wait substrate-crds --health
-argocd app sync substrate      && argocd app wait substrate      --health
-kubectl get crd | grep -i workerpool         # WorkerPool CRD now present
-kubectl -n ate-system get pods               # substrate controller Running
-```
-The substrate **controller** is a normal pod (no gVisor) — it runs on the existing
-pool. Only the WorkerPool's worker needs the sandbox node (step 4).
-
-## Step 4 — Enable substrate on kagent + create the WorkerPool (LAST)
-
-Only after step 1 + 3 succeed. Add to the `kagent` ArgoCD app's helm values
-(`tesserix-k8s/argocd/prod/infrastructure/kagent.yaml`) — this reconfigures the
-running controller, so it goes last:
-```yaml
-        controller:
-          substrate:
-            enabled: true
-            defaultWorkerPool:
-              namespace: kagent-system
-              name: kagent-default
-            ateApiEndpoint: "dns:///api.ate-system.svc:443"
-            ateApiInsecure: true
-            atenetRouterURL: "http://atenet-router.ate-system.svc:80"
-            ateApiTokenFile: "/var/run/secrets/tokens/ate-api/token"
-        substrateWorkerPool:
-          create: true
-          name: kagent-default
-          replicas: 1
-          ateomImage: ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.6
-```
-Verify the WorkerPool schedules (it triggers the sandbox node to autoscale up):
-```bash
-kubectl -n kagent-system get workerpool kagent-default
-kubectl -n kagent-system get pods -l app=substrate-worker -o wide   # lands on the gvisor node
-kubectl get nodes -l sandbox.gke.io/runtime=gvisor                  # 1 node now (autoscaled up)
-```
-
-## Step 5 — End-to-end smoke test (DevAI → SandboxAgent → Actor)
-
-```bash
-# render a SandboxAgent from a DevAI registry agent (workerPool param):
-curl -s "http://agentregistry.agentregistry-system:12121/v0/agents/document-analyzer-agent/export/kagent?namespace=devai&workerPool=kagent-default&modelConfig=default-model-config"
-# cross-validate first (ok=true means the controller will accept it):
-curl -s ".../export/kagent?...&validate=true"   # {"ok":true,"issues":[]}
-# apply via the kagent-agent-sync path (NOT manual kubectl) — see below — then:
-kubectl -n kagent-system get sandboxagent
-```
-Already proven: a rendered SandboxAgent **passes the live CRD** (server dry-run).
-
-## Wiring DevAI → Substrate (after the runtime is up)
-
-- `kagent-agent-sync` (CronJob) renders + applies the labelled agents. To target
-  Substrate, pass `?workerPool=kagent-default` to the export (agentic-registry
-  already supports it → emits `SandboxAgent` with `spec.substrate.workerPoolRef`).
-- Re-enable kagent platform-wide: `DEVAI_KAGENT_ENABLED=true` (devai-api values) —
-  this is the operator kill-switch; per-user enablement still applies.
-- Dispatch (`_maybe_dispatch_kagent`) reaches the Actor over A2A unchanged.
-
-## Rollback
-
-- Step 4: revert the kagent values change → ArgoCD restores the controller; the
-  WorkerPool is pruned.
-- Step 3: `argocd app delete substrate substrate-crds`.
-- Step 1: `gcloud container node-pools delete sandbox-gvisor …` (scaled to zero, so
-  deleting when idle is free).
-
-## Cost / footprint
-
-- Idle: **0** extra nodes (scale-to-zero) — baseline unchanged at 3.
-- Active: **1** `e2-standard-4` sandbox node while agents run; the WorkerPool
-  multiplexes all Actors onto it. Substrate controller (~1 small pod) on the
-  existing pool.
-
----
-
-## Decision log (why it's shaped this way)
-
-| Question | Decision | Why |
+| Gate | Production evidence | Result |
 |---|---|---|
-| Run agents always-warm (classic kagent) or on-demand? | **On-demand Jobs by default** | A classic kagent Agent = one standing Deployment per agent × model variant → ~160 pods at our scale → doesn't fit 3 nodes. The default `JobRunnerStage` spins an ephemeral Job per run; per-user keys + fallback already work there. |
-| Is kagent dead, then? | **No — dormant, behind `DEVAI_KAGENT_ENABLED` (off)** | Kept for genuinely hot agents once there's headroom. The operator flag is the real off-switch (provisioning is operator-controlled; per-user toggles only pick *which* variants). |
-| Why revisit kagent at all? | **Agent Substrate** | WorkerPool + Actor model = low overhead + fast cold start + gVisor isolation per agent → fits the budget *and* lets *users* run *their own* agent code safely. |
-| Separate cluster for Substrate? | **No — a node pool** | Substrate needs gVisor *nodes*, i.e. a GKE-Sandbox node pool in the same cluster. Separate cluster = later hardening for full tenant blast-radius isolation, not a requirement. |
-| How to keep 3-node baseline? | **Sandbox pool autoscale 0→1** | 0 nodes when idle (baseline = 3), 1 sandbox node on demand. The WorkerPool multiplexes Actors onto it — not a node-per-agent. |
-| How do we know our render is correct before deploying? | **Server-side dry-run + a validate API** | `kubectl apply --dry-run=server` validates against the live CRD + admission with **no persist**; `GET /v0/agents/{n}/export/kagent?validate=true` returns `{ok,issues}` for authoring. |
+| Control-plane readiness | Canary `Accepted=True`, `Ready=False`, `ActorTemplateNotReady` | Fail |
+| On-demand execution | No Actor can complete the keyless canary path | Fail |
+| Fixed worker budget | Worker is Kubernetes `BestEffort`: no CPU or memory request/limit | Fail |
+| Worker privilege | Substrate 0.0.8 generates a root, privileged worker with a hostPath | Fail |
+| 5/20/50 Actor load | Cannot be run while the golden Actor is not ready | Not measurable |
+| Cold-start latency | No successful idle-to-response sample exists | Not measurable |
+| Dedicated pool | `sandbox-gvisor` exists with zero nodes and autoscaling disabled | Not usable |
+| Three-node isolation | The worker currently shares an ordinary support node | Fail |
 
-## Gotchas & lessons learned (the hard-won ones)
+The existing worker does not consume one pod per Actor, but that fact alone is
+not a capacity proof. Its missing resource request lets the scheduler treat it
+as free, and its missing memory limit gives it no enforceable ceiling. The
+current deployment also includes the Substrate control plane, six Valkey pods,
+RustFS, and one worker, so a per-Actor cost cannot be separated from a reliable
+fixed baseline yet.
 
-**Schema / rendering (agentic-registry `adapters/kagent`)**
-1. **systemMessage must be non-empty** or the controller rejects the CR. 39/40 DevAI
-   agents keep their prompt in a referenced `Prompt` (not inline) → the export must
-   resolve `spec.promptRef` → `Prompt.spec.systemPrompt` (`resolveSystemPrompt`).
-2. **`spec.substrate.workerPoolRef` is an OBJECT `{name[,apiGroup,kind]}`, not a
-   string.** A string is rejected (`must be of type object`). Caught by server dry-run.
-3. **Nest under `spec.declarative` + `spec.type: Declarative`.** A flat/pre-0.9 spec
-   makes the controller nil-panic (declarative pruned to nil).
-4. **Emit `kagent.dev/v1alpha2`.** The declarative shape only exists there; v1alpha1
-   converts-and-drops the model/prompt on storage.
-5. **Separate multi-doc YAML with `---`.** Concatenated docs parse as ONE (last wins),
-   so only the final agent/variant applies.
-6. **Model ids must be DIRECT-provider-valid.** kagent calls the provider directly
-   (no DevAI gateway), so a gateway-alias model 404s; validate 200/429 vs 404.
+Substrate 0.0.15 removes privileged mode from the gVisor worker, adds explicit
+capabilities and authenticated tunnel identities, supports WorkerPool resource
+templates, and replaces Valkey with PostgreSQL. It is not currently a safe
+production upgrade: kagent 0.9.12 compiles against Substrate 0.0.6, the newest
+published kagent 0.10.0-rc3 compiles against 0.0.9, and only unreleased kagent
+`main` targets Substrate 0.0.15. The 0.0.15 chart also requires new signing
+pools, an authentication ConfigMap, pod-certificate projections, and a stateful
+Valkey-to-PostgreSQL replacement.
 
-**Apply / reconcile (`kagent-agent-sync`)**
-7. **Client-side apply, not `--server-side`.** SSA mis-negotiates the multi-version
-   CRD and rejects `spec.type`/`spec.declarative` ("field not declared in schema").
-8. **`--validate=false` + 256Mi.** Client-side apply downloads/parses the cluster
-   OpenAPI → OOMKill (exit 137) at 128Mi.
-9. **The registry `/v0/apply` MERGES `metadata.labels`.** Removing a label from a seed
-   + reseeding does NOT drop it on the registry object → the agent still exports. The
-   reliable off-switch is the **active-variants kill-switch** (operator `kagent_enabled`),
-   not unlabelling.
-10. **Reap on a *successful empty* export, not keep-last.** Otherwise unlabelling the
-    last agent orphans its pods forever.
+Re-open the GO decision only when all of these are true:
 
-**Cluster / mesh / runtime**
-11. **gVisor needs a GKE-Sandbox node pool.** The `gvisor` RuntimeClass *existing* is
-    NOT enough — a pod with `runtimeClassName: gvisor` only schedules on a
-    `--sandbox type=gvisor` node pool. No such pool → Pending forever.
-12. **Cross-namespace on ambient mesh = THREE layers.** kagent-system → devai-api needed
-    a NetworkPolicy **ingress** + an **egress** allow + an **Istio AuthorizationPolicy**
-    SPIFFE principal — ztunnel L4-resets by identity *before* the L7 token check, so the
-    authz was the real unlock. A NetworkPolicy alone isn't enough.
-13. **Substrate namespace is `ate-system`; worker image is `ateom-gvisor`.** ("ate" =
-    the substrate runtime; not "substrate-system".)
+1. A published kagent release explicitly targets the selected hardened
+   Substrate release.
+2. The migration, signing-state bootstrap, and rollback are proven outside
+   production.
+3. The WorkerPool has enforceable CPU and memory requests/limits and the #76
+   network boundary is default-deny.
+4. The keyless canary is Ready and completes a wake-and-return invocation.
+5. The 5/20/50 Actor tests record worker CPU, memory, pod count, failures, and
+   p50/p95 cold-start latency without displacing a core DevAI workload.
 
-**Process / git**
-14. **`connect-local` / `connect-prod` first; verify `kubectl config current-context`.**
-    The default context may be prod. Read-only inspection on prod is fine; deploys go
-    through ArgoCD (never manual `kubectl apply`).
-15. **A pre-existing unpushed local commit can hide under `main`.** When pushing
-    tesserix-k8s, a stray local commit (e.g. `d025be3f` HomeChef NATS, not ours) caused a
-    rebase conflict. **Cherry-pick your own commit onto `origin/main`** and push that —
-    don't rebase-and-lose someone else's WIP.
-16. **`dashboard/next-env.d.ts` + `tsconfig.json` are Next.js auto-reformats.** They show
-    as modified from session start; do NOT commit them with feature changes.
+Until then, ephemeral Jobs remain the supported on-demand runtime and preserve
+the three-node budget with zero idle agent footprint.
 
-## Verify / reproduce cheatsheet
+## GitOps ownership
+
+The production sources of truth are in `tesserix/tesserix-k8s`:
+
+- `argocd/prod/infrastructure/substrate-crds.yaml`
+- `argocd/prod/infrastructure/substrate.yaml`
+- `argocd/prod/infrastructure/kagent.yaml`
+- `charts/apps/kagent-agent-sync/`
+
+The old staged manifests under `argocd/prod/apps/substrate/` are superseded.
+Do not recreate or sync a second Argo CD Application for the same Helm release.
+
+Argo CD sync ordering is:
+
+1. Substrate CRDs at sync wave `-6`.
+2. Substrate runtime at sync wave `-5`.
+3. kagent and its WorkerPool at sync wave `-3`.
+4. Registry-to-kagent reconciliation through `kagent-agent-sync`.
+
+All changes must follow that GitOps path. Do not use `kubectl apply` to repair
+or deploy production resources.
+
+## OIDC and protected signing state
+
+Substrate 0.0.8 is required because it trusts system roots for an external OIDC
+issuer. The Helm values set the GKE issuer explicitly:
+
+```text
+https://container.googleapis.com/v1/projects/tesseracthub-480811/locations/asia-south1/clusters/tesseract-prod-in-gke
+```
+
+This resolved the earlier x509 and unexpected-issuer failures between kagent
+and `ate-api`.
+
+Argo CD deliberately preserves the generated TLS and Actor/session signing
+material across chart upgrades:
+
+- `ConfigMap/ateapi-ca`
+- `Secret/ateapi-tls`
+- `Secret/session-id-ca-pool`
+- `Secret/session-id-jwt-pool`
+
+Their production creation timestamp is `2026-06-17T14:37:57Z`. Verify it is
+unchanged before and after any Substrate upgrade or state repair. Never print
+their data.
+
+## Registry reconciliation and canary
+
+`kagent-agent-sync` exports registry agents with
+`workerPool=kagent-default`, then reconciles and prunes both
+`SandboxAgent` and legacy `Agent` resources. The reconciler:
+
+- selects registry agents labelled `devai.io/runtime=kagent`;
+- resolves `promptRef` before rendering a non-empty `systemMessage`;
+- emits `kagent.dev/v1alpha2` `SandboxAgent` resources;
+- applies the configured model variants; and
+- removes resources after a successful empty export.
+
+The GitOps-managed `devai-substrate-canary` has no provider key, model
+invocation, tool call, or user payload. It only verifies the
+`SandboxAgent → ActorTemplate → Actor` control-plane path.
+
+Current blocker:
+
+```text
+Accepted=True  reason=Reconciled
+Ready=False    reason=ActorTemplateNotReady
+               message=ActorTemplate golden snapshot is not ready
+```
+
+The golden Actor is assigned to a deleted WorkerPool pod. Substrate 0.0.8 can
+miss worker deletion events while its API is unavailable and does not reconcile
+orphan workers on startup.
+
+## Agentic Gateway routing
+
+Pull request
+[tesserix-k8s#432](https://github.com/tesserix/tesserix-k8s/pull/432)
+routes kagent's Anthropic and OpenAI ModelConfigs through the private AI gateway:
+
+```text
+Anthropic: http://ai-gateway.agentgateway-system.svc.cluster.local:8080/anthropic
+OpenAI:    http://ai-gateway.agentgateway-system.svc.cluster.local:8080/openai/v1
+```
+
+The ModelConfigs retain `apiKeyPassthrough`; no provider key is stored in the
+canary. The user-specific key is forwarded only for the selected request.
+
+This is necessary but not sufficient for tenant-safe user traffic:
+
+- gateway authorization must bind Actor calls to the correct workload identity;
+- every request needs server-derived tenant, user, and run attribution for cost;
+- cross-user Actor memory and state isolation needs a negative test; and
+- provider egress must fail closed instead of allowing a direct-provider bypass.
+
+Do not enable `DEVAI_KAGENT_ENABLED` or broaden the gateway allowlist until
+those #76 acceptance checks pass.
+
+`DEVAI_AGENTGATEWAY_URL` is the MCP gateway base used by DevAI Jobs and
+runners. It is separate from the AI provider base URL above. Provider adapters
+must use the configured AI gateway paths; MCP endpoint resolution must use
+`DEVAI_AGENTGATEWAY_URL`. Neither variable is an authorization mechanism by
+itself.
+
+## Valkey and stale-worker incident
+
+The six Valkey pods are ready and cover all 16,384 slots, but cluster membership
+contains stale pod addresses. At least one master advertises an old address and
+one failed, addressless node remains. Clients can therefore be redirected to a
+dead address.
+
+The WorkerPool store also contains non-expiring records for deleted worker
+pods. The affected records inspected on 2026-08-19 held no Actor assignment or
+user data, but deleting them is still a production state repair.
+
+Before any repair:
+
+1. Obtain explicit approval for the named records and cluster nodes.
+2. Capture Valkey membership, the stale records, and canary state in a
+   restricted recovery directory.
+3. Verify every target against the current Kubernetes pod set.
+4. Repair only the stale membership and orphan worker records.
+5. Recreate only the keyless canary through GitOps if it cannot recover.
+6. Re-run every verification below and confirm the protected signing-state
+   timestamps did not change.
+
+Do not paste Valkey payloads into an issue, pull request, log, or this runbook.
+
+Later Substrate releases add startup orphan-worker reconciliation and replace
+Valkey with PostgreSQL. Treat that as a separate, reviewed migration; do not
+upgrade solely as an incident workaround.
+
+## Read-only verification
+
+Always use the production kubeconfig explicitly:
 
 ```bash
-# 0. context (NEVER assume)
+export KUBECONFIG=/Users/samyakrout/.kube/gke-prod
+
+gcloud config get-value account
+gcloud config get-value project
 kubectl config current-context
 
-# 1. Substrate readiness
-kubectl get crd | grep -iE 'sandboxagent|workerpool'         # SandboxAgent yes, WorkerPool = installed?
-kubectl get runtimeclass gvisor                              # RuntimeClass present?
-kubectl get nodes -l sandbox.gke.io/runtime=gvisor           # a sandbox NODE? (empty = blocker)
-kubectl -n ate-system get pods                               # substrate controller up?
-
-# 2. cross-validate a render WITHOUT deploying (the ultimate check)
-cat <<'Y' | kubectl apply --dry-run=server -f -
-apiVersion: kagent.dev/v1alpha2
-kind: SandboxAgent
-metadata: {name: probe, namespace: kagent-system}
-spec:
-  type: Declarative
-  platform: substrate
-  substrate: {workerPoolRef: {name: kagent-default}}   # OBJECT, not string
-  declarative: {runtime: go, modelConfig: default-model-config, systemMessage: "hi"}
-Y
-# "created (server dry run)" = passes the live CRD + admission, nothing persisted.
-
-# 3. cross-validate from DevAI / the registry (returns {ok, issues})
-curl -s ".../v0/agents/<name>/export/kagent?namespace=devai&workerPool=kagent-default&validate=true"
-# or in Python: RegistryClient(...).kagent_validate("<name>")
-
-# 4. render a SandboxAgent (no deploy)
-curl -s ".../v0/agents/<name>/export/kagent?namespace=devai&workerPool=kagent-default&modelConfig=default-model-config"
+kubectl -n ate-system get pods
+kubectl -n kagent-system get workerpool kagent-default
+kubectl -n kagent-system get sandboxagent devai-substrate-canary
+kubectl -n kagent-system describe sandboxagent devai-substrate-canary
+kubectl -n kagent-system get actortemplate
+kubectl -n kagent-system get modelconfig
 ```
 
-## As actually deployed (2026-06-17) — the real steps + fixes hit
+Expected identity and target:
 
-This is what *actually* happened bringing it up on prod, beyond the idealized
-runbook above. Reproduce in this order.
+```text
+account:   unidevidp@gmail.com
+project:   tesseracthub-480811
+context:   gke_tesseracthub-480811_asia-south1_tesseract-prod-in-gke
+namespace: kagent-system
+```
 
-1. **Node pool** — `gcloud container node-pools create sandbox-gvisor … --sandbox type=gvisor`
-   (the command at the top). Created fine, scale-to-zero.
-2. **Pin versions** — substrate charts: latest is **0.0.6** (`crane ls ghcr.io/kagent-dev/substrate/helm/substrate`).
-   `helm show/pull` was blocked locally by a missing `docker-credential-osxkeychain`
-   — use **`crane`** to inspect OCI charts instead.
-3. **Wire the apps** — `prod-infrastructure` is **kustomize-based**, so the two
-   Application files (`argocd/prod/infrastructure/substrate-{crds,}.yaml`) must be
-   **added to `argocd/prod/infrastructure/kustomization.yaml` `resources:`** — a
-   standalone file in the dir is otherwise invisible. (Cost me a wrong assumption +
-   a wasted sync.)
-4. **CRDs are `ate.dev`, not `kagent.dev`** — `workerpools.ate.dev`,
-   `actortemplates.ate.dev`. The substrate stack lands in **`ate-system`**:
-   `ate-api-server`, `ate-controller`, `atelet` (×3 worker daemons), `atenet-router`,
-   `dns`, `rustfs` (object store), plus a bundled valkey (the `substrate` app shows a
-   benign valkey StatefulSet `OutOfSync` — Healthy, ignore).
-5. **Enable on kagent (Phase B)** — `controller.substrate.enabled=true` +
-   `substrateWorkerPool.create=true` in the **kagent** app values. The new
-   substrate-enabled controller pod **CrashLoopBackOff**ed:
-   `dial ate-api "dns:///api.ate-system.svc:443": context deadline exceeded`.
-   **Cause:** `kagent-system` egress is default-deny and `ate-system` wasn't allowed.
-   **Fix:** `allow-kagent-to-ate-egress` NetworkPolicy in
-   `manifests/agentic-istio/networkpolicy-consumer-egress.yaml` (same pattern as the
-   registry/devai egress allows). Controller recovered, WorkerPool worker came up.
-6. **SandboxAgent stuck `ActorTemplateNotReady`** — the ate-controller couldn't
-   create the "golden actor": `Unauthenticated: invalid bearer token: unexpected
-   issuer "https://container.googleapis.com/.../tesseract-prod-in-gke"`.
-   **Cause:** **GKE mints SA tokens with the cluster's OIDC issuer**, but the ate-api
-   defaulted `auth.jwt.issuer=https://kubernetes.default.svc.cluster.local`.
-   **Fix:** set `auth.jwt.issuer` (substrate app values) to this cluster's issuer
-   (`kubectl get --raw /.well-known/openid-configuration`).
-7. **git** — `tesserix-k8s` main is force-pushed by other clones and **dropped a
-   clean push** mid-deploy. Always `git pull --rebase origin main` then push; verify
-   with `git ls-tree origin/main <path>`. (See the feedback memory.)
+Inspect the WorkerPool execution boundary without printing secret data:
 
-## Current state + the OPEN blocker (2026-06-17)
+```bash
+kubectl -n kagent-system get workerpool kagent-default \
+  -o jsonpath='{.spec.sandboxClass}{"\n"}{.spec.ateomImage}{"\n"}'
 
-**Deployed & healthy on prod:** the gVisor node pool (`sandbox-gvisor`, idle at 0),
-the Substrate stack (`ate-system`: ate-api, ate-controller, atelet ×3, atenet-router,
-dns, rustfs, valkey), the `kagent-default` WorkerPool, and the kagent controller with
-substrate enabled (talks to ate-api fine). devai is unaffected.
+kubectl -n kagent-system get pods \
+  -l ate.dev/worker-pool=kagent-default \
+  -o jsonpath='{range .items[*]}{.metadata.name}{" runtimeClass="}{.spec.runtimeClassName}{" node="}{.spec.nodeName}{"\n"}{end}'
+```
 
-**OPEN — Actor execution blocked (substrate 0.0.6 ↔ GKE Workload Identity):** a
-SandboxAgent reaches `ActorTemplateNotReady`. The ate-controller validates a projected
-SA token against the OIDC issuer, but **GKE mints tokens with the external issuer
-(`container.googleapis.com/…`)** whose discovery doc is served over a **public-CA**
-TLS cert — and the chart **hardcodes** `--client-jwt-ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`
-(the *cluster* CA), so it can't verify Google's cert →
-`x509: certificate signed by unknown authority`. It's not a values knob in 0.0.6.
+The first command should report `gvisor`; an empty `runtimeClass` on the
+WorkerPool pod is expected for the current nested-gVisor architecture.
 
-**Fix options (pick one):**
-1. **mTLS mode** (`auth.mode: mtls`) — substrate uses in-cluster pod-cert auth, no
-   OIDC. Cleanest in principle, BUT kagent 0.9.7's substrate config only exposes the
-   JWT token file (no mTLS client option), so the kagent→ate-api path would also need
-   to speak mTLS — a both-sides change, not values-only. Verify kagent mTLS support first.
-2. **Patch the substrate chart** to make `--client-jwt-ca-cert` configurable (point it
-   at a bundle that includes the public CAs, or at the in-cluster discovery), then
-   keep JWT mode. Raise upstream (kagent-dev/substrate) — the chart already documents
-   the GKE issuer but not the matching CA.
-3. **Workload Identity off / in-cluster issuer** — if the cluster minted tokens with
-   the in-cluster issuer, JWT mode works as-is. Cluster-level, conflicts with WI usage.
+Verify status conditions and gateway configuration without credentials:
 
-Until one lands, leave substrate deployed+dormant (no DevAI agent is labelled for it,
-`DEVAI_KAGENT_ENABLED=false`), so nothing tries to run a broken Actor. The node pool
-is scale-to-zero (no idle cost).
+```bash
+kubectl -n kagent-system get sandboxagent devai-substrate-canary \
+  -o jsonpath='{range .status.conditions[*]}{.type}{"="}{.status}{" reason="}{.reason}{"\n"}{end}'
 
-## Where everything lives
+kubectl -n kagent-system get modelconfig \
+  -o jsonpath='{range .items[*]}{.metadata.name}{" provider="}{.spec.provider}{"\n"}{end}'
+```
 
-| Piece | Path |
-|---|---|
-| This runbook | `devai/docs/agentic/SUBSTRATE-SETUP.md` |
-| Jobs-vs-kagent decision + re-enable | `devai/docs/agentic/KAGENT-INTEGRATION.md` §0 / §0a |
-| Render + validate + SandboxAgent | `agentic-registry/adapters/kagent/kagent.go`, `internal/api/export.go`, `resolve.go` |
-| DevAI validate client | `devai/src/devai/registry/client.py::kagent_validate` |
-| Reconciler (renders + applies) | `tesserix-k8s/charts/apps/kagent-agent-sync/` |
-| Staged Substrate ArgoCD apps | `tesserix-k8s/argocd/prod/apps/substrate/` (manual sync, not wired) |
-| kagent controller app | `tesserix-k8s/argocd/prod/infrastructure/kagent.yaml` |
-| Tracking | tesserix/devai epic **#69**, subs **#70–#78** |
+## Completion gate for #71
+
+Do not close #71 until all of the following are observed:
+
+- the keyless canary is `Accepted=True` and `Ready=True`;
+- its ActorTemplate golden snapshot is ready;
+- its Actor is assigned to the single live WorkerPool pod;
+- no new x509, OIDC issuer, dead-address, or Valkey timeout error appears;
+- all protected signing resources retain creation timestamp
+  `2026-06-17T14:37:57Z`;
+- Argo CD reports the Substrate, kagent, and agent-sync applications synced and
+  healthy; and
+- this runbook is deployed from DevAI `main`.
+
+## Rollback and upgrade policy
+
+Rollback is a Git revert of the owning `tesserix-k8s` commit followed by Argo
+CD reconciliation. Do not delete the live Argo CD Applications, CRDs, Valkey
+StatefulSet, or protected signing resources as a rollback shortcut.
+
+Before an upgrade:
+
+1. Diff CRDs, rendered names, StatefulSets, PVCs, signing resources, and Valkey
+   versions between the current and candidate charts.
+2. Prove the migration and rollback in a non-production cluster.
+3. Back up or capture every stateful resource needed to return to 0.0.8.
+4. Confirm Argo CD ignores generated signing data under the candidate names.
+5. Roll out through GitOps and verify the canary before enabling user traffic.
+
+## Cost and capacity
+
+The current one-worker pool is intended to multiplex Actors and does not create
+one Kubernetes pod or GKE node per Actor. The WorkerPool currently has no
+resource request or limit, however, and the canary cannot reach Ready. Measure
+5, 20, and 50 concurrent Actors before changing the NO-GO decision or setting
+production quotas. Until those measurements exist, no supported concurrency or
+cost-per-Actor claim should be made.
+
+The dedicated `sandbox-gvisor` GKE node pool still exists with zero nodes and
+autoscaling disabled, but the current WorkerPool does not schedule onto it.
+Enabling, resizing, removing, or repurposing it is a separate production change
+and requires explicit approval.

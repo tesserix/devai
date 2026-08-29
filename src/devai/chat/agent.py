@@ -36,8 +36,11 @@ Architecture:
 
 from __future__ import annotations
 
+import contextvars
+import hashlib
 import json
 import logging
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from langchain_anthropic import ChatAnthropic
@@ -90,6 +93,8 @@ class _ChatUsageCallback:
             model = getattr(self._agent.config, "claude_model", "") or "claude"
             principal = getattr(self._agent, "_principal", None)
             email = getattr(principal, "email", "") if principal else ""
+            tenant_id = getattr(principal, "tenant_id", "") if principal else ""
+            user_id = getattr(principal, "uid", "") if principal else ""
             cost = estimate_cost("anthropic", model, tok_in, tok_out)
             import asyncio
             import datetime
@@ -104,6 +109,8 @@ class _ChatUsageCallback:
                 cost_usd=cost,
                 duration_ms=0.0,
                 triggered_by=email,
+                tenant_id=tenant_id,
+                user_id=user_id or email,
                 agent="chat",
                 status="ok",
             )
@@ -172,12 +179,16 @@ class DevAIChatAgent:
         # chat uses LangChain directly, not the instrumented adapter, so
         # without this its cost/tokens never reach the ledger.
         self._usage_cb = _ChatUsageCallback(self)
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+
+        self._gateway_required = gateway_required(config)
         self.llm = ChatAnthropic(
             model=config.claude_model,
             anthropic_api_key=config.anthropic_api_key,
             max_tokens=4096,
             temperature=0.3,
             callbacks=[self._usage_cb],
+            anthropic_api_url=gateway_base_url(config, "anthropic", getattr(config, "anthropic_base_url", "")),
         )
         self._tools = self._build_tools()
         self._conversations: dict[str, list] = {}  # session_id -> message history
@@ -187,8 +198,20 @@ class DevAIChatAgent:
         # Per-call identity context, set by chat() / stream_chat(). Tools
         # that mutate platform state read these so the resulting A2A
         # messages are attributed to the human, not the chat agent.
-        self._principal: Principal | None = None
-        self._trace_id: str | None = None
+        self._principal_context: contextvars.ContextVar[Principal | None] = contextvars.ContextVar(
+            "devai_chat_principal", default=None
+        )
+        self._trace_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+            "devai_chat_trace", default=None
+        )
+
+    @property
+    def _principal(self) -> Principal | None:
+        return self._principal_context.get()
+
+    @property
+    def _trace_id(self) -> str | None:
+        return self._trace_context.get()
 
     async def _scm_for_principal(self) -> Any:
         """A fresh SCM client for the current conversation's user — their own
@@ -204,7 +227,7 @@ class DevAIChatAgent:
 
                 svc = get_settings_service()
                 if svc is not None:
-                    overlay = await PrincipalSCMResolver(self.config, svc).settings_for_email(email)
+                    overlay = await PrincipalSCMResolver(self.config, svc).settings_for_principal(self._principal)
                     return create_scm_client(overlay)
             except Exception:  # noqa: BLE001
                 logger.debug("chat: per-user SCM resolution failed — using platform client", exc_info=True)
@@ -770,6 +793,22 @@ class DevAIChatAgent:
         principal: Principal | None = None,
         trace_id: str | None = None,
     ) -> str:
+        principal_token = self._principal_context.set(principal)
+        trace_token = self._trace_context.set(trace_id)
+        try:
+            return await self._chat(message, session_id, principal=principal, trace_id=trace_id)
+        finally:
+            self._principal_context.reset(principal_token)
+            self._trace_context.reset(trace_token)
+
+    async def _chat(
+        self,
+        message: str,
+        session_id: str = "default",
+        *,
+        principal: Principal | None = None,
+        trace_id: str | None = None,
+    ) -> str:
         """Process a user message and return a response.
 
         Maintains conversation history per session. Uses LangChain's
@@ -777,22 +816,18 @@ class DevAIChatAgent:
         natural language responses.
 
         ``principal`` (resolved by the chat route from auth-bff headers
-        or the dashboard session cookie) is stashed on the agent so any
+        or the dashboard session cookie) is held in task-local context so any
         tool that mutates platform state — e.g. ``inject_pipeline_requirements``
         — can attribute the action to the real human, not the literal
         string ``"human"``.
         """
-        # Stash identity for tools that need it (injection, pipeline triggers).
-        # Per-call assignment because chat agents are shared across sessions
-        # on ``request.app.state`` — we can't bind identity at construction.
-        self._principal = principal
-        self._trace_id = trace_id
-
+        gateway_kwargs = self._gateway_request_kwargs(principal, trace_id or session_id)
+        session_id = self._scoped_session_id(session_id, principal)
         history = await self._restore_or_init_history(session_id)
         history.append(HumanMessage(content=message))
 
         # Bind tools to the model
-        llm_with_tools = self.llm.bind_tools(self._tools)
+        llm_with_tools = self.llm.bind_tools(self._tools, **gateway_kwargs)
 
         # ReAct loop: call LLM → execute tools → feed back → repeat
         for _iteration in range(8):  # Max 8 tool-calling rounds
@@ -853,19 +888,35 @@ class DevAIChatAgent:
         *,
         principal: Principal | None = None,
         trace_id: str | None = None,
-    ):
+    ) -> AsyncIterator[str]:
+        principal_token = self._principal_context.set(principal)
+        trace_token = self._trace_context.set(trace_id)
+        try:
+            async for chunk in self._stream_chat(message, session_id, principal=principal, trace_id=trace_id):
+                yield chunk
+        finally:
+            self._principal_context.reset(principal_token)
+            self._trace_context.reset(trace_token)
+
+    async def _stream_chat(
+        self,
+        message: str,
+        session_id: str = "default",
+        *,
+        principal: Principal | None = None,
+        trace_id: str | None = None,
+    ) -> AsyncIterator[str]:
         """Stream a response token by token.
 
         Yields text chunks as they arrive from Claude.
         For tool calls, yields a status update then continues.
         """
-        self._principal = principal
-        self._trace_id = trace_id
-
+        gateway_kwargs = self._gateway_request_kwargs(principal, trace_id or session_id)
+        session_id = self._scoped_session_id(session_id, principal)
         history = await self._restore_or_init_history(session_id)
         history.append(HumanMessage(content=message))
 
-        llm_with_tools = self.llm.bind_tools(self._tools)
+        llm_with_tools = self.llm.bind_tools(self._tools, **gateway_kwargs)
 
         for _iteration in range(8):
             # Collect full response for tool handling
@@ -916,6 +967,31 @@ class DevAIChatAgent:
 
     _HISTORY_TTL_SECONDS = 86400 * 7
 
+    def _gateway_request_kwargs(self, principal: Principal | None, run_id: str) -> dict[str, Any]:
+        if not self._gateway_required:
+            return {}
+        from devai.adapters.llm.gateway_routing import gateway_headers
+
+        return {
+            "extra_headers": gateway_headers(
+                {
+                    "tenant_id": principal.tenant_id if principal else "",
+                    "user_id": (principal.uid or principal.email) if principal else "",
+                    "run_id": run_id,
+                    "agent": "chat",
+                },
+                provider="anthropic",
+            )
+        }
+
+    @staticmethod
+    def _scoped_session_id(session_id: str, principal: Principal | None) -> str:
+        if principal is None:
+            return session_id
+        owner = principal.user_scope_id or principal.email
+        digest = hashlib.sha256(f"{owner}\0{session_id}".encode()).hexdigest()
+        return f"v2:{digest}"
+
     @staticmethod
     def _history_key(session_id: str) -> str:
         return f"devai:chat:history:{session_id}"
@@ -949,8 +1025,9 @@ class DevAIChatAgent:
         except Exception:  # noqa: BLE001 — persistence is best-effort
             logger.debug("chat history persist failed for %s", session_id, exc_info=True)
 
-    def clear_session(self, session_id: str = "default") -> None:
+    def clear_session(self, session_id: str = "default", *, principal: Principal | None = None) -> None:
         """Clear conversation history for a session (in-proc + Redis)."""
+        session_id = self._scoped_session_id(session_id, principal)
         self._conversations.pop(session_id, None)
         try:
             import asyncio

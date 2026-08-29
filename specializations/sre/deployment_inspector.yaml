@@ -6,6 +6,7 @@ description: >-
   deploy-correlated regressions. Read-only; surfaces what changed and
   whether it looks healthy.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: openai
 llm_model: gpt-4.1

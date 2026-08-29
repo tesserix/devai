@@ -8,6 +8,7 @@ description: >-
   Issues no mutations — it reports drift with evidence so the responder or
   a human can act.
 category: sre
+runtime: tesserix_adk
 
 llm_provider: groq
 llm_model: llama-3.3-70b-versatile

@@ -5,9 +5,10 @@ description: >-
   plan, follow repo conventions, write code + co-located unit tests,
   validate compile/lint/test, open a PR linked to the story issue.
 category: coding
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 max_tokens: 8192
 
 allowed_tools:

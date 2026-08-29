@@ -7,7 +7,7 @@ import logging
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
@@ -18,20 +18,19 @@ if TYPE_CHECKING:
     from devai.config import Settings
     from devai.core.event_bus import EventBus
     from devai.core.state import StateManager
+    from devai.pipeline.interfaces import StageDeps
 
 logger = logging.getLogger(__name__)
 _START_TIME = time.time()
 
 
-def _sandbox_stage_deps(app: FastAPI, config: Settings) -> object:
-    """The pipeline's own deps when it is up, so a sandbox run resolves the
-    invoking user's credentials exactly as a pipeline stage does; otherwise a
-    minimal bundle so invoking still works with the pipeline disabled."""
-    deps = getattr(getattr(app.state, "pipeline_service", None), "stage_deps", None)
-    if deps is not None:
-        return deps
-
+def _sandbox_stage_deps(app: FastAPI, config: Settings) -> StageDeps:
+    """Return service wiring that the sandbox credential resolver will strip."""
     from devai.pipeline.interfaces import StageDeps
+
+    deps = getattr(getattr(app.state, "pipeline_service", None), "stage_deps", None)
+    if isinstance(deps, StageDeps):
+        return deps
 
     llm = None
     try:
@@ -89,6 +88,7 @@ def create_app(
             logger.exception("registry client construction failed — running in pure-local mode")
             _registry_client = None
         app.state.registry_client = _registry_client
+        app.state.agent_import_service = None
 
         # A2A (Agent2Agent) runtime client — lets the orchestrator discover
         # peer agents via the registry, fetch their capability cards, and
@@ -258,6 +258,15 @@ def create_app(
             logger.exception("SRE Studio service failed to start — sre-studio API will 503")
             app.state.sre_studio_service = None
 
+        if app.state.sre_studio_db is not None and _registry_client is not None:
+            from devai.registry.imports import AgentImportService
+
+            app.state.agent_import_service = AgentImportService(
+                database=app.state.sre_studio_db,
+                registry=_registry_client,
+            )
+            logger.info("Registry import service ready")
+
         # Live preview service — on-demand ephemeral preview environments.
         # Reuses the SRE Studio DB pool + the pipeline's connected K8s runtime.
         app.state.preview_service = None
@@ -323,23 +332,83 @@ def create_app(
         app.state.sandbox_traces = None
         app.state.sandbox_invoker = None
         app.state.sandbox_evals = None
+        app.state.evaluation_service = None
+        app.state.agent_gate_service = None
         try:
+            from devai.sandbox.credentials import SandboxCredentialResolver
             from devai.sandbox.evals import EvalRunner, EvalStore
             from devai.sandbox.invoke import SandboxInvoker
             from devai.sandbox.trace import TraceStore
 
-            app.state.sandbox_traces = TraceStore(getattr(state, "redis", None))
+            sandbox_deps = _sandbox_stage_deps(app, config)
+            trace_object_store = (sandbox_deps.extra or {}).get("object_store")
+            if trace_object_store is None:
+                from devai.adapters.object_store import create_object_store_adapter
+
+                trace_object_store = create_object_store_adapter(config)
+            app.state.sandbox_traces = TraceStore(
+                getattr(state, "redis", None),
+                object_store=trace_object_store,
+            )
+            if app.state.sre_studio_db is not None and getattr(trace_object_store, "provider_name", "noop") != "noop":
+                from devai.evaluations import AgentGateService, EvaluationService
+
+                app.state.evaluation_service = EvaluationService(
+                    database=app.state.sre_studio_db,
+                    object_store=trace_object_store,
+                    registry=getattr(app.state, "registry_client", None),
+                )
+                app.state.agent_gate_service = AgentGateService(
+                    database=app.state.sre_studio_db,
+                    evaluations=app.state.evaluation_service,
+                    audit=app.state.sre_studio_db.audit,
+                )
+                logger.info("Evaluation dataset service ready (durable metadata + object store)")
+            elif app.state.sre_studio_db is not None:
+                logger.warning("Evaluation datasets disabled: durable object store unavailable")
+            sandbox_audit = None
+            if app.state.sre_studio_db is not None:
+
+                async def sandbox_audit(event: dict[str, str]) -> None:
+                    details = {key: value for key, value in event.items() if key not in {"action", "owner"}}
+                    await app.state.sre_studio_db.audit(
+                        action=event["action"],
+                        actor=event["owner"],
+                        actor_type="user",
+                        entity_type="sandbox",
+                        entity_ref=event["sandbox_id"],
+                        details=details,
+                    )
+
             # The service, not its registry: an agent published from the UI has
             # to be invokable without waiting for the next restart.
             if spec_service is not None:
                 app.state.sandbox_invoker = SandboxInvoker(
                     specializations=spec_service,
-                    deps=_sandbox_stage_deps(app, config),
+                    deps=sandbox_deps,
                     traces=app.state.sandbox_traces,
+                    credentials=SandboxCredentialResolver(
+                        service=settings_service,
+                        audit=sandbox_audit,
+                    ),
                 )
-                app.state.sandbox_evals = EvalRunner(
-                    app.state.sandbox_invoker, EvalStore(getattr(state, "redis", None))
-                )
+                if app.state.sre_studio_db is not None:
+                    from devai.evaluations.job import JobEvaluationInvoker
+                    from devai.evaluations.judge import JudgeFactory
+
+                    evaluation_invoker = JobEvaluationInvoker(
+                        deps=sandbox_deps,
+                        traces=app.state.sandbox_traces,
+                        fallback=app.state.sandbox_invoker,
+                    )
+                    app.state.sandbox_evals = EvalRunner(
+                        evaluation_invoker,
+                        EvalStore(None, database=app.state.sre_studio_db),
+                        max_cases=int(getattr(config, "sandbox_max_eval_cases_per_run", 50) or 50),
+                        max_concurrency=int(getattr(config, "sandbox_eval_max_concurrency", 4) or 4),
+                        judge_factory=JudgeFactory(sandbox_deps),
+                    )
+                    logger.info("Evaluation runner ready (backend=%s)", evaluation_invoker.execution_backend)
                 logger.info("Sandbox invoker ready")
         except Exception:
             logger.exception("Sandbox invoker failed to start — invoke API will 503")
@@ -549,6 +618,22 @@ def create_app(
             logger.exception("MessagingService failed to start — remote channels disabled")
             app.state.messaging_service = None
 
+        # Admin analytics rollups reuse this same Postgres handle. Connected
+        # here (not lazily on first request) so `record_active` — which only
+        # writes when app.state.analytics_db is already set — never silently
+        # drops active-user rows before the first /api/analytics/* call.
+        app.state.analytics_db = None
+        if getattr(config, "database_url", ""):
+            try:
+                from devai.services.database import Database
+
+                analytics_db = Database(config.database_url)
+                await analytics_db.connect()
+                app.state.analytics_db = analytics_db
+            except Exception:  # noqa: BLE001
+                logger.info("analytics: Postgres unavailable at startup — rollups disabled", exc_info=True)
+                app.state.analytics_db = None
+
         try:
             yield
         finally:
@@ -624,6 +709,32 @@ def create_app(
     app.state.event_bus_adapter = event_bus_adapter
     app.state.state_manager = state
     app.state.config = config
+    app.state.agent_lifecycle_orchestrator = None
+    if getattr(config, "workflow_provider", "inproc") == "temporal":
+        from devai.orchestration.agent_lifecycle_client import AgentLifecycleOrchestrator
+
+        app.state.agent_lifecycle_orchestrator = AgentLifecycleOrchestrator(config)
+
+    # Daily active-user recording. Starlette runs middleware in the reverse
+    # of add order, so registering this before the auth gate below makes it
+    # the innermost layer — it only runs once auth has resolved the
+    # request, and its failures are swallowed so a telemetry miss can never
+    # fail a user request.
+    from devai.admin.activity import ActivityMiddleware
+
+    app.add_middleware(ActivityMiddleware)
+
+    # Dedup guard for the above — one audit_log row per user per day, shared
+    # across pods. None degrades to "record nothing", never to a crash.
+    app.state.activity_redis = None
+    try:
+        import redis.asyncio as _redis
+
+        url = getattr(config, "redis_url", "") or ""
+        if url:
+            app.state.activity_redis = _redis.from_url(url, decode_responses=True)
+    except Exception:  # noqa: BLE001
+        logger.info("activity dedup guard unavailable — active-user stats disabled")
 
     # Opt-in auth gate (DEVAI_REQUIRE_AUTH). No-op unless enabled; when on,
     # mutating requests without a resolvable principal get 401. Webhook
@@ -636,6 +747,13 @@ def create_app(
         if blocked is not None:
             return blocked
         return await call_next(request)
+
+    # Bound the request body before any handler reads it. Added last of the
+    # two so it sits outside the auth gate — an oversized body is rejected
+    # without buffering it for an identity lookup.
+    from devai.services.request_limits import BodySizeLimitMiddleware
+
+    app.add_middleware(BodySizeLimitMiddleware)
 
     # Telemetry adapter (adapters/telemetry). Built synchronously HERE — not in
     # lifespan — because instrument_asgi adds middleware, which must be
@@ -673,7 +791,25 @@ def create_app(
     try:
         from devai.analytics.usage_ledger import UsageLedger, set_global_ledger
 
-        app.state.usage_ledger = UsageLedger(getattr(config, "redis_url", "") or "")
+        async def _sandbox_spend_alert(event: dict[str, Any]) -> None:
+            database = getattr(app.state, "sre_studio_db", None)
+            if database is None:
+                return
+            await database.audit(
+                action=str(event["action"]),
+                actor="system:usage-ledger",
+                actor_type="system",
+                entity_type="tenant",
+                entity_ref=str(event["tenant_id"]),
+                details={key: value for key, value in event.items() if key not in {"action", "tenant_id"}},
+            )
+
+        app.state.usage_ledger = UsageLedger(
+            getattr(config, "redis_url", "") or "",
+            sandbox_monthly_cost_limit_usd=float(getattr(config, "sandbox_monthly_cost_limit_usd", 100.0) or 0.0),
+            sandbox_spend_alert_ratio=float(getattr(config, "sandbox_spend_alert_ratio", 0.8) or 0.0),
+            alert_sink=_sandbox_spend_alert,
+        )
         set_global_ledger(app.state.usage_ledger)
     except Exception:  # noqa: BLE001
         logger.exception("usage ledger init failed — analytics cost views may be empty")
@@ -724,9 +860,18 @@ def create_app(
     app.include_router(catalog_router)
 
     # Agent Registry catalog routes (/api/registry/*).
+    from devai.registry.import_routes import router as registry_import_router
     from devai.registry.routes import router as registry_router
 
     app.include_router(registry_router)
+    app.include_router(registry_import_router)
+
+    # Authenticated Agent2Agent server endpoint for the specialization catalog.
+    from devai.a2a.routes import router as a2a_router
+    from devai.a2a.routes import well_known_router as a2a_well_known_router
+
+    app.include_router(a2a_router)
+    app.include_router(a2a_well_known_router)
 
     # Agentic control-plane status (/api/agentic/status + smoke probes).
     # Backs the dashboard's Gateway panel; one endpoint aggregates the
@@ -764,6 +909,13 @@ def create_app(
 
     app.include_router(analytics_router)
 
+    # Admin routes (/api/admin/*) — platform-owner view of who uses DevAI.
+    # Gated by a router-level admin-role dependency, not by the edge, so the
+    # boundary holds regardless of how the pod is reached.
+    from devai.admin.routes import router as admin_router
+
+    app.include_router(admin_router)
+
     # Specializations catalog routes (/api/specializations/*)
     from devai.specializations.routes import router as specializations_router
 
@@ -789,8 +941,22 @@ def create_app(
     # Sandbox routes (/api/sandboxes/*) — pinned, TTL-bounded agent
     # configurations. 503s until sandbox_service is wired (lifespan).
     from devai.sandbox.routes import router as sandbox_router
+    from devai.sandbox.routes import trace_router
 
     app.include_router(sandbox_router)
+    app.include_router(trace_router)
+
+    # Versioned evaluation datasets and suites. The routes are mounted even
+    # when storage is unavailable so callers receive an explicit 503.
+    from devai.evaluations.routes import (
+        comparison_router,
+    )
+    from devai.evaluations.routes import (
+        router as evaluation_router,
+    )
+
+    app.include_router(evaluation_router)
+    app.include_router(comparison_router)
 
     # Runtime version picker (/api/adk/versions) — what a sandbox may pin to.
     from devai.kit.routes import router as adk_router

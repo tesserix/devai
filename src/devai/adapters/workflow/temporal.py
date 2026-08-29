@@ -6,15 +6,18 @@ result. The workflow + activity live in :mod:`devai.orchestration` and run in th
 uses to kick a run off and wait for it.
 
 All ``temporalio`` imports are lazy (inside methods) so importing this module never
-requires the SDK. If the cluster is unreachable the adapter **degrades** to the
-injected fallback (in-process) rather than failing the request — "degrade, never
-crash".
+requires the SDK. Local development can degrade before a workflow is started;
+production fails closed so a partially accepted run is never repeated in-process.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from dataclasses import fields
 from typing import TYPE_CHECKING, Any
+
+from devai.pipeline.types import TaskState
 
 from .base import WorkflowAdapter
 
@@ -24,6 +27,14 @@ if TYPE_CHECKING:
     from devai.pipeline.types import DevAITask
 
 logger = logging.getLogger(__name__)
+
+
+def workflow_id_for_task(task: DevAITask) -> str:
+    principal = task.principal or {}
+    tenant = str(principal.get("tenant_id") or principal.get("pool") or "").strip()
+    subject = str(principal.get("uid") or principal.get("email") or task.triggered_by or "system").strip()
+    scope = hashlib.sha256(f"{tenant}:{subject}".encode()).hexdigest()[:20]
+    return f"devai-bp-{scope}-{task.id}"
 
 
 class TemporalWorkflowAdapter(WorkflowAdapter):
@@ -43,10 +54,17 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
             return self._client
         from temporalio.client import Client  # lazy
 
+        from devai.orchestration.payload_codec import temporal_data_converter
+
         host = getattr(self._settings, "temporal_host", "localhost:7233")
         namespace = getattr(self._settings, "temporal_namespace", "default")
         tls = bool(getattr(self._settings, "temporal_tls_enabled", False))
-        self._client = await Client.connect(host, namespace=namespace, tls=tls)
+        self._client = await Client.connect(
+            host,
+            namespace=namespace,
+            tls=tls,
+            data_converter=temporal_data_converter(self._settings),
+        )
         logger.info("TemporalWorkflowAdapter connected: %s ns=%s", host, namespace)
         return self._client
 
@@ -60,11 +78,12 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
         try:
             client = await self._ensure_client()
         except Exception:  # noqa: BLE001
-            logger.exception(
-                "Temporal connect failed — degrading to %s for task %s",
-                self._fallback.provider_name,
-                task.id,
-            )
+            if bool(getattr(self._settings, "temporal_fail_closed", False)):
+                logger.exception("Temporal connect failed for task %s", task.id)
+                task.error = "durable workflow backend unavailable"
+                task.transition(TaskState.STAGE_FAILED)
+                return task
+            logger.exception("Temporal connect failed for task %s; using local fallback", task.id)
             return await self._fallback.run_blueprint(blueprint, task)
 
         task_queue = getattr(self._settings, "temporal_task_queue", "devai")
@@ -77,34 +96,57 @@ class TemporalWorkflowAdapter(WorkflowAdapter):
             "max_stage_attempts": max_attempts,
         }
 
+        workflow_id = workflow_id_for_task(task)
         try:
+            from temporalio.common import WorkflowIDReusePolicy
+            from temporalio.exceptions import WorkflowAlreadyStartedError
+
+            reuse_policy = WorkflowIDReusePolicy.REJECT_DUPLICATE
+            if task.agent_context.get("resumed_from_failure_at") is not None:
+                reuse_policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE
             handle = await client.start_workflow(
                 "BlueprintWorkflow",
                 payload,
-                id=f"devai-bp-{task.id}",
+                id=workflow_id,
+                id_reuse_policy=reuse_policy,
                 task_queue=task_queue,
             )
+        except WorkflowAlreadyStartedError:
+            handle = client.get_workflow_handle(workflow_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Temporal workflow start failed for task %s", task.id)
+            task.error = "durable workflow start failed"
+            task.transition(TaskState.STAGE_FAILED)
+            return task
+
+        try:
             result = await handle.result()
         except Exception:  # noqa: BLE001
-            logger.exception(
-                "Temporal workflow failed for task %s — degrading to %s",
-                task.id,
-                self._fallback.provider_name,
-            )
-            return await self._fallback.run_blueprint(blueprint, task)
+            logger.exception("Temporal workflow execution failed for task %s", task.id)
+            task.error = "durable workflow execution failed"
+            task.transition(TaskState.STAGE_FAILED)
+            return task
 
-        return task_from_dict(result)
+        completed = task_from_dict(result)
+        for field in fields(task):
+            setattr(task, field.name, getattr(completed, field.name))
+        return task
 
-    async def signal(self, task_id: str, signal_name: str, args: list | None = None) -> bool:
+    async def signal(
+        self,
+        task: DevAITask | str,
+        signal_name: str,
+        args: list[Any] | None = None,
+    ) -> bool:
         """Deliver a durable Signal to the run's BlueprintWorkflow.
 
-        The workflow id mirrors run_blueprint: ``devai-bp-{task_id}``. Returns
-        False (never raises) if the cluster is unreachable or the run isn't
-        found, so a control click degrades quietly.
+        Returns False if the cluster is unreachable or the run is not found.
         """
+        task_id = task.id if not isinstance(task, str) else task
+        workflow_id = workflow_id_for_task(task) if not isinstance(task, str) else f"devai-bp-{task}"
         try:
             client = await self._ensure_client()
-            handle = client.get_workflow_handle(f"devai-bp-{task_id}")
+            handle = client.get_workflow_handle(workflow_id)
             await handle.signal(signal_name, *(args or []))
             return True
         except Exception:  # noqa: BLE001

@@ -14,8 +14,9 @@
 import { useEffect, useState } from "react";
 import { PackageOpen, RefreshCw } from "lucide-react";
 import { GuidanceInfo, GuidancePanel } from "@/components/guidance";
+import { isRegistryTab, registryEndpoint, type RegistryTab } from "@/lib/registry-tabs";
 
-type Counts = { skills: number; prompts: number; mcp_servers: number; agents: number };
+type Counts = { skills: number; prompts: number; mcp_servers: number; agents: number; datasets: number; eval_suites: number };
 type LocalCounts = { tools: number; blueprints: number; specializations: number; stages: number };
 type Health = { reachable: boolean; status?: string; error?: string };
 
@@ -31,6 +32,15 @@ type Agent = {
   model_provider: string;
   model_name: string;
 };
+type Dataset = { name: string; description: string; version: string; case_count: number };
+type EvalSuite = {
+  name: string;
+  description: string;
+  version: string;
+  dataset_ref: { ref?: string; version?: string };
+  scorers: string[];
+  thresholds: Record<string, number>;
+};
 type Tool = {
   name: string;
   description: string;
@@ -42,18 +52,11 @@ type Blueprint = { name: string; description: string; stage_count: number };
 type Specialization = { name: string; category: string; description: string };
 type Stage = { name: string };
 
-type Tab =
-  | "skills"
-  | "prompts"
-  | "mcp-servers"
-  | "agents"
+type Tab = RegistryTab
   | "tools"
   | "blueprints"
   | "specializations"
   | "stages";
-
-const REGISTRY_TABS: Tab[] = ["skills", "prompts", "mcp-servers", "agents"];
-const LOCAL_TABS: Tab[] = ["tools", "blueprints", "specializations", "stages"];
 
 export default function RegistryPage() {
   const [counts, setCounts] = useState<Counts | null>(null);
@@ -163,7 +166,7 @@ export default function RegistryPage() {
           divider so the source of truth is obvious. */}
       <div>
         <div className="label-eyebrow mb-2 text-[var(--ink-400)]">Upstream — aregistry</div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
           <CountCard label="Skills" value={counts?.skills} active={tab === "skills"} onClick={() => setTab("skills")} />
           <CountCard label="Prompts" value={counts?.prompts} active={tab === "prompts"} onClick={() => setTab("prompts")} />
           <CountCard
@@ -172,7 +175,9 @@ export default function RegistryPage() {
             active={tab === "mcp-servers"}
             onClick={() => setTab("mcp-servers")}
           />
-          <CountCard label="Agents" value={counts?.agents} active={tab === "agents"} onClick={() => setTab("agents")} />
+            <CountCard label="Agents" value={counts?.agents} active={tab === "agents"} onClick={() => setTab("agents")} />
+            <CountCard label="Datasets" value={counts?.datasets} active={tab === "datasets"} onClick={() => setTab("datasets")} />
+            <CountCard label="Eval Suites" value={counts?.eval_suites} active={tab === "eval-suites"} onClick={() => setTab("eval-suites")} />
         </div>
       </div>
       <div>
@@ -230,7 +235,7 @@ async function safeJson<T>(res: Response | null): Promise<T | null> {
 }
 
 function endpointFor(tab: Tab): string {
-  if (REGISTRY_TABS.includes(tab)) return `/api/registry/${tab}`;
+  if (isRegistryTab(tab)) return registryEndpoint(tab);
   if (tab === "tools") return "/api/catalog/tools";
   if (tab === "stages") return "/api/catalog/stages";
   if (tab === "blueprints") return "/api/pipeline/blueprints";
@@ -323,6 +328,37 @@ function renderTable(tab: Tab, items: unknown[]) {
               {a.model_provider}/{a.model_name}
             </MonoCell>
             <Cell>{a.description}</Cell>
+          </tr>
+        ))}
+      </Table>
+    );
+  }
+  if (tab === "datasets") {
+    const rows = items as Dataset[];
+    return (
+      <Table headers={["Name", "Version", "Cases", "Description"]}>
+        {rows.map((dataset) => (
+          <tr key={`${dataset.name}@${dataset.version}`}>
+            <Mono>{dataset.name}</Mono>
+            <Cell>{dataset.version}</Cell>
+            <Cell>{dataset.case_count}</Cell>
+            <Cell>{dataset.description}</Cell>
+          </tr>
+        ))}
+      </Table>
+    );
+  }
+  if (tab === "eval-suites") {
+    const rows = items as EvalSuite[];
+    return (
+      <Table headers={["Name", "Version", "Dataset", "Scorers", "Thresholds"]}>
+        {rows.map((suite) => (
+          <tr key={`${suite.name}@${suite.version}`}>
+            <Mono>{suite.name}</Mono>
+            <Cell>{suite.version}</Cell>
+            <MonoCell>{suite.dataset_ref?.ref || "—"}@{suite.dataset_ref?.version || "—"}</MonoCell>
+            <Cell>{suite.scorers?.join(", ") || "—"}</Cell>
+            <MonoCell>{Object.entries(suite.thresholds ?? {}).map(([key, value]) => `${key}=${value}`).join(" · ") || "—"}</MonoCell>
           </tr>
         ))}
       </Table>

@@ -1,26 +1,43 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: Agent
 metadata:
   name: reflector-agent
   namespace: devai
+  tenantId: devai
+  tag: 1.0.1
   visibility: public
   labels:
     devai.io/source: devai
     devai.io/category: specialist
     devai.io/skill: reflector
+    devai.io/risk-level: low
+    ai.tesserix.dev/runtime: tesserix-adk
+    ai.tesserix.dev/provider-policy: user-connectors
 spec:
-  skill: reflector
+  title: Post-Run Reflector
+  description: Runs AFTER a pipeline task terminates. Reviews what happened (success or failure), extracts
+    lessons, and writes them to agent memory as either episodic or semantic memories. Closes the learning
+    loop.
+  model:
+    provider: devai-user-routing
+    name: dynamic
+  a2a:
+    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/reflector
+    preferredTransport: JSONRPC
+    provider:
+      organization: Tesserix
+      url: https://tesserix.app
+    capabilities:
+      streaming: false
+      pushNotifications: false
+    defaultInputModes:
+    - application/json
+    - text/plain
+    defaultOutputModes:
+    - application/json
+    - text/plain
+  skills:
+  - reflector
+  prompts:
+  - reflector-prompt-v1
   promptRef: reflector-prompt-v1
-  llm:
-    provider: groq
-    model: llama-3.3-70b-versatile
-    temperature: null
-    maxTokens: null
-  limits:
-    maxTurns: 8
-    timeoutSeconds: 900
-  runtime:
-    kind: yaml_only
-    pythonClass: null
-  riskLevel: low
-  roleColor: admin

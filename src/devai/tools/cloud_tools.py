@@ -32,6 +32,12 @@ def _email(ctx: ToolContext) -> str:
     return (ctx.triggered_by or "").strip()
 
 
+def _principal(ctx: ToolContext) -> Any:
+    from devai.identity import Principal
+
+    return Principal.from_dict((ctx.extra or {}).get("principal")) or Principal(email=_email(ctx))
+
+
 def _list_accounts_factory(ctx: ToolContext) -> Handler:
     async def handler(_: dict[str, Any]) -> str:
         email = _email(ctx)
@@ -39,7 +45,7 @@ def _list_accounts_factory(ctx: ToolContext) -> Handler:
             return "ERROR: this call carries no user identity"
         from devai.settings.connections import user_connections
 
-        conns = await user_connections(email, "cloud")
+        conns = await user_connections(_principal(ctx), "cloud")
         return _dump(
             [{"name": c.get("cloud_name") or c.get("instance_id"), "provider": c.get("provider", "")} for c in conns]
         )
@@ -74,9 +80,10 @@ async def _resolve(ctx: ToolContext, name: str) -> tuple[Any, str]:
     from devai.adapters.cloud import create_cloud_adapter
     from devai.settings.connections import user_cloud, user_cloud_names
 
-    conn = await user_cloud(email, name)
+    principal = _principal(ctx)
+    conn = await user_cloud(principal, name)
     if conn is None:
-        names = await user_cloud_names(email)
+        names = await user_cloud_names(principal)
         return None, (
             f"ERROR: no connected cloud account named {name!r} for {email}. "
             + (f"Available: {', '.join(names)}" if names else "Connect one in Settings → Cloud Account.")

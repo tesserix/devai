@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from openai import AsyncOpenAI
 
 if TYPE_CHECKING:
+    from devai.adapters.llm.base import LLMAdapter
     from devai.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,21 @@ class OpenAIProvider:
     """OpenAI Chat Completions provider."""
 
     def __init__(self, config: Settings) -> None:
+        from devai.adapters.llm.gateway_routing import gateway_base_url, gateway_required
+        from devai.adapters.llm.legacy_bridge import current_legacy_llm
+
         self._config = config
-        self.client = AsyncOpenAI(api_key=config.openai_api_key)
+        self._gateway_required = gateway_required(config)
+        self._resolved_llm: LLMAdapter | None = current_legacy_llm()
         self.model = config.openai_model
+        if self._resolved_llm is not None:
+            self.client: AsyncOpenAI | None = None
+            return
+        self.client = AsyncOpenAI(
+            api_key=config.openai_api_key,
+            base_url=gateway_base_url(config, "openai", getattr(config, "openai_base_url", "")),
+            default_headers={"x-devai-provider": "openai"} if gateway_required(config) else None,
+        )
 
     def _user_pinned_elsewhere(self) -> bool:
         """True when this run's config is a USER's settings overlay whose
@@ -46,6 +59,22 @@ class OpenAIProvider:
         response_format: dict[str, Any] | None = None,
     ) -> str:
         """Generate a response using OpenAI Chat Completions."""
+        resolved_llm: LLMAdapter | None = getattr(self, "_resolved_llm", None)
+        if resolved_llm is not None:
+            from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+            response = await resolved_llm.generate(
+                LLMRequest(
+                    system=system,
+                    messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    response_format=response_format,
+                )
+            )
+            if response.finish_reason == "error":
+                raise RuntimeError("all authorized LLM providers failed")
+            return response.text
         if self._user_pinned_elsewhere():
             return await self._fallback_to_claude(prompt, system, max_tokens)
         messages: list[dict[str, str]] = []
@@ -65,9 +94,17 @@ class OpenAIProvider:
             kwargs["temperature"] = temperature
         if response_format:
             kwargs["response_format"] = response_format
+        if self._gateway_required:
+            from devai.adapters.llm.gateway_routing import current_gateway_headers
+
+            kwargs["extra_headers"] = current_gateway_headers("openai")
+
+        client = self.client
+        if client is None:
+            raise RuntimeError("OpenAI client is not initialized")
 
         try:
-            response = await self.client.chat.completions.create(**kwargs)
+            response = await client.chat.completions.create(**kwargs)
             return response.choices[0].message.content or ""
         except Exception as e:
             # Fall back to Anthropic if available

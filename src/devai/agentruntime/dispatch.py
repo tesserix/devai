@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from devai.agentruntime.agent import Agent, AgentResult, RunContext
 
@@ -170,10 +170,13 @@ class AgentDispatcher:
         """
         email = task.triggered_by or ""
         deps = self.deps
+        from devai.identity import Principal
 
-        llm = await self._resolve_llm(email)
-        scm = scm_override if scm_override is not None else await self._resolve_scm(email)
-        config = config_override if config_override is not None else await self._resolve_config(email)
+        identity = Principal.from_dict(task.principal) or email
+
+        llm = await self._resolve_llm(identity)
+        scm = scm_override if scm_override is not None else await self._resolve_scm(identity)
+        config = config_override if config_override is not None else await self._resolve_config(identity)
 
         return RunContext(
             task=task,
@@ -186,29 +189,33 @@ class AgentDispatcher:
             dispatcher=self,
         )
 
-    async def _resolve_llm(self, email: str) -> LLMAdapter | None:
+    async def _resolve_llm(self, identity: Any) -> LLMAdapter | None:
         try:
-            return await self.deps.llm_for_principal(email)
+            return await self.deps.llm_for_principal(identity)
         except Exception:  # noqa: BLE001 — resolution must never break a run
             logger.debug("AgentDispatcher: llm_for_principal failed — using deps.llm", exc_info=True)
             return self.deps.llm
 
-    async def _resolve_scm(self, email: str) -> SCMClient | None:
+    async def _resolve_scm(self, identity: Any) -> SCMClient | None:
         try:
-            return await self.deps.scm_for_principal(email) or self.deps.scm
+            return await self.deps.scm_for_principal(identity) or self.deps.scm
         except Exception:  # noqa: BLE001
             logger.debug("AgentDispatcher: scm_for_principal failed — using deps.scm", exc_info=True)
             return self.deps.scm
 
-    async def _resolve_config(self, email: str) -> Settings:
+    async def _resolve_config(self, identity: Any) -> Settings:
         """The principal's Settings overlay (their keys/model), or the platform
         config. Only a human with their own LLM connector gets an overlay; system
         principals and connector-less users ride the platform config."""
         resolver = getattr(self.deps, "llm_resolver", None)
-        if resolver is None or not _is_human(email) or not hasattr(resolver, "llm_overlay_for_email"):
+        principal = self.deps._principal_identity(identity)
+        if resolver is None or not _is_human(principal.email):
             return self.deps.config
         try:
-            overlay, has_own = await resolver.llm_overlay_for_email(email)
+            if hasattr(resolver, "llm_overlay_for_principal"):
+                overlay, has_own = await resolver.llm_overlay_for_principal(principal)
+            else:
+                overlay, has_own = await resolver.llm_overlay_for_email(principal.email)
             if has_own and overlay is not None:
                 return overlay
         except Exception:  # noqa: BLE001

@@ -6,9 +6,10 @@ description: >-
   stories, and the estimated complexity. Output drives the collaborative
   parallel implementation model.
 category: planning
+runtime: tesserix_adk
 
 llm_provider: claude
-llm_model: claude-sonnet-4-20250514
+llm_model: claude-sonnet-5
 max_tokens: 8192
 
 allowed_tools:
