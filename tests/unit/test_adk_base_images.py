@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 ADK_BASE = (
@@ -22,6 +23,18 @@ def test_kit_extra_pins_the_same_adk_release() -> None:
     project = Path("pyproject.toml").read_text()
 
     assert f"agent-development-kit@v{ADK_VERSION}" in project
+
+
+def test_application_dependencies_preserve_the_adk_base_constraints() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text())
+    dependencies = set(project["project"]["dependencies"])
+
+    assert {
+        "google-genai==2.20.0",
+        "opentelemetry-api==1.42.1",
+        "opentelemetry-sdk==1.42.1",
+        "opentelemetry-exporter-otlp-proto-http==1.42.1",
+    } <= dependencies
 
 
 def test_main_ci_installs_the_adk_extra_fail_closed() -> None:

@@ -23,13 +23,13 @@ dependencies = [
     "keyring>=25.6.0",
     "jsonschema>=4.26.0",
     "structlog>=26.1.0",
-    "opentelemetry-api>=1.29.0",
-    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-api==1.42.1",
+    "opentelemetry-sdk==1.42.1",
     # OTLP/HTTP exporter — backs the telemetry adapter family
     # (adapters/telemetry/otel.py) when DEVAI_TELEMETRY_PROVIDER=otel. Shipped
     # in the image so turning telemetry on is one env var, no custom build. The
     # adapter lazy-imports it and degrades to Noop if it's ever absent.
-    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http==1.42.1",
     "python-ulid>=4.0.1",
     "rich>=15.0.0",
     "playwright>=1.49.0",
@@ -40,7 +40,7 @@ dependencies = [
     # Groq (fallback)
     "groq>=0.12.0",
     # Google Gemini
-    "google-genai==2.18.1",
+    "google-genai==2.20.0",
     # GCP monitoring and management (exact pins to avoid resolution-too-deep)
     "google-cloud-monitoring==2.31.0",
     "google-cloud-logging==3.16.2",
