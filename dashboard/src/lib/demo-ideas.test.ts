@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 import { DEMO_IDEAS, shouldShowOnboarding } from "./demo-ideas.ts";
 
-const fresh = { trial_enabled: true, budget: 100, used: 0, remaining: 100, exhausted: false, warning: false };
-const spent = { trial_enabled: true, budget: 100, used: 100, remaining: 0, exhausted: true, warning: true };
+const fresh = { trial_enabled: true, applicable: true, budget: 100, used: 0, remaining: 100, exhausted: false, warning: false };
+const spent = { trial_enabled: true, applicable: true, budget: 100, used: 100, remaining: 0, exhausted: true, warning: true };
 
 test("every demo idea has a title, blurb and href", () => {
   assert.ok(DEMO_IDEAS.length >= 3);
@@ -32,4 +32,8 @@ test("onboarding does not show when the trial is disabled", () => {
     shouldShowOnboarding(false, { trial_enabled: false, budget: 0, used: 0, remaining: 0, exhausted: false, warning: false }),
     false
   );
+});
+
+test("onboarding does not show when the trial does not apply to this user", () => {
+  assert.equal(shouldShowOnboarding(false, { ...fresh, applicable: false }), false);
 });

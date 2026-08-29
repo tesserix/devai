@@ -32,6 +32,6 @@ export const DEMO_IDEAS: DemoIdea[] = [
 /** Show the onboarding panel only while there are still tokens to spend on the suggestions. */
 export function shouldShowOnboarding(alreadySeen: boolean, status: TrialStatus | null | undefined): boolean {
   if (alreadySeen) return false;
-  if (!status || !status.trial_enabled) return false;
+  if (!status || !status.trial_enabled || !status.applicable) return false;
   return !status.exhausted;
 }

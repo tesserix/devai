@@ -12,17 +12,24 @@ test("openpanel path carries the day window", () => {
 });
 
 test("trial tone is ok below the warning threshold", () => {
-  assert.equal(trialTone({ trial_enabled: true, budget: 100, used: 10, remaining: 90, exhausted: false, warning: false }), "ok");
+  assert.equal(trialTone({ trial_enabled: true, applicable: true, budget: 100, used: 10, remaining: 90, exhausted: false, warning: false }), "ok");
 });
 
 test("trial tone warns at the 80 percent mark", () => {
-  assert.equal(trialTone({ trial_enabled: true, budget: 100, used: 80, remaining: 20, exhausted: false, warning: true }), "warning");
+  assert.equal(trialTone({ trial_enabled: true, applicable: true, budget: 100, used: 80, remaining: 20, exhausted: false, warning: true }), "warning");
 });
 
 test("trial tone is exhausted when the budget is spent", () => {
-  assert.equal(trialTone({ trial_enabled: true, budget: 100, used: 100, remaining: 0, exhausted: true, warning: true }), "exhausted");
+  assert.equal(trialTone({ trial_enabled: true, applicable: true, budget: 100, used: 100, remaining: 0, exhausted: true, warning: true }), "exhausted");
 });
 
 test("trial tone is hidden when trials are disabled", () => {
   assert.equal(trialTone({ trial_enabled: false, budget: 0, used: 0, remaining: 0, exhausted: false, warning: false }), "hidden");
+});
+
+test("trial tone is hidden when the trial does not apply to this user", () => {
+  assert.equal(
+    trialTone({ trial_enabled: true, applicable: false, budget: 100, used: 10, remaining: 90, exhausted: false, warning: false }),
+    "hidden"
+  );
 });

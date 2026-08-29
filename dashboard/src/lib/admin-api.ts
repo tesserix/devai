@@ -30,7 +30,7 @@ export function adminOpenPanelPath(days = 30): string {
  * threshold, defined server-side in settings/trial.py.
  */
 export function trialTone(status: TrialStatus | null | undefined): TrialTone {
-  if (!status || !status.trial_enabled) return "hidden";
+  if (!status || !status.trial_enabled || !status.applicable) return "hidden";
   if (status.exhausted) return "exhausted";
   if (status.warning) return "warning";
   return "ok";

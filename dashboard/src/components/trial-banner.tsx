@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { api, type TrialStatus } from "@/lib/api";
 import { trialTone } from "@/lib/admin-api";
@@ -20,6 +21,7 @@ import { DEMO_IDEAS, shouldShowOnboarding } from "@/lib/demo-ideas";
 const SEEN_KEY = "devai-trial-onboarding-seen";
 
 export function TrialBanner() {
+  const pathname = usePathname();
   const [status, setStatus] = useState<TrialStatus | null>(null);
   const [seen, setSeen] = useState(true);
 
@@ -31,6 +33,9 @@ export function TrialBanner() {
       .catch(() => setStatus(null));
   }, []);
 
+  // Settings already carries its own trial notice, and the exhaustion prompt links there.
+  if (pathname === "/settings") return null;
+
   const tone = trialTone(status);
   if (tone === "hidden" || !status) return null;
 
@@ -39,7 +44,7 @@ export function TrialBanner() {
     setSeen(true);
   };
 
-  if (shouldShowOnboarding(seen, status)) {
+  if (tone === "ok" && shouldShowOnboarding(seen, status)) {
     return (
       <div className="panel mb-4" style={{ padding: 16 }}>
         <div className="flex items-start justify-between gap-4">
