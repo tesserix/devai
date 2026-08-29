@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/tesserix/devai/services/auth-bff/internal/allowlist"
@@ -256,9 +257,9 @@ func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	// GET stays for browser navigation, but a cross-site GET (e.g. a hostile
-	// <img> tag) must not be able to force-clear the session.
-	if r.Method == http.MethodGet && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+	// GET stays for browser navigation, but no cross-site request (hostile
+	// <img> tag or auto-submitted form) may force-clear the session.
+	if isCrossSite(r) {
 		http.Error(w, `{"error":"cross_site_request_rejected"}`, http.StatusForbidden)
 		return
 	}
@@ -279,6 +280,21 @@ func (h *AuthHandler) readyz(w http.ResponseWriter, _ *http.Request) {
 }
 
 // --- helpers ---
+
+// isCrossSite reports whether the request originates from another site.
+// Modern browsers are judged by fetch metadata (same-site subdomains stay
+// allowed); older browsers and non-browser clients fall back to comparing
+// an Origin header, when present, against the request host.
+func isCrossSite(r *http.Request) bool {
+	if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" {
+		return sfs != "same-origin" && sfs != "same-site" && sfs != "none"
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		return origin == "null" || err != nil || !strings.EqualFold(u.Host, r.Host)
+	}
+	return false
+}
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
