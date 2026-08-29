@@ -177,6 +177,24 @@ const nextConfig: NextConfig = {
         source: "/api/adk/:path*",
         destination: `${API_INTERNAL_URL}/api/adk/:path*`,
       },
+      // Durable evaluation runs, comparisons and invocation traces —
+      // the Studio release gate depends on these.
+      {
+        source: "/api/evaluations",
+        destination: `${API_INTERNAL_URL}/api/evaluations`,
+      },
+      {
+        source: "/api/evaluations/:path*",
+        destination: `${API_INTERNAL_URL}/api/evaluations/:path*`,
+      },
+      {
+        source: "/api/comparisons/:path*",
+        destination: `${API_INTERNAL_URL}/api/comparisons/:path*`,
+      },
+      {
+        source: "/api/traces/:path*",
+        destination: `${API_INTERNAL_URL}/api/traces/:path*`,
+      },
       // Legacy catch-all — original dashboard endpoints sit under
       // /dashboard/api/* on devai-api. Keep this last so it doesn't
       // shadow the more-specific rewrites above.
