@@ -311,3 +311,39 @@ async def test_suite_persists_and_resolves_the_pinned_judge_configuration() -> N
     assert resolved.judge == judge
     stored = database.suites[("tenant-a:alice", "judged-release-gate", "1")]
     assert stored["thresholds"]["_judge"]["rubric"]["version"] == "3"
+
+
+async def test_suite_rows_with_jsonb_text_thresholds_still_parse() -> None:
+    # asyncpg returns jsonb columns as text — the row parser must decode it.
+    import json
+
+    class _TextThresholdDatabase(_Database):
+        async def get_eval_suite(self, owner_scope: str, name: str, version: str) -> dict[str, Any] | None:
+            row = await super().get_eval_suite(owner_scope, name, version)
+            if row is not None and not isinstance(row["thresholds"], str):
+                row = {**row, "thresholds": json.dumps(row["thresholds"])}
+            return row
+
+    service = EvaluationService(database=_TextThresholdDatabase(), object_store=NoopObjectStoreAdapter())
+    await service.create_dataset(_principal(), _dataset())
+    await service.create_suite(
+        _principal(),
+        EvalSuiteCreate(
+            name="release-gate",
+            version="2",
+            dataset=ArtifactVersionRef(name="remediation-golden", version="3"),
+            scorers=["exact_match", "llm_judge"],
+            thresholds=EvalThresholds(success=0.9, safety=1.0),
+            judge=JudgeConfig(
+                provider="vertex_gemini",
+                model="gemini-2.5-flash",
+                rubric=JudgeRubric(name="rubric", version="1", dimensions={"groundedness": "No fabricated facts."}),
+            ),
+        ),
+    )
+
+    suite = await service.get_suite(_principal(), "release-gate", "2")
+
+    assert suite.thresholds.success == 0.9
+    assert suite.judge is not None
+    assert suite.judge.rubric.dimensions["groundedness"] == "No fabricated facts."
