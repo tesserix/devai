@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture — DevAI</title>
+<meta name="description" content="DevAI platform architecture: control plane, orchestration, sandboxes, registry, gateway, and backing services.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <div class="inner">
+    <a class="brand" href="index.html">Dev<span>AI</span></a>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a class="active" href="architecture.html">Architecture</a>
+      <a href="agents.html">Build Agents</a>
+      <a href="https://github.com/tesserix/devai">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main>
+
+<h1>Platform architecture</h1>
+<p class="muted">
+  The system boundary is simple to state: a Python control plane orchestrates versioned
+  agents; everything an agent touches — models, tools, data, side effects — passes
+  through a governed seam. This page is the short version; the exhaustive reference
+  lives in <a href="https://github.com/tesserix/devai/blob/main/docs/PLATFORM-ARCHITECTURE.md">docs/PLATFORM-ARCHITECTURE.md</a>.
+</p>
+
+<h2>Big picture</h2>
+<div class="flow">Dashboards (ALM :3100 · SRE :3200)        CLI (devai adk …)
+        │                                      │
+        ▼                                      ▼
+  API control plane (FastAPI) ── auth (Keycloak + auth-bff session)
+        │
+        ├─ LangGraph orchestrations   ALM pipeline (14 nodes) · SRE loop (5 nodes)
+        ├─ Durable workflows          Temporal (encrypted payloads, versioned workers)
+        ├─ Sandboxes + evaluations    ephemeral runtimes, pinned specs, traces
+        │
+        ├─ Agent Registry             versioned agents · blueprints · datasets · suites
+        ├─ AgentGateway               ALL model traffic: policy, attribution, cost
+        └─ MCP Hub                    tool servers resolved per agent composition
+        │
+  PostgreSQL (+pgvector) · Redis · NATS JetStream · object storage</div>
+
+<h2>Components</h2>
+<table>
+  <tr><th>Component</th><th>Role</th></tr>
+  <tr><td>API control plane</td><td>FastAPI services for the ALM pipeline, webhooks, chat, sandboxes, evaluations, and registry publishing. A separate SRE server runs the monitoring loop.</td></tr>
+  <tr><td>LangGraph orchestration</td><td>The ALM pipeline is a 14-node graph (ingest → plan → implement → review ⇄ security gate → build → test → provision → release) with bounded loops, checkpointing, and per-node timeouts. The SRE loop is a 5-node graph on a cron schedule.</td></tr>
+  <tr><td>Temporal</td><td>Durable execution for the agent lifecycle: sandbox creation, evaluation runs, and gated publication run as workflows with encrypted payloads and worker-deployment versioning, so restarts and deploys don't strand work.</td></tr>
+  <tr><td>Agent Registry</td><td>The system of record for versioned artifacts: agents, blueprints, skills, datasets, evaluation suites. Publication goes through an evaluation gate; built-ins arrive via GitOps seeds.</td></tr>
+  <tr><td>AgentGateway</td><td>The mandatory LLM seam. Sandboxes and pipeline stages never hold provider credentials; the gateway enforces policy, attributes usage to the owning principal, and records cost per run.</td></tr>
+  <tr><td>MCP Hub</td><td>Resolves the MCP tool servers an agent's composition declares, so tool access is part of the reviewed record rather than ambient capability.</td></tr>
+  <tr><td>A2A bus</td><td>Agent-to-agent messaging (request/response, notification, handoff, escalation, broadcast) persisted to Redis and PostgreSQL, so multi-agent runs are auditable.</td></tr>
+  <tr><td>Dashboards</td><td>Next.js apps: ALM (runs, agents, approvals, evaluations, compare) and SRE (cluster overview, incidents, scan history), behind Keycloak session auth.</td></tr>
+</table>
+
+<h2>Execution paths for an agent run</h2>
+<p>When something needs to invoke an agent, the runtime picks a path by what the record is:</p>
+<table>
+  <tr><th>Path</th><th>When</th><th>What happens</th></tr>
+  <tr><td>Inline (draft)</td><td>An unpublished draft pinned to a sandbox</td><td>The draft envelope itself is the spec; it runs in-process inside the sandbox boundary. This is the author's fast feedback loop.</td></tr>
+  <tr><td>Governed Job</td><td>A published registry agent</td><td>The runner performs a fresh registry composition resolution, verifies gateway configuration, and dispatches an ephemeral Kubernetes Job with the sandbox boundary applied. Any resolution miss fails closed.</td></tr>
+  <tr><td>Substrate agent</td><td>A labelled long-lived agent</td><td>Reached over A2A through its own control plane instead of spawning a Job; opt-in per agent.</td></tr>
+</table>
+
+<h2>Backing services</h2>
+<table>
+  <tr><th>Service</th><th>What it holds</th></tr>
+  <tr><td>PostgreSQL + pgvector</td><td>Pipeline runs, agent executions, A2A messages, evaluation results, traces, audit log, and semantic memory vectors.</td></tr>
+  <tr><td>Redis</td><td>Hot state, locks, sessions, pub/sub, and the memory cache.</td></tr>
+  <tr><td>NATS JetStream</td><td>Async event distribution.</td></tr>
+  <tr><td>Object storage</td><td>Evaluation artifacts and run evidence.</td></tr>
+</table>
+
+<h2>The adapter rule</h2>
+<p>
+  Every external system — database, cache, memory, vector store, queue, event bus,
+  object store, secrets, telemetry, LLM provider, SCM, ticketing — is reached through
+  an adapter family with one abstract interface, one file per backend, lazy SDK imports,
+  and a mandatory no-op fallback. A configuration change swaps a backend; business logic
+  never imports a vendor SDK. The factory never raises: an unknown or unconfigured
+  provider degrades to the no-op instead of crashing the pod.
+</p>
+
+<h2>Security posture</h2>
+<ul>
+  <li><strong>Owner scoping.</strong> Sandboxes, traces, evaluation runs, and connectors belong to the signed-in principal; a publication gate refuses evidence owned by anyone else.</li>
+  <li><strong>No credential mounting.</strong> Provider keys live in the control plane; sandboxes reach models only through AgentGateway.</li>
+  <li><strong>Side-effect boundaries.</strong> Tool calls default to mock or block in sandboxes; real calls are an explicit, recorded choice.</li>
+  <li><strong>Image allow-listing.</strong> Job images from authored records are validated against trusted prefixes; a rejected override downgrades to a safe default, never escalates.</li>
+  <li><strong>Fail-closed governance.</strong> If the registry, gateway, or composition can't be verified, dispatch fails rather than running ungoverned.</li>
+</ul>
+
+</main>
+<footer class="site">DevAI · an agent lifecycle platform · <a href="https://github.com/tesserix/devai">github.com/tesserix/devai</a></footer>
+</body>
+</html>
