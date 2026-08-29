@@ -24,7 +24,7 @@ dependencies = [
     "jsonschema>=4.26.0",
     "structlog>=26.1.0",
     "opentelemetry-api>=1.29.0",
-    "opentelemetry-sdk>=1.42.1",
+    "opentelemetry-sdk>=1.44.0",
     # OTLP/HTTP exporter — backs the telemetry adapter family
     # (adapters/telemetry/otel.py) when DEVAI_TELEMETRY_PROVIDER=otel. Shipped
     # in the image so turning telemetry on is one env var, no custom build. The
