@@ -1,3 +1,6 @@
+import { adminOpenPanelPath, adminOverviewPath, type TrialStatus } from "./admin-api.ts";
+export type { TrialStatus } from "./admin-api.ts";
+
 const API_BASE = "/api";
 
 export interface PipelineRun {
@@ -532,17 +535,7 @@ export const api = {
       { method: "DELETE" }
     ),
 
-  getTrialStatus: () =>
-    apiFetch<{
-      trial_enabled: boolean;
-      budget: number;
-      used: number;
-      remaining: number;
-      exhausted: boolean;
-      warning: boolean;
-      has_own_connector: boolean;
-      applicable: boolean;
-    }>("/settings/trial", { soft: true }),
+  getTrialStatus: () => apiFetch<TrialStatus>("/settings/trial", { soft: true }),
 
   listProviderModels: (provider: string) =>
     apiFetch<{
@@ -1159,6 +1152,13 @@ export const api = {
     logsArchive: (limit = 50) => apiFetch<LogArchive>(`/analytics/logs/archive?limit=${limit}`),
   },
 
+  // ── Admin: platform-owner view. 403 for non-admins by design — the
+  // caller treats that as "hide the tab", not as an error to surface.
+  admin: {
+    overview: (days = 30) => apiFetch<AdminOverview>(adminOverviewPath(days), { soft: true }),
+    openpanel: (days = 30) => apiFetch<AdminOpenPanel>(adminOpenPanelPath(days), { soft: true }),
+  },
+
   // ── Live preview: on-demand ephemeral preview environments ──────
   // preview_url is the unique forwarded host (preview-<id>.tesserix.app) —
   // the same URL the dashboard iframes AND opens in a new tab.
@@ -1646,6 +1646,45 @@ export interface McpMarketplaceEntry {
   native: string; // http | stdio
   credential: string;
   docs: string;
+}
+
+// ── Admin (GET /api/admin/*) ───────────────────────────────────────────
+export interface AdminActiveUserPoint {
+  date: string;
+  users: number;
+}
+
+export interface AdminUserActivity {
+  user: string;
+  days_active: number;
+  last_seen: string;
+}
+
+export interface AdminUserUsage {
+  user: string;
+  user_id: string;
+  tenant_id: string;
+  cost_usd: number;
+  calls?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+}
+
+export interface AdminOverview {
+  days: number;
+  active_users: AdminActiveUserPoint[];
+  signins: number;
+  user_activity: AdminUserActivity[];
+  by_user: AdminUserUsage[];
+  enabled: boolean;
+}
+
+export interface AdminOpenPanel {
+  enabled: boolean;
+  reason?: string;
+  visitors?: number;
+  sessions?: number;
+  pageviews?: number;
 }
 
 // ── Analytics (GET /api/analytics/*) ──────────────────────────────────
