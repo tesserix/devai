@@ -51,4 +51,5 @@ async def fetch_overview(config: Any, days: int) -> dict[str, Any]:
 
     if not isinstance(payload, dict):
         return {"enabled": False, "reason": "unavailable"}
-    return {"enabled": True, **payload}
+    # Our marker wins: an upstream body carrying its own `enabled` must not override it.
+    return {**payload, "enabled": True}
