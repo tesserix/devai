@@ -166,3 +166,33 @@ def test_middleware_skips_recording_for_anonymous(monkeypatch):
     res = client.get("/api/thing")
     assert res.status_code == 200
     assert db.rows == []
+
+
+@pytest.mark.asyncio
+async def test_record_login_writes_a_row():
+    from devai.admin.activity import ACTION_LOGIN, record_login
+
+    db = _Database()
+    state = SimpleNamespace(analytics_db=db)
+    assert await record_login(state, "user@example.com") is True
+    assert db.rows[0]["action"] == ACTION_LOGIN
+    assert db.rows[0]["actor_type"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_record_login_without_database_is_silent():
+    from devai.admin.activity import record_login
+
+    assert await record_login(SimpleNamespace(analytics_db=None), "u@example.com") is False
+
+
+@pytest.mark.asyncio
+async def test_record_login_is_not_deduplicated():
+    """Unlike active-days, every sign-in is its own event."""
+    from devai.admin.activity import record_login
+
+    db = _Database()
+    state = SimpleNamespace(analytics_db=db)
+    await record_login(state, "user@example.com")
+    await record_login(state, "user@example.com")
+    assert len(db.rows) == 2

@@ -88,6 +88,28 @@ async def record_active(app_state: Any, principal: Principal | None) -> bool:
     return True
 
 
+async def record_login(app_state: Any, actor: str) -> bool:
+    """Record an explicit sign-in. Local-dev only — in production auth-bff
+    terminates OAuth outside this pod, so no login reaches us and the admin
+    page sources sign-ins from OpenPanel instead."""
+    if not actor:
+        return False
+    database = getattr(app_state, "analytics_db", None)
+    if database is None:
+        return False
+    try:
+        await database.audit(
+            action=ACTION_LOGIN,
+            actor=actor,
+            actor_type="user",
+            details={"day": _today(), "source": "local"},
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("activity: login audit failed", exc_info=True)
+        return False
+    return True
+
+
 class ActivityMiddleware(BaseHTTPMiddleware):
     """Record the caller as active for today, then get out of the way."""
 
