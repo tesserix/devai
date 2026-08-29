@@ -65,8 +65,8 @@ class VertexGeminiLLMAdapter(LLMAdapter):
             except ImportError as e:  # pragma: no cover
                 raise AdapterNotInstalled("vertex_gemini adapter requires google-auth for ADC mode") from e
         if base_url:
-            # devai-ai-gateway route — the gateway injects x-goog-api-key
-            # and strips caller auth, so this client sends no credentials.
+            # ai-gateway route — the gateway attaches GCP credentials and
+            # passes caller headers through, so this client must send none.
             origin = base_url.rstrip("/")
         else:
             host = (
@@ -83,12 +83,12 @@ class VertexGeminiLLMAdapter(LLMAdapter):
         headers = {"Content-Type": "application/json"}
         if self._gateway_routed:
             headers.update(gateway_headers(extra, provider=self.provider_name))
+        if self._gateway:
+            # Gateway owns Vertex auth (GCP token attach); sending a caller
+            # x-goog-api-key alongside it makes Google reject with 401.
+            return headers
         if self._api_key:
             headers["x-goog-api-key"] = self._api_key
-            return headers
-        if self._gateway:
-            # Gateway injects credentials; sending none avoids a stale
-            # bearer overriding the gateway's key.
             return headers
         if self._creds is None:
             import google.auth  # noqa: PLC0415

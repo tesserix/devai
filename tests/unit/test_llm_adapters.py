@@ -229,6 +229,21 @@ def test_vertex_gemini_gateway_mode_needs_no_credentials():
     assert a._base.startswith("http://ai-gateway.agentgateway-system.svc.cluster.local:8080/vertex/v1/")
 
 
+def test_vertex_gemini_gateway_mode_wins_over_connector_api_key():
+    from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
+
+    a = VertexGeminiLLMAdapter(
+        project="proj-1",
+        location="global",
+        base_url="http://ai-gateway.agentgateway-system.svc.cluster.local:8080/vertex",
+        api_key="AQ.test",
+    )
+    # Gateway attaches its own GCP credential; forwarding the connector key
+    # too makes Google see double auth and reject with 401.
+    h = a._headers()
+    assert "Authorization" not in h and "x-goog-api-key" not in h
+
+
 def test_vertex_gemini_api_key_mode_sets_goog_header():
     from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
 
