@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Columns2, Play, XCircle } from "lucide-react";
 import type { EvalCase } from "@/components/eval-panel";
+import { lifecycleMutationHeaders } from "@/lib/api";
 
 /**
  * The same checks, the same definition, two models.
@@ -33,7 +34,7 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...lifecycleMutationHeaders() },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));

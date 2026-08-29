@@ -159,3 +159,45 @@ async def test_list_installation_repos_github_app_uses_installation_endpoint() -
     assert paths[0].startswith("/installation/repositories")
     assert [r["full_name"] for r in out] == ["tesserix/devai"]
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_list_issues_paginates_to_the_requested_limit() -> None:
+    client = GitHubSCMClient(auth_method=AuthMethod.PAT, token="t")
+    pages: list[int] = []
+
+    async def fake_request(method: str, path: str, **kwargs):
+        page = int(kwargs["params"]["page"])
+        pages.append(page)
+        count = 100 if page < 3 else 25
+        issues = [
+            {"number": (page - 1) * 100 + index, "title": "Feedback", "labels": []} for index in range(1, count + 1)
+        ]
+        return httpx.Response(200, json=issues, request=httpx.Request(method, path))
+
+    client._request = fake_request  # type: ignore[assignment]
+    issues = await client.list_issues("tesserix/devai", state="all", labels=["feedback"], limit=225)
+
+    assert pages == [1, 2, 3]
+    assert len(issues) == 225
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_list_issue_comments_paginates_in_chronological_order() -> None:
+    client = GitHubSCMClient(auth_method=AuthMethod.PAT, token="t")
+    pages: list[int] = []
+
+    async def fake_request(method: str, path: str, **kwargs):
+        page = int(kwargs["params"]["page"])
+        pages.append(page)
+        count = 100 if page == 1 else 1
+        comments = [{"id": (page - 1) * 100 + index} for index in range(1, count + 1)]
+        return httpx.Response(200, json=comments, request=httpx.Request(method, path))
+
+    client._request = fake_request  # type: ignore[assignment]
+    comments = await client.list_issue_comments("tesserix/devai", 323, limit=200)
+
+    assert pages == [1, 2]
+    assert [comment["id"] for comment in comments] == list(range(1, 102))
+    await client.close()

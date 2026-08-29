@@ -296,6 +296,7 @@ class EvalRunner:
         scorers: list[str] | None = None,
         principal: Principal | None = None,
         judge_config: JudgeConfig | None = None,
+        run_id: str | None = None,
     ) -> EvalRun:
         """Run every case with bounded fan-out and preserve dataset order."""
         from devai.evaluations.scorers import bind
@@ -310,10 +311,20 @@ class EvalRunner:
         if bool(judge_scorers) != (judge_config is not None):
             raise ValueError("llm_judge scorer requires exactly one pinned judge configuration")
 
+        if run_id:
+            existing = await self._store.get_by_id(owner_scope, run_id)
+            if existing is not None:
+                if existing.sandbox_id != record.id:
+                    raise ValueError("idempotent evaluation request resolved to a different sandbox")
+                return existing
+        agent = record.spec.agent
+        if agent is None:
+            raise ValueError(f"sandbox {record.id} has no agent")
+
         run = EvalRun(
-            id=f"eval-{uuid.uuid4().hex[:12]}",
+            id=run_id or f"eval-{uuid.uuid4().hex[:12]}",
             sandbox_id=record.id,
-            agent=record.spec.agent.name,
+            agent=agent.name,
             owner_scope=owner_scope,
             tenant_id=tenant_id,
             user_id=user_id,

@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
@@ -48,6 +49,7 @@ from devai.adk import (
     scaffold_prompt,
     scaffold_skill,
 )
+from devai.cli.auth_commands import load_stored_session
 from devai.config import settings
 from devai.services.redact import scrub_structure
 
@@ -57,7 +59,9 @@ adk_app = typer.Typer(
     no_args_is_help=True,
 )
 sandbox_app = typer.Typer(name="sandbox", help="Create, invoke, inspect, and destroy agent sandboxes.")
+registry_app = typer.Typer(name="registry", help="Search and import immutable Registry agents into DevAI.")
 adk_app.add_typer(sandbox_app, name="sandbox")
+adk_app.add_typer(registry_app, name="registry")
 console = Console()
 
 
@@ -257,10 +261,117 @@ def publish(
 
 
 def _new_sandbox_client(*, api_url: str = "", session_cookie: str = "", token: str = "") -> SandboxClient:
-    base_url = api_url or os.environ.get("DEVAI_API_URL", "") or settings.dashboard_base_url or "http://localhost:8080"
     cookie = session_cookie or os.environ.get("DEVAI_SESSION_COOKIE", "")
     bearer = token or os.environ.get("DEVAI_API_TOKEN", "")
+    stored = load_stored_session() if not cookie and not bearer else None
+    base_url = (
+        api_url
+        or os.environ.get("DEVAI_API_URL", "")
+        or (stored.base_url if stored is not None else "")
+        or settings.dashboard_base_url
+        or "http://localhost:8080"
+    )
+    if stored is not None and base_url.rstrip("/") == stored.base_url:
+        cookie = stored.cookie.get_secret_value()
     return SandboxClient(base_url=base_url, session_cookie=cookie, token=bearer)
+
+
+@registry_app.command("search")
+def registry_search(
+    query: str = typer.Argument(..., help="Capability or behavior to find."),
+    kind: list[str] = typer.Option(["Agent"], "--kind", help="Repeat to include more artifact kinds."),
+    limit: int = typer.Option(10, "--limit", min=1, max=50),
+    api_url: str = typer.Option("", "--api-url"),
+    output: str = typer.Option("table", "--output"),
+) -> None:
+    """Search the Registry semantic index through DevAI's authorization boundary."""
+    try:
+        client = _new_sandbox_client(api_url=api_url)
+        try:
+            result = client.search_registry(query, kinds=kind, limit=limit)
+        finally:
+            client.close()
+    except AdkError as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=2) from error
+    if output == "json":
+        console.print_json(json.dumps(result))
+        return
+    table = Table("rank", "kind", "name", "version", "description")
+    for hit in result.get("hits") or []:
+        table.add_row(
+            str(hit.get("rank") or ""),
+            str(hit.get("kind") or ""),
+            str(hit.get("name") or ""),
+            str(hit.get("version") or ""),
+            str(hit.get("description") or ""),
+        )
+    console.print(table)
+
+
+@registry_app.command("import")
+def registry_import(
+    registry_ref: str = typer.Argument(..., help="Exact registry://...@version Agent reference."),
+    project_id: str = typer.Option(..., "--project"),
+    idempotency_key: str = typer.Option("", "--idempotency-key"),
+    api_url: str = typer.Option("", "--api-url"),
+    output: str = typer.Option("table", "--output"),
+) -> None:
+    """Verify and lock one signed Registry Agent for a DevAI project."""
+    try:
+        client = _new_sandbox_client(api_url=api_url)
+        try:
+            imported = client.import_agent(
+                project_id=project_id,
+                registry_ref=registry_ref,
+                idempotency_key=idempotency_key or f"devai-cli-{uuid.uuid4()}",
+            )
+        finally:
+            client.close()
+    except AdkError as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=2) from error
+    if output == "json":
+        console.print_json(json.dumps(imported))
+        return
+    agent = imported.get("agent") or {}
+    console.print(
+        f"[green]{imported.get('state', 'ready')}[/] {imported.get('id', '')} · "
+        f"{agent.get('name', '')}@{agent.get('version', '')}"
+    )
+
+
+@registry_app.command("imports")
+def registry_imports(
+    project_id: str = typer.Option(..., "--project"),
+    api_url: str = typer.Option("", "--api-url"),
+    output: str = typer.Option("table", "--output"),
+) -> None:
+    """List immutable Agent locks visible to the current tenant."""
+    try:
+        client = _new_sandbox_client(api_url=api_url)
+        try:
+            imports = client.list_agent_imports(project_id)
+        finally:
+            client.close()
+    except AdkError as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=2) from error
+    if output == "json":
+        console.print_json(json.dumps(imports))
+        return
+    table = Table("id", "agent", "version", "conformance", "state")
+    for imported in imports:
+        agent = imported.get("agent") or {}
+        conformance = imported.get("conformance") or {}
+        table.add_row(
+            str(imported.get("id") or ""),
+            str(agent.get("name") or ""),
+            str(agent.get("version") or ""),
+            str(conformance.get("level") or ""),
+            str(imported.get("state") or ""),
+        )
+    console.print(table)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -345,6 +456,39 @@ def sandbox_create(
         finally:
             client.close()
     except (AdkError, OSError, ValueError) as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=2) from error
+    if output == "json":
+        console.print_json(json.dumps(created))
+    else:
+        console.print(f"[green]created[/] {created.get('id', '')} ({created.get('status', '')})")
+
+
+@sandbox_app.command("from-import")
+def sandbox_from_import(
+    import_id: str = typer.Argument(..., help="Ready Agent import UUID."),
+    provider: str = typer.Option("custom", "--provider"),
+    model: str = typer.Option("portable-runtime", "--model"),
+    tool_mode: str = typer.Option("mock", "--tool-mode"),
+    api_url: str = typer.Option("", "--api-url"),
+    output: str = typer.Option("table", "--output"),
+) -> None:
+    """Create a sandbox from a server-verified immutable import lock."""
+    if tool_mode not in {"mock", "replay", "block", "real"}:
+        console.print("[red]--tool-mode must be mock, replay, block, or real[/]")
+        raise typer.Exit(code=2)
+    spec = {
+        "import_id": import_id,
+        "model": {"provider": provider, "model": model},
+        "tools": {"default_mode": tool_mode, "overrides": {}},
+    }
+    try:
+        client = _new_sandbox_client(api_url=api_url)
+        try:
+            created = client.create(spec)
+        finally:
+            client.close()
+    except AdkError as error:
         console.print(f"[red]{error}[/]")
         raise typer.Exit(code=2) from error
     if output == "json":
@@ -582,6 +726,39 @@ def test_agent(
         console.print(f"durable evaluation run [bold]{run['id']}[/]")
     if float(summary.get("pass_rate") or 0) < minimum_pass_rate:
         raise typer.Exit(code=2)
+
+
+@adk_app.command("compare")
+def compare_runs(
+    baseline_run_id: str = typer.Argument(...),
+    candidate_run_id: str = typer.Argument(...),
+    api_url: str = typer.Option("", "--api-url"),
+    output: str = typer.Option("table", "--output"),
+) -> None:
+    """Compare two durable evaluation runs and name regressions."""
+    try:
+        client = _new_sandbox_client(api_url=api_url)
+        try:
+            comparison = client.compare(baseline_run_id, candidate_run_id)
+        finally:
+            client.close()
+    except AdkError as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=2) from error
+    if output == "json":
+        console.print_json(json.dumps(comparison))
+        return
+    console.print(str(comparison.get("summary") or comparison.get("id") or "comparison complete"))
+    regressions = comparison.get("regressions") or []
+    if regressions:
+        table = Table("case", "baseline", "candidate")
+        for regression in regressions:
+            table.add_row(
+                str(regression.get("case_id") or ""),
+                str(regression.get("baseline_passed") or False),
+                str(regression.get("candidate_passed") or False),
+            )
+        console.print(table)
 
 
 # ---- helpers ---------------------------------------------------------------

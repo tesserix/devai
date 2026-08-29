@@ -23,6 +23,10 @@ const CONNECT_SRC = [
   "https://securetoken.googleapis.com",
   "https://*.tesserix.app",
   "wss://*.tesserix.app",
+  "https://cloudflareinsights.com",
+  // Native CLI sign-in posts its state-bound proof to a random loopback port.
+  // Keep this IPv4-only: parseCLIAuthRequest rejects localhost, IPv6 and LAN hosts.
+  "http://127.0.0.1:*",
 ].join(" ");
 
 // Firebase Auth (GIP) Google sign-in loads the gapi loader script and runs its
@@ -42,7 +46,7 @@ const CSP = [
   // above). No hash/nonce here or it would disable 'unsafe-inline'. 'unsafe-eval'
   // is NOT allowed. apis.google.com + gstatic are the Firebase/Google sign-in
   // loader scripts.
-  "script-src 'self' 'unsafe-inline' https://apis.google.com https://www.gstatic.com",
+  "script-src 'self' 'unsafe-inline' https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",

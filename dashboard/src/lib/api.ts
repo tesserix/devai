@@ -1,3 +1,6 @@
+import { adminOpenPanelPath, adminOverviewPath, type TrialStatus } from "./admin-api.ts";
+export type { TrialStatus } from "./admin-api.ts";
+
 const API_BASE = "/api";
 
 export interface PipelineRun {
@@ -6,6 +9,36 @@ export interface PipelineRun {
   repo: string;
   created_at: string;
   agents: Record<string, { status: string; error?: string; updated_at?: number }>;
+}
+
+export interface FeedbackReply {
+  id: string;
+  body: string;
+  author: string;
+  author_role: "user" | "support";
+  created_at: string;
+  url: string;
+}
+
+export interface FeedbackThread {
+  id: string;
+  type: "story" | "bug" | "task";
+  title: string;
+  description: string;
+  status: "open" | "closed";
+  issue_number: number;
+  issue_url: string;
+  submitter: string;
+  created_at: string;
+  updated_at: string;
+  can_reply: boolean;
+  can_manage: boolean;
+  replies?: FeedbackReply[];
+}
+
+export interface FeedbackInbox {
+  threads: FeedbackThread[];
+  can_manage: boolean;
 }
 
 export type SandboxStatus = "pending" | "provisioning" | "ready" | "destroying" | "destroyed" | "failed";
@@ -18,6 +51,15 @@ export interface ArtifactVersionRef {
 
 export interface SandboxSpec {
   agent: ArtifactVersionRef;
+  import_id?: string | null;
+  import_snapshot?: {
+    import_id: string;
+    registry_ref: string;
+    agent_digest: string;
+    dependency_lock: Array<Record<string, string>>;
+    runtime: Record<string, unknown>;
+    permissions: Record<string, unknown>;
+  } | null;
   model: { provider: string; model: string };
   prompt?: { ref: string; version: string } | null;
   dataset?: { ref: string; version: string } | null;
@@ -44,6 +86,53 @@ export interface SandboxRecord {
   expires_at: string;
   last_access_at?: string | null;
   detail?: Record<string, unknown>;
+}
+
+export interface RegistrySearchHit {
+  kind: string;
+  name: string;
+  title: string;
+  description: string;
+  version: string;
+  namespace: string;
+  arn: string;
+  digest: string;
+  visibility: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  attributes: Record<string, unknown>;
+  rank: number;
+  match_type: string;
+  fetch_path: string;
+  registry_fetch_path: string;
+}
+
+export interface RegistrySearchResponse {
+  query: string;
+  hits: RegistrySearchHit[];
+  provider: string;
+  index_refreshing: boolean;
+}
+
+export interface AgentImport {
+  id: string;
+  project_id: string;
+  registry_ref: string;
+  state: string;
+  agent: {
+    name: string;
+    namespace: string;
+    version: string;
+    digest: string;
+    framework: string;
+    runtime: Record<string, unknown>;
+    spec: Record<string, unknown>;
+  };
+  dependency_lock: Array<Record<string, string>>;
+  permissions: Record<string, unknown>;
+  conformance: { level: string; findings: string[]; evidence: Record<string, boolean> };
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TraceStep {
@@ -278,6 +367,10 @@ function handleUnauthorized(): void {
   window.location.assign(`/login?return_to=${encodeURIComponent(returnTo)}`);
 }
 
+export function lifecycleMutationHeaders(idempotencyKey = crypto.randomUUID()): Record<string, string> {
+  return { "Idempotency-Key": idempotencyKey };
+}
+
 async function apiFetch<T>(path: string, opts?: RequestInit & { soft?: boolean }): Promise<T> {
   const { soft, ...init } = opts ?? {};
   const res = await fetch(`${API_BASE}${path}`, {
@@ -310,6 +403,17 @@ export function registryAgentManifestPath(name: string): string {
 
 export function registryArtifactPath(plural: string, name: string): string {
   return `/registry/${encodeURIComponent(plural)}/${encodeURIComponent(name)}`;
+}
+
+export function registrySearchPath(query: string, kinds: string[] = [], limit = 10): string {
+  const params = new URLSearchParams({ q: query });
+  if (kinds.length > 0) params.set("kinds", kinds.join(","));
+  params.set("limit", String(Math.max(1, Math.min(limit, 50))));
+  return `/registry/search?${params.toString()}`;
+}
+
+export function agentImportsPath(projectId: string): string {
+  return `/registry/imports?${new URLSearchParams({ project_id: projectId }).toString()}`;
 }
 
 export function sandboxPath(id: string): string {
@@ -416,6 +520,24 @@ function normalizeRun(raw: unknown): PipelineRun {
 export const api = {
   // Auth
   me: () => apiFetch<{ login: string; name: string; avatar_url: string }>("/me"),
+  submitFeedback: (body: { type: "story" | "bug" | "task"; title: string; description: string }) =>
+    apiFetch<FeedbackThread>("/feedback", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listFeedback: () => apiFetch<FeedbackInbox>("/feedback"),
+  getFeedback: (threadId: string) =>
+    apiFetch<FeedbackThread>(`/feedback/${encodeURIComponent(threadId)}`),
+  replyToFeedback: (threadId: string, message: string) =>
+    apiFetch<FeedbackReply>(`/feedback/${encodeURIComponent(threadId)}/replies`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+  setFeedbackStatus: (threadId: string, status: "open" | "closed") =>
+    apiFetch<FeedbackThread>(`/feedback/${encodeURIComponent(threadId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
 
   // ── Settings (per-user/per-tenant connectors + secrets) ─────────────
   getSettingsCatalog: () =>
@@ -456,17 +578,7 @@ export const api = {
       { method: "DELETE" }
     ),
 
-  getTrialStatus: () =>
-    apiFetch<{
-      trial_enabled: boolean;
-      budget: number;
-      used: number;
-      remaining: number;
-      exhausted: boolean;
-      warning: boolean;
-      has_own_connector: boolean;
-      applicable: boolean;
-    }>("/settings/trial", { soft: true }),
+  getTrialStatus: () => apiFetch<TrialStatus>("/settings/trial", { soft: true }),
 
   listProviderModels: (provider: string) =>
     apiFetch<{
@@ -826,10 +938,21 @@ export const api = {
   // browser state.
   listSandboxes: () => apiFetch<SandboxRecord[]>("/sandboxes"),
   getSandbox: (id: string) => apiFetch<SandboxRecord>(sandboxPath(id)),
-  createSandbox: (input: Partial<SandboxSpec> & Pick<SandboxSpec, "agent" | "model">) =>
-    apiFetch<SandboxRecord>("/sandboxes", { method: "POST", body: JSON.stringify(input) }),
-  destroySandbox: (id: string) =>
-    apiFetch<{ destroyed: string }>(sandboxPath(id), { method: "DELETE" }),
+  createSandbox: (
+    input: Partial<SandboxSpec> & Pick<SandboxSpec, "model"> &
+      ({ agent: ArtifactVersionRef } | { import_id: string }),
+    idempotencyKey?: string,
+  ) =>
+    apiFetch<SandboxRecord>("/sandboxes", {
+      method: "POST",
+      headers: lifecycleMutationHeaders(idempotencyKey),
+      body: JSON.stringify(input),
+    }),
+  destroySandbox: (id: string, idempotencyKey?: string) =>
+    apiFetch<{ destroyed: string }>(sandboxPath(id), {
+      method: "DELETE",
+      headers: lifecycleMutationHeaders(idempotencyKey),
+    }),
   invokeSandbox: (id: string, message: string) =>
     apiFetch<SandboxInvocation>(`${sandboxPath(id)}/invoke`, {
       method: "POST",
@@ -844,24 +967,50 @@ export const api = {
     suite: ArtifactVersionRef;
     sandbox_id?: string;
     sandbox?: SandboxSpec;
-  }) => apiFetch<EvaluationRun>("/evaluations", { method: "POST", body: JSON.stringify(input) }),
+  }, idempotencyKey?: string) => apiFetch<EvaluationRun>("/evaluations", {
+    method: "POST",
+    headers: lifecycleMutationHeaders(idempotencyKey),
+    body: JSON.stringify(input),
+  }),
   getEvaluationRun: (id: string) => apiFetch<EvaluationRun>(evaluationRunPath(id)),
   listSandboxEvaluations: (id: string, limit = 20) =>
     apiFetch<EvaluationRun[]>(`${sandboxPath(id)}/evals?limit=${Math.max(1, Math.min(limit, 200))}`),
   runSandboxEvaluation: (
     id: string,
     source: { dataset: ArtifactVersionRef } | { suite: ArtifactVersionRef },
+    idempotencyKey?: string,
   ) =>
     apiFetch<EvaluationRun>(`${sandboxPath(id)}/evals`, {
       method: "POST",
+      headers: lifecycleMutationHeaders(idempotencyKey),
       body: JSON.stringify(source),
     }),
   createComparison: (input: {
     baseline_run_id: string;
     candidate_run_id: string;
     axes?: ComparisonAxisName[];
-  }) => apiFetch<EvaluationComparison>("/comparisons", { method: "POST", body: JSON.stringify(input) }),
+  }, idempotencyKey?: string) => apiFetch<EvaluationComparison>("/comparisons", {
+    method: "POST",
+    headers: lifecycleMutationHeaders(idempotencyKey),
+    body: JSON.stringify(input),
+  }),
   getComparison: (id: string) => apiFetch<EvaluationComparison>(comparisonPath(id)),
+
+  searchRegistry: (query: string, kinds: string[] = [], limit = 10) =>
+    apiFetch<RegistrySearchResponse>(registrySearchPath(query, kinds, limit)),
+  createAgentImport: (
+    input: { project_id: string; registry_ref: string },
+    idempotencyKey: string,
+  ) =>
+    apiFetch<AgentImport>("/registry/imports", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(input),
+    }),
+  listAgentImports: (projectId: string) =>
+    apiFetch<AgentImport[]>(agentImportsPath(projectId)),
+  getAgentImport: (id: string) =>
+    apiFetch<AgentImport>(`/registry/imports/${encodeURIComponent(id)}`),
 
   // ── Catalog (tools available to pick when authoring an agent) ──────
   listCatalogTools: (category?: string) =>
@@ -885,10 +1034,14 @@ export const api = {
   // artifact reflects in both DevAI and the aregistry marketplace. Names are
   // unique within the tenant: a create that collides returns 409 — pass
   // overwrite to publish a new version of the existing artifact on purpose.
-  publishArtifact: (plural: string, manifest: unknown, overwrite = false) =>
+  publishArtifact: (plural: string, manifest: unknown, overwrite = false, idempotencyKey?: string) =>
     apiFetch<{ name?: string; status?: string }>(
       `/registry/${plural}${overwrite ? "?overwrite=true" : ""}`,
-      { method: "POST", body: JSON.stringify(manifest) }
+      {
+        method: "POST",
+        headers: lifecycleMutationHeaders(idempotencyKey),
+        body: JSON.stringify(manifest),
+      }
     ),
   unpublishArtifact: (plural: string, name: string) =>
     apiFetch<{ deleted: string }>(registryArtifactPath(plural, name), { method: "DELETE" }),
@@ -1040,6 +1193,13 @@ export const api = {
     },
     slo: (days = 7) => apiFetch<SLOReport>(`/analytics/slo?days=${days}`),
     logsArchive: (limit = 50) => apiFetch<LogArchive>(`/analytics/logs/archive?limit=${limit}`),
+  },
+
+  // ── Admin: platform-owner view. 403 for non-admins by design — the
+  // caller treats that as "hide the tab", not as an error to surface.
+  admin: {
+    overview: (days = 30) => apiFetch<AdminOverview>(adminOverviewPath(days), { soft: true }),
+    openpanel: (days = 30) => apiFetch<AdminOpenPanel>(adminOpenPanelPath(days), { soft: true }),
   },
 
   // ── Live preview: on-demand ephemeral preview environments ──────
@@ -1485,6 +1645,7 @@ export interface WritableScope {
 export interface LlmCapabilities {
   connected: string[];
   primary: string;
+  gateway_required: boolean;
   roles: Record<string, { tier: string; provider: string; model: string }>;
 }
 
@@ -1528,6 +1689,44 @@ export interface McpMarketplaceEntry {
   native: string; // http | stdio
   credential: string;
   docs: string;
+}
+
+// ── Admin (GET /api/admin/*) ───────────────────────────────────────────
+export interface AdminActiveUserPoint {
+  date: string;
+  users: number;
+}
+
+export interface AdminUserActivity {
+  user: string;
+  days_active: number;
+  last_seen: string;
+}
+
+export interface AdminUserUsage {
+  user: string;
+  user_id: string;
+  tenant_id: string;
+  cost_usd: number;
+  calls?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+}
+
+export interface AdminOverview {
+  days: number;
+  active_users: AdminActiveUserPoint[];
+  signins: number;
+  user_activity: AdminUserActivity[];
+  by_user: AdminUserUsage[];
+}
+
+export interface AdminOpenPanel {
+  enabled: boolean;
+  reason?: string;
+  visitors?: number;
+  sessions?: number;
+  pageviews?: number;
 }
 
 // ── Analytics (GET /api/analytics/*) ──────────────────────────────────

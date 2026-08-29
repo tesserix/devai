@@ -68,6 +68,7 @@ func main() {
 		Verifier:      verifier,
 		Session:       sessions,
 		Allowlist:     allowed,
+		PublicSignup:  cfg.PublicSignup,
 		ALMTenant:     cfg.ALMTenantID,
 		SRETenant:     cfg.SRETenantID,
 		GIPWebAPIKey:  cfg.GIPWebAPIKey,

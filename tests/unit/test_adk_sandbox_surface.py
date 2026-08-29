@@ -342,13 +342,15 @@ def test_sandbox_client_uses_session_cookie_and_never_sends_tenant_identity() ->
         {
             "agent": {"name": "reviewer", "version": "1"},
             "model": {"provider": "anthropic", "model": "claude"},
-        }
+        },
+        idempotency_key="sandbox-create-1",
     )
 
     assert result["id"] == "sbx-1"
     assert seen[0].headers["cookie"] == "devai_session=encrypted-session"
     assert "x-forwarded-user" not in seen[0].headers
     assert "x-forwarded-tenant" not in seen[0].headers
+    assert seen[0].headers["idempotency-key"] == "sandbox-create-1"
 
 
 def test_sandbox_client_covers_lifecycle_and_eval_surface() -> None:
@@ -371,9 +373,24 @@ def test_sandbox_client_covers_lifecycle_and_eval_surface() -> None:
 
     assert client.invoke("sbx-1", "go")["final_text"] == "done"
     assert client.traces("sbx-1") == [{"id": "inv-1"}]
-    assert client.test("sbx-1", [{"name": "works", "input": "go", "expect": {}}])["summary"]["passed"] == 1
-    assert client.evaluate("sbx-1", "release-gate", "2")["id"] == "eval-durable"
-    assert client.destroy("sbx-1") == {"destroyed": "sbx-1"}
+    assert (
+        client.test(
+            "sbx-1",
+            [{"name": "works", "input": "go", "expect": {}}],
+            idempotency_key="sandbox-eval-1",
+        )["summary"]["passed"]
+        == 1
+    )
+    assert (
+        client.evaluate(
+            "sbx-1",
+            "release-gate",
+            "2",
+            idempotency_key="evaluation-1",
+        )["id"]
+        == "eval-durable"
+    )
+    assert client.destroy("sbx-1", idempotency_key="sandbox-destroy-1") == {"destroyed": "sbx-1"}
     assert calls == [
         ("POST", "/api/sandboxes/sbx-1/invoke", {"message": "go"}),
         ("GET", "/api/sandboxes/sbx-1/traces", None),
@@ -399,6 +416,7 @@ def test_sandbox_client_publishes_agent_through_devai_gate_headers() -> None:
         {"kind": "Agent", "metadata": {"name": "reviewer"}, "spec": {}},
         overwrite=True,
         override_reason="Approved judge outage",
+        idempotency_key="promotion-1",
     )
 
     assert result["gate"]["status"] == "overridden"
@@ -406,6 +424,55 @@ def test_sandbox_client_publishes_agent_through_devai_gate_headers() -> None:
     assert seen[0].url.query == b"overwrite=true"
     assert seen[0].headers["x-devai-eval-gate-override"] == "true"
     assert seen[0].headers["x-devai-eval-gate-override-reason"] == "Approved judge outage"
+    assert seen[0].headers["idempotency-key"] == "promotion-1"
+
+
+def test_sandbox_client_covers_registry_import_search_and_comparison() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/registry/search":
+            return httpx.Response(200, json={"query": "support", "hits": [{"kind": "Agent"}]})
+        if request.url.path == "/api/registry/imports" and request.method == "POST":
+            return httpx.Response(201, json={"id": "8d359f6a-a8d9-4cea-8155-e29709832298"})
+        if request.url.path == "/api/registry/imports":
+            return httpx.Response(200, json=[{"id": "import-1"}])
+        return httpx.Response(201, json={"id": "comparison-1"})
+
+    client = SandboxClient(base_url="https://devai.example", transport=httpx.MockTransport(handle))
+
+    assert client.search_registry("support", kinds=["Agent"], limit=5)["hits"] == [{"kind": "Agent"}]
+    assert (
+        client.import_agent(
+            project_id="support-lab",
+            registry_ref="registry://acme/agents/acme/support@1.4.0",
+            idempotency_key="import-support-1",
+        )["id"]
+        == "8d359f6a-a8d9-4cea-8155-e29709832298"
+    )
+    assert client.list_agent_imports("support-lab") == [{"id": "import-1"}]
+    assert (
+        client.compare(
+            "eval-baseline",
+            "eval-candidate",
+            idempotency_key="comparison-1",
+        )["id"]
+        == "comparison-1"
+    )
+
+    assert seen[0].url.query == b"q=support&kinds=Agent&limit=5"
+    assert seen[1].headers["idempotency-key"] == "import-support-1"
+    assert json.loads(seen[1].content) == {
+        "project_id": "support-lab",
+        "registry_ref": "registry://acme/agents/acme/support@1.4.0",
+    }
+    assert seen[2].url.query == b"project_id=support-lab"
+    assert json.loads(seen[3].content) == {
+        "baseline_run_id": "eval-baseline",
+        "candidate_run_id": "eval-candidate",
+    }
+    assert seen[3].headers["idempotency-key"] == "comparison-1"
 
 
 def test_sandbox_client_returns_a_typed_redacted_error() -> None:
@@ -423,6 +490,7 @@ def test_sandbox_client_returns_a_typed_redacted_error() -> None:
 class _CLIClient:
     created: dict[str, Any] | None = None
     published: dict[str, Any] | None = None
+    imported: dict[str, str] | None = None
 
     def create(self, spec: dict[str, Any]) -> dict[str, Any]:
         self.created = spec
@@ -462,6 +530,29 @@ class _CLIClient:
             "results": [{"name": "bad", "passed": False, "failures": ["missing expected text: 'ok'"]}],
         }
 
+    def search_registry(self, query: str, *, kinds: list[str], limit: int) -> dict[str, Any]:
+        return {"query": query, "hits": [{"kind": kinds[0], "name": "support", "rank": 1}], "limit": limit}
+
+    def import_agent(
+        self,
+        *,
+        project_id: str,
+        registry_ref: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        self.imported = {
+            "project_id": project_id,
+            "registry_ref": registry_ref,
+            "idempotency_key": idempotency_key,
+        }
+        return {"id": "8d359f6a-a8d9-4cea-8155-e29709832298", "state": "ready"}
+
+    def list_agent_imports(self, project_id: str) -> list[dict[str, Any]]:
+        return [{"id": "import-1", "project_id": project_id, "state": "ready"}]
+
+    def compare(self, baseline_run_id: str, candidate_run_id: str) -> dict[str, Any]:
+        return {"id": "comparison-1", "baseline_run_id": baseline_run_id, "candidate_run_id": candidate_run_id}
+
     def publish_agent(
         self,
         manifest: dict[str, Any],
@@ -475,6 +566,77 @@ class _CLIClient:
 
     def close(self) -> None:
         return None
+
+
+def test_cli_registry_search_import_and_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _CLIClient()
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: fake)
+
+    search = CliRunner().invoke(
+        adk_app,
+        ["registry", "search", "support agent", "--kind", "Agent", "--limit", "5", "--output", "json"],
+    )
+    imported = CliRunner().invoke(
+        adk_app,
+        [
+            "registry",
+            "import",
+            "registry://acme/agents/acme/support@1.4.0",
+            "--project",
+            "support-lab",
+            "--idempotency-key",
+            "import-support-1",
+            "--output",
+            "json",
+        ],
+    )
+    listed = CliRunner().invoke(
+        adk_app,
+        ["registry", "imports", "--project", "support-lab", "--output", "json"],
+    )
+
+    assert search.exit_code == 0, search.output
+    assert json.loads(search.output)["hits"][0]["name"] == "support"
+    assert imported.exit_code == 0, imported.output
+    assert fake.imported == {
+        "project_id": "support-lab",
+        "registry_ref": "registry://acme/agents/acme/support@1.4.0",
+        "idempotency_key": "import-support-1",
+    }
+    assert json.loads(listed.output)[0]["project_id"] == "support-lab"
+
+
+def test_cli_creates_sandbox_from_import_and_compares_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _CLIClient()
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: fake)
+
+    created = CliRunner().invoke(
+        adk_app,
+        [
+            "sandbox",
+            "from-import",
+            "8d359f6a-a8d9-4cea-8155-e29709832298",
+            "--provider",
+            "custom",
+            "--model",
+            "support-runtime",
+            "--output",
+            "json",
+        ],
+    )
+    compared = CliRunner().invoke(
+        adk_app,
+        ["compare", "eval-baseline", "eval-candidate", "--output", "json"],
+    )
+
+    assert created.exit_code == 0, created.output
+    assert fake.created == {
+        "import_id": "8d359f6a-a8d9-4cea-8155-e29709832298",
+        "model": {"provider": "custom", "model": "support-runtime"},
+        "tools": {"default_mode": "mock", "overrides": {}},
+    }
+    assert compared.exit_code == 0, compared.output
+    assert json.loads(compared.output)["id"] == "comparison-1"
 
 
 def test_cli_sandbox_create_builds_a_draft_spec(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

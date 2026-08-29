@@ -7,8 +7,11 @@ import {
   registryAgentManifestPath,
   registryAgentsPath,
   registryArtifactPath,
+  registrySearchPath,
+  agentImportsPath,
   sandboxPath,
   sandboxTracesPath,
+  lifecycleMutationHeaders,
 } from "./api.ts";
 
 test("requests the authenticated user's agents only when mine is selected", () => {
@@ -40,4 +43,21 @@ test("encodes owner-scoped sandbox, trace, evaluation, and comparison paths", ()
   );
   assert.equal(evaluationRunPath("eval/one"), "/evaluations/eval%2Fone");
   assert.equal(comparisonPath("compare/one"), "/comparisons/compare%2Fone");
+});
+
+test("encodes semantic search and project-scoped immutable imports", () => {
+  assert.equal(
+    registrySearchPath("incident response", ["Agent", "Tool"], 20),
+    "/registry/search?q=incident+response&kinds=Agent%2CTool&limit=20",
+  );
+  assert.equal(
+    agentImportsPath("support / lab"),
+    "/registry/imports?project_id=support+%2F+lab",
+  );
+});
+
+test("carries a caller-stable idempotency key on durable mutations", () => {
+  assert.deepEqual(lifecycleMutationHeaders("request-42"), {
+    "Idempotency-Key": "request-42",
+  });
 });

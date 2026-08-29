@@ -426,6 +426,26 @@ def test_anthropic_kwargs_never_forward_bookkeeping_extras():
     assert all(m["role"] != "system" for m in kwargs["messages"])
 
 
+def test_anthropic_kwargs_omit_temperature_for_opus_4_8():
+    pytest.importorskip("anthropic")
+    from devai.adapters.llm.anthropic_adapter import AnthropicLLMAdapter
+    from devai.adapters.llm.base import LLMMessage, LLMRequest, LLMRole
+
+    adapter = AnthropicLLMAdapter.__new__(AnthropicLLMAdapter)
+    adapter.default_model = "claude-sonnet-4-6"
+    adapter.default_max_tokens = 100
+
+    kwargs = adapter._build_kwargs(
+        LLMRequest(
+            messages=[LLMMessage(role=LLMRole.USER, content="hello")],
+            model="claude-opus-4-8",
+            temperature=0.2,
+        )
+    )
+
+    assert "temperature" not in kwargs
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Per-role model routing
 # ─────────────────────────────────────────────────────────────────────
@@ -634,8 +654,7 @@ def test_default_fallback_order_is_anthropic_openai_vertex_groq():
 
 
 def test_platform_and_role_chains_build_in_order(monkeypatch):
-    """The platform chain degrades anthropic→openai→vertex→groq; role chains
-    add the claude-preserving gateway right after the primary."""
+    """Role model preferences never reorder the configured provider chain."""
     from devai.adapters.llm import factory
     from devai.config import Settings
 
@@ -656,10 +675,10 @@ def test_platform_and_role_chains_build_in_order(monkeypatch):
         chain = factory.create_llm_chain(s)
         assert chain.provider_name == "anthropic→openai→vertex_gemini→groq"
 
-        # Role chain for a claude-pinned role: anthropic primary, gateway
-        # (claude-on-vertex) first, then the same ordered fallbacks.
+        # The non-governed legacy gateway remains a final fallback. In
+        # production gateway_required routes every provider through it instead.
         role = factory.create_role_llm(s, "dev_api")
-        assert role.provider_name == "anthropic→gateway→openai→vertex_gemini→groq"
+        assert role.provider_name == "anthropic→openai→vertex_gemini→groq→gateway"
     finally:
         factory._ROLE_CHAIN_CACHE.clear()
 

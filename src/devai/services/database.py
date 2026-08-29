@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -1565,6 +1566,249 @@ class Database:
             limit,
         )
         return [dict(r) for r in rows]
+
+    async def record_agent_lifecycle_event(self, **values: Any) -> dict[str, Any]:
+        """Append one transition and its delivery intent atomically."""
+        columns = """id, workflow_id, sequence, owner_scope, tenant_id,
+                     operation, state, step, error_code, created_at"""
+        args = (
+            values["id"],
+            values["workflow_id"],
+            values["sequence"],
+            values["owner_scope"],
+            values.get("tenant_id", ""),
+            values["operation"],
+            values["state"],
+            values["step"],
+            values.get("error_code", ""),
+            values["created_at"],
+        )
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""INSERT INTO agent_lifecycle_events ({columns})
+                    VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (workflow_id, sequence) DO NOTHING
+                    RETURNING {columns}""",
+                *args,
+            )
+            if row is None:
+                row = await connection.fetchrow(
+                    f"""SELECT {columns}
+                          FROM agent_lifecycle_events
+                         WHERE workflow_id = $1 AND sequence = $2""",
+                    values["workflow_id"],
+                    values["sequence"],
+                )
+                if row is None:
+                    raise RuntimeError("agent lifecycle event idempotency winner disappeared")
+            event = dict(row)
+            payload = {
+                "event_id": str(event["id"]),
+                "workflow_id": event["workflow_id"],
+                "sequence": event["sequence"],
+                "operation": event["operation"],
+                "state": event["state"],
+                "step": event["step"],
+                "error_code": event["error_code"],
+            }
+            outbox_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"devai:lifecycle-outbox:{event['id']}"))
+            await connection.execute(
+                """INSERT INTO agent_lifecycle_outbox
+                     (id, event_id, owner_scope, event_type, payload, created_at)
+                   VALUES ($1::uuid, $2::uuid, $3, 'agent_lifecycle.transitioned', $4::jsonb, $5)
+                   ON CONFLICT (event_id, event_type) DO NOTHING""",
+                outbox_id,
+                str(event["id"]),
+                event["owner_scope"],
+                json.dumps(payload),
+                event["created_at"],
+            )
+        event["id"] = str(event["id"])
+        return event
+
+    async def pending_agent_lifecycle_outbox(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Read committed delivery intents oldest-first for at-least-once publication."""
+        rows = await self.pool.fetch(
+            """SELECT o.id, o.event_id, o.event_type, o.payload, o.created_at,
+                      e.tenant_id
+                 FROM agent_lifecycle_outbox AS o
+                 JOIN agent_lifecycle_events AS e ON e.id = o.event_id
+                WHERE o.published_at IS NULL
+                ORDER BY o.created_at, o.id
+                LIMIT $1""",
+            max(1, min(limit, 500)),
+        )
+        return [dict(row) for row in rows]
+
+    async def mark_agent_lifecycle_outbox_published(
+        self,
+        outbox_id: str,
+        *,
+        published_at: datetime,
+    ) -> None:
+        await self.pool.execute(
+            """UPDATE agent_lifecycle_outbox
+                  SET published_at = $2
+                WHERE id = $1::uuid AND published_at IS NULL""",
+            outbox_id,
+            published_at,
+        )
+
+    async def agent_lifecycle_operational_snapshot(self) -> dict[str, float]:
+        """Return low-cardinality backlog and capacity measurements for telemetry."""
+        row = await self.pool.fetchrow(
+            """WITH latest_workflows AS (
+                   SELECT DISTINCT ON (workflow_id) workflow_id, state
+                     FROM agent_lifecycle_events
+                    ORDER BY workflow_id, sequence DESC
+               )
+               SELECT
+                   (SELECT COUNT(*) FROM sandboxes WHERE status <> 'destroyed') AS live_sandboxes,
+                   (SELECT COUNT(*) FROM sandboxes WHERE status = 'pending') AS pending_sandboxes,
+                   (SELECT COUNT(*) FROM sandboxes WHERE status = 'destroying') AS destroying_sandboxes,
+                   (SELECT COUNT(*)
+                      FROM sandboxes
+                     WHERE status = 'destroying'
+                        OR (status <> 'destroyed' AND expires_at <= NOW())) AS cleanup_backlog,
+                   (SELECT COUNT(*) FROM latest_workflows WHERE state = 'stuck') AS stuck_workflows,
+                   (SELECT COUNT(*)
+                      FROM agent_lifecycle_outbox
+                     WHERE published_at IS NULL) AS outbox_pending,
+                   COALESCE((
+                       SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))
+                         FROM agent_lifecycle_outbox
+                        WHERE published_at IS NULL
+                   ), 0) AS outbox_oldest_age_seconds"""
+        )
+        if row is None:
+            return {}
+        return {str(key): float(value or 0.0) for key, value in dict(row).items()}
+
+    async def create_agent_import(self, **values: Any) -> dict[str, Any]:
+        """Atomically create one import snapshot and its publication intent."""
+        columns = """id, owner_scope, tenant_id, project_id, idempotency_key,
+                     request_fingerprint, registry_ref, state, agent,
+                     dependency_lock, permissions, conformance, created_by,
+                     created_at, updated_at"""
+        args = (
+            values["id"],
+            values["owner_scope"],
+            values.get("tenant_id", ""),
+            values["project_id"],
+            values["idempotency_key"],
+            values["request_fingerprint"],
+            values["registry_ref"],
+            values["state"],
+            json.dumps(values["agent"]),
+            json.dumps(values["dependency_lock"]),
+            json.dumps(values.get("permissions") or {}),
+            json.dumps(values["conformance"]),
+            values["created_by"],
+            values["created_at"],
+            values["updated_at"],
+        )
+        async with self.pool.acquire() as connection, connection.transaction():
+            row = await connection.fetchrow(
+                f"""INSERT INTO agent_imports ({columns})
+                    VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8,
+                            $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb,
+                            $13, $14, $15)
+                    ON CONFLICT (owner_scope, project_id, idempotency_key) DO NOTHING
+                    RETURNING {columns}""",
+                *args,
+            )
+            if row is None:
+                row = await connection.fetchrow(
+                    f"""SELECT {columns}
+                          FROM agent_imports
+                         WHERE owner_scope = $1 AND project_id = $2 AND idempotency_key = $3""",
+                    values["owner_scope"],
+                    values["project_id"],
+                    values["idempotency_key"],
+                )
+                if row is None:
+                    raise RuntimeError("agent import idempotency winner disappeared")
+            else:
+                payload = {
+                    "import_id": values["id"],
+                    "project_id": values["project_id"],
+                    "registry_ref": values["registry_ref"],
+                    "agent_digest": values["agent"].get("digest", ""),
+                    "conformance": values["conformance"],
+                }
+                await connection.execute(
+                    """INSERT INTO agent_import_outbox
+                         (id, import_id, owner_scope, event_type, payload, created_at)
+                       VALUES ($1::uuid, $2::uuid, $3, 'agent_import.created', $4::jsonb, $5)""",
+                    str(uuid.uuid4()),
+                    values["id"],
+                    values["owner_scope"],
+                    json.dumps(payload),
+                    values["created_at"],
+                )
+        return _agent_import_row(dict(row))
+
+    async def get_agent_import_by_idempotency(
+        self,
+        owner_scope: str,
+        project_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT id, owner_scope, tenant_id, project_id, idempotency_key,
+                      request_fingerprint, registry_ref, state, agent,
+                      dependency_lock, permissions, conformance, created_by,
+                      created_at, updated_at
+                 FROM agent_imports
+                WHERE owner_scope = $1 AND project_id = $2 AND idempotency_key = $3""",
+            owner_scope,
+            project_id,
+            idempotency_key,
+        )
+        return _agent_import_row(dict(row)) if row else None
+
+    async def get_agent_import(self, owner_scope: str, import_id: str) -> dict[str, Any] | None:
+        row = await self.pool.fetchrow(
+            """SELECT id, owner_scope, tenant_id, project_id, idempotency_key,
+                      request_fingerprint, registry_ref, state, agent,
+                      dependency_lock, permissions, conformance, created_by,
+                      created_at, updated_at
+                 FROM agent_imports
+                WHERE owner_scope = $1 AND id = $2::uuid""",
+            owner_scope,
+            import_id,
+        )
+        return _agent_import_row(dict(row)) if row else None
+
+    async def list_agent_imports(
+        self,
+        owner_scope: str,
+        project_id: str,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            """SELECT id, owner_scope, tenant_id, project_id, idempotency_key,
+                      request_fingerprint, registry_ref, state, agent,
+                      dependency_lock, permissions, conformance, created_by,
+                      created_at, updated_at
+                 FROM agent_imports
+                WHERE owner_scope = $1 AND project_id = $2
+                ORDER BY created_at DESC, id DESC
+                LIMIT $3""",
+            owner_scope,
+            project_id,
+            limit,
+        )
+        return [_agent_import_row(dict(row)) for row in rows]
+
+
+def _agent_import_row(row: dict[str, Any]) -> dict[str, Any]:
+    row["id"] = str(row["id"])
+    for field in ("agent", "dependency_lock", "permissions", "conformance"):
+        value = row[field]
+        row[field] = json.loads(value) if isinstance(value, str) else value
+    return row
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -42,6 +42,9 @@ class NoopTelemetryAdapter(TelemetryAdapter):
     def observe(self, name: str, value: float, attrs: dict[str, str] | None = None) -> None:  # noqa: ARG002
         return None
 
+    def gauge(self, name: str, value: float, attrs: dict[str, str] | None = None) -> None:  # noqa: ARG002
+        return None
+
     async def health_check(self) -> dict[str, Any]:
         return {
             "ok": True,
