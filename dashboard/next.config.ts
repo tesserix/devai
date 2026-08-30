@@ -125,6 +125,11 @@ const nextConfig: NextConfig = {
         source: "/api/analytics/:path*",
         destination: `${API_INTERNAL_URL}/api/analytics/:path*`,
       },
+      // Admin (platform-owner usage view + trial budget) — role-gated by the API.
+      {
+        source: "/api/admin/:path*",
+        destination: `${API_INTERNAL_URL}/api/admin/:path*`,
+      },
       {
         source: "/api/sre-studio/:path*",
         destination: `${API_INTERNAL_URL}/api/sre-studio/:path*`,
