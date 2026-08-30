@@ -73,6 +73,7 @@ class _Registry:
         self.items: dict[str, dict[str, Any]] = {}
         self.prompts: dict[str, dict[str, Any]] = {}
         self.mcp_servers: dict[str, dict[str, Any]] = {}
+        self.deleted_tags: list[tuple[str, str, str]] = []
 
     def list_agents(self) -> list[Agent]:
         return [self._agent(body) for body in self.items.values()]
@@ -126,7 +127,8 @@ class _Registry:
         self.mcp_servers[name] = copied
         return {"name": name}
 
-    def delete(self, plural: str, name: str) -> None:
+    def delete(self, plural: str, name: str, tag: str = "latest") -> None:
+        self.deleted_tags.append((plural, name, tag))
         collection = self.items if plural == "agents" else self.prompts
         collection.pop(name)
 
@@ -822,6 +824,18 @@ def test_only_owner_can_unpublish_private_agent() -> None:
     assert removed.status_code == 200
     assert removed.json() == {"deleted": "owned-agent"}
     assert "owned-agent" not in registry.items
+
+
+def test_unpublish_deletes_the_tag_the_artifact_was_published_with() -> None:
+    client, registry = _client()
+    alice = _headers("alice", "tenant-a")
+    body = _manifest("versioned-agent")
+    assert client.post("/api/registry/agents", headers=alice, json=body).status_code == 201
+    registry.items["versioned-agent"]["metadata"]["tag"] = "1"
+
+    removed = client.delete("/api/registry/agents/versioned-agent", headers=alice)
+    assert removed.status_code == 200
+    assert registry.deleted_tags == [("agents", "versioned-agent", "1")]
 
 
 def test_declared_eval_suite_fails_closed_when_gate_service_is_unavailable() -> None:

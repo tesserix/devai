@@ -595,8 +595,11 @@ async def unpublish(request: Request, plural: str, name: str) -> dict[str, str]:
         raise HTTPException(status_code=502, detail=str(e)) from e
     if existing is None or _labels(existing).get(_OWNER_LABEL) != owner_id:
         raise HTTPException(status_code=404, detail=f"artifact not found: {name}")
+    # Versioned publishes carry their version as the tag; deleting the
+    # hardcoded "latest" 500s upstream and strands the artifact forever.
+    tag = str((existing.get("metadata") or {}).get("tag") or "latest")
     try:
-        await asyncio.to_thread(client.delete, plural, name)
+        await asyncio.to_thread(client.delete, plural, name, tag)
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     client.refresh()
