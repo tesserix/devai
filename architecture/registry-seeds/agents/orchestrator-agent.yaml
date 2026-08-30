@@ -22,7 +22,7 @@ spec:
     provider: devai-user-routing
     name: dynamic
   a2a:
-    url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/orchestrator
+    url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/orchestrator
     preferredTransport: JSONRPC
     provider:
       organization: Tesserix

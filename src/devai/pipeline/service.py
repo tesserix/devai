@@ -16,6 +16,7 @@ the chat agent, and the dashboard all read from the same instance.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -47,6 +48,8 @@ logger = logging.getLogger(__name__)
 # Stage-event phases that represent a terminal transition — the ones worth one
 # telemetry metric each (STARTED is omitted so we count each stage once).
 _TELEMETRY_STAGE_PHASES = frozenset({"completed", "failed", "skipped"})
+_REPLICA_EVENT_CHANNEL = "devai:pipeline:events:v1"
+_MAX_REPLICA_EVENT_BYTES = 512 * 1024
 
 
 def _provider_for_model(model: str) -> str:
@@ -114,6 +117,9 @@ class PipelineService:
         )
         self._sse_queues: list[asyncio.Queue[tuple[float, str, dict[str, Any]]]] = []
         self._lock = asyncio.Lock()
+        self._replica_id = uuid.uuid4().hex
+        self._event_pubsub: Any = None
+        self._event_relay_task: asyncio.Task[None] | None = None
         # Strong references to fire-and-forget publish tasks so the event loop
         # can't GC them mid-flight (asyncio only holds a weak ref). Cleared by
         # a done-callback when each task finishes.
@@ -141,12 +147,8 @@ class PipelineService:
         """
         ts = float(envelope.get("timestamp") or time.time())
         payload = {**envelope, "task_id": run_id}
-        self._ring.append((ts, run_id, payload))
-        for q in list(self._sse_queues):
-            try:
-                q.put_nowait((ts, run_id, payload))
-            except asyncio.QueueFull:
-                logger.debug("SSE queue full — dropping agent_turn")
+        self._fanout_live_event(ts, run_id, payload)
+        self._publish_replica_events(run_id, [payload], ts)
         if self.state_manager is not None:
             try:
                 self._persist_run_log(run_id, [payload], ts)
@@ -355,6 +357,11 @@ class PipelineService:
             logger.error("pipeline blueprint load failed: %s", e)
 
         await self._pipeline.start()
+        try:
+            await self._start_replica_event_relay()
+        except Exception:
+            await self._pipeline.stop()
+            raise
         self._started = True
         logger.info(
             "PipelineService started — %d blueprints, %d stages",
@@ -456,6 +463,7 @@ class PipelineService:
         if not self._started or self._pipeline is None:
             return
         await self._pipeline.stop()
+        await self._stop_replica_event_relay()
         # Memory adapters that own connections (mem0 HTTP client, zep HTTP
         # client) clean up here. Adapters that share a connection with the
         # host (Redis, pgvector) implement close() as a no-op.
@@ -1197,9 +1205,10 @@ class PipelineService:
             logger.exception("run-signal derivation failed for %s", task.id)
             derived = []
 
-        self._ring.append((ts, task.id, payload))
-        for env in derived:
-            self._ring.append((ts, task.id, env))
+        envelopes = [payload, *derived]
+        for envelope in envelopes:
+            self._fanout_live_event(ts, task.id, envelope)
+        self._publish_replica_events(task.id, envelopes, ts)
 
         # Best-effort OTel: one metric per terminal stage transition. record_*
         # never raises; guard the rare case telemetry is wired but malformed.
@@ -1223,14 +1232,6 @@ class PipelineService:
                 )
             except Exception:  # noqa: BLE001
                 logger.debug("telemetry record_stage failed", exc_info=True)
-
-        for q in list(self._sse_queues):
-            try:
-                q.put_nowait((ts, task.id, payload))
-                for env in derived:
-                    q.put_nowait((ts, task.id, env))
-            except asyncio.QueueFull:
-                logger.warning("SSE queue full — dropping event")
 
         # Dry-run tasks are never persisted — a preview must leave no trace.
         if self.state_manager is not None and not task.dry_run:
@@ -1595,6 +1596,106 @@ class PipelineService:
                 logger.debug("run-log persist failed for %s", task_id, exc_info=True)
 
         self._spawn(_write())
+
+    def _fanout_live_event(self, ts: float, task_id: str, payload: dict[str, Any]) -> None:
+        self._ring.append((ts, task_id, payload))
+        for queue in list(self._sse_queues):
+            try:
+                queue.put_nowait((ts, task_id, payload))
+            except asyncio.QueueFull:
+                logger.warning("SSE queue full — dropping event")
+
+    def _publish_replica_events(self, task_id: str, envelopes: list[dict[str, Any]], ts: float) -> None:
+        redis = getattr(self.state_manager, "redis", None)
+        if redis is None or self._event_pubsub is None:
+            return
+
+        messages = []
+        for payload in envelopes:
+            message = json.dumps(
+                {
+                    "origin": self._replica_id,
+                    "timestamp": ts,
+                    "task_id": task_id,
+                    "payload": payload,
+                },
+                default=str,
+                separators=(",", ":"),
+            )
+            if len(message.encode("utf-8")) <= _MAX_REPLICA_EVENT_BYTES:
+                messages.append(message)
+            else:
+                logger.warning("replica event exceeds relay limit task_id=%s", task_id)
+
+        async def _publish() -> None:
+            try:
+                for message in messages:
+                    await redis.publish(_REPLICA_EVENT_CHANNEL, message)
+            except Exception:  # noqa: BLE001 — durable per-run logs remain available
+                logger.warning("replica event publish failed task_id=%s", task_id, exc_info=True)
+
+        if messages:
+            self._spawn(_publish())
+
+    async def _start_replica_event_relay(self) -> None:
+        redis = getattr(self.state_manager, "redis", None)
+        if redis is None or self._event_relay_task is not None:
+            return
+        pubsub = redis.pubsub(ignore_subscribe_messages=True)
+        try:
+            await pubsub.subscribe(_REPLICA_EVENT_CHANNEL)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await pubsub.aclose()
+            raise
+        self._event_pubsub = pubsub
+        self._event_relay_task = asyncio.create_task(self._consume_replica_events(pubsub))
+
+    async def _consume_replica_events(self, pubsub: Any) -> None:
+        try:
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                raw = message.get("data")
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8")
+                if not isinstance(raw, str) or len(raw.encode("utf-8")) > _MAX_REPLICA_EVENT_BYTES:
+                    continue
+                try:
+                    envelope = json.loads(raw)
+                    origin = envelope["origin"]
+                    ts = float(envelope["timestamp"])
+                    task_id = envelope["task_id"]
+                    payload = envelope["payload"]
+                    if (
+                        not isinstance(origin, str)
+                        or not isinstance(task_id, str)
+                        or len(task_id) > 128
+                        or not isinstance(payload, dict)
+                    ):
+                        continue
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    logger.warning("discarding malformed replica event")
+                    continue
+                if origin != self._replica_id:
+                    self._fanout_live_event(ts, task_id, payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — request serving remains available
+            logger.exception("replica event relay stopped unexpectedly")
+
+    async def _stop_replica_event_relay(self) -> None:
+        task = self._event_relay_task
+        self._event_relay_task = None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        pubsub = self._event_pubsub
+        self._event_pubsub = None
+        if pubsub is not None:
+            with contextlib.suppress(Exception):
+                await pubsub.aclose()
 
     def _spawn(self, coro: Any) -> None:
         """Fire-and-forget a coroutine with a strong ref (GC-safe)."""

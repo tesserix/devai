@@ -15,6 +15,8 @@ from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.registry import SpecializationRegistry
 from devai.specializations.service import SpecializationService
 
+_RUNTIME_TOKEN = "global-adk-runtime-upstream-token-123"
+
 
 class ScriptedGatewayLLM:
     provider_name = "gateway"
@@ -101,6 +103,7 @@ class ResolvedCatalog:
 
 def _client(*, governed: bool = True, llm_available: bool = True) -> TestClient:
     config = Settings(
+        adk_runtime_service_token=_RUNTIME_TOKEN,
         auth_bff_shared_secret="test-shared-secret",
         llm_gateway_required=True,
         llm_gateway_base_url="http://ai-gateway:8080",
@@ -160,8 +163,59 @@ def _request() -> dict[str, Any]:
     }
 
 
+def _runtime_headers(token: str = _RUNTIME_TOKEN) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-ADK-Workload-Subject": "zitadel-service-user-123",
+        "X-ADK-Workload-Client-ID": "inventory-agent",
+    }
+
+
 def test_a2a_endpoint_requires_a_verified_principal() -> None:
     response = _client().post("/a2a/v1/requirements-analyst", json=_request())
+
+    assert response.status_code == 401
+
+
+def test_a2a_endpoint_accepts_agentgateway_runtime_identity() -> None:
+    response = _client().post(
+        "/a2a/v1/requirements-analyst-agent",
+        json=_request(),
+        headers=_runtime_headers(),
+    )
+
+    assert response.status_code == 200
+
+
+def test_a2a_endpoint_rejects_spoofed_runtime_identity_without_the_upstream_token() -> None:
+    headers = _runtime_headers()
+    headers.pop("Authorization")
+
+    response = _client().post(
+        "/a2a/v1/requirements-analyst-agent",
+        json=_request(),
+        headers=headers,
+    )
+
+    assert response.status_code == 401
+
+
+def test_a2a_endpoint_rejects_runtime_identity_with_the_wrong_upstream_token() -> None:
+    response = _client().post(
+        "/a2a/v1/requirements-analyst-agent",
+        json=_request(),
+        headers=_runtime_headers("wrong-global-runtime-token-123"),
+    )
+
+    assert response.status_code == 401
+
+
+def test_a2a_endpoint_requires_auditable_runtime_identity_headers() -> None:
+    response = _client().post(
+        "/a2a/v1/requirements-analyst-agent",
+        json=_request(),
+        headers={"Authorization": f"Bearer {_RUNTIME_TOKEN}"},
+    )
 
     assert response.status_code == 401
 

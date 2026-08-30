@@ -37,7 +37,7 @@ CATALOG_API_VERSION = "registry.solo.io/v1alpha1"
 AGENT_API_VERSION = "registry.agentic.dev/v1alpha1"
 NAMESPACE = "devai"
 SOURCE_LABEL = "devai"
-A2A_BASE_URL = "http://devai-api.devai.svc.cluster.local:8080/a2a/v1"
+A2A_BASE_URL = "http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1"
 # Seeds are public so they show in the (logged-in) aregistry marketplace, not
 # just DevAI's own authenticated reads. aregistry defaults an unset visibility
 # to "private", which CanRead hides from anyone outside the owning tenant.

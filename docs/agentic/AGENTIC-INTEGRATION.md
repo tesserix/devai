@@ -7,6 +7,8 @@ gateways. The same admission rules apply to in-process A2A and Kubernetes Job ru
 
 Publishing and release operations are covered separately in
 [Publishing DevAI agents to the Agent Registry](AGENT-REGISTRY-PUBLISHING.md).
+Cross-product caller and hosted-capability admission is covered in
+[Global ADK runtime onboarding](../guides/global-adk-runtime.md).
 
 Diagrams are provided in two formats:
 
@@ -18,8 +20,6 @@ Diagrams are provided in two formats:
 
 ## 1. Component topology
 
-Six boxes, one user. That's it.
-
 ```mermaid
 flowchart LR
     User([User])
@@ -27,7 +27,9 @@ flowchart LR
     Reg[Agent Registry<br/>catalog of<br/>agents · skills · MCP · prompts]
     Runner[Runner Pod<br/>ephemeral K8s Job]
     AIGW[AI Gateway<br/>LLM proxy<br/>Anthropic · OpenAI]
-    AGW[Agent Gateway<br/>MCP dispatch<br/>solo.io]
+    AGW[Agent Gateway<br/>MCP + A2A policy<br/>solo.io]
+    Peer[Admitted product agent]
+    ADK[Global ADK Runtime<br/>warm HA pool]
     LLM[/Anthropic · OpenAI/]
     MCP[/MCP servers/]
 
@@ -37,6 +39,9 @@ flowchart LR
     DevAI   -- 3. create Job<br/>(profile in env) --> Runner
     Runner  -- 4. LLM call --> AIGW
     Runner  -- 5. MCP call --> AGW
+    Peer    -- authenticated A2A --> AGW
+    AGW     -- /a2a/v1 --> ADK
+    ADK     -- governed /resolved --> Reg
     AIGW    --> LLM
     AGW     --> MCP
     Runner  -. 6. RESULT:: .-> DevAI
@@ -46,6 +51,7 @@ flowchart LR
     style Runner fill:#3d5a3d,color:#fff
     style AIGW  fill:#8c5a2d,color:#fff
     style AGW   fill:#8c5a2d,color:#fff
+    style ADK   fill:#2d3a8c,color:#fff
 ```
 
 ### Component roles
@@ -57,8 +63,9 @@ flowchart LR
 | **devai-dashboard** | `devai` | 3100 | Next.js UI |
 | **auth-bff** | `devai` | 8090 | Terminates OAuth, stamps `X-Forwarded-User/Uid/Tenant` |
 | **agentregistry (aregistry)** | `agentregistry-system` | 12121 | Catalog. `/v0/{agents,skills,prompts,servers,health}`. pgvector for semantic search. |
-| **agentgateway-mcp** | `agentgateway-system` | 8080 | Solo MCP data plane. Routes approved `/mcp/{name}` traffic to backend MCP servers. |
-| **ai-gateway** | `agentgateway-system` | 8080 | Solo AI data plane. Routes provider and `/a2a/v1/*` paths under policy. |
+| **agentgateway-mcp** | `agentgateway-system` | 8080 | Shared internal data plane. Routes approved `/mcp/{name}` traffic and authenticated `/a2a/v1/*` calls. |
+| **adk-runtime** | `devai` | 8080 | Stable backend alias for the HA warm runtime pool. Consumers never call it directly. |
+| **ai-gateway** | `agentgateway-system` | 8080 | Provider data plane for governed model calls only. |
 | **kagent** | `kagent-system` | 8083 | Agent lifecycle controller (solo.io). Reconciles agents labelled `devai.io/runtime=kagent` into Deployments; the dispatcher routes those over A2A (all other agents stay Job-dispatched). |
 
 → Edit: [`diagrams/01-component-topology.drawio`](diagrams/01-component-topology.drawio)
@@ -171,7 +178,7 @@ aregistry → runner: "http://devai-api.devai.svc.cluster.local:8080/mcp/scm"
 The runner replaces backing-service URLs with the configured Agent Gateway route:
 
 ```
-http://agentgateway.agentgateway-system.svc.cluster.local:9092/mcp/scm-mcp
+http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/mcp/scm-mcp
 ```
 
 In governed mode an absent MCP gateway is an error before agent execution. Direct MCP
@@ -226,6 +233,13 @@ to direct vendor egress. DevAI's production chain is Vertex Gemini → Anthropic
 ---
 
 ## 3. A2A protocol — agent-to-agent handover
+
+Do not confuse the in-run message bus below with the cluster-global A2A
+transport. An admitted product agent invokes a hosted capability at
+`http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/...`.
+AgentGateway verifies Zitadel and the `agentgateway.runtime` role, overwrites
+workload identity headers, and forwards to the `adk-runtime` alias with a
+dedicated upstream bearer. Direct access to the backend is not supported.
 
 DevAI agents collaborate via a small typed protocol. Six message types
 (`request`, `response`, `notification`, `handoff`, `escalation`, `broadcast`)
@@ -349,8 +363,11 @@ The integration is healthy when **every one** of these holds:
 | 8 | MCP call hits agentgateway when set | runner logs: `mcp endpoints routed_via=agentgateway` |
 | 9 | A2A messages carry identity | `redis-cli LRANGE devai:run:<id>:a2a_messages 0 -1 \| jq '.[0].triggered_by'` → `"alice@x.com"` |
 | 10 | Dashboard timeline attributes | `/runs/<id>` Timeline tab shows alice@x.com on each message |
+| 11 | global card requires a machine token | authenticated `GET` through `agentgateway-mcp:8080/.well-known/agent-card.json` succeeds; a request without the token returns 401 |
+| 12 | global A2A reaches the warm pool | authenticated `message/send` through `agentgateway-mcp:8080/a2a/v1/capabilities/<name>` succeeds and the access log contains verified subject and client id |
+| 13 | HA floor is present | three `devai-api` replicas are ready in separate zones and the PDB has `minAvailable: 2` |
 
-If any of 1-10 regresses, the chain breaks silently — runs still complete, but the
+If any of 1-13 regresses, the chain breaks silently — runs still complete, but the
 identity / control-plane wiring degrades to "system" attribution.
 
 ---
@@ -362,7 +379,7 @@ identity / control-plane wiring degrades to "system" attribution.
 | ✅ Done | **kagent dispatch (opt-in, per-agent).** `JobRunnerStage` routes an agent over A2A through the kagent controller when its registry record carries `devai.io/runtime=kagent` and `DEVAI_KAGENT_URL` is set; otherwise it dispatches a K8s Job. Definite pre-acceptance failures use the Job path; accepted or ambiguous outcomes fail closed to prevent duplicate tool calls. `kagent-agent-sync` reconciles the same labelled agents into Deployments. See `src/devai/pipeline/stages/job_runner.py::_maybe_dispatch_kagent` + `src/devai/agentic/kagent_client.py` |
 | ✅ Done | **Dynamic on/off switch.** kagent is a `kagent` connector in the Settings catalog (`settings/models.py`, provider `on`/`off` → `kagent_enabled`, plus optional controller URL/namespace fields). Resolved per run through `build_overlay` with full scope precedence (user → team → org → tenant → global → `DEVAI_KAGENT_ENABLED` base), so toggling it lands on the next run with **no restart**. The Settings UI renders it automatically from the catalog. `JobRunnerStage._kagent_settings` reads the overlay before dispatch. |
 | ⚠️ Caveat | Confirm the kagent controller's A2A `message/send` contract in-cluster before labelling a hot-path agent — the result-shape parsing in `extract_a2a_text` is defensive but unverified against the live 0.9.7 controller |
-| ⚠️ Deferred | **agentgateway provider backends.** The gateway is in the topology but solo.io's MCP routing rules are not configured for our specific MCP servers — currently `routed_via=agentgateway` produces a URL that resolves on path but agentgateway's MCP backend resolution is still TODO in `tesserix-k8s/charts/apps/agentgateway` |
+| ✅ Done | **AgentGateway MCP and global A2A routes.** Registry-owned MCP routes and the authenticated global runtime route are rendered by `tesserix-k8s/charts/apps/agentgateway-route-sync`; governed production traffic has no direct-service fallback. |
 | ✅ Done | Aregistry profile injection into Job env (this PR) |
 | ✅ Done | Identity propagation end-to-end (prior PR) |
 | ✅ Done | MCP endpoint resolver with agentgateway fallback (this PR) |

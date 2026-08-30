@@ -1,5 +1,9 @@
 # Bring your own Agent to DevAI
 
+To let a cluster workload call an already hosted capability, follow
+[Global ADK runtime onboarding](global-adk-runtime.md). Publishing a portable
+Agent does not automatically admit it to the shared warm runtime.
+
 This flow is for developing an Agent in the Tesserix ADK, LangGraph, Google ADK, OpenAI Agents SDK, A2A, or a custom OCI runtime. DevAI imports and tests the exact Registry version; it does not become an unrestricted always-on automation runner.
 
 ## 1. Export a portable Agent

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from devai.a2a.publish import build_agent_card, build_platform_card
 from devai.authz import require_principal
+from devai.identity import Principal, extract_adk_runtime_principal
 from devai.specializations.service import AgentNotAdmittedError, AgentUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -75,25 +76,34 @@ def _normalize_agent_name(name: str) -> str | None:
     return normalized.removesuffix("-agent").replace("-", "_")
 
 
-def _service_and_base_url(request: Request) -> tuple[Any, str]:
+def _service_and_base_url(request: Request, principal: Principal) -> tuple[Any, str]:
     service = getattr(request.app.state, "specialization_service", None)
     if service is None:
         raise HTTPException(status_code=503, detail="agent catalog unavailable")
-    base_url = str(getattr(request.app.state.config, "public_base_url", "") or "").strip()
+    config = request.app.state.config
+    setting = "adk_runtime_base_url" if principal.auth_provider == "agentgateway-runtime" else "public_base_url"
+    base_url = str(getattr(config, setting, "") or "").strip()
+    if not base_url:
+        raise HTTPException(status_code=503, detail="agent card base URL unavailable")
     return service, base_url
+
+
+async def _require_a2a_principal(request: Request) -> Principal:
+    principal = extract_adk_runtime_principal(request)
+    return principal if principal is not None else await require_principal(request)
 
 
 @well_known_router.get("/.well-known/agent-card.json")
 async def platform_agent_card(request: Request) -> dict[str, object]:
-    await require_principal(request)
-    service, base_url = _service_and_base_url(request)
+    principal = await _require_a2a_principal(request)
+    service, base_url = _service_and_base_url(request, principal)
     return build_platform_card(service.admitted_specs(), base_url)
 
 
 @router.get("/{agent_name}/card")
 async def agent_card(agent_name: str, request: Request) -> dict[str, object]:
-    await require_principal(request)
-    service, base_url = _service_and_base_url(request)
+    principal = await _require_a2a_principal(request)
+    service, base_url = _service_and_base_url(request, principal)
     normalized_name = _normalize_agent_name(agent_name)
     spec = service.get_full(normalized_name) if normalized_name else None
     if spec is None or spec not in service.admitted_specs():
@@ -112,7 +122,7 @@ async def send_message(agent_name: str, body: A2ARequest, request: Request) -> d
 
 
 async def _send_message(requested_name: str, body: A2ARequest, request: Request) -> dict[str, object]:
-    principal = await require_principal(request)
+    principal = await _require_a2a_principal(request)
     normalized_name = _normalize_agent_name(requested_name)
     service = getattr(request.app.state, "specialization_service", None)
     if normalized_name is None or service is None:

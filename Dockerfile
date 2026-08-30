@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-ARG ADK_BASE=ghcr.io/tesserix/base-python-adk-3.13:20260827@sha256:575f845a640619b19a4612fd2fd483b85547ebbe47793b28b971534de3d4cfb9
+ARG ADK_BASE=ghcr.io/tesserix/base-python-adk-3.14:20260829@sha256:5a6fd1863ed7f37f3929cc596d0ec063c3077c11713cd334f14d1df2b30ef386
 
 FROM ${ADK_BASE} AS wheels
 
@@ -25,7 +25,7 @@ RUN apt-get update \
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels,ro \
     python -m pip install --no-cache-dir --no-index --find-links=/wheels devai bandit pip-audit \
     && python -m pip check \
-    && python -c "import importlib.metadata as m; assert m.version('tesserix-adk') == '0.51.0'"
+    && python -c "import importlib.metadata as m; assert m.version('tesserix-adk') == '0.53.1'"
 
 COPY --from=wheels /usr/local/bin/kubectl /usr/local/bin/kubectl
 COPY blueprints/ /app/blueprints/
