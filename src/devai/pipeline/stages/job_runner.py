@@ -330,7 +330,7 @@ class JobRunnerStage(PipelineStage):
             if governed:
                 raise RuntimeError("governed agent composition unavailable")
             return None
-        return {
+        profile = {
             "name": getattr(agent_meta, "name", agent_name),
             "image": getattr(agent_meta, "image", "") or "",
             "description": getattr(agent_meta, "description", "") or "",
@@ -345,6 +345,16 @@ class JobRunnerStage(PipelineStage):
             # Registry labels, incl. `devai.io/runtime` — drives kagent routing.
             "labels": dict(getattr(agent_meta, "labels", {}) or {}),
         }
+        # Eval-gated (user-published) agents: the sandbox boundary strips
+        # registry credentials from the Job, so the runner cannot re-fetch the
+        # record. Ship the gate-stamped envelope with the dispatch instead —
+        # this env is set by the control plane, not reachable by sandbox code.
+        from devai.evaluations.gates import EVAL_GATE_LABEL
+
+        raw = getattr(agent_meta, "raw", None)
+        if isinstance(raw, dict) and raw and EVAL_GATE_LABEL in profile["labels"]:
+            profile["envelope"] = raw
+        return profile
 
     # ── kagent A2A dispatch (opt-in Substrate actors) ────────────────
 
