@@ -1,9 +1,10 @@
 name: DevAI Runner - CI Build
 
 # Builds the slim `devai-runner` image — the agent-execution container
-# spawned by the JobRunnerStage. Triggered on changes to the runner
-# entrypoint, the Dockerfile.runner, or the modules the runner imports
-# (config, registry client, specializations, agents, adapters).
+# spawned by the JobRunnerStage. The image installs the whole devai wheel
+# (Dockerfile.runner copies src/ wholesale), so any src/devai change alters
+# it; a narrower filter silently ships stale runner code (bit us when an
+# agentruntime fix never rebuilt the image).
 
 on:
   push:
@@ -14,25 +15,16 @@ on:
       - 'bugfix/**'
       - 'hotfix/**'
     paths:
-      - 'src/devai/runner/**'
-      - 'src/devai/runtime/**'
-      - 'src/devai/sandbox/**'
-      - 'src/devai/mcphub/**'
-      - 'src/devai/registry/**'
-      - 'src/devai/specializations/**'
-      - 'src/devai/agents/**'
-      - 'src/devai/adapters/**'
-      - 'src/devai/config.py'
+      - 'src/devai/**'
+      - 'specializations/**'
       - 'Dockerfile.runner'
       - 'pyproject.toml'
       - '.github/workflows/runner-build.yaml'
   pull_request:
     branches: [main]
     paths:
-      - 'src/devai/runner/**'
-      - 'src/devai/runtime/**'
-      - 'src/devai/sandbox/**'
-      - 'src/devai/mcphub/**'
+      - 'src/devai/**'
+      - 'specializations/**'
       - 'Dockerfile.runner'
       - 'pyproject.toml'
       - '.github/workflows/runner-build.yaml'
