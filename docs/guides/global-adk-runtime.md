@@ -5,7 +5,7 @@ admitted agents in any product namespace. It is implemented by the DevAI control
 plane, but its consumer address is stable and does not expose the DevAI service:
 
 ```text
-http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080
+http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082
 ```
 
 Use the runtime in two different ways:
@@ -45,7 +45,7 @@ spec:
     provider: devai-user-routing
     name: dynamic
   a2a:
-    url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/support-agent
+    url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/support-agent
     preferredTransport: JSONRPC
     provider:
       organization: Tesserix
@@ -245,7 +245,7 @@ Fetch the authenticated platform card:
 ```bash
 curl --fail-with-body \
   --header "Authorization: Bearer ${ADK_RUNTIME_ACCESS_TOKEN}" \
-  http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/.well-known/agent-card.json
+  http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/.well-known/agent-card.json
 ```
 
 Invoke a reviewed capability through JSON-RPC:
@@ -265,7 +265,7 @@ curl --fail-with-body \
       }
     }
   }' \
-  http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/capabilities/support
+  http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/capabilities/support
 ```
 
 Use a client-generated idempotency key for every downstream mutation exposed by

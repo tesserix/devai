@@ -22,7 +22,12 @@ spec:
     services:
       matchLabels:
         mcp.tesserix.app/server: sample-mcp
-  authMode: none
+  authMode: jwt
+  credentialRef:
+    secretName: devai-mcp-upstream
+    key: token
+    header: Authorization
+    prefix: 'Bearer '
   tools:
   - sample_ping
   - sample_echo

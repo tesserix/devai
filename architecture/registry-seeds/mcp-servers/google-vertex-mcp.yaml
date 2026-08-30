@@ -7,6 +7,7 @@ metadata:
   labels:
     devai.io/source: google-cloud
     devai.io/category: llm
+    mcp.tesserix.app/gateway-export: 'false'
 spec:
   name: google-vertex-mcp
   displayName: Google Vertex AI MCP (generate)
@@ -16,6 +17,7 @@ spec:
     aiplatform private DNS zone, so traffic stays inside the VPC.
   endpoint: https://aiplatform.googleapis.com/mcp/generate
   authMode: gcp_adc
+  gatewayExport: false
   tools:
   - generate_content
   - count_tokens

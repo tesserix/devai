@@ -26,7 +26,7 @@ gateway. Every crossing validates identity and the exact admitted object.
 The cluster-internal consumer contract is:
 
 ```text
-http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/...
+http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/...
 ```
 
 AgentGateway owns caller authentication and coarse workload authorization. It

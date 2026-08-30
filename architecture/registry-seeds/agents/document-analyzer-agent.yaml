@@ -21,7 +21,7 @@ spec:
     provider: devai-user-routing
     name: dynamic
   a2a:
-    url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/document-analyzer
+    url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/document-analyzer
     preferredTransport: JSONRPC
     provider:
       organization: Tesserix

@@ -63,7 +63,7 @@ flowchart LR
 | **devai-dashboard** | `devai` | 3100 | Next.js UI |
 | **auth-bff** | `devai` | 8090 | Terminates OAuth, stamps `X-Forwarded-User/Uid/Tenant` |
 | **agentregistry (aregistry)** | `agentregistry-system` | 12121 | Catalog. `/v0/{agents,skills,prompts,servers,health}`. pgvector for semantic search. |
-| **agentgateway-mcp** | `agentgateway-system` | 8080 | Shared internal data plane. Routes approved `/mcp/{name}` traffic and authenticated `/a2a/v1/*` calls. |
+| **agentgateway-mcp** | `agentgateway-system` | 8080 / 8082 | Shared data plane. Port 8080 routes approved MCP traffic; the isolated, authenticated global A2A runtime listener is on 8082. |
 | **adk-runtime** | `devai` | 8080 | Stable backend alias for the HA warm runtime pool. Consumers never call it directly. |
 | **ai-gateway** | `agentgateway-system` | 8080 | Provider data plane for governed model calls only. |
 | **kagent** | `kagent-system` | 8083 | Agent lifecycle controller (solo.io). Reconciles agents labelled `devai.io/runtime=kagent` into Deployments; the dispatcher routes those over A2A (all other agents stay Job-dispatched). |
@@ -236,7 +236,7 @@ to direct vendor egress. DevAI's production chain is Vertex Gemini → Anthropic
 
 Do not confuse the in-run message bus below with the cluster-global A2A
 transport. An admitted product agent invokes a hosted capability at
-`http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/...`.
+`http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/...`.
 AgentGateway verifies Zitadel and the `agentgateway.runtime` role, overwrites
 workload identity headers, and forwards to the `adk-runtime` alias with a
 dedicated upstream bearer. Direct access to the backend is not supported.

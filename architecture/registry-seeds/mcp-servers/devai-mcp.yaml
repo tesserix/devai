@@ -7,6 +7,7 @@ metadata:
   labels:
     devai.io/source: devai
     devai.io/category: lifecycle
+    mcp.devai.io/catalog: 'true'
 spec:
   name: devai-mcp
   displayName: DevAI Pipeline MCP
@@ -21,11 +22,7 @@ spec:
       matchLabels:
         mcp.tesserix.app/server: devai-mcp
   authMode: jwt
-  credentialRef:
-    secretName: devai-mcp-upstream
-    key: token
-    header: Authorization
-    prefix: 'Bearer '
+  catalog: true
   tools:
   - devai_pipeline_dispatch
   - devai_pipeline_list_runs
