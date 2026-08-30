@@ -387,6 +387,7 @@ def create_app(
                     specializations=spec_service,
                     deps=sandbox_deps,
                     traces=app.state.sandbox_traces,
+                    registry=getattr(app.state, "registry_client", None),
                     credentials=SandboxCredentialResolver(
                         service=settings_service,
                         audit=sandbox_audit,

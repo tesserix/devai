@@ -188,6 +188,7 @@ class AgentRunner:
         messages: list[LLMMessage] = [LLMMessage(role=LLMRole.USER, content=user, images=images)]
         result = AgentRunResult()
         max_turns = min(max(1, spec.max_turns or 1), _MAX_TURNS_CEILING)
+        tool_nudged = False
 
         for turn in range(max_turns):
             result.turns = turn + 1
@@ -222,6 +223,23 @@ class AgentRunner:
                 detail = redact_secrets(str((resp.extra or {}).get("error") or "provider returned an error response"))[
                     :500
                 ]
+                finish_raw = str((resp.extra or {}).get("finish_raw") or "")
+                if finish_raw in ("UNEXPECTED_TOOL_CALL", "MALFORMED_FUNCTION_CALL") and not tool_nudged:
+                    # The prompt talked the model into a tool call it can't make
+                    # (agents often reference tools their request never declares).
+                    # One corrective turn recovers any such agent generically.
+                    tool_nudged = True
+                    logger.warning("AgentRunner: %s for %s — retrying with a no-tools nudge", finish_raw, spec.name)
+                    messages.append(
+                        LLMMessage(
+                            role=LLMRole.USER,
+                            content=(
+                                "Your last reply tried to call a tool that is not available in this "
+                                "environment. Do not call tools; answer the task directly in text."
+                            ),
+                        )
+                    )
+                    continue
                 logger.error("AgentRunner: llm.generate errored for %s: %s", spec.name, detail)
                 result.error = f"llm_error: {detail}"
                 break

@@ -135,6 +135,10 @@ async def test_resolve_runnable_answers_from_the_catalog_it_already_has(local_di
 
     assert (await svc.resolve_runnable("db_engineer")) is not None
     assert (await svc.resolve_runnable("no_such_role")) is None
+    # Registry (`db-engineer-agent`) and role (`db_engineer_agent`) spellings both land
+    # on the same reviewed capability — sandbox pins arrive with either.
+    assert (await svc.resolve_runnable("db-engineer-agent")) is not None
+    assert (await svc.resolve_runnable("db_engineer_agent")) is not None
 
 
 def _resolved_db_agent(*, unresolved: list[UnresolvedRef] | None = None) -> ResolvedAgent:
