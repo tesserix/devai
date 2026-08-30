@@ -325,6 +325,22 @@ class SpecializationService:
             return None
         return await self._invoke_spec(bundle.spec, state, deps=deps)
 
+    async def invoke_spec(
+        self,
+        spec: Specialization,
+        state: dict[str, Any],
+        *,
+        deps: Any = None,
+    ) -> dict[str, Any] | None:
+        """Run an already-admitted spec (e.g. an eval-gated registry agent).
+
+        Callers own admission: this bypasses the reviewed local catalog, so it
+        must only receive specs whose registry record passed the eval gate.
+        """
+        if spec.uses_legacy_runtime:
+            return None
+        return await self._invoke_spec(spec, state, deps=deps)
+
     async def _invoke_spec(
         self,
         spec: Specialization,

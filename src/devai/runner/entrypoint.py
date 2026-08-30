@@ -238,11 +238,21 @@ async def _run_agent(
     try:
         patch = await service.invoke(agent_name, state_slice)
     except Exception as e:  # noqa: BLE001
-        return {
-            "ok": False,
-            "error": f"agent {agent_name} failed: {e}",
-            "stage": stage,
-        }
+        from devai.specializations.service import AgentNotAdmittedError
+
+        if not isinstance(e, AgentNotAdmittedError):
+            return {
+                "ok": False,
+                "error": f"agent {agent_name} failed: {e}",
+                "stage": stage,
+            }
+        # Not in the reviewed local catalog — user-authored agents never are.
+        # Their admission review is the eval gate: run the exact registry
+        # record the gate stamped, or fail closed.
+        patch = await _invoke_eval_gated(agent_name, state_slice, service, registry_client)
+        if isinstance(patch, dict) and patch.get("ok") is False:
+            patch.setdefault("stage", stage)
+            return patch
     if patch is None:
         # invoke() runs YAML specs via the Agent SDK; it returns None for an
         # unknown agent or a legacy Python class. Construct that class directly.
@@ -253,6 +263,50 @@ async def _run_agent(
     patch.setdefault("ok", True)
     patch.setdefault("stage", stage)
     return patch
+
+
+async def _invoke_eval_gated(
+    agent_name: str,
+    state: dict[str, Any],
+    service: Any,
+    registry_client: Any,
+) -> dict[str, Any] | None:
+    """Run a user-authored registry agent whose admission is the eval gate.
+
+    The reviewed local catalog only covers shipped roles. Published catalog
+    agents were admitted by AgentGateService instead, and that verdict is
+    stamped on the record (`devai.tesserix.app/eval-gate=passed`). Anything
+    without the stamp — or unreachable — fails closed.
+    """
+    from devai.evaluations.gates import EVAL_GATE_LABEL
+    from devai.registry.mapping import agent_envelope_to_spec
+
+    if registry_client is None:
+        return {"ok": False, "error": f"agent {agent_name} failed: registry unavailable for eval-gate admission"}
+    try:
+        agent = await asyncio.to_thread(_safe_get_agent, registry_client, agent_name)
+    except Exception:  # noqa: BLE001
+        logger.exception("runner: registry lookup for eval-gated agent %s failed", agent_name)
+        agent = None
+    if agent is None:
+        return {"ok": False, "error": f"agent {agent_name} failed: capability is not admitted"}
+    gate = str((getattr(agent, "labels", {}) or {}).get(EVAL_GATE_LABEL, "")).strip().lower()
+    if gate != "passed":
+        return {
+            "ok": False,
+            "error": f"agent {agent_name} failed: registry record has no passing eval gate (eval-gate={gate or 'absent'})",
+        }
+    try:
+        spec = agent_envelope_to_spec(getattr(agent, "raw", {}) or {})
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"agent {agent_name} failed: registry envelope is not runnable: {e}"}
+    logger.info(
+        "runner: admitting eval-gated registry agent name=%s version=%s", agent_name, getattr(agent, "version", "")
+    )
+    try:
+        return await service.invoke_spec(spec, state)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"agent {agent_name} failed: {e}"}
 
 
 async def _invoke_legacy(agent_name: str, state: dict[str, Any], config: Any) -> dict[str, Any]:
