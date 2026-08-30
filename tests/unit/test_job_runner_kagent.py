@@ -467,3 +467,52 @@ async def test_falls_back_to_job_on_non_object_dispatch_response(monkeypatch):
     result = await _stage(deps).execute(DevAITask(intent="x"))
 
     assert result.data.get("review_code_stub") is True
+
+
+@pytest.mark.asyncio
+async def test_governed_resolution_uses_the_exact_catalog_name_first() -> None:
+    # A published catalog agent keeps its name; nothing may append `-agent`.
+    config = SimpleNamespace(
+        llm_gateway_required=True,
+        llm_gateway_base_url="http://ai-gateway:8080",
+        agentgateway_url="http://agentgateway-mcp:8080",
+        kagent_url="",
+    )
+    seen: list[str] = []
+
+    def resolve_agent(name: str):
+        seen.append(name)
+        if name != "e2e-gate-agent-xyz":
+            raise RuntimeError("not found")
+        return SimpleNamespace(agent=_agent_meta("e2e-gate-agent-xyz", {}), unresolved=[], resolved={})
+
+    deps = StageDeps(config=config, extra={"registry_client": SimpleNamespace(resolve_agent=resolve_agent)})
+
+    profile = await _stage(deps)._fetch_agent_profile("e2e-gate-agent-xyz")
+
+    assert seen == ["e2e-gate-agent-xyz"]
+    assert profile is not None and profile["name"] == "e2e-gate-agent-xyz"
+
+
+@pytest.mark.asyncio
+async def test_governed_resolution_still_maps_alm_roles_to_their_built_in() -> None:
+    config = SimpleNamespace(
+        llm_gateway_required=True,
+        llm_gateway_base_url="http://ai-gateway:8080",
+        agentgateway_url="http://agentgateway-mcp:8080",
+        kagent_url="",
+    )
+    seen: list[str] = []
+
+    def resolve_agent(name: str):
+        seen.append(name)
+        if name != "capacity-planner-agent":
+            raise RuntimeError("not found")
+        return SimpleNamespace(agent=_agent_meta("capacity-planner-agent", {}), unresolved=[], resolved={})
+
+    deps = StageDeps(config=config, extra={"registry_client": SimpleNamespace(resolve_agent=resolve_agent)})
+
+    profile = await _stage(deps)._fetch_agent_profile("capacity_planner")
+
+    assert seen == ["capacity_planner", "capacity-planner-agent"]
+    assert profile is not None and profile["name"] == "capacity-planner-agent"
