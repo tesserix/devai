@@ -38,3 +38,16 @@ def test_the_image_copies_every_catalog_into_the_workdir() -> None:
         assert f"COPY {directory}/ {WORKDIR}/{directory}/" in source, (
             f"{directory}/ is never copied into the image, so it loads empty at runtime"
         )
+
+
+def test_the_runner_image_ships_specializations_outside_the_workspace_mount() -> None:
+    """The runner Job mounts an emptyDir at /devai/work, shadowing anything
+    the image ships under it — the catalog must live elsewhere and be
+    addressed explicitly via DEVAI_SPECIALIZATIONS_DIR."""
+    source = Path("Dockerfile.runner").read_text()
+
+    assert "COPY --chown=10001:10001 specializations/ /devai/specializations/" in source
+    assert "ENV DEVAI_SPECIALIZATIONS_DIR=/devai/specializations" in source
+    assert "/devai/work/specializations" not in source, (
+        "specializations under /devai/work are shadowed by the workspace emptyDir mount"
+    )

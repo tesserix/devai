@@ -213,6 +213,7 @@ def build_job_spec(
     # Workload-Identity-bound to the same GSA, so ADC works in-Job; these
     # vars just tell the adapter which project/location/model to dial.
     for plain_key in (
+        "DEVAI_REGISTRY_DEFAULT_TENANT",
         "DEVAI_LLM_PROVIDER",
         "DEVAI_LLM_FALLBACK_PROVIDER",
         "DEVAI_LLM_GATEWAY_BASE_URL",
@@ -254,6 +255,22 @@ def build_job_spec(
                 },
             }
         )
+
+    # Registry auth — without it the runner's client is anonymous and the
+    # registry hides private (user-published) agents from list/get, so
+    # eval-gated admission fails closed even for legitimately gated agents.
+    env.append(
+        {
+            "name": "DEVAI_REGISTRY_TOKEN",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": "agentic-registry-deploy-key",
+                    "key": "API_KEY",
+                    "optional": True,
+                }
+            },
+        }
+    )
 
     container: dict[str, Any] = {
         "name": "runner",

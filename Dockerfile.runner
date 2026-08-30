@@ -22,10 +22,11 @@ RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels,ro \
     && python -m pip check \
     && python -c "import importlib.metadata as m; assert m.version('tesserix-adk') == '0.53.1'"
 
-# Reviewed admission catalog — without it every spec-based agent fails
-# "capability is not admitted" inside Job pods (settings default is the
-# relative `specializations` path, resolved against this WORKDIR).
-COPY --chown=10001:10001 specializations/ /devai/work/specializations/
+# Reviewed admission catalog — must live OUTSIDE /devai/work because the
+# Job mounts an emptyDir workspace there, shadowing anything the image
+# ships under it. The env var points the loader at the unshadowed path.
+COPY --chown=10001:10001 specializations/ /devai/specializations/
+ENV DEVAI_SPECIALIZATIONS_DIR=/devai/specializations
 
 USER 10001:10001
 WORKDIR /devai/work
