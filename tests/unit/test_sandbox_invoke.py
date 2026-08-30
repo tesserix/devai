@@ -112,7 +112,7 @@ class _GrantedSandboxLLM:
         )
 
 
-def _invoker(llm, *, registry=None, store=None, telemetry=None, portable_client=None) -> SandboxInvoker:
+def _invoker(llm, *, registry=None, store=None, telemetry=None, portable_client=None, catalog=None) -> SandboxInvoker:
     return SandboxInvoker(
         specializations=registry if registry is not None else _Specs(_registry()),
         deps=StageDeps(config=Settings(), llm=llm),
@@ -120,6 +120,7 @@ def _invoker(llm, *, registry=None, store=None, telemetry=None, portable_client=
         credentials=_GrantedSandboxLLM(llm),  # type: ignore[arg-type]
         telemetry=telemetry,
         portable_client=portable_client,
+        registry=catalog,
     )
 
 
@@ -570,3 +571,43 @@ async def test_an_agent_published_after_startup_is_invokable(monkeypatch) -> Non
 
     result = await inv.invoke(_record(), message="go", triggered_by="sam@example.com")
     assert result.ok
+
+
+class _Catalog:
+    """Stands in for the registry client the invoker falls back to."""
+
+    def __init__(self, raw) -> None:
+        self._raw = raw
+
+    def get_agent(self, name):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(raw=self._raw) if self._raw else None
+
+
+async def test_a_published_catalog_agent_runs_from_its_registry_envelope() -> None:
+    # User-published records never join the reviewed role catalog; the sandbox
+    # fence is the boundary, so the registry envelope is enough to run one.
+    raw = {
+        "metadata": {"name": "measure-mate-agent", "tag": "1"},
+        "spec": {"systemPrompt": "Convert units precisely.", "description": "Converts units."},
+    }
+    llm = _ScriptedLLM([LLMResponse(text="30.5 cm")])
+    inv = _invoker(llm, registry=_Specs(SpecializationRegistry()), catalog=_Catalog(raw))
+
+    result = await inv.invoke(_record(agent="measure-mate-agent"), message="1 ft in cm", triggered_by="sam@example.com")
+
+    assert result.ok
+    assert result.final_text == "30.5 cm"
+    assert result.steps[0].output == "Convert units precisely."
+
+
+async def test_an_agent_unknown_to_roles_and_registry_stays_not_runnable() -> None:
+    inv = _invoker(
+        _ScriptedLLM([LLMResponse(text="never")]),
+        registry=_Specs(SpecializationRegistry()),
+        catalog=_Catalog(None),
+    )
+
+    with pytest.raises(ValueError, match="not runnable"):
+        await inv.invoke(_record(agent="ghost-agent"), message="hi", triggered_by="sam@example.com")

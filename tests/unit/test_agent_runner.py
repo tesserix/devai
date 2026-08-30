@@ -190,3 +190,44 @@ async def test_soft_error_response_fails_the_run():
     assert run.error.startswith("llm_error:")
     assert "RBAC: access denied" in run.error
     assert run.final_text == ""
+
+
+@pytest.mark.asyncio
+async def test_undeclared_tool_call_gets_one_corrective_retry():
+    # Gemini's UNEXPECTED_TOOL_CALL (prompt told the model to use a tool the
+    # request never declared) recovers with a single "answer in text" nudge.
+    llm = FakeLLMAdapter(
+        [
+            LLMResponse(
+                text="",
+                finish_reason="error",
+                extra={
+                    "error": "model attempted an invalid tool call (UNEXPECTED_TOOL_CALL)",
+                    "finish_raw": "UNEXPECTED_TOOL_CALL",
+                },
+            ),
+            LLMResponse(text="6.2 miles"),
+        ]
+    )
+    run = await AgentRunner(_deps(llm)).run(Specialization(name="converter", max_turns=4), _task())
+
+    assert run.error == ""
+    assert run.final_text == "6.2 miles"
+    assert any(m.role == LLMRole.USER and "Do not call tools" in m.content for m in llm.requests[1].messages)
+
+
+@pytest.mark.asyncio
+async def test_undeclared_tool_call_fails_after_the_single_retry():
+    err = LLMResponse(
+        text="",
+        finish_reason="error",
+        extra={
+            "error": "model attempted an invalid tool call (UNEXPECTED_TOOL_CALL)",
+            "finish_raw": "UNEXPECTED_TOOL_CALL",
+        },
+    )
+    llm = FakeLLMAdapter([err, err])
+    run = await AgentRunner(_deps(llm)).run(Specialization(name="converter", max_turns=4), _task())
+
+    assert run.error.startswith("llm_error:")
+    assert "UNEXPECTED_TOOL_CALL" in run.error

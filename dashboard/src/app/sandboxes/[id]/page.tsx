@@ -98,6 +98,17 @@ export default function SandboxPage({ params }: { params: Promise<{ id: string }
           )}
         </div>
         <div className="flex items-center gap-2">
+          {sandbox && (
+            <Link
+              href={`/agents/${encodeURIComponent(sandbox.spec.agent.name)}`}
+              className="btn-secondary !py-1 !px-2 !text-xs"
+            >
+              Agent in catalog
+            </Link>
+          )}
+          <Link href="/" className="btn-secondary !py-1 !px-2 !text-xs">
+            <ExternalLink className="w-3 h-3" /> Live run
+          </Link>
           {live && sandbox?.spec.browser && (
             <a
               href={sandboxBrowserDesktopPath(id)}

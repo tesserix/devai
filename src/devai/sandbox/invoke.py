@@ -55,10 +55,12 @@ class SandboxInvoker:
         credentials: SandboxCredentialProvider | None = None,
         telemetry: Any | None = None,
         portable_client: Any | None = None,
+        registry: Any | None = None,
     ) -> None:
         from devai.sandbox.credentials import SandboxCredentialResolver
 
         self._specs = specializations
+        self._registry = registry
         self._deps = deps
         self._traces = traces
         self._credentials = credentials or SandboxCredentialResolver()
@@ -211,6 +213,8 @@ class SandboxInvoker:
             if record.spec.agent is None:
                 raise ValueError(f"sandbox {record.id} has no agent")
             spec = await self._specs.resolve_runnable(role_name(record.spec.agent.name))
+            if spec is None:
+                spec = await self._registry_spec(record.spec.agent.name)
         if spec is None:
             agent_name = record.spec.agent.name if record.spec.agent is not None else "draft"
             raise ValueError(f"sandbox {record.id} pins agent {agent_name!r}, which is not runnable here")
@@ -221,6 +225,28 @@ class SandboxInvoker:
             llm_model=record.spec.model.model or spec.llm_model,
             max_turns=min(spec.max_turns, 8),
         )
+
+    async def _registry_spec(self, name: str) -> Specialization | None:
+        """User-published catalog records aren't in the reviewed role catalog;
+        run them from their registry envelope — the same trust a draft already
+        gets, and the sandbox fence (mock tools, dry run, budget) still applies."""
+        if self._registry is None:
+            return None
+        from devai.registry.mapping import agent_envelope_to_spec
+
+        try:
+            agent = await asyncio.to_thread(self._registry.get_agent, name)
+        except Exception:  # noqa: BLE001 — registry outage degrades to "not runnable"
+            logger.warning("sandbox: registry lookup failed for agent %s", name, exc_info=True)
+            return None
+        raw = getattr(agent, "raw", None)
+        if not raw:
+            return None
+        try:
+            return agent_envelope_to_spec(raw)
+        except ValueError:
+            logger.warning("sandbox: registry envelope for %s is not runnable", name)
+            return None
 
     async def _run(
         self,

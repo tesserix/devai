@@ -134,7 +134,9 @@ class SpecializationService:
             return None
 
     async def resolve_governed(self, capability: str) -> GovernedAgent:
-        normalized = capability.strip().lower().removesuffix("-agent").replace("-", "_")
+        # Accept both registry (`capacity-planner-agent`) and role (`capacity_planner_agent`)
+        # spellings — callers arrive with either.
+        normalized = capability.strip().lower().replace("-", "_").removesuffix("_agent")
         if normalized not in self._reviewed_capabilities:
             raise AgentNotAdmittedError("capability is not admitted")
         spec = self.get_full(normalized)

@@ -297,6 +297,23 @@ def test_vertex_gemini_parse_maps_text_tools_and_usage():
     assert r.provider == "vertex_gemini"
 
 
+def test_vertex_gemini_parse_surfaces_undeclared_tool_call_as_error():
+    # UNEXPECTED_TOOL_CALL/MALFORMED_FUNCTION_CALL come with an EMPTY candidate;
+    # mapping them to "stop" made the run look like a clean empty answer.
+    from devai.adapters.llm.vertex_gemini import VertexGeminiLLMAdapter
+
+    payload = {
+        "candidates": [{"finishReason": "UNEXPECTED_TOOL_CALL"}],
+        "usageMetadata": {"promptTokenCount": 151, "totalTokenCount": 151},
+        "modelVersion": "gemini-2.5-flash",
+    }
+    r = VertexGeminiLLMAdapter._parse(payload, model="gemini-2.5-flash", latency_ms=5.0)
+    assert r.finish_reason == "error"
+    assert r.extra["finish_raw"] == "UNEXPECTED_TOOL_CALL"
+    assert "tool call" in r.extra["error"]
+    assert r.text == ""
+
+
 def test_factory_explicit_provider_override_wins_over_settings():
     s = _Settings()
     s.llm_provider = "anthropic"  # would fail without key

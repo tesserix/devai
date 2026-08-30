@@ -199,12 +199,19 @@ class VertexGeminiLLMAdapter(LLMAdapter):
             cached_tokens=int(usage_md.get("cachedContentTokenCount", 0)),
         )
         finish_raw = str(candidates[0].get("finishReason", "")).upper()
+        extra: dict[str, Any] = {}
         if tool_calls:
             finish = "tool_use"
         elif finish_raw == "MAX_TOKENS":
             finish = "length"
         elif finish_raw in ("SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT"):
             finish = "content_filter"
+        elif finish_raw in ("UNEXPECTED_TOOL_CALL", "MALFORMED_FUNCTION_CALL"):
+            # Gemini emits an EMPTY candidate here (e.g. the prompt told it to
+            # call a tool the request never declared); treating it as a clean
+            # stop made runs look like a successful empty answer.
+            finish = "error"
+            extra = {"error": f"model attempted an invalid tool call ({finish_raw})", "finish_raw": finish_raw}
         else:
             finish = "stop"
         return LLMResponse(
@@ -216,6 +223,7 @@ class VertexGeminiLLMAdapter(LLMAdapter):
             provider="vertex_gemini",
             request_id=str(payload.get("responseId", "")),
             latency_ms=latency_ms,
+            extra=extra,
         )
 
     # ── LLMAdapter surface ────────────────────────────────────────────

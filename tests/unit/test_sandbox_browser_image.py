@@ -21,7 +21,9 @@ def test_runner_workflow_builds_both_runner_and_browser_targets() -> None:
     assert "target: browser" in workflow
     assert "image: devai-runner" in workflow
     assert "image: devai-browser" in workflow
-    assert "src/devai/sandbox/**" in workflow
+    # The image installs the whole devai wheel, so the trigger must cover all of
+    # src/devai — a narrower filter shipped stale runner code once already.
+    assert "src/devai/**" in workflow
 
 
 def test_every_main_commit_gets_a_browser_image_tag_before_deploy() -> None:
