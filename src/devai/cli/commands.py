@@ -343,7 +343,13 @@ async def _serve(host: str, port: int) -> None:
         _handler = _logging.StreamHandler(_sys.stdout)
         _handler.setFormatter(_logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         _root.addHandler(_handler)
-    config = uvicorn.Config(webhook_app, host=host, port=port, log_level=settings.log_level)
+    config = uvicorn.Config(
+        webhook_app,
+        host=host,
+        port=port,
+        log_level=settings.log_level,
+        timeout_keep_alive=settings.http_keepalive_timeout,
+    )
     server = uvicorn.Server(config)
     await server.serve()
 

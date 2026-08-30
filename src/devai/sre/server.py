@@ -919,4 +919,4 @@ if __name__ == "__main__":
     import uvicorn
 
     app = create_sre_app()
-    uvicorn.run(app, host="0.0.0.0", port=8090, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8090, log_level="info", timeout_keep_alive=75)

@@ -20,6 +20,7 @@ def main() -> None:
         host=getattr(settings, "host", "0.0.0.0"),
         port=getattr(settings, "mcp_hub_port", 8095),
         log_level=getattr(settings, "log_level", "info"),
+        timeout_keep_alive=getattr(settings, "http_keepalive_timeout", 75),
     )
 
 
