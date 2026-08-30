@@ -602,6 +602,31 @@ async def test_a_published_catalog_agent_runs_from_its_registry_envelope() -> No
     assert result.steps[0].output == "Convert units precisely."
 
 
+async def test_a_reviewed_agent_failing_governed_admission_falls_back_to_its_envelope() -> None:
+    # Governed admission (version/label/policy match) guards live runs; inside
+    # the sandbox fence an inadmissible reviewed bundle must degrade to the
+    # registry envelope instead of surfacing a 500.
+    from devai.specializations.service import AgentUnavailableError
+
+    class _InadmissibleSpecs:
+        async def resolve_runnable(self, name: str):
+            raise AgentUnavailableError("agent version is not admitted")
+
+    raw = {
+        "metadata": {"name": "capacity-planner-agent", "tag": "1.0.1"},
+        "spec": {"systemPrompt": "Plan capacity.", "description": "Plans capacity."},
+    }
+    llm = _ScriptedLLM([LLMResponse(text="plan for 9 replicas")])
+    inv = _invoker(llm, registry=_InadmissibleSpecs(), catalog=_Catalog(raw))
+
+    result = await inv.invoke(
+        _record(agent="capacity-planner-agent"), message="traffic doubles", triggered_by="sam@example.com"
+    )
+
+    assert result.ok
+    assert result.final_text == "plan for 9 replicas"
+
+
 async def test_an_agent_unknown_to_roles_and_registry_stays_not_runnable() -> None:
     inv = _invoker(
         _ScriptedLLM([LLMResponse(text="never")]),
