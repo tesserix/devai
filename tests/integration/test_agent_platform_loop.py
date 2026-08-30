@@ -9,6 +9,7 @@ things DevAI does not own.
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -168,6 +169,11 @@ async def test_a_draft_is_scored_against_its_checks_before_it_is_published(platf
 
     assert scored.status_code == 200, scored.text
     body = scored.json()
+    for _ in range(200):
+        if body.get("status") != "running":
+            break
+        time.sleep(0.05)
+        body = client.get(f"/api/sandboxes/{sandbox_id}/evals/{body['id']}", headers=_SAM).json()
     assert body["summary"]["passed"] == 1
     assert body["summary"]["failed"] == 1
     assert body["results"][1]["failures"] == ["used 102 tokens, budget 10"]
