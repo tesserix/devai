@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import json
 import logging
 import uuid
@@ -72,6 +73,7 @@ class SandboxService:
                 return await self._provision(existing)
         spec = await self._materialize_import(spec, owner_scope=tenant_id or owner)
         self._assert_refs_published(spec)
+        spec = await self._inline_draft_prompt_ref(spec)
         spec = await self._pin_adk_version(spec)
         if spec.agent is None:  # guarded by SandboxSpec and import hydration
             raise SandboxError("sandbox agent is unresolved")
@@ -108,6 +110,35 @@ class SandboxService:
             raise SandboxError(str(exc)) from exc
         logger.info("sandbox %s created for %s (agent=%s@%s)", record.id, owner, spec.agent.name, spec.agent.version)
         return await self._provision(record)
+
+    async def _inline_draft_prompt_ref(self, spec: SandboxSpec) -> SandboxSpec:
+        """Resolve a promptRef-only draft into an inline system prompt.
+
+        Published agents get promptRef composed by the registry's resolver; a
+        draft never reaches it, so without this the sandbox runs the agent with
+        an empty system prompt and every result tests the wrong configuration.
+        """
+        draft = spec.draft
+        dspec = draft.get("spec") if isinstance(draft, dict) else None
+        if not isinstance(dspec, dict) or self._registry is None:
+            return spec
+        if str(dspec.get("systemPrompt") or "").strip():
+            return spec
+        prompts = dspec.get("prompts") if isinstance(dspec.get("prompts"), list) else []
+        ref = str(dspec.get("promptRef") or "").strip() or str((prompts or [""])[0] or "").strip()
+        if not ref:
+            return spec
+        try:
+            envelope = await asyncio.to_thread(self._registry.get_artifact_envelope, "prompts", ref)
+        except Exception:  # noqa: BLE001 — registry trouble degrades, never blocks
+            logger.warning("sandbox: prompt lookup for draft promptRef %r failed", ref, exc_info=True)
+            return spec
+        text = str(((envelope or {}).get("spec") or {}).get("systemPrompt") or "")
+        if not text.strip():
+            raise SandboxError(f"draft promptRef {ref!r} has no non-empty spec.systemPrompt")
+        new_draft = copy.deepcopy(draft)
+        new_draft["spec"]["systemPrompt"] = text
+        return spec.model_copy(update={"draft": new_draft})
 
     async def _pin_adk_version(self, spec: SandboxSpec) -> SandboxSpec:
         """Resolve the runtime release now, so the stored spec reproduces the run
