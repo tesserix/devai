@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Sequence
 from typing import Any
@@ -85,13 +86,17 @@ class SandboxClient:
         cases: list[dict[str, Any]],
         *,
         idempotency_key: str = "",
+        wait: bool = True,
     ) -> dict[str, Any]:
-        return self._request_object(
+        run = self._request_object(
             "POST",
             f"/api/sandboxes/{sandbox_id}/evals",
             json={"cases": cases},
             headers=_mutation_headers(idempotency_key),
         )
+        if not wait:
+            return run
+        return self._wait_for_run(run, f"/api/sandboxes/{sandbox_id}/evals/{run.get('id')}")
 
     def evaluate(
         self,
@@ -100,8 +105,9 @@ class SandboxClient:
         suite_version: str,
         *,
         idempotency_key: str = "",
+        wait: bool = True,
     ) -> dict[str, Any]:
-        return self._request_object(
+        run = self._request_object(
             "POST",
             "/api/evaluations",
             json={
@@ -110,6 +116,26 @@ class SandboxClient:
             },
             headers=_mutation_headers(idempotency_key),
         )
+        if not wait:
+            return run
+        return self._wait_for_run(run, f"/api/evaluations/{run.get('id')}")
+
+    def _wait_for_run(
+        self,
+        run: dict[str, Any],
+        path: str,
+        *,
+        poll_seconds: float = 3.0,
+        timeout_seconds: float = 900.0,
+    ) -> dict[str, Any]:
+        """Evaluation runs finish in the background; poll until terminal."""
+        deadline = time.monotonic() + timeout_seconds
+        while str(run.get("status") or "completed") == "running":
+            if time.monotonic() >= deadline:
+                raise AdkAPIError(504, f"evaluation {run.get('id')} still running after {int(timeout_seconds)}s")
+            time.sleep(poll_seconds)
+            run = self._request_object("GET", path)
+        return run
 
     def search_registry(
         self,

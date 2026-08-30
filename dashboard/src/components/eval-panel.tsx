@@ -34,6 +34,7 @@ type CaseResult = {
 type EvalRun = {
   id: string;
   created_at: string;
+  status?: string;
   results: CaseResult[];
   summary: {
     cases: number;
@@ -93,7 +94,19 @@ export function EvalPanel({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
-      setRuns((prev) => [body as EvalRun, ...prev]);
+      // The suite finishes in the background; poll the durable record until it
+      // reaches a terminal status so long runs survive proxy timeouts.
+      let run = body as EvalRun;
+      const runUrl = `/api/sandboxes/${encodeURIComponent(sandboxId)}/evals/${encodeURIComponent(run.id)}`;
+      const deadline = Date.now() + 15 * 60_000;
+      while (run.status === "running" && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        const poll = await fetch(runUrl, { credentials: "include" });
+        if (poll.ok) run = (await poll.json()) as EvalRun;
+      }
+      if (run.status === "running") throw new Error("evaluation is still running; refresh to see the result");
+      if (run.status === "failed") throw new Error("evaluation failed to complete");
+      setRuns((prev) => [run, ...prev]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

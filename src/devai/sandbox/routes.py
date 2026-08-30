@@ -516,7 +516,7 @@ async def run_evals(
         raise HTTPException(status_code=503, detail="evaluation storage unavailable") from e
     await _service(request).touch(sandbox_id)
     try:
-        run = await runner.run(
+        run = await runner.start(
             record,
             cases,
             triggered_by=owner or record.owner,

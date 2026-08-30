@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import FastAPI
@@ -88,6 +89,15 @@ def _sandbox(client: TestClient) -> str:
     return client.post("/api/sandboxes", json=_SPEC, headers=_SAM).json()["id"]
 
 
+def _terminal(client: TestClient, sid: str, run_id: str) -> dict:
+    for _ in range(200):
+        body = client.get(f"/api/sandboxes/{sid}/evals/{run_id}", headers=_SAM).json()
+        if body.get("status") != "running":
+            return body
+        time.sleep(0.05)
+    raise AssertionError("eval run never left the running state")
+
+
 def test_a_suite_answers_with_a_pass_rate_and_per_case_detail() -> None:
     client = _client()
     sid = _sandbox(client)
@@ -95,7 +105,7 @@ def test_a_suite_answers_with_a_pass_rate_and_per_case_detail() -> None:
     r = client.post(f"/api/sandboxes/{sid}/evals", json=_CASES, headers=_SAM)
 
     assert r.status_code == 200, r.text
-    body = r.json()
+    body = _terminal(client, sid, r.json()["id"])
     assert body["id"].startswith("eval-")
     assert body["summary"] == {**body["summary"], "cases": 2, "passed": 1, "failed": 1}
     assert body["results"][1]["failures"] == ["missing expected text: 'outage'"]

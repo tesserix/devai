@@ -1302,7 +1302,10 @@ class Database:
                           configuration, dataset_version_id, suite_id, dataset_ref,
                           suite_ref, summary, created_at)
                        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9,
-                               $10::jsonb, $11::jsonb, $12::jsonb, $13)""",
+                               $10::jsonb, $11::jsonb, $12::jsonb, $13)
+                       ON CONFLICT (id) DO UPDATE
+                          SET configuration = EXCLUDED.configuration,
+                              summary = EXCLUDED.summary""",
                 run["id"],
                 owner_scope,
                 run.get("tenant_id") or "",
@@ -1317,6 +1320,7 @@ class Database:
                 json.dumps(run.get("summary") or {}),
                 datetime.fromisoformat(str(run["created_at"])),
             )
+            await connection.execute("DELETE FROM eval_case_results WHERE eval_run_id = $1", run["id"])
             for case_index, result in enumerate(run.get("results") or []):
                 await connection.execute(
                     """INSERT INTO eval_case_results

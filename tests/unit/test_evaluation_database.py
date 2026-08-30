@@ -178,7 +178,8 @@ async def test_eval_run_and_case_results_commit_together_with_exact_version_ids(
     assert "configuration" in pool.connection.execute_calls[0][0]
     assert json.loads(pool.connection.execute_calls[0][1][6])["agent"]["version"] == "7"
     assert pool.connection.execute_calls[0][1][1:4] == ("tenant-a:alice", "tenant-a", "alice")
-    assert "INSERT INTO eval_case_results" in pool.connection.execute_calls[1][0]
+    assert "DELETE FROM eval_case_results" in pool.connection.execute_calls[1][0]
+    assert "INSERT INTO eval_case_results" in pool.connection.execute_calls[2][0]
 
 
 async def test_registry_backed_eval_run_persists_exact_refs_without_local_foreign_keys() -> None:
