@@ -256,3 +256,18 @@ async def test_risk_approval_requires_verified_admin_reason_and_durable_audit() 
             "details": {"risk_level": "high", "reason": "Reviewed tool and data boundaries"},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_gate_blocks_a_run_that_is_still_running() -> None:
+    run = _run(passed=True)
+    run["summary"]["status"] = "running"
+    service = AgentGateService(
+        database=_Database({("tenant-a:alice", "eval-candidate"): run}),
+        evaluations=_Evaluations(),
+    )
+
+    gate = await service.evaluate(_principal(), _manifest(), "eval-candidate")
+
+    assert gate.status == "blocked"
+    assert "evaluation run is running, not completed" in gate.issues

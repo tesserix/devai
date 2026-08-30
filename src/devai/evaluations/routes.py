@@ -180,7 +180,7 @@ async def run_evaluation(
             )
         if record.status != SandboxStatus.READY:
             raise EvaluationInvalid(f"sandbox {record.id} is not ready")
-        run = await _runner(request).run(
+        run = await _runner(request).start(
             record,
             resolved.cases,
             triggered_by=owner_scope,

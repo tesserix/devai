@@ -119,6 +119,9 @@ class EvalRun:
     duration_ms: int = 0
     judge_cost_usd: float = 0.0
     infrastructure_cost_usd: float = 0.0
+    # Lives inside the summary jsonb so it round-trips without a schema change.
+    status: str = "completed"
+    error: str = ""
 
     @property
     def summary(self) -> dict[str, Any]:
@@ -158,7 +161,10 @@ class EvalRun:
             "p95_latency_ms": p95_latency_ms,
             "duration_ms": self.duration_ms,
             "dimensions": dimensions,
+            "status": self.status,
         }
+        if self.error:
+            summary["error"] = self.error
         calibration = self._calibration()
         if calibration is not None:
             summary["calibration"] = calibration
@@ -193,6 +199,7 @@ class EvalRun:
             "configuration": self.configuration,
             "judge": self.judge,
             "created_at": self.created_at,
+            "status": self.status,
             "results": [r.to_dict() for r in self.results],
             "summary": self.summary,
         }
@@ -224,6 +231,8 @@ class EvalRun:
             judge=body.get("judge"),
             results=results,
             created_at=str(body.get("created_at") or ""),
+            status=str(body.get("status") or summary.get("status") or "completed"),
+            error=str(summary.get("error") or ""),
             duration_ms=int(summary.get("duration_ms") or 0),
             judge_cost_usd=float(cost_breakdown.get("judge_cost_usd") or 0.0),
             infrastructure_cost_usd=float(cost_breakdown.get("infrastructure_cost_usd") or 0.0),
@@ -277,6 +286,7 @@ class EvalRunner:
         self._max_cases = max(1, max_cases)
         self._max_concurrency = max(1, max_concurrency)
         self._judge_factory = judge_factory
+        self._tasks: set[asyncio.Task[None]] = set()
 
     @property
     def store(self) -> EvalStore:
@@ -299,6 +309,107 @@ class EvalRunner:
         run_id: str | None = None,
     ) -> EvalRun:
         """Run every case with bounded fan-out and preserve dataset order."""
+        run, created, judge_scorers, deterministic_scorers = await self._admit(
+            record,
+            cases,
+            owner_scope=owner_scope,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            dataset_ref=dataset_ref,
+            suite_ref=suite_ref,
+            scorers=scorers,
+            judge_config=judge_config,
+            run_id=run_id,
+        )
+        if not created:
+            return run
+        await self._execute(
+            run,
+            record,
+            cases,
+            judge_scorers,
+            deterministic_scorers,
+            triggered_by=triggered_by,
+            principal=principal,
+            judge_config=judge_config,
+        )
+        return run
+
+    async def start(
+        self,
+        record: SandboxRecord,
+        cases: list[EvalCase],
+        *,
+        triggered_by: str,
+        owner_scope: str = "",
+        tenant_id: str = "",
+        user_id: str = "",
+        dataset_ref: dict[str, str] | None = None,
+        suite_ref: dict[str, str] | None = None,
+        scorers: list[str] | None = None,
+        principal: Principal | None = None,
+        judge_config: JudgeConfig | None = None,
+        run_id: str | None = None,
+    ) -> EvalRun:
+        """Persist a running record and finish in the background.
+
+        A suite on the kubernetes_job backend takes minutes — longer than any
+        proxy in front of the API holds a request open — so the caller gets the
+        durable id immediately and polls ``status`` until it is terminal.
+        """
+        run, created, judge_scorers, deterministic_scorers = await self._admit(
+            record,
+            cases,
+            owner_scope=owner_scope,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            dataset_ref=dataset_ref,
+            suite_ref=suite_ref,
+            scorers=scorers,
+            judge_config=judge_config,
+            run_id=run_id,
+        )
+        if not created:
+            return run  # idempotent replay of an already-started run
+        await self._store.save(run, ttl_seconds=self._ttl(record))
+
+        async def finish() -> None:
+            try:
+                await self._execute(
+                    run,
+                    record,
+                    cases,
+                    judge_scorers,
+                    deterministic_scorers,
+                    triggered_by=triggered_by,
+                    principal=principal,
+                    judge_config=judge_config,
+                )
+            except Exception as exc:  # noqa: BLE001 — a lost suite must still reach a terminal state
+                logger.exception("eval run %s failed in the background", run.id)
+                run.status = "failed"
+                run.error = str(exc)[:500]
+                await self._store.save(run, ttl_seconds=self._ttl(record))
+
+        task = asyncio.create_task(finish())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return run
+
+    async def _admit(
+        self,
+        record: SandboxRecord,
+        cases: list[EvalCase],
+        *,
+        owner_scope: str,
+        tenant_id: str,
+        user_id: str,
+        dataset_ref: dict[str, str] | None,
+        suite_ref: dict[str, str] | None,
+        scorers: list[str] | None,
+        judge_config: JudgeConfig | None,
+        run_id: str | None,
+    ) -> tuple[EvalRun, bool, list[Any], list[Any]]:
         from devai.evaluations.scorers import bind
 
         if not cases:
@@ -316,7 +427,7 @@ class EvalRunner:
             if existing is not None:
                 if existing.sandbox_id != record.id:
                     raise ValueError("idempotent evaluation request resolved to a different sandbox")
-                return existing
+                return existing, False, judge_scorers, deterministic_scorers
         agent = record.spec.agent
         if agent is None:
             raise ValueError(f"sandbox {record.id} has no agent")
@@ -331,7 +442,22 @@ class EvalRunner:
             dataset_ref=dataset_ref,
             suite_ref=suite_ref,
             configuration=record.spec.model_dump(mode="json"),
+            status="running",
         )
+        return run, True, judge_scorers, deterministic_scorers
+
+    async def _execute(
+        self,
+        run: EvalRun,
+        record: SandboxRecord,
+        cases: list[EvalCase],
+        judge_scorers: list[Any],
+        deterministic_scorers: list[Any],
+        *,
+        triggered_by: str,
+        principal: Principal | None,
+        judge_config: JudgeConfig | None,
+    ) -> None:
         started = time.perf_counter()
         semaphore = asyncio.Semaphore(self._max_concurrency)
         results: list[CaseResult | None] = [None] * len(cases)
@@ -361,6 +487,8 @@ class EvalRunner:
                 judge_config=judge_config,
             )
         run.duration_ms = int((time.perf_counter() - started) * 1000)
+        run.status = "completed"
+        run.error = ""
 
         await self._store.save(run, ttl_seconds=self._ttl(record))
         return run
@@ -556,11 +684,14 @@ class EvalStore:
         if self._redis is None:
             self._local[key] = body
             self._local[global_key] = locator
-            self._local_index.setdefault(index, []).insert(0, run.id)
+            bucket = self._local_index.setdefault(index, [])
+            if run.id not in bucket:  # a run saves twice: once running, once terminal
+                bucket.insert(0, run.id)
             return
         try:
             await self._redis.set(key, body, ex=ttl_seconds)
             await self._redis.set(global_key, locator, ex=ttl_seconds)
+            await self._redis.lrem(index, 0, run.id)
             await self._redis.lpush(index, run.id)
             await self._redis.expire(index, ttl_seconds)
         except Exception:  # noqa: BLE001 — a lost result must not fail the suite

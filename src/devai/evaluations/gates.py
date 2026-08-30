@@ -223,6 +223,10 @@ class AgentGateService:
         agent_name: str,
         suite: ArtifactVersionRef,
     ) -> str:
+        summary = candidate.get("summary")
+        status = str(summary.get("status") or "completed") if isinstance(summary, dict) else "completed"
+        if status != "completed":
+            return f"evaluation run is {status}, not completed"
         if str(candidate.get("agent") or "") != agent_name:
             return "evaluation run does not match the agent draft"
         if candidate.get("suite") != suite.model_dump(mode="json"):

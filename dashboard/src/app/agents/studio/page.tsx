@@ -265,7 +265,18 @@ export default function AgentStudioPage() {
       if (!res.ok) {
         throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`);
       }
-      setEvalRun(body as DurableEvalRun);
+      // The run finishes in the background; poll the durable record until it is
+      // terminal so a long kubernetes_job suite survives proxy timeouts.
+      let run = body as DurableEvalRun & { status?: string };
+      const deadline = Date.now() + 15 * 60_000;
+      while (run.status === "running" && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        const poll = await fetch(`/api/evaluations/${encodeURIComponent(run.id)}`, { credentials: "include" });
+        if (poll.ok) run = (await poll.json()) as DurableEvalRun & { status?: string };
+      }
+      if (run.status === "running") throw new Error("evaluation is still running; try again shortly");
+      if (run.status === "failed") throw new Error("evaluation failed to complete");
+      setEvalRun(run);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

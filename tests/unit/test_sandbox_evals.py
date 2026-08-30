@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import unittest.mock
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -640,3 +641,54 @@ async def test_judge_calibration_reports_threshold_agreement_and_mean_absolute_e
         "mean_absolute_error": 0.2,
     }
     assert run.judge_cost_usd > 0
+
+
+# ── background execution ─────────────────────────────────────────────
+
+
+async def test_start_answers_running_immediately_and_completes_in_the_background() -> None:
+    llm = _ScriptedLLM([LLMResponse(text="v2.1 ships.")])
+    runner = _runner(llm)
+
+    run = await runner.start(
+        _record(),
+        [EvalCase(name="c1", input="summarise", expect=EvalExpect(contains=["v2.1"]))],
+        triggered_by="sam@example.com",
+    )
+
+    assert run.status == "running"
+    # Persisted before the first case executed, so a poll can always find it.
+    stored = await runner.store.get("sb-1", run.id)
+    assert stored is not None
+    await asyncio.gather(*runner._tasks)
+    finished = await runner.store.get("sb-1", run.id)
+    assert finished is not None
+    assert finished.status == "completed"
+    assert finished.summary["status"] == "completed"
+    assert [r.passed for r in finished.results] == [True]
+
+
+async def test_a_background_suite_that_blows_up_lands_in_failed_not_limbo() -> None:
+    class _ExplodingInvoker:
+        async def invoke(self, record, *, message, triggered_by):
+            raise RuntimeError("cluster gone")
+
+    runner = EvalRunner(_ExplodingInvoker(), EvalStore(None))
+    with unittest.mock.patch.object(EvalRunner, "_execute", side_effect=RuntimeError("storage write refused")):
+        run = await runner.start(_record(), [EvalCase(name="c1", input="go")], triggered_by="sam@example.com")
+        await asyncio.gather(*runner._tasks, return_exceptions=True)
+    stored = await runner.store.get("sb-1", run.id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert "storage write refused" in stored.error
+
+
+async def test_double_save_keeps_one_index_entry_per_run() -> None:
+    llm = _ScriptedLLM([LLMResponse(text="ok")])
+    runner = _runner(llm)
+
+    run = await runner.start(_record(), [EvalCase(name="c1", input="go")], triggered_by="sam@example.com")
+    await asyncio.gather(*runner._tasks)
+
+    listed = await runner.store.list_for_sandbox("sb-1", limit=20)
+    assert [r.id for r in listed].count(run.id) == 1

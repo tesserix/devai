@@ -216,6 +216,9 @@ class _Runner:
         self.store.runs[(kwargs["owner_scope"], run.id)] = run
         return run
 
+    # The route now calls start(); the stub finishes synchronously.
+    start = run
+
 
 class _Sandboxes:
     def __init__(self) -> None:
