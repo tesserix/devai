@@ -281,32 +281,66 @@ async def _invoke_eval_gated(
     from devai.evaluations.gates import EVAL_GATE_LABEL
     from devai.registry.mapping import agent_envelope_to_spec
 
-    if registry_client is None:
-        return {"ok": False, "error": f"agent {agent_name} failed: registry unavailable for eval-gate admission"}
-    try:
-        agent = await asyncio.to_thread(_safe_get_agent, registry_client, agent_name)
-    except Exception:  # noqa: BLE001
-        logger.exception("runner: registry lookup for eval-gated agent %s failed", agent_name)
-        agent = None
-    if agent is None:
-        return {"ok": False, "error": f"agent {agent_name} failed: capability is not admitted"}
-    gate = str((getattr(agent, "labels", {}) or {}).get(EVAL_GATE_LABEL, "")).strip().lower()
+    # Prefer the envelope the dispatcher resolved with its authenticated
+    # registry client and baked into DEVAI_AGENT_PROFILE. Sandboxed Jobs have
+    # their secrets rescoped away, so a live lookup from here runs anonymous
+    # and cannot see private (user-published) records.
+    envelope, version = _dispatched_envelope(agent_name, state)
+    if envelope is not None:
+        labels = _envelope_labels(envelope)
+    else:
+        if registry_client is None:
+            return {"ok": False, "error": f"agent {agent_name} failed: registry unavailable for eval-gate admission"}
+        try:
+            agent = await asyncio.to_thread(_safe_get_agent, registry_client, agent_name)
+        except Exception:  # noqa: BLE001
+            logger.exception("runner: registry lookup for eval-gated agent %s failed", agent_name)
+            agent = None
+        if agent is None:
+            return {"ok": False, "error": f"agent {agent_name} failed: capability is not admitted"}
+        envelope = dict(getattr(agent, "raw", {}) or {})
+        version = str(getattr(agent, "version", "") or "")
+        labels = dict(getattr(agent, "labels", {}) or {})
+    gate = str(labels.get(EVAL_GATE_LABEL, "")).strip().lower()
     if gate != "passed":
         return {
             "ok": False,
             "error": f"agent {agent_name} failed: registry record has no passing eval gate (eval-gate={gate or 'absent'})",
         }
     try:
-        spec = agent_envelope_to_spec(getattr(agent, "raw", {}) or {})
+        spec = agent_envelope_to_spec(envelope)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"agent {agent_name} failed: registry envelope is not runnable: {e}"}
-    logger.info(
-        "runner: admitting eval-gated registry agent name=%s version=%s", agent_name, getattr(agent, "version", "")
-    )
+    logger.info("runner: admitting eval-gated registry agent name=%s version=%s", agent_name, version)
     try:
         return await service.invoke_spec(spec, state)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"agent {agent_name} failed: {e}"}
+
+
+def _dispatched_envelope(agent_name: str, state: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """The registry envelope the dispatcher pre-resolved, if it is this agent's."""
+    profile = state.get("agent_profile")
+    if not isinstance(profile, dict):
+        return None, ""
+    envelope = profile.get("envelope")
+    if not isinstance(envelope, dict) or not envelope:
+        return None, ""
+    meta = envelope.get("metadata") if isinstance(envelope.get("metadata"), dict) else {}
+    name = str(meta.get("name") or envelope.get("name") or "").strip()
+    if name != agent_name:
+        return None, ""
+    version = str(meta.get("tag") or envelope.get("version") or "")
+    return envelope, version
+
+
+def _envelope_labels(envelope: dict[str, Any]) -> dict[str, Any]:
+    """Labels from either the nested envelope or the flattened record shape."""
+    meta = envelope.get("metadata")
+    if isinstance(meta, dict) and isinstance(meta.get("labels"), dict):
+        return meta["labels"]
+    labels = envelope.get("labels")
+    return labels if isinstance(labels, dict) else {}
 
 
 async def _invoke_legacy(agent_name: str, state: dict[str, Any], config: Any) -> dict[str, Any]:
