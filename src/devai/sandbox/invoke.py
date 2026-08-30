@@ -212,7 +212,21 @@ class SandboxInvoker:
         else:
             if record.spec.agent is None:
                 raise ValueError(f"sandbox {record.id} has no agent")
-            spec = await self._specs.resolve_runnable(role_name(record.spec.agent.name))
+            from devai.specializations.service import GovernedAgentError
+
+            try:
+                spec = await self._specs.resolve_runnable(role_name(record.spec.agent.name))
+            except GovernedAgentError as exc:
+                # Governed admission protects live runs; inside the sandbox fence
+                # (mock tools, dry run, budget) an inadmissible reviewed bundle
+                # degrades to the registry envelope, same as an unknown role.
+                logger.warning(
+                    "sandbox %s: governed resolution of %s failed (%s); trying registry envelope",
+                    record.id,
+                    record.spec.agent.name,
+                    exc,
+                )
+                spec = None
             if spec is None:
                 spec = await self._registry_spec(record.spec.agent.name)
         if spec is None:
