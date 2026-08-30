@@ -214,6 +214,18 @@ class AgentRunner:
                 result.error = f"llm_error: {safe_error}"
                 break
 
+            if resp.finish_reason == "error":
+                # Adapters soft-fail (return an empty error response instead of
+                # raising); without this the run looks like a clean empty answer.
+                from devai.services.redact import redact_secrets
+
+                detail = redact_secrets(str((resp.extra or {}).get("error") or "provider returned an error response"))[
+                    :500
+                ]
+                logger.error("AgentRunner: llm.generate errored for %s: %s", spec.name, detail)
+                result.error = f"llm_error: {detail}"
+                break
+
             result.prompt_tokens += resp.usage.prompt_tokens
             result.completion_tokens += resp.usage.completion_tokens
             messages.append(LLMMessage(role=LLMRole.ASSISTANT, content=resp.text, tool_calls=list(resp.tool_calls)))
