@@ -287,6 +287,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "info"
+    # Must outlive the dashboard proxy's idle-socket reuse window; uvicorn's
+    # 5s default loses the race and surfaces as ECONNRESET 500s at the edge.
+    http_keepalive_timeout: int = 75
 
     # --- Security ---
     # When True, mutating requests (POST/PUT/PATCH/DELETE) must carry a

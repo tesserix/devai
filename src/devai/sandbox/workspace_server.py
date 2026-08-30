@@ -295,7 +295,7 @@ def main() -> None:
     )
     desktop = BrowserDesktop() if browser_enabled else nullcontext()
     with desktop:
-        uvicorn.run(app, host="0.0.0.0", port=WORKSPACE_PORT)  # noqa: S104 — pod-local; ClusterIP only
+        uvicorn.run(app, host="0.0.0.0", port=WORKSPACE_PORT, timeout_keep_alive=75)  # noqa: S104 — pod-local; ClusterIP only
 
 
 if __name__ == "__main__":
