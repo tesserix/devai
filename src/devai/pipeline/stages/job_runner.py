@@ -302,17 +302,27 @@ class JobRunnerStage(PipelineStage):
                 raise RuntimeError("governed agent composition unavailable")
             return None
         if governed:
-            canonical = f"{agent_name.strip().lower().removesuffix('-agent').replace('_', '-')}-agent"
-            try:
-                resolution = await asyncio.to_thread(registry.resolve_agent, canonical)
-            except Exception as exc:  # noqa: BLE001 -- dependency details stay internal
-                logger.warning(
-                    "governed Job agent resolution failed agent=%s error_type=%s",
-                    canonical,
-                    type(exc).__name__,
-                )
-                raise RuntimeError("governed agent composition unavailable") from None
-            if resolution.agent.name != canonical or resolution.unresolved:
+            # Catalog agents keep their published name; ALM role names
+            # (`capacity_planner`) still map to their `<role>-agent` built-in.
+            exact = agent_name.strip().lower()
+            role = f"{exact.removesuffix('-agent').replace('_', '-')}-agent"
+            candidates = [exact] if exact == role else [exact, role]
+            resolution = None
+            for canonical in candidates:
+                try:
+                    resolution = await asyncio.to_thread(registry.resolve_agent, canonical)
+                except Exception as exc:  # noqa: BLE001 -- dependency details stay internal
+                    logger.warning(
+                        "governed Job agent resolution failed agent=%s error_type=%s",
+                        canonical,
+                        type(exc).__name__,
+                    )
+                    resolution = None
+                    continue
+                if resolution.agent.name == canonical and not resolution.unresolved:
+                    break
+                resolution = None
+            if resolution is None:
                 raise RuntimeError("governed agent composition unavailable")
             if (
                 resolution.resolved.get("mcpServers")
