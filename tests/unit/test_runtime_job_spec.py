@@ -85,3 +85,16 @@ def test_job_spec_embeds_agent_profile_for_audit():
     spec = build_job_spec(_cfg(), _inputs(agent_profile=profile))
     env = _env_of(spec)
     assert json.loads(env["DEVAI_AGENT_PROFILE"]["value"]) == profile
+
+
+def test_job_spec_authenticates_registry_client(monkeypatch):
+    monkeypatch.setenv("DEVAI_REGISTRY_DEFAULT_TENANT", "devai")
+    spec = build_job_spec(_cfg(), _inputs())
+    env = _env_of(spec)
+    # Anonymous clients can't see private published agents, so eval-gated
+    # admission would fail closed without these.
+    ref = env["DEVAI_REGISTRY_TOKEN"]["valueFrom"]["secretKeyRef"]
+    assert ref["name"] == "agentic-registry-deploy-key"
+    assert ref["key"] == "API_KEY"
+    assert ref["optional"] is True
+    assert env["DEVAI_REGISTRY_DEFAULT_TENANT"]["value"] == "devai"
