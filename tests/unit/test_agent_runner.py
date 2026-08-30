@@ -176,3 +176,17 @@ async def test_missing_required_handover_field_flags_violation():
     llm = FakeLLMAdapter([LLMResponse(text='```json\n{"note": "forgot the pr"}\n```')])
     run = await AgentRunner(_deps(llm)).run(spec, _task())
     assert "_handover_violations" in run.patch
+
+
+@pytest.mark.asyncio
+async def test_soft_error_response_fails_the_run():
+    # Adapters return LLMResponse(finish_reason="error") instead of raising;
+    # the loop must not report that as a clean empty answer.
+    llm = FakeLLMAdapter(
+        [LLMResponse(text="", finish_reason="error", extra={"status_code": 403, "error": "RBAC: access denied"})]
+    )
+    run = await AgentRunner(_deps(llm)).run(Specialization(name="summarizer"), _task())
+
+    assert run.error.startswith("llm_error:")
+    assert "RBAC: access denied" in run.error
+    assert run.final_text == ""
