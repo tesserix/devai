@@ -21,6 +21,11 @@ spec:
       matchLabels:
         mcp.tesserix.app/server: scm-mcp
   authMode: jwt
+  credentialRef:
+    secretName: devai-mcp-upstream
+    key: token
+    header: Authorization
+    prefix: 'Bearer '
   tools:
   - scm_get_repo_tree
   - scm_read_file

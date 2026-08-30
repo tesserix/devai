@@ -7,6 +7,7 @@ metadata:
   labels:
     devai.io/source: devai
     devai.io/category: analyst
+    mcp.devai.io/catalog: 'true'
 spec:
   name: analyst-mcp
   displayName: DevAI Analyst MCP
@@ -22,11 +23,7 @@ spec:
       matchLabels:
         mcp.tesserix.app/server: analyst-mcp
   authMode: jwt
-  credentialRef:
-    secretName: devai-mcp-upstream
-    key: token
-    header: Authorization
-    prefix: 'Bearer '
+  catalog: true
   tools:
   - security_scan_sast
   - security_scan_dependencies

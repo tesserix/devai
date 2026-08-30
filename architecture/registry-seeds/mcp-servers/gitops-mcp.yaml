@@ -20,6 +20,11 @@ spec:
       matchLabels:
         mcp.tesserix.app/server: gitops-mcp
   authMode: jwt
+  credentialRef:
+    secretName: devai-mcp-upstream
+    key: token
+    header: Authorization
+    prefix: 'Bearer '
   tools:
   - argocd_list_apps
   - argocd_get_app

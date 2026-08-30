@@ -27,7 +27,7 @@ _RUNTIME_AUTH = {
 
 def _client(
     *,
-    adk_runtime_base_url: str = ("http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080"),
+    adk_runtime_base_url: str = ("http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082"),
 ) -> TestClient:
     config = Settings(
         adk_runtime_base_url=adk_runtime_base_url,
@@ -140,8 +140,8 @@ def test_cards_accept_agentgateway_runtime_identity() -> None:
 
     assert platform.status_code == 200
     assert platform.json()["name"] == "Tesserix Global ADK Runtime"
-    assert platform.json()["url"] == ("http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1")
+    assert platform.json()["url"] == ("http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1")
     assert agent.status_code == 200
     assert agent.json()["url"] == (
-        "http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8080/a2a/v1/requirements-analyst"
+        "http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/requirements-analyst"
     )

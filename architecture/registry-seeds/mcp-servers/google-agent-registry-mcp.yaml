@@ -7,6 +7,7 @@ metadata:
   labels:
     devai.io/source: google-cloud
     devai.io/category: registry
+    mcp.tesserix.app/gateway-export: 'false'
 spec:
   name: google-agent-registry-mcp
   displayName: Google Agent Registry MCP
@@ -16,6 +17,7 @@ spec:
     the in-cluster aregistry. Auth via Workload Identity ADC.
   endpoint: https://agentregistry.googleapis.com/mcp
   authMode: gcp_adc
+  gatewayExport: false
   tools:
   - list_agents
   - search_agents
