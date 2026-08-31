@@ -55,7 +55,7 @@ dependencies = [
     "googleapis-common-protos==1.75.1",
     # LangGraph / LangChain / LangSmith
     "langgraph>=0.2",
-    "langchain-core>=0.3",
+    "langchain-core>=1.6.1",
     "langchain-anthropic>=0.3",
     "langchain-openai>=1.3.5",
     "langchain-community>=0.4.2",
