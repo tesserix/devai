@@ -503,3 +503,37 @@ def test_the_workspace_kinds_are_routable_to_a_k8s_api() -> None:
         ("Service", "service"),
     ):
         assert rt._manifest_api(kind)[1] == suffix  # noqa: SLF001
+
+
+# ── per-sandbox namespace isolation ───────────────────────────────────────
+
+
+def test_isolation_quota_is_namespace_wide() -> None:
+    quota = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x"))["ResourceQuota"]
+    # The namespace is the fence now; a PriorityClass scope split the shared
+    # namespace, which no longer exists.
+    assert "scopeSelector" not in quota["spec"]
+
+
+def test_network_policy_egress_targets_control_plane_pods_only() -> None:
+    np = _by_kind(
+        build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai")
+    )["NetworkPolicy"]
+    rules = np["spec"]["egress"]
+    own = rules[1]["to"][0]["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"]
+    assert own == "devai-sbx-x"
+    cp = rules[2]["to"][0]
+    assert cp["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"] == "devai"
+    # Pods only — Postgres/Redis in the control-plane namespace stay dark.
+    assert cp["podSelector"]["matchLabels"]["app.kubernetes.io/name"] == "devai"
+
+
+def test_network_policy_ingress_is_control_plane_and_own_namespace() -> None:
+    np = _by_kind(
+        build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai")
+    )["NetworkPolicy"]
+    frm = np["spec"]["ingress"][0]["from"]
+    assert {"podSelector": {}} in frm  # any pod in the sandbox's own namespace
+    cp = next(e for e in frm if "namespaceSelector" in e)
+    assert cp["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"] == "devai"
+    assert cp["podSelector"]["matchLabels"]["app.kubernetes.io/name"] == "devai"
