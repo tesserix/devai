@@ -232,6 +232,14 @@ def test_the_proxy_pod_is_unprivileged_and_carries_no_service_account_token():
     assert pod["spec"]["containers"][0]["securityContext"]["capabilities"]["drop"] == ["ALL"]
 
 
+def test_the_proxy_pod_passes_the_restricted_pod_security_profile():
+    # The sandbox namespace enforces PSA restricted; without a seccompProfile
+    # the API server rejects the pod and provisioning fails.
+    pod = build_proxy_manifests(_record(), namespace="devai-sbx-sb1234")[1]
+    assert pod["spec"]["securityContext"]["seccompProfile"] == {"type": "RuntimeDefault"}
+    assert pod["spec"]["containers"][0]["securityContext"]["allowPrivilegeEscalation"] is False
+
+
 def test_the_proxy_pod_gets_no_proxy_env_of_its_own():
     # It is the way out; pointing it at itself would loop.
     pod = build_proxy_manifests(_record(), namespace="devai")[1]

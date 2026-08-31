@@ -117,7 +117,12 @@ def build_proxy_manifests(record: SandboxRecord, *, namespace: str, image: str =
             "restartPolicy": "Always",
             "serviceAccountName": "devai-sandbox",
             "automountServiceAccountToken": False,
-            "securityContext": {"runAsNonRoot": True, "runAsUser": 1000, "fsGroup": 1000},
+            "securityContext": {
+                "runAsNonRoot": True,
+                "runAsUser": 1000,
+                "fsGroup": 1000,
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
             "containers": [
                 {
                     "name": "proxy",
