@@ -63,8 +63,10 @@
   <div class="card">
     <h3>Isolated sandboxes</h3>
     <p>Every candidate agent runs in an owner-scoped sandbox that pins prompt, model,
-    dataset, tool policy, budgets, and expiry. Tools run in mock, replay, block, or
-    deliberately-allowed real mode — side effects are a boundary, not an accident.</p>
+    dataset, tool policy, budgets, and expiry — inside its own throwaway Kubernetes
+    namespace with restricted pods and a deny-by-default network. Tools run in mock,
+    replay, block, or deliberately-allowed real mode — side effects are a boundary,
+    not an accident.</p>
   </div>
   <div class="card">
     <h3>Evaluation gates</h3>

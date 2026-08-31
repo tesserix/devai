@@ -63,9 +63,12 @@
               │
               ▼
       SANDBOXES + EVALUATIONS
-  isolated runtimes with pinned prompt,
-  model, dataset, tool policy, budgets;
-  every run leaves a full trace
+  one throwaway namespace per sandbox
+  (devai-sbx-*): restricted pods, deny-
+  by-default network, quota; pinned
+  prompt, model, dataset, tool policy,
+  budgets; every run leaves a full trace;
+  destroy = delete the namespace
               │
    ┌──────────┼──────────────────────┬───────────────────────────┐
    ▼          ▼                      ▼                           ▼
@@ -137,6 +140,7 @@ publishing  ▼
 
 <h2>Security posture</h2>
 <ul>
+  <li><strong>Namespace isolation.</strong> Every sandbox runs in its own throwaway <code>devai-sbx-*</code> namespace under the restricted Pod Security profile, with a default-deny network policy: egress only to DNS and the control-plane pods (the platform's databases are unreachable), ingress only from the control plane. Destroying a sandbox deletes the namespace and everything in it; an orphan reaper sweeps up anything left behind. The runtime class is pluggable for a future gVisor or microVM upgrade.</li>
   <li><strong>Owner scoping.</strong> Sandboxes, traces, evaluation runs, and connectors belong to the signed-in principal; a publication gate refuses evidence owned by anyone else.</li>
   <li><strong>No credential mounting.</strong> Provider keys live in the control plane; sandboxes reach models only through AgentGateway.</li>
   <li><strong>Side-effect boundaries.</strong> Tool calls default to mock or block in sandboxes; real calls are an explicit, recorded choice.</li>
