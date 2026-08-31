@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started — DevAI</title>
+<meta name="description" content="Start using DevAI: sign in, set up your profile, connect your own model and GitHub, and work with your own repositories.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <div class="inner">
+    <a class="brand" href="index.html">Dev<span>AI</span></a>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a class="active" href="getting-started.html">Getting Started</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="agents.html">Build Agents</a>
+      <a href="https://github.com/tesserix/devai">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main>
+
+<h1>Getting started</h1>
+<p class="muted">
+  From first sign-in to running work against your own repositories. Ten minutes,
+  no local installation required — everything here happens in the dashboard.
+</p>
+
+<ol class="steps">
+<li>
+  <strong>Sign in</strong>
+  <p>Open the DevAI dashboard and sign in with your Google account. Sign-in is
+  handled by the platform's identity service; DevAI never sees your password.
+  Your session lives in a secure, browser-only cookie, and everything you create —
+  sandboxes, evaluation runs, connections, traces — is owned by your account and
+  visible only to you.</p>
+</li>
+<li>
+  <strong>Complete your profile</strong>
+  <p>Go to <em>Settings → Profile</em> to review your display name and details.
+  These appear wherever the platform attributes work to you: run history,
+  published agents, audit records. You can update them at any time.</p>
+</li>
+<li>
+  <strong>Connect a model</strong>
+  <p>In <em>Settings → Connections</em>, add a connector for the model provider you
+  want your agents to use. Paste the key once; it is stored in the platform's
+  secret manager and never shown again, never written into files, and never
+  placed inside a sandbox. Every model call is routed through the platform
+  gateway and billed to your connection.</p>
+</li>
+<li>
+  <strong>Connect your GitHub</strong>
+  <p>In <em>Settings → Source Control</em>, connect the GitHub account or
+  organization you want to develop against. Two ways in:</p>
+  <table>
+    <tr><th>Method</th><th>Good for</th><th>What you provide</th></tr>
+    <tr><td>Personal access token</td><td>Individuals and small teams; fastest setup</td><td>A fine-grained token with repository read/write. Optionally set an <em>Organization</em> to scope listings and repository creation.</td></tr>
+    <tr><td>GitHub App</td><td>Organizations that want installation-scoped, revocable access</td><td>App ID, installation ID, and the app's private key.</td></tr>
+  </table>
+  <p>Tokens and keys go straight into the platform's secret manager — the same
+  vault that holds model keys. The dashboard only ever shows that a secret is
+  set, never its value, and you can rotate or remove it whenever you like.</p>
+</li>
+<li>
+  <strong>Work with your repositories</strong>
+  <p>Open the <em>Repos</em> page. It now lists the repositories your connection
+  can see — your organization if you set one, otherwise everything your token
+  or app installation has access to. From here you can onboard existing
+  repositories, create new ones in your organization, and scaffold projects.
+  Pipeline runs and the chat assistant use the same connection, so the whole
+  develop → review → release loop happens against <em>your</em> GitHub.</p>
+  <p>If you open Repos before connecting, you'll see a short setup prompt
+  pointing you back to Settings — nothing breaks, you're just not connected yet.</p>
+</li>
+<li>
+  <strong>Build your first agent</strong>
+  <p>With a model and source control connected, follow the
+  <a href="agents.html">build-agents guide</a>: author a small manifest, run it
+  in an isolated sandbox, evaluate it against a versioned dataset, and publish
+  it once it passes the gate.</p>
+</li>
+</ol>
+
+<h2>Who sees what</h2>
+<table>
+  <tr><th>Thing</th><th>Scope</th></tr>
+  <tr><td>Your sandboxes, traces, evaluation runs</td><td>Owned by you. Other users cannot see or reuse them, and the publication gate refuses evidence owned by anyone else.</td></tr>
+  <tr><td>Your repository listings</td><td>Come from your own connection. What you can see and create is exactly what your token or app installation allows.</td></tr>
+  <tr><td>Repositories you onboard</td><td>Listed for you. You won't see other tenants' onboarded repositories, and they won't see yours.</td></tr>
+  <tr><td>The platform's own GitHub organization</td><td>Reserved for platform operators. Regular accounts always work through their own connection.</td></tr>
+</table>
+
+<h2>Feedback</h2>
+<p>
+  The <em>Feedback</em> button in the dashboard files your report directly with the
+  platform's owners, regardless of which GitHub you have connected. That channel is
+  intentionally fixed: your product feedback always reaches the people who run the
+  platform, and it never touches your repositories.
+</p>
+
+<h2>Frequently asked</h2>
+<h3>Can DevAI read my secrets back to me?</h3>
+<p>No. Secret values are write-only from the dashboard's point of view. Once stored,
+the interface confirms a secret exists and lets you replace or delete it — it never
+displays the value.</p>
+
+<h3>What happens if I remove my GitHub connection?</h3>
+<p>Repository listing and creation stop working for your account until you connect
+again. Nothing is deleted: repositories you onboarded and runs you completed keep
+their history.</p>
+
+<h3>Do I need the CLI?</h3>
+<p>No. The dashboard covers the full loop. The CLI (<code>devai adk …</code>) drives
+the same authenticated interfaces and is there when you prefer a terminal or want
+to script things — see <a href="agents.html">Build Agents</a>.</p>
+
+</main>
+<footer class="site">DevAI · an agent lifecycle platform · <a href="https://github.com/tesserix/devai">github.com/tesserix/devai</a></footer>
+</body>
+</html>

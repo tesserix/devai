@@ -13,6 +13,7 @@
     <a class="brand" href="index.html">Dev<span>AI</span></a>
     <nav>
       <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting Started</a>
       <a class="active" href="architecture.html">Architecture</a>
       <a href="agents.html">Build Agents</a>
       <a href="https://github.com/tesserix/devai">GitHub</a>
@@ -29,21 +30,67 @@
   lives in <a href="https://github.com/tesserix/devai/blob/main/docs/PLATFORM-ARCHITECTURE.md">docs/PLATFORM-ARCHITECTURE.md</a>.
 </p>
 
-<h2>Big picture</h2>
-<div class="flow">Dashboards (ALM :3100 · SRE :3200)        CLI (devai adk …)
-        │                                      │
-        ▼                                      ▼
-  API control plane (FastAPI) ── auth (Keycloak + auth-bff session)
-        │
-        ├─ LangGraph orchestrations   ALM pipeline (14 nodes) · SRE loop (5 nodes)
-        ├─ Durable workflows          Temporal (encrypted payloads, versioned workers)
-        ├─ Sandboxes + evaluations    ephemeral runtimes, pinned specs, traces
-        │
-        ├─ Agent Registry             versioned agents · blueprints · datasets · suites
-        ├─ AgentGateway               ALL model traffic: policy, attribution, cost
-        └─ MCP Hub                    tool servers resolved per agent composition
-        │
-  PostgreSQL (+pgvector) · Redis · NATS JetStream · object storage</div>
+<h2>The whole system on one page</h2>
+<div class="flow">                                you (browser · CLI)
+                                        │
+                          Google sign-in · session cookie
+                        (identity service + auth front-end)
+                                        │
+                                service mesh ingress
+                    routes every hostname, denies by default
+                                        │
+              ┌─────────────────────────┼─────────────────────────┐
+              ▼                         ▼                         ▼
+      ALM dashboard              SRE dashboard              chat assistant
+   runs · repos · evals      cluster health · incidents   same interfaces, spoken
+              └─────────────────────────┼─────────────────────────┘
+                                        ▼
+                        ╔═══════════════════════════════╗
+                        ║   DevAI control plane (API)   ║
+                        ║  pipelines · sandboxes · evals║
+                        ║  settings · repos · feedback  ║
+                        ╚═══════╤═══════════════╤═══════╝
+                                │               │
+              ┌─────────────────┘               └──────────────────┐
+              ▼                                                    ▼
+      ORCHESTRATOR                                        DURABLE WORKFLOWS
+  lifecycle pipeline: 14 stages                       sandbox creation, evaluation
+  ingest → plan → implement →                         runs, gated publication —
+  review ⇄ security gate →                            survive restarts and deploys
+  build → test → provision → release
+  SRE loop: discover → monitor →
+  correlate → respond → learn
+              │
+              ▼
+      SANDBOXES + EVALUATIONS
+  isolated runtimes with pinned prompt,
+  model, dataset, tool policy, budgets;
+  every run leaves a full trace
+              │
+   ┌──────────┼──────────────────────┬───────────────────────────┐
+   ▼          ▼                      ▼                           ▼
+AGENT       AGENT                  MCP HUB                SOURCE CONTROL
+REGISTRY    GATEWAY            resolves the tool        platform GitHub for
+versioned   the ONLY road      servers an agent's       operators · YOUR GitHub
+agents,     to any model:      record declares —        (token or app) for your
+blueprints, policy, usage      tools are reviewed,      repositories; secrets in
+datasets,   attribution,       not ambient              the platform secret vault
+suites;     cost per run
+gated       │
+publishing  ▼
+       model providers
+   (Anthropic, OpenAI, Groq,
+    self-hosted GPU, …)
+              │
+              ▼
+        BACKING STORES
+  PostgreSQL (+vectors) · Redis · NATS · object storage · secret manager</div>
+<p class="muted">
+  Read it top to bottom: a person signs in once; everything they do flows through one
+  control plane; agents run inside pinned sandboxes; and every road out of a sandbox —
+  to a model, a tool, or a repository — passes through a governed seam that records
+  who did what and what it cost.
+</p>
 
 <h2>Components</h2>
 <table>
@@ -56,6 +103,8 @@
   <tr><td>MCP Hub</td><td>Resolves the MCP tool servers an agent's composition declares, so tool access is part of the reviewed record rather than ambient capability.</td></tr>
   <tr><td>A2A bus</td><td>Agent-to-agent messaging (request/response, notification, handoff, escalation, broadcast) persisted to Redis and PostgreSQL, so multi-agent runs are auditable.</td></tr>
   <tr><td>Dashboards</td><td>Next.js apps: ALM (runs, agents, approvals, evaluations, compare) and SRE (cluster overview, incidents, scan history), behind Keycloak session auth.</td></tr>
+  <tr><td>Source control</td><td>One interface over GitHub, GitLab, and Azure DevOps. Each user connects their own GitHub (token or app) in Settings; repository listing, creation, pipeline runs, and chat all act through the caller's connection. The platform's own organization is reserved for its operators.</td></tr>
+  <tr><td>Secret manager</td><td>Holds every connector credential — model keys, source-control tokens, app private keys. Values are write-only from the dashboard; services resolve them at use time and never echo them back.</td></tr>
 </table>
 
 <h2>Execution paths for an agent run</h2>
