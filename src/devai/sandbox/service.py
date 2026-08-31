@@ -40,13 +40,18 @@ class SandboxService:
         settings: Any | None = None,
         provisioner: Any | None = None,
         adk_catalogue: AdkVersionCatalogue | None = None,
+        runtime: Any | None = None,
     ) -> None:
         self._db = db
         self._registry = registry
         self._settings = settings
         self._provisioner = provisioner
         self._adk_catalogue = adk_catalogue
+        self._runtime = runtime
         self._reaper_task: asyncio.Task[None] | None = None
+        # Namespaces seen Terminating on the previous sweep — the reaper
+        # re-deletes only what Kubernetes GC failed to clear on its own.
+        self._terminating_seen: set[str] = set()
 
     async def create(
         self,
@@ -211,6 +216,39 @@ class SandboxService:
             await self._db.set_sandbox_status(row["id"], SandboxStatus.DESTROYED.value)
         return len(rows)
 
+    async def reap_orphan_namespaces(self) -> int:
+        """Delete devai-sbx-* namespaces whose sandbox row is gone or expired.
+
+        The namespace is the boundary, so an orphan is a whole leaked sandbox;
+        this sweep is what makes crash-during-teardown safe.
+        """
+        if self._runtime is None:
+            return 0
+        reaped = 0
+        namespaces = await self._runtime.list_namespaces(
+            label_selector="app.kubernetes.io/managed-by=devai,devai.tesserix.app/sandbox"
+        )
+        for ns in namespaces:
+            name = str(ns.get("metadata", {}).get("name", ""))
+            sid = str((ns.get("metadata", {}).get("labels") or {}).get("devai.tesserix.app/sandbox") or "")
+            row = await self._db.get_sandbox(sid) if sid else None
+            if row is not None:
+                live = str(row.get("status")) not in ("destroyed", "failed")
+                expired = row.get("expires_at") is not None and row["expires_at"] <= datetime.now(UTC)
+                if live and not expired:
+                    continue
+            phase = str((ns.get("status") or {}).get("phase") or "")
+            if phase == "Terminating" and name not in self._terminating_seen:
+                self._terminating_seen.add(name)
+                continue
+            if phase == "Terminating":
+                logger.warning("sandbox reaper: namespace %s stuck Terminating — re-deleting", name)
+            with contextlib.suppress(Exception):
+                await self._runtime.delete_namespace(name)
+                reaped += 1
+            self._terminating_seen.discard(name)
+        return reaped
+
     # ── TTL reaper ────────────────────────────────────────────────────
 
     def start_reaper(self) -> None:
@@ -232,6 +270,10 @@ class SandboxService:
                 reaped = await self.reap_expired()
                 if reaped:
                     logger.info("sandbox: reaped %d expired sandbox(es)", reaped)
+                with contextlib.suppress(Exception):
+                    orphans = await self.reap_orphan_namespaces()
+                    if orphans:
+                        logger.info("sandbox: reaped %d orphan namespace(s)", orphans)
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 — a reap failure must not kill the loop

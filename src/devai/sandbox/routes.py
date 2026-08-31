@@ -181,10 +181,14 @@ async def destroy_sandbox(
 SANDBOX_TOKEN_HEADER = "X-DevAI-Sandbox-Token"
 
 
-async def _authorize_sandbox_token(runtime: Any, sandbox_id: str, supplied: str | None) -> None:
+async def _authorize_sandbox_token(runtime: Any, record: SandboxRecord, supplied: str | None) -> None:
     """Let a sandbox speak for itself, using the token only it can read."""
+    from devai.sandbox.namespace import recorded_namespace
+
     try:
-        expected = await runtime.read_secret_key(sandbox_secret_name(sandbox_id), "capability_token")
+        expected = await runtime.read_secret_key(
+            sandbox_secret_name(record.id), "capability_token", recorded_namespace(record) or None
+        )
     except Exception as e:  # noqa: BLE001 — no Secret means nothing can authenticate as this sandbox
         raise HTTPException(status_code=401, detail="sandbox token not recognised") from e
     if not supplied or not hmac.compare_digest(supplied, expected):
@@ -208,10 +212,10 @@ async def mint_credential(
     """Hand a sandbox the narrowest credential that satisfies its request."""
     runtime = getattr(getattr(request.app.state, "pipeline_service", None), "k8s_runtime", None)
     if x_devai_sandbox_token and runtime is not None:
-        await _authorize_sandbox_token(runtime, sandbox_id, x_devai_sandbox_token)
         record = await _service(request).get(sandbox_id, owner="", is_admin=True)
         if record is None:
             raise HTTPException(status_code=404, detail=f"sandbox {sandbox_id!r} not found")
+        await _authorize_sandbox_token(runtime, record, x_devai_sandbox_token)
     else:
         record = await _sandbox_or_404(request, sandbox_id)
 
@@ -242,8 +246,12 @@ async def _workspace_access(request: Request, record: SandboxRecord) -> tuple[st
     runtime = getattr(getattr(request.app.state, "pipeline_service", None), "k8s_runtime", None)
     if runtime is None:
         raise HTTPException(status_code=503, detail="cluster runtime unavailable")
+    from devai.sandbox.namespace import recorded_namespace
+
     try:
-        token = await runtime.read_secret_key(f"devai-sandbox-ws-{record.id}", "token")
+        token = await runtime.read_secret_key(
+            f"devai-sandbox-ws-{record.id}", "token", recorded_namespace(record) or None
+        )
     except Exception as e:  # noqa: BLE001 — a missing Secret means the workspace is gone
         raise HTTPException(status_code=409, detail="workspace is not ready") from e
     return str(endpoint), token

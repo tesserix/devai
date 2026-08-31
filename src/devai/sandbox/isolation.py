@@ -108,9 +108,7 @@ def _egress_rules(namespace: str, control_plane_namespace: str) -> list[dict[str
         {
             "to": [
                 {
-                    "namespaceSelector": {
-                        "matchLabels": {"kubernetes.io/metadata.name": control_plane_namespace}
-                    },
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": control_plane_namespace}},
                     "podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}},
                 }
             ],
@@ -128,9 +126,7 @@ def _ingress_rules(control_plane_namespace: str) -> list[dict[str, Any]]:
         {
             "from": [
                 {
-                    "namespaceSelector": {
-                        "matchLabels": {"kubernetes.io/metadata.name": control_plane_namespace}
-                    },
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": control_plane_namespace}},
                     "podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}},
                 },
                 {"podSelector": {}},

@@ -92,7 +92,11 @@ async def test_apply_manifest_namespace_conflict_falls_back_to_patch() -> None:
 @pytest.mark.asyncio
 async def test_apply_manifest_service_account() -> None:
     api = _RecordingApi()
-    manifest = {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "devai-sandbox", "namespace": "devai-sbx-x"}}
+    manifest = {
+        "apiVersion": "v1",
+        "kind": "ServiceAccount",
+        "metadata": {"name": "devai-sandbox", "namespace": "devai-sbx-x"},
+    }
 
     await _runtime(api).apply_manifest(manifest)
 

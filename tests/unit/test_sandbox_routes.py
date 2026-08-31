@@ -177,3 +177,39 @@ def test_durable_sandbox_mutations_require_an_idempotency_key() -> None:
 
     assert response.status_code == 422
     assert "Idempotency-Key" in response.text
+
+
+# ── record-scoped secret reads ────────────────────────────────────────
+
+
+def test_token_auth_reads_secret_in_record_namespace() -> None:
+    import asyncio
+
+    from devai.sandbox.models import SandboxRecord
+    from devai.sandbox.routes import _authorize_sandbox_token
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.reads: list[tuple[str, str, str | None]] = []
+
+        async def read_secret_key(self, name: str, key: str, namespace: str | None = None) -> str:
+            self.reads.append((name, key, namespace))
+            return "tok"
+
+    now = datetime.now(UTC)
+    record = SandboxRecord.model_validate(
+        {
+            "id": "sb-x",
+            "owner": "sam@example.com",
+            "spec": _SPEC,
+            "status": "ready",
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=1)).isoformat(),
+            "detail": {"namespace": "devai-sbx-sb-x"},
+        }
+    )
+    runtime = _Runtime()
+
+    asyncio.run(_authorize_sandbox_token(runtime, record, "tok"))
+
+    assert runtime.reads == [("devai-sandbox-sb-x", "capability_token", "devai-sbx-sb-x")]

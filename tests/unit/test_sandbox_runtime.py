@@ -609,9 +609,9 @@ def test_isolation_quota_is_namespace_wide() -> None:
 
 
 def test_network_policy_egress_targets_control_plane_pods_only() -> None:
-    np = _by_kind(
-        build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai")
-    )["NetworkPolicy"]
+    np = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))[
+        "NetworkPolicy"
+    ]
     rules = np["spec"]["egress"]
     own = rules[1]["to"][0]["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"]
     assert own == "devai-sbx-x"
@@ -622,9 +622,9 @@ def test_network_policy_egress_targets_control_plane_pods_only() -> None:
 
 
 def test_network_policy_ingress_is_control_plane_and_own_namespace() -> None:
-    np = _by_kind(
-        build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai")
-    )["NetworkPolicy"]
+    np = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))[
+        "NetworkPolicy"
+    ]
     frm = np["spec"]["ingress"][0]["from"]
     assert {"podSelector": {}} in frm  # any pod in the sandbox's own namespace
     cp = next(e for e in frm if "namespaceSelector" in e)

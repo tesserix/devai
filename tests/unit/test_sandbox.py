@@ -456,6 +456,52 @@ async def test_a_provisioning_failure_leaves_the_sandbox_readable() -> None:
     assert (await svc.get(rec.id, owner="sam@example.com")) is not None
 
 
+# ── orphan-namespace reaper ───────────────────────────────────────────
+
+
+class _NsRuntime:
+    def __init__(self, namespaces: list[dict[str, Any]]) -> None:
+        self.namespaces = namespaces
+        self.deleted: list[str] = []
+
+    async def list_namespaces(self, label_selector: str) -> list[dict[str, Any]]:
+        return self.namespaces
+
+    async def delete_namespace(self, name: str) -> None:
+        self.deleted.append(name)
+
+
+def _ns(name: str, sandbox_id: str, phase: str = "Active") -> dict[str, Any]:
+    return {
+        "metadata": {"name": name, "labels": {"devai.tesserix.app/sandbox": sandbox_id}},
+        "status": {"phase": phase},
+    }
+
+
+@pytest.mark.asyncio
+async def test_reap_orphan_namespaces_deletes_rowless_namespace() -> None:
+    db = _FakeDB()
+    svc = _service(db, provisioner=_FakeProvisioner())
+    rec = await svc.create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
+    runtime = _NsRuntime([_ns("devai-sbx-dead", "dead"), _ns(f"devai-sbx-{rec.id}", rec.id)])
+    svc._runtime = runtime  # noqa: SLF001 — wired at construction in the app
+
+    assert await svc.reap_orphan_namespaces() == 1
+    assert runtime.deleted == ["devai-sbx-dead"]
+
+
+@pytest.mark.asyncio
+async def test_reap_orphan_namespaces_skips_active_terminating_grace() -> None:
+    runtime = _NsRuntime([_ns("devai-sbx-gone", "gone", phase="Terminating")])
+    svc = _service(runtime=runtime)
+
+    # First sweep: seen once, left to Kubernetes GC.
+    assert await svc.reap_orphan_namespaces() == 0
+    # Second sweep: still Terminating — re-delete to unstick it.
+    assert await svc.reap_orphan_namespaces() == 1
+    assert runtime.deleted == ["devai-sbx-gone"]
+
+
 # ── reference validation ──────────────────────────────────────────────
 
 

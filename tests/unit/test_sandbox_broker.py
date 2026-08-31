@@ -293,7 +293,7 @@ async def test_the_broker_route_refuses_a_caller_with_the_wrong_token():
 
     rt = _FakeRuntime({"devai-sandbox-sb1/capability_token": "right"})
     with pytest.raises(HTTPException) as e:
-        await _authorize_sandbox_token(rt, "sb1", "wrong")
+        await _authorize_sandbox_token(rt, _record("sb1"), "wrong")
     assert e.value.status_code == 401
 
 
@@ -302,7 +302,7 @@ async def test_the_broker_route_accepts_the_sandboxs_own_token():
     from devai.sandbox.routes import _authorize_sandbox_token
 
     rt = _FakeRuntime({"devai-sandbox-sb1/capability_token": "right"})
-    await _authorize_sandbox_token(rt, "sb1", "right")
+    await _authorize_sandbox_token(rt, _record("sb1"), "right")
 
 
 @pytest.mark.asyncio

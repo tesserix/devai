@@ -47,7 +47,7 @@ class _Service:
 
 
 class _Runtime:
-    async def read_secret_key(self, name: str, key: str) -> str:
+    async def read_secret_key(self, name: str, key: str, namespace: str | None = None) -> str:
         assert (name, key) == ("devai-sandbox-ws-sb-1", "token")
         return "capability-token"
 

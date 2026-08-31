@@ -42,9 +42,10 @@ def test_namespace_manifest_labels():
     # Owner hash is stable, short and never the raw email.
     assert len(labels["devai.tesserix.app/owner-hash"]) == 16
     assert "@" not in labels["devai.tesserix.app/owner-hash"]
-    assert labels["devai.tesserix.app/owner-hash"] == build_namespace_manifest(_record())["metadata"]["labels"][
-        "devai.tesserix.app/owner-hash"
-    ]
+    assert (
+        labels["devai.tesserix.app/owner-hash"]
+        == build_namespace_manifest(_record())["metadata"]["labels"]["devai.tesserix.app/owner-hash"]
+    )
 
 
 def test_service_account_manifest():

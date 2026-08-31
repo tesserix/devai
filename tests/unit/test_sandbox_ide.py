@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from devai.sandbox.isolation import build_isolation_manifests
-from devai.sandbox.job import SANDBOX_LABEL
 from devai.sandbox.models import SandboxRecord, SandboxSpec, SandboxStatus
 from devai.sandbox.workspace import IDE_PORT, WORKSPACE_ROOT, build_workspace_manifests
 
