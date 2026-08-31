@@ -323,6 +323,18 @@ class K8sJobRuntime:
             raise KeyError(f"secret {name} has no key {key}")
         return base64.b64decode(raw).decode()
 
+    async def copy_secret(self, name: str, *, from_namespace: str, to_namespace: str) -> None:
+        """Re-create a Secret in another namespace — e.g. the image pull secret."""
+        secret = await self._core_v1.read_namespaced_secret(name=name, namespace=from_namespace)
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": name, "namespace": to_namespace, "labels": {"app.kubernetes.io/managed-by": "devai"}},
+            "type": getattr(secret, "type", None) or "Opaque",
+            "data": getattr(secret, "data", None) or {},
+        }
+        await self.apply_manifest(manifest)
+
     async def get_job(self, name: str, *, namespace: str | None = None) -> Any:
         """Read a Job's current state."""
         return await self._batch_v1.read_namespaced_job(name=name, namespace=namespace or self._config.namespace)

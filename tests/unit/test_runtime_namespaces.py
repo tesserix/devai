@@ -147,6 +147,18 @@ async def test_create_job_defaults_to_config_namespace() -> None:
 
 
 @pytest.mark.asyncio
+async def test_copy_secret_reapplies_into_target_namespace() -> None:
+    api = _RecordingApi()
+
+    await _runtime(api).copy_secret("pull-secret", from_namespace="devai", to_namespace="devai-sbx-x")
+
+    assert api.named("read_namespaced_secret")[0] == {"name": "pull-secret", "namespace": "devai"}
+    created = api.named("create_namespaced_secret")[0]
+    assert created["namespace"] == "devai-sbx-x"
+    assert created["body"]["metadata"]["name"] == "pull-secret"
+
+
+@pytest.mark.asyncio
 async def test_job_and_pod_helpers_accept_namespace_override() -> None:
     api = _RecordingApi()
     runtime = _runtime(api)

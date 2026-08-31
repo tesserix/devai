@@ -14,6 +14,12 @@ from devai.sandbox.egress import build_proxy_manifests, proxy_service_host
 from devai.sandbox.isolation import build_isolation_manifests
 from devai.sandbox.job import build_sandbox_secret
 from devai.sandbox.models import SandboxStatus
+from devai.sandbox.namespace import (
+    build_namespace_manifest,
+    build_service_account_manifest,
+    recorded_namespace,
+    sandbox_namespace,
+)
 from devai.sandbox.portable import build_portable_runtime_manifests, portable_runtime_endpoint
 from devai.sandbox.snapshot import capture
 from devai.sandbox.workspace import build_workspace_manifests, workspace_service_host
@@ -37,19 +43,33 @@ class SandboxProvisioner:
 
     async def provision(self, record: SandboxRecord) -> SandboxRecord:
         await self._set(record, SandboxStatus.PROVISIONING)
-        namespace = getattr(getattr(self._runtime, "config", None), "namespace", "devai")
+        control_plane_ns = getattr(getattr(self._runtime, "config", None), "namespace", "devai")
+        namespace = sandbox_namespace(record.id)
         try:
             await self._runtime.connect()
-            for manifest in build_isolation_manifests(record, namespace=namespace):
+            # The namespace is the boundary; everything else lives inside it.
+            await self._runtime.apply_manifest(build_namespace_manifest(record))
+            await self._runtime.apply_manifest(build_service_account_manifest(namespace))
+            await self._copy_pull_secret(control_plane_ns, namespace)
+            for manifest in build_isolation_manifests(
+                record, namespace=namespace, control_plane_namespace=control_plane_ns
+            ):
                 await self._runtime.apply_manifest(manifest)
             await self._provision_identity(record, namespace)
             detail = await self._provision_egress(record, namespace)
             detail.update(await self._provision_agent_runtime(record, namespace) or {})
             detail.update(await self._provision_workspace(record, namespace) or {})
+            detail["namespace"] = namespace
         except Exception as e:  # noqa: BLE001 — a cluster failure is a sandbox outcome, not a crash
             logger.warning("sandbox %s: provisioning failed", record.id, exc_info=True)
             return await self._set(record, SandboxStatus.FAILED, {"error": str(e)})
         return await self._set(record, SandboxStatus.READY, detail)
+
+    async def _copy_pull_secret(self, control_plane_ns: str, namespace: str) -> None:
+        pull_secret = getattr(getattr(self._runtime, "config", None), "pull_secret_name", None)
+        if not pull_secret:
+            return
+        await self._runtime.copy_secret(pull_secret, from_namespace=control_plane_ns, to_namespace=namespace)
 
     async def _provision_identity(self, record: SandboxRecord, namespace: str) -> None:
         """The sandbox's own Secret: how it proves to the broker that it is itself.
@@ -115,6 +135,18 @@ class SandboxProvisioner:
 
     async def teardown(self, record: SandboxRecord) -> SandboxRecord:
         await self._set(record, SandboxStatus.DESTROYING)
+        ns = recorded_namespace(record)
+        if ns:
+            # Namespaced sandbox: snapshot while the objects still exist, then
+            # one namespace delete and Kubernetes GC does the rest.
+            detail = await self._snapshot(record, ns)
+            if self._broker is not None:
+                await self._broker.revoke_all(record.id)
+            try:
+                await self._runtime.delete_namespace(ns)
+            except Exception:  # noqa: BLE001 — already gone is the desired end state
+                logger.debug("sandbox %s: namespace %s already absent", record.id, ns)
+            return await self._set(record, SandboxStatus.DESTROYED, detail)
         namespace = getattr(getattr(self._runtime, "config", None), "namespace", "devai")
         if self._broker is not None:
             await self._broker.revoke_all(record.id)
@@ -143,7 +175,7 @@ class SandboxProvisioner:
         if not record.spec.workspace:
             return None
         try:
-            token = await self._runtime.read_secret_key(f"devai-sandbox-ws-{record.id}", "token")
+            token = await self._runtime.read_secret_key(f"devai-sandbox-ws-{record.id}", "token", namespace)
             client = WorkspaceClient(workspace_service_host(record.id, namespace=namespace), token=token)
             return {"snapshot": await capture(client)}
         except Exception as e:  # noqa: BLE001

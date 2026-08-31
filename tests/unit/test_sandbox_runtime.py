@@ -389,6 +389,9 @@ class _FakeRuntime:
     async def delete_manifest(self, kind: str, name: str, namespace: str) -> None:
         self.deleted.append((kind, name))
 
+    async def delete_namespace(self, name: str) -> None:
+        self.deleted_namespaces = [*getattr(self, "deleted_namespaces", []), name]
+
 
 class _FakeStore:
     def __init__(self) -> None:
@@ -406,9 +409,9 @@ async def test_provisioning_walks_pending_to_ready() -> None:
 
     assert store.statuses == ["provisioning", "ready"]
     assert record.status is SandboxStatus.READY
-    # quota, limits, egress policy, the sandbox's own Secret, then the proxy's
-    # configmap/pod/service
-    assert len(runtime.created) == 7
+    # namespace, service account, quota, limits, egress policy, the sandbox's
+    # own Secret, then the proxy's configmap/pod/service
+    assert len(runtime.created) == 9
 
 
 @pytest.mark.asyncio
@@ -450,7 +453,61 @@ async def test_teardown_removes_every_isolation_object() -> None:
         "Service",
         "Secret",
     }
+    assert getattr(runtime, "deleted_namespaces", []) == []
     assert store.statuses[-1] == "destroyed"
+
+
+# ── per-sandbox namespace lifecycle ───────────────────────────────────────
+
+
+class _FakeBroker:
+    def __init__(self) -> None:
+        self.revoked: list[str] = []
+
+    async def grant(self, record: Any, *, kind: str, scope: str) -> tuple[str, str]:
+        return ("grant-1", "tok")
+
+    async def revoke_all(self, sandbox_id: str) -> None:
+        self.revoked.append(sandbox_id)
+
+
+@pytest.mark.asyncio
+async def test_provision_creates_namespace_first_and_records_it() -> None:
+    runtime, store = _FakeRuntime(), _FakeStore()
+
+    record = await SandboxProvisioner(runtime, store).provision(_record())
+
+    ns = f"devai-sbx-{record.id}"
+    kinds = [m["kind"] for m in runtime.created]
+    assert kinds[0] == "Namespace"
+    assert kinds[1] == "ServiceAccount"
+    assert runtime.created[0]["metadata"]["name"] == ns
+    for manifest in runtime.created[1:]:
+        assert manifest["metadata"]["namespace"] == ns
+    assert record.detail["namespace"] == ns
+
+
+@pytest.mark.asyncio
+async def test_teardown_namespaced_record_deletes_namespace() -> None:
+    runtime, store, broker = _FakeRuntime(), _FakeStore(), _FakeBroker()
+    record = _record().model_copy(update={"detail": {"namespace": "devai-sbx-sb-123"}})
+
+    await SandboxProvisioner(runtime, store, broker=broker).teardown(record)
+
+    assert runtime.deleted_namespaces == ["devai-sbx-sb-123"]
+    assert runtime.deleted == []
+    assert broker.revoked == [record.id]
+    assert store.statuses[-1] == "destroyed"
+
+
+@pytest.mark.asyncio
+async def test_teardown_legacy_record_uses_object_loop() -> None:
+    runtime, store = _FakeRuntime(), _FakeStore()
+
+    await SandboxProvisioner(runtime, store).teardown(_record())
+
+    assert getattr(runtime, "deleted_namespaces", []) == []
+    assert runtime.deleted  # per-object deletes, as before
 
 
 # ── cluster client dispatch ───────────────────────────────────────────────
