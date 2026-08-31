@@ -348,3 +348,32 @@ def test_every_kind_a_sandbox_emits_can_be_applied() -> None:
     ]
     for manifest in manifests:
         rt._manifest_api(manifest["kind"])  # noqa: SLF001 — raises if unroutable
+
+
+def test_dns_egress_allows_the_cluster_nameserver_ip(tmp_path, monkeypatch):
+    """GKE Dataplane V2 matches the kube-dns ClusterIP, which a kube-system
+    namespaceSelector alone does not cover — without the ipBlock every lookup
+    from the sandbox times out.
+    """
+    from devai.sandbox import isolation
+    from devai.sandbox.isolation import build_isolation_manifests
+
+    resolv = tmp_path / "resolv.conf"
+    resolv.write_text("search devai.svc.cluster.local svc.cluster.local\nnameserver 10.30.0.10\noptions ndots:5\n")
+    monkeypatch.setattr(isolation, "_RESOLV_CONF", str(resolv))
+
+    policy = build_isolation_manifests(_record(), namespace="devai-sbx-sb1234")[2]
+    dns_rule = policy["spec"]["egress"][0]
+    assert {"ipBlock": {"cidr": "10.30.0.10/32"}} in dns_rule["to"]
+    assert {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}} in dns_rule["to"]
+
+
+def test_dns_egress_survives_a_missing_resolv_conf(monkeypatch):
+    from devai.sandbox import isolation
+    from devai.sandbox.isolation import build_isolation_manifests
+
+    monkeypatch.setattr(isolation, "_RESOLV_CONF", "/nonexistent/resolv.conf")
+
+    policy = build_isolation_manifests(_record(), namespace="devai-sbx-sb1234")[2]
+    dns_rule = policy["spec"]["egress"][0]
+    assert {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}} in dns_rule["to"]

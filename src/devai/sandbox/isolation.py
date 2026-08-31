@@ -89,6 +89,24 @@ def build_isolation_manifests(
     return [quota, limits, policy]
 
 
+_RESOLV_CONF = "/etc/resolv.conf"
+
+
+def _dns_server_ips() -> list[str]:
+    """Nameserver IPs from this pod's own resolv.conf.
+
+    On GKE the kube-dns *ClusterIP* is what a NetworkPolicy must allow — the
+    kube-system namespaceSelector matches pod IPs only, so without these
+    ipBlocks every lookup from the sandbox times out.
+    """
+    try:
+        with open(_RESOLV_CONF) as fh:
+            lines = fh.readlines()
+    except OSError:
+        return []
+    return [parts[1] for line in lines if (parts := line.split()) and parts[0] == "nameserver" and len(parts) > 1]
+
+
 def _egress_rules(namespace: str, control_plane_namespace: str) -> list[dict[str, Any]]:
     """DNS, the sandbox's own namespace, then the control-plane *pods* only.
 
@@ -97,9 +115,13 @@ def _egress_rules(namespace: str, control_plane_namespace: str) -> list[dict[str
     and mock the call. The pod selector on the control-plane rule is what
     keeps Postgres/Redis in that namespace unreachable.
     """
+    dns_to: list[dict[str, Any]] = [
+        {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}
+    ]
+    dns_to += [{"ipBlock": {"cidr": f"{ip}/32"}} for ip in _dns_server_ips()]
     return [
         {
-            "to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}],
+            "to": dns_to,
             "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}],
         },
         {
