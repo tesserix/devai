@@ -218,29 +218,38 @@ class K8sJobRuntime:
 
     # ── high-level helpers ───────────────────────────────────────────
 
-    async def create_job(self, job_spec: Any) -> str:
-        """Create a Job in the runtime namespace, return its full name."""
+    async def create_job(self, job_spec: Any, *, namespace: str | None = None) -> str:
+        """Create a Job, return its full name.
+
+        The namespace is the explicit argument, else the one on the manifest
+        (a sandboxed Job carries its own), else the runtime namespace.
+        """
         from devai.runtime.errors import JobDispatchFailed
 
+        manifest_ns = None
+        if isinstance(job_spec, dict):
+            manifest_ns = job_spec.get("metadata", {}).get("namespace")
+        ns = namespace or manifest_ns or self._config.namespace
         try:
-            created = await self._batch_v1.create_namespaced_job(namespace=self._config.namespace, body=job_spec)
+            created = await self._batch_v1.create_namespaced_job(namespace=ns, body=job_spec)
         except Exception as e:  # noqa: BLE001 — surface every API error
             raise JobDispatchFailed(f"create_namespaced_job: {e}") from e
         name = created.metadata.name
-        logger.info("k8s runtime: created job %s/%s", self._config.namespace, name)
+        logger.info("k8s runtime: created job %s/%s", ns, name)
         return name
 
-    async def delete_job(self, name: str, *, propagation: str = "Background") -> None:
+    async def delete_job(self, name: str, *, namespace: str | None = None, propagation: str = "Background") -> None:
         """Best-effort Job deletion — used by stage cleanup and TTL trims."""
         from kubernetes_asyncio import client as k8s_client
 
+        ns = namespace or self._config.namespace
         try:
             await self._batch_v1.delete_namespaced_job(
                 name=name,
-                namespace=self._config.namespace,
+                namespace=ns,
                 body=k8s_client.V1DeleteOptions(propagation_policy=propagation),
             )
-            logger.info("k8s runtime: deleted job %s/%s", self._config.namespace, name)
+            logger.info("k8s runtime: deleted job %s/%s", ns, name)
         except Exception:  # noqa: BLE001
             logger.exception("k8s runtime: delete_job failed for %s", name)
 
@@ -260,6 +269,7 @@ class K8sJobRuntime:
             "ConfigMap": (self._core_v1, "config_map"),
             "Pod": (self._core_v1, "pod"),
             "Service": (self._core_v1, "service"),
+            "ServiceAccount": (self._core_v1, "service_account"),
         }
         if kind not in table:
             raise ValueError(f"unsupported manifest kind: {kind}")
@@ -267,6 +277,15 @@ class K8sJobRuntime:
 
     async def apply_manifest(self, manifest: dict[str, Any]) -> None:
         """Create the object, or patch it if a previous sandbox left one behind."""
+        if manifest["kind"] == "Namespace":
+            # Cluster-scoped — the per-sandbox boundary object itself.
+            try:
+                await self._core_v1.create_namespace(body=manifest)
+            except Exception as e:  # noqa: BLE001
+                if getattr(e, "status", None) != 409:
+                    raise
+                await self._core_v1.patch_namespace(name=manifest["metadata"]["name"], body=manifest)
+            return
         api, suffix = self._manifest_api(manifest["kind"])
         ns = manifest["metadata"].get("namespace") or self._config.namespace
         name = manifest["metadata"]["name"]
@@ -278,8 +297,20 @@ class K8sJobRuntime:
             await getattr(api, f"patch_namespaced_{suffix}")(name=name, namespace=ns, body=manifest)
 
     async def delete_manifest(self, kind: str, name: str, namespace: str | None = None) -> None:
+        if kind == "Namespace":
+            await self._core_v1.delete_namespace(name=name)
+            return
         api, suffix = self._manifest_api(kind)
         await getattr(api, f"delete_namespaced_{suffix}")(name=name, namespace=namespace or self._config.namespace)
+
+    async def delete_namespace(self, name: str) -> None:
+        """Delete a sandbox namespace — the whole boundary in one call."""
+        await self._core_v1.delete_namespace(name=name)
+
+    async def list_namespaces(self, label_selector: str) -> list[dict[str, Any]]:
+        """Plain-dict namespace listing, used by the sandbox reaper."""
+        out = await self._core_v1.list_namespace(label_selector=label_selector)
+        return [item.to_dict() if hasattr(item, "to_dict") else item for item in out.items]
 
     async def read_secret_key(self, name: str, key: str, namespace: str | None = None) -> str:
         """One key out of a Secret — used for per-sandbox capability tokens."""
@@ -292,16 +323,16 @@ class K8sJobRuntime:
             raise KeyError(f"secret {name} has no key {key}")
         return base64.b64decode(raw).decode()
 
-    async def get_job(self, name: str) -> Any:
+    async def get_job(self, name: str, *, namespace: str | None = None) -> Any:
         """Read a Job's current state."""
-        return await self._batch_v1.read_namespaced_job(name=name, namespace=self._config.namespace)
+        return await self._batch_v1.read_namespaced_job(name=name, namespace=namespace or self._config.namespace)
 
-    async def pod_logs(self, pod_name: str, *, tail_lines: int = 500) -> str:
+    async def pod_logs(self, pod_name: str, *, namespace: str | None = None, tail_lines: int = 500) -> str:
         """Fetch the (truncated) stdout of a pod. Used for failure triage."""
         try:
             return await self._core_v1.read_namespaced_pod_log(
                 name=pod_name,
-                namespace=self._config.namespace,
+                namespace=namespace or self._config.namespace,
                 tail_lines=tail_lines,
             )
         except Exception as e:  # noqa: BLE001
@@ -581,12 +612,12 @@ class K8sJobRuntime:
             logger.warning("k8s runtime: patch_preview_service(%s) failed", name, exc_info=True)
             return False
 
-    async def find_pod_for_job(self, job_name: str) -> str | None:
+    async def find_pod_for_job(self, job_name: str, *, namespace: str | None = None) -> str | None:
         """First pod matching `job-name=<job_name>`. None if the Job hasn't
         scheduled a pod yet (or already cleaned up)."""
         try:
             pods = await self._core_v1.list_namespaced_pod(
-                namespace=self._config.namespace,
+                namespace=namespace or self._config.namespace,
                 label_selector=f"job-name={job_name}",
                 limit=1,
             )
