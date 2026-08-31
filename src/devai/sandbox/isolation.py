@@ -86,7 +86,37 @@ def build_isolation_manifests(
             "ingress": _ingress_rules(control_plane_namespace),
         },
     }
-    return [quota, limits, policy]
+    proxy_policy = {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": _meta(sid, "devai-sandbox-proxy-egress", namespace),
+        "spec": {
+            # The main policy above also selects the proxy (it carries the
+            # sandbox label) and would strand it; this additive policy opens
+            # web ports to public IPs only, so the proxy cannot pivot inward.
+            "podSelector": {"matchLabels": {SANDBOX_LABEL: sid, "app.kubernetes.io/component": "sandbox-proxy"}},
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "ipBlock": {
+                                "cidr": "0.0.0.0/0",
+                                "except": [
+                                    "10.0.0.0/8",
+                                    "172.16.0.0/12",
+                                    "192.168.0.0/16",
+                                    "169.254.0.0/16",
+                                ],
+                            }
+                        }
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 443}, {"protocol": "TCP", "port": 80}],
+                }
+            ],
+        },
+    }
+    return [quota, limits, policy, proxy_policy]
 
 
 _RESOLV_CONF = "/etc/resolv.conf"
