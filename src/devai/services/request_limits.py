@@ -52,20 +52,20 @@ class BodySizeLimitMiddleware:
 
         declared = _content_length(scope)
         if declared is not None and declared > limit:
-            await self._reject(scope, send, limit)
+            await self._reject(scope, receive, send, limit)
             return
 
         body, overflowed = await _read_capped(receive, limit)
         if overflowed:
-            await self._reject(scope, send, limit)
+            await self._reject(scope, receive, send, limit)
             return
 
-        await self.app(scope, _replay(body), send)
+        await self.app(scope, _replay(body, receive), send)
 
-    async def _reject(self, scope: Scope, send: Send, limit: int) -> None:
+    async def _reject(self, scope: Scope, receive: Receive, send: Send, limit: int) -> None:
         logger.warning("Request body over %d bytes rejected on %s", limit, scope.get("path", ""))
         response = JSONResponse({"detail": "Request body too large"}, status_code=413)
-        await response(scope, _replay(b""), send)
+        await response(scope, _replay(b"", receive), send)
 
 
 def _content_length(scope: Scope) -> int | None:
@@ -127,14 +127,14 @@ async def enforce_rate_limit(
         raise HTTPException(status_code=429, detail="Rate limit exceeded — try again shortly")
 
 
-def _replay(body: bytes) -> Receive:
+def _replay(body: bytes, receive: Receive) -> Receive:
     sent = False
 
-    async def receive() -> Message:
+    async def replay() -> Message:
         nonlocal sent
-        if sent:
-            return {"type": "http.disconnect"}
-        sent = True
-        return {"type": "http.request", "body": body, "more_body": False}
+        if not sent:
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return await receive()
 
-    return receive
+    return replay
