@@ -92,6 +92,16 @@ class PrincipalSCMResolver:
         return await self.resolve(Principal(uid="", email=email))
 
     async def resolve(self, principal: Principal | None) -> SCMClient | None:
+        pair = await self.resolve_with_overlay(principal)
+        return pair[0] if pair is not None else None
+
+    async def resolve_with_overlay(self, principal: Principal | None) -> tuple[SCMClient, Any] | None:
+        """The user's own SCM client plus the settings overlay it came from.
+
+        For callers that also need connector prefs (e.g. ``scm_organization``
+        to scope a repo listing). Same contract as :meth:`resolve`: never
+        raises, ``None`` when nothing user-specific applies.
+        """
         if self._service is None or principal is None:
             return None
         try:
@@ -103,7 +113,7 @@ class PrincipalSCMResolver:
             fingerprint = "|".join(f"{a}={getattr(overlay, a)!r}" for a in sorted(relevant))
             cached = self._cache.get(fingerprint)
             if cached is not None:
-                return cached
+                return cached, overlay
 
             from devai.scm.factory import create_scm_client
 
@@ -119,7 +129,7 @@ class PrincipalSCMResolver:
                 getattr(overlay, "scm_provider", "?"),
                 getattr(overlay, "scm_auth_method", "?"),
             )
-            return client
+            return client, overlay
         except Exception:  # noqa: BLE001
             logger.warning("settings: per-user SCM resolution failed — using platform client", exc_info=True)
             return None

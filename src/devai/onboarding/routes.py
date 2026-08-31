@@ -51,6 +51,70 @@ def _service(request: Request) -> OnboardingService:
     return svc
 
 
+# One scoped service per (user, connection) so its 5-min catalog cache
+# survives across requests. Bounded like the SCM resolver's client cache.
+_SCOPED_MAX = 64
+_scoped: dict[tuple[str, int, str], OnboardingService] = {}
+
+
+CONNECT_HINT = (
+    "No GitHub connection yet. Connect your own GitHub in Settings → Source Control "
+    "(personal access token or GitHub App) to work with your repositories."
+)
+
+
+def _platform_scm_allowed(request: Request, principal: Any) -> bool:
+    """Whether this caller may fall back to the platform's own GitHub.
+
+    The platform credentials belong to the app owners; when auth is enforced
+    only principals holding the "admin" role (DEVAI_ADMIN_EMAILS) inherit
+    them. With auth off (local dev) everyone falls through, as before.
+    """
+    config = getattr(request.app.state, "config", None)
+    if config is None or not getattr(config, "require_auth", False):
+        return True
+    roles = list(getattr(principal, "roles", []) or []) if principal is not None else []
+    return "admin" in roles
+
+
+async def _service_for(request: Request) -> OnboardingService:
+    """The onboarding service acting as the caller.
+
+    A user whose Settings connect their own Source Control (PAT or GitHub
+    App) gets a service on THEIR credentials, scoped to their configured
+    organization ("" = every repo their token can see). Platform owners
+    (admin role) fall back to the platform's GitHub; everyone else gets a
+    clear 403 telling them to connect their own.
+    """
+    platform = _service(request)
+    resolver = getattr(request.app.state, "scm_resolver", None)
+    try:
+        principal = await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500 a listing
+        principal = None
+    pair = None
+    if resolver is not None and principal is not None:
+        try:
+            pair = await resolver.resolve_with_overlay(principal)
+        except Exception:  # noqa: BLE001 — degrade rather than 500
+            logger.warning("onboarding: per-user SCM resolution failed", exc_info=True)
+    if pair is None:
+        if _platform_scm_allowed(request, principal):
+            return platform
+        raise HTTPException(status_code=403, detail=CONNECT_HINT)
+    client, overlay = pair
+    org = str(getattr(overlay, "scm_organization", "") or "")
+    viewer = str(getattr(principal, "email", "") or "")
+    key = (viewer, id(client), org)
+    svc = _scoped.get(key)
+    if svc is None:
+        if len(_scoped) >= _SCOPED_MAX:
+            _scoped.clear()
+        svc = platform.scoped_to(client, org=org, viewer=viewer)
+        _scoped[key] = svc
+    return svc
+
+
 async def _require_principal(request: Request) -> None:
     """Gate a mutating onboarding action behind a real principal.
 
@@ -120,7 +184,7 @@ async def list_org_repos(
     the current page, with each repo's onboarding ``state`` resolved from
     the store and a marker probe.
     """
-    svc = _service(request)
+    svc = await _service_for(request)
     try:
         # Bound the whole catalog build so a slow upstream returns a clean JSON
         # error well before an edge gateway (e.g. Cloudflare ~100s) would cut
@@ -164,7 +228,7 @@ class OnboardRequest(BaseModel):
 async def list_onboarded(
     request: Request, state: str = Query("", description="Filter by state")
 ) -> list[dict[str, Any]]:
-    svc = _service(request)
+    svc = await _service_for(request)
     rows = await svc.list_onboarded(state=state or None)
     return [r.to_dict() for r in rows]
 
@@ -173,7 +237,7 @@ async def list_onboarded(
 async def onboard_repos(request: Request, body: OnboardRequest) -> dict[str, Any]:
     """Onboard one or many repos — opens a gated PR adding the marker."""
     await _require_principal(request)
-    svc = _service(request)
+    svc = await _service_for(request)
     try:
         return await svc.onboard(
             repos=[(r.owner, r.name) for r in body.repos],
@@ -209,7 +273,7 @@ async def create_and_onboard_repo(request: Request, body: CreateRepoRequest) -> 
     import httpx
 
     await _require_principal(request)
-    svc = _service(request)
+    svc = await _service_for(request)
     try:
         return await svc.create_and_onboard(
             body.name,
@@ -245,7 +309,7 @@ async def create_and_onboard_repo(request: Request, body: CreateRepoRequest) -> 
 @router.get("/onboarded/{owner}/{name}")
 async def get_onboarded(request: Request, owner: str, name: str) -> dict[str, Any]:
     _check_repo(owner, name)
-    svc = _service(request)
+    svc = await _service_for(request)
     row = await svc.get(owner, name)
     if row is None:
         raise HTTPException(status_code=404, detail=f"{owner}/{name} not onboarded")
@@ -268,7 +332,7 @@ async def mark_onboarding_pr_ready(request: Request, owner: str, name: str) -> d
     """Promote the draft onboarding PR to a ready-for-review (real) PR."""
     await _require_principal(request)
     _check_repo(owner, name)
-    svc = _service(request)
+    svc = await _service_for(request)
     try:
         row = await svc.mark_ready(owner, name)
     except ValueError as e:
@@ -285,7 +349,7 @@ async def merge_onboarding_pr(
     """Merge the onboarding PR from inside DevAI and flip the repo to onboarded."""
     await _require_principal(request)
     _check_repo(owner, name)
-    svc = _service(request)
+    svc = await _service_for(request)
     method = (body.method if body else "squash") or "squash"
     if method not in ("merge", "squash", "rebase"):
         raise HTTPException(status_code=422, detail="invalid merge method")
@@ -321,7 +385,7 @@ async def assign_reviewer(request: Request, owner: str, name: str, body: AssignR
     """Request a reviewer on the onboarding PR (assign-to-approve flow)."""
     await _require_principal(request)
     _check_repo(owner, name)
-    svc = _service(request)
+    svc = await _service_for(request)
     try:
         return await svc.assign_reviewer(owner, name, body.reviewers)
     except ValueError as e:
@@ -334,7 +398,7 @@ async def assign_reviewer(request: Request, owner: str, name: str, body: AssignR
 async def archive_onboarded(request: Request, owner: str, name: str) -> dict[str, Any]:
     await _require_principal(request)
     _check_repo(owner, name)
-    svc = _service(request)
+    svc = await _service_for(request)
     row = await svc.archive(owner, name)
     if row is None:
         raise HTTPException(status_code=404, detail=f"{owner}/{name} not onboarded")
@@ -349,7 +413,7 @@ async def reconcile(
     await _require_principal(request)
     if org and not _valid_segment(org):
         raise HTTPException(status_code=422, detail="invalid org")
-    svc = _service(request)
+    svc = await _service_for(request)
     try:
         return await svc.reconcile(org=org)
     except Exception as e:  # noqa: BLE001
