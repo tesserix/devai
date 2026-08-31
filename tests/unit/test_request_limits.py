@@ -1,9 +1,11 @@
 """Request body size caps and per-principal rate limiting."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from devai.services.guardrails import RateLimiter
@@ -28,6 +30,14 @@ def _app() -> FastAPI:
     async def hook(request: Request):
         return {"size": len(await request.body())}
 
+    @app.post("/api/stream")
+    async def stream():
+        async def chunks():
+            await asyncio.sleep(0.01)
+            yield b"stream-ready"
+
+        return StreamingResponse(chunks(), media_type="text/plain")
+
     return app
 
 
@@ -42,6 +52,15 @@ def test_small_body_passes():
     r = client.post("/api/echo", content=b"x" * 1000)
     assert r.status_code == 200
     assert r.json()["size"] == 1000
+
+
+def test_buffered_request_does_not_disconnect_streaming_response():
+    client = TestClient(_app())
+
+    response = client.post("/api/stream", content=b"request")
+
+    assert response.status_code == 200
+    assert response.text == "stream-ready"
 
 
 def test_oversized_api_body_is_rejected():
