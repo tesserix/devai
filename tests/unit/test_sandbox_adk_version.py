@@ -31,7 +31,8 @@ class _FakeDB:
     async def set_sandbox_status(self, sandbox_id: str, status: str, detail: dict[str, Any] | None = None) -> None:
         self.rows[sandbox_id]["status"] = status
 
-    async def touch_sandbox(self, sandbox_id: str) -> None:
+    async def touch_sandbox(self, sandbox_id: str, ttl_seconds: int) -> None:
+        del ttl_seconds
         self.rows[sandbox_id]["last_access_at"] = datetime.now(UTC)
 
 
