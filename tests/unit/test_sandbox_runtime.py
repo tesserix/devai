@@ -257,6 +257,42 @@ def test_the_pod_runs_restricted() -> None:
     assert sc["capabilities"]["drop"] == ["ALL"]
 
 
+# ── per-sandbox namespace on the boundary ─────────────────────────────────
+
+
+def _ns_record() -> SandboxRecord:
+    record = _record()
+    record.detail["namespace"] = "devai-sbx-x"
+    return record
+
+
+def test_boundary_stamps_record_namespace() -> None:
+    job = _job(_ns_record())
+    assert job["metadata"]["namespace"] == "devai-sbx-x"
+    assert "devai-sbx-x.svc" in _env(job)["HTTP_PROXY"]["value"]
+
+
+def test_boundary_legacy_record_keeps_job_namespace() -> None:
+    # No recorded namespace → the job keeps the control-plane one it was built with.
+    assert _job()["metadata"]["namespace"] == "devai"
+
+
+def test_boundary_readonly_rootfs() -> None:
+    job = _job()
+    container = job["spec"]["template"]["spec"]["containers"][0]
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
+    assert {"name": "tmp", "mountPath": "/tmp"} in container["volumeMounts"]
+    assert {"name": "tmp", "emptyDir": {}} in job["spec"]["template"]["spec"]["volumes"]
+    assert _env(job)["HOME"]["value"] == "/devai/work"
+
+
+def test_boundary_runtime_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEVAI_SANDBOX_RUNTIME_CLASS", "gvisor")
+    assert _job()["spec"]["template"]["spec"]["runtimeClassName"] == "gvisor"
+    monkeypatch.delenv("DEVAI_SANDBOX_RUNTIME_CLASS")
+    assert "runtimeClassName" not in _job()["spec"]["template"]["spec"]
+
+
 # ── dispatch hook ─────────────────────────────────────────────────────────
 
 

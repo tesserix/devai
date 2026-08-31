@@ -652,6 +652,8 @@ class Settings(BaseSettings):
     sandbox_max_eval_cases_per_run: int = 50
     sandbox_eval_max_concurrency: int = 4
     sandbox_spend_alert_ratio: float = 0.8
+    # RuntimeClass for sandbox pods (e.g. "gvisor"); empty = node default runtime.
+    sandbox_runtime_class: str = ""
 
     # --- Agent Registry (aregistry HTTP client) ---
     # The shared catalog of skills + prompts + MCP servers + agents.
