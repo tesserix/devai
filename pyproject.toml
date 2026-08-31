@@ -58,7 +58,7 @@ dependencies = [
     "langchain-core>=0.3",
     "langchain-anthropic>=0.3",
     "langchain-openai>=1.3.5",
-    "langchain-community>=0.3",
+    "langchain-community>=0.4.2",
     "langsmith>=0.2",
     # Kubernetes — async client backs the Job-runner stage that spawns
     # a Pod per agent run. See src/devai/runtime/k8s_client.py.
