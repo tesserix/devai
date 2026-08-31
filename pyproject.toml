@@ -68,7 +68,7 @@ dependencies = [
     # when DEVAI_WORKFLOW_PROVIDER=temporal; with the default inproc provider it
     # is imported lazily only inside the temporal adapter, so it never loads.
     # Shipped in the image so the worker can run without a custom build.
-    "temporalio>=1.7.0",
+    "temporalio>=1.32.0",
     # Remote conversational channels (src/devai/adapters/messaging). MCP server
     # (FastMCP, Streamable HTTP) exposes DevAI at /mcp; slack_sdk backs the
     # Slack Events API channel. Both are imported lazily inside their channels,
