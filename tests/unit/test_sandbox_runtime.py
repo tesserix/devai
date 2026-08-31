@@ -328,13 +328,18 @@ def _by_kind(manifests: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {m["kind"]: m for m in manifests}
 
 
+def _main_policy(manifests: list[dict[str, Any]]) -> dict[str, Any]:
+    # Two NetworkPolicies now: the sandbox fence and the proxy's web egress.
+    return next(m for m in manifests if m["metadata"]["name"].startswith("devai-sandbox-egress-"))
+
+
 def test_isolation_ships_a_quota_a_limitrange_and_a_network_policy() -> None:
     kinds = set(_by_kind(build_isolation_manifests(_record(), namespace=_NS)))
     assert kinds == {"ResourceQuota", "LimitRange", "NetworkPolicy"}
 
 
 def test_egress_is_default_deny_with_an_explicit_allow_list() -> None:
-    np = _by_kind(build_isolation_manifests(_record(), namespace=_NS))["NetworkPolicy"]
+    np = _main_policy(build_isolation_manifests(_record(), namespace=_NS))
     assert "Egress" in np["spec"]["policyTypes"]
     assert np["spec"]["podSelector"]["matchLabels"][SANDBOX_LABEL] == "sb-123"
     # An empty egress list would be a silent allow-all in some CNIs; DNS must be
@@ -409,9 +414,9 @@ async def test_provisioning_walks_pending_to_ready() -> None:
 
     assert store.statuses == ["provisioning", "ready"]
     assert record.status is SandboxStatus.READY
-    # namespace, service account, quota, limits, egress policy, the sandbox's
-    # own Secret, then the proxy's configmap/pod/service
-    assert len(runtime.created) == 9
+    # namespace, service account, quota, limits, egress + proxy-egress
+    # policies, the sandbox's own Secret, then the proxy's configmap/pod/service
+    assert len(runtime.created) == 10
 
 
 @pytest.mark.asyncio
@@ -552,6 +557,7 @@ async def test_each_isolation_kind_maps_to_its_api() -> None:
         "create_namespaced_resource_quota",
         "create_namespaced_limit_range",
         "create_namespaced_network_policy",
+        "create_namespaced_network_policy",
     ]
 
 
@@ -609,9 +615,7 @@ def test_isolation_quota_is_namespace_wide() -> None:
 
 
 def test_network_policy_egress_targets_control_plane_pods_only() -> None:
-    np = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))[
-        "NetworkPolicy"
-    ]
+    np = _main_policy(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))
     rules = np["spec"]["egress"]
     own = rules[1]["to"][0]["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"]
     assert own == "devai-sbx-x"
@@ -622,9 +626,7 @@ def test_network_policy_egress_targets_control_plane_pods_only() -> None:
 
 
 def test_network_policy_ingress_is_control_plane_and_own_namespace() -> None:
-    np = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))[
-        "NetworkPolicy"
-    ]
+    np = _main_policy(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))
     frm = np["spec"]["ingress"][0]["from"]
     assert {"podSelector": {}} in frm  # any pod in the sandbox's own namespace
     cp = next(e for e in frm if "namespaceSelector" in e)

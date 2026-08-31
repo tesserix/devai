@@ -377,3 +377,27 @@ def test_dns_egress_survives_a_missing_resolv_conf(monkeypatch):
     policy = build_isolation_manifests(_record(), namespace="devai-sbx-sb1234")[2]
     dns_rule = policy["spec"]["egress"][0]
     assert {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}} in dns_rule["to"]
+
+
+def test_the_proxy_pod_gets_internet_egress_on_web_ports_only():
+    """The main egress policy also selects the proxy pod (it carries the
+    sandbox label), which left the proxy unable to reach even allowlisted
+    domains. A second, additive policy opens 443/80 for the proxy alone —
+    private ranges excluded so it cannot become a pivot into the VPC.
+    """
+    from devai.sandbox.isolation import build_isolation_manifests
+
+    manifests = build_isolation_manifests(_record(), namespace="devai-sbx-sb1234")
+    proxy_policy = next(
+        m
+        for m in manifests
+        if m["kind"] == "NetworkPolicy"
+        and m["spec"]["podSelector"]["matchLabels"].get("app.kubernetes.io/component") == "sandbox-proxy"
+    )
+    (rule,) = proxy_policy["spec"]["egress"]
+    assert {p["port"] for p in rule["ports"]} == {443, 80}
+    (block,) = rule["to"]
+    assert block["ipBlock"]["cidr"] == "0.0.0.0/0"
+    assert "10.0.0.0/8" in block["ipBlock"]["except"]
+    assert "172.16.0.0/12" in block["ipBlock"]["except"]
+    assert "192.168.0.0/16" in block["ipBlock"]["except"]
