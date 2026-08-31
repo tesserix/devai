@@ -207,7 +207,13 @@ class SandboxService:
 
     async def touch(self, sandbox_id: str) -> None:
         with contextlib.suppress(Exception):
-            await self._db.touch_sandbox(sandbox_id)
+            row = await self._db.get_sandbox(sandbox_id)
+            if row is None:
+                return
+            await self._db.touch_sandbox(
+                sandbox_id,
+                SandboxSpec.model_validate(_jsonb(row["spec"])).ttl_seconds,
+            )
 
     async def reap_expired(self) -> int:
         rows = await self._db.expired_sandboxes(datetime.now(UTC))

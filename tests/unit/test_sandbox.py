@@ -50,8 +50,10 @@ class _FakeDB:
             if detail:
                 self.rows[sandbox_id]["detail"] = detail
 
-    async def touch_sandbox(self, sandbox_id: str) -> None:
-        self.rows[sandbox_id]["last_access_at"] = datetime.now(UTC)
+    async def touch_sandbox(self, sandbox_id: str, ttl_seconds: int) -> None:
+        now = datetime.now(UTC)
+        self.rows[sandbox_id]["last_access_at"] = now
+        self.rows[sandbox_id]["expires_at"] = now + timedelta(seconds=ttl_seconds)
 
     async def expired_sandboxes(self, now: datetime) -> list[dict[str, Any]]:
         return [r for r in self.rows.values() if r["status"] != "destroyed" and r["expires_at"] <= now]
@@ -392,6 +394,20 @@ async def test_expired_sandboxes_are_reaped() -> None:
     assert await svc.reap_expired() == 1
     assert db.rows[rec.id]["status"] == "destroyed"
     assert await svc.reap_expired() == 0  # already destroyed — not reaped twice
+
+
+@pytest.mark.asyncio
+async def test_activity_resets_the_sandbox_idle_deadline() -> None:
+    db = _FakeDB()
+    svc = _service(db)
+    rec = await svc.create(SandboxSpec.model_validate(_MIN_SPEC), owner="sam@example.com")
+    previous_deadline = rec.expires_at
+
+    await svc.touch(rec.id)
+
+    assert db.rows[rec.id]["last_access_at"] > rec.last_access_at
+    assert db.rows[rec.id]["expires_at"] > previous_deadline
+    assert db.rows[rec.id]["expires_at"] - db.rows[rec.id]["last_access_at"] == timedelta(hours=4)
 
 
 # ── provisioning ──────────────────────────────────────────────────────

@@ -1560,8 +1560,18 @@ class Database:
             json.dumps(detail) if detail else None,
         )
 
-    async def touch_sandbox(self, sandbox_id: str) -> None:
-        await self.pool.execute("UPDATE sandboxes SET last_access_at = NOW() WHERE id = $1", sandbox_id)
+    async def touch_sandbox(self, sandbox_id: str, ttl_seconds: int) -> None:
+        await self.pool.execute(
+            """
+            UPDATE sandboxes
+            SET last_access_at = NOW(),
+                expires_at = NOW() + make_interval(secs => $2),
+                updated_at = NOW()
+            WHERE id = $1 AND status <> 'destroyed'
+            """,
+            sandbox_id,
+            ttl_seconds,
+        )
 
     async def expired_sandboxes(self, now: datetime, limit: int = 100) -> list[dict[str, Any]]:
         rows = await self.pool.fetch(
