@@ -331,6 +331,7 @@ def create_app(
                         else None
                     ),
                     adk_catalogue=app.state.adk_catalogue,
+                    runtime=sandbox_runtime,
                 )
                 app.state.sandbox_service.start_reaper()
                 logger.info("Sandbox service ready (TTL reaper started)")

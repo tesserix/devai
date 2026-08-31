@@ -280,7 +280,7 @@ async def test_the_proxy_endpoint_is_recorded_on_the_sandbox():
 
     result = await SandboxProvisioner(_FakeRuntime(), _FakeStore()).provision(_record())
 
-    assert result.detail["egress"]["proxy"] == proxy_service_host("sb1234", namespace="devai")
+    assert result.detail["egress"]["proxy"] == proxy_service_host("sb1234", namespace="devai-sbx-sb1234")
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from devai.sandbox.isolation import build_isolation_manifests
-from devai.sandbox.job import SANDBOX_LABEL
 from devai.sandbox.models import SandboxRecord, SandboxSpec, SandboxStatus
 from devai.sandbox.workspace import IDE_PORT, WORKSPACE_ROOT, build_workspace_manifests
 
@@ -70,17 +69,23 @@ def test_the_ide_url_points_at_the_ide_port_of_this_sandbox() -> None:
 def test_no_other_sandbox_can_reach_this_one() -> None:
     """The IDE trusts whoever reaches it, so only the control plane may."""
     policy = next(
-        m for m in build_isolation_manifests(_record(ide=True), namespace="devai") if m["kind"] == "NetworkPolicy"
+        m
+        for m in build_isolation_manifests(_record(ide=True), namespace="devai-sbx-sb-1")
+        if m["kind"] == "NetworkPolicy"
     )
 
     assert "Ingress" in policy["spec"]["policyTypes"]
     allowed = policy["spec"]["ingress"][0]["from"]
 
-    assert {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}}} in allowed
-    # This sandbox's own pods still reach its workspace; every rule that names
-    # a sandbox names *this* one, so another sandbox matches nothing.
-    assert {"podSelector": {"matchLabels": {SANDBOX_LABEL: "sb-1"}}} in allowed
-    assert all(rule["podSelector"]["matchLabels"].get(SANDBOX_LABEL, "sb-1") == "sb-1" for rule in allowed)
+    # Only the control-plane pods cross the namespace boundary; the bare
+    # podSelector admits this sandbox's own namespace, which no other sandbox
+    # shares — so another sandbox matches nothing.
+    assert {
+        "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "devai"}},
+        "podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}},
+    } in allowed
+    assert {"podSelector": {}} in allowed
+    assert all("namespaceSelector" in rule or rule["podSelector"] == {} for rule in allowed)
 
 
 # ── the API in front of it ────────────────────────────────────────────

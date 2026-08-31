@@ -107,7 +107,7 @@ class _Runtime:
     async def delete_manifest(self, kind: str, name: str, namespace: str) -> None:
         self.deleted.append((kind, name))
 
-    async def read_secret_key(self, name: str, key: str) -> str:
+    async def read_secret_key(self, name: str, key: str, namespace: str | None = None) -> str:
         return "ws-token"
 
 

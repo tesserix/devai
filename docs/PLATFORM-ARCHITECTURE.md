@@ -690,6 +690,22 @@ skills, conventions, and decisions persist in the repo itself, so every later ru
 human contributor) inherits them. Combined with skill profiles per stack, this is how repo
 knowledge compounds across runs.
 
+### 15.4 Sandbox boundary (per-sandbox namespaces)
+
+Every agent sandbox is provisioned into its own throwaway namespace
+`devai-sbx-<id>` (PSA `restricted`, owner + managed-by labels); destroy/expiry
+deletes the namespace and Kubernetes GC removes everything inside it. A
+default-deny NetworkPolicy limits egress to DNS, the sandbox's own namespace,
+and the DevAI **control-plane pods only** — Postgres/Redis in the `devai`
+namespace are unreachable from a sandbox — and limits ingress to control-plane
+pods, so sandboxes cannot reach each other. Runner jobs get a read-only root
+filesystem (tmp emptyDir scratch, `HOME=/devai/work`) and a pluggable
+`runtimeClassName` via `DEVAI_SANDBOX_RUNTIME_CLASS` for a future gVisor/microVM
+upgrade. The JobWatcher tracks runner jobs cluster-wide by label; an orphan
+reaper deletes `devai-sbx-*` namespaces whose record is gone. Helm gates the
+required ClusterRole/Binding on `sandbox.namespaceIsolation`. Full model:
+`docs/concepts/sandbox-and-evals.md` § Isolation model.
+
 ---
 
 ## 16. SCM, Webhooks & Triggers

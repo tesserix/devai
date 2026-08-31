@@ -45,12 +45,19 @@ def sandbox_from_stage_config(config: dict[str, Any]) -> SandboxRecord | None:
 
 def apply_sandbox_boundary(job: dict[str, Any], record: SandboxRecord) -> dict[str, Any]:
     """Return a copy of ``job`` fenced into ``record``'s sandbox."""
+    import os
+
+    from devai.sandbox.namespace import recorded_namespace  # local: namespace.py imports from here
+
     job = copy.deepcopy(job)
     spec = record.spec
     sid = record.id
+    namespace = recorded_namespace(record)
 
     for meta in (job["metadata"], job["spec"]["template"]["metadata"]):
         meta.setdefault("labels", {})[SANDBOX_LABEL] = sid
+    if namespace:
+        job["metadata"]["namespace"] = namespace
 
     job["spec"]["backoffLimit"] = 0  # a retried eval doubles the cost and blurs the trajectory
     job["spec"]["ttlSecondsAfterFinished"] = _JOB_TTL_SECONDS
@@ -67,13 +74,21 @@ def apply_sandbox_boundary(job: dict[str, Any], record: SandboxRecord) -> dict[s
         "seccompProfile": {"type": "RuntimeDefault"},
     }
 
+    rc = os.environ.get("DEVAI_SANDBOX_RUNTIME_CLASS", "")
+    if rc:
+        pod["runtimeClassName"] = rc
+
     container = pod["containers"][0]
     container["securityContext"] = {
         "allowPrivilegeEscalation": False,
-        "readOnlyRootFilesystem": False,  # the runner writes its working tree
+        # The working tree lives on the /devai/work emptyDir, so the image
+        # itself can stay immutable; /tmp gets its own scratch mount below.
+        "readOnlyRootFilesystem": True,
         "capabilities": {"drop": ["ALL"]},
     }
-    pinned = _pinned_env(record)
+    pod.setdefault("volumes", []).append({"name": "tmp", "emptyDir": {}})
+    container.setdefault("volumeMounts", []).append({"name": "tmp", "mountPath": "/tmp"})
+    pinned = _pinned_env(record, namespace=namespace)
     pinned_names = {e["name"] for e in pinned}
     inherited = [e for e in _rescope_secrets(container.get("env", []), sid) if e["name"] not in pinned_names]
     container["env"] = inherited + pinned
@@ -130,7 +145,7 @@ def _rescope_secrets(env: list[dict[str, Any]], sandbox_id: str) -> list[dict[st
     return out
 
 
-def _workspace_env(record: SandboxRecord) -> list[dict[str, Any]]:
+def _workspace_env(record: SandboxRecord, *, namespace: str = "") -> list[dict[str, Any]]:
     """Where this sandbox's own workspace is, for the MCP leg to federate.
 
     Absent for a sandbox without a workspace, so the leg resolves to nothing
@@ -142,7 +157,7 @@ def _workspace_env(record: SandboxRecord) -> list[dict[str, Any]]:
 
     if not record.spec.workspace:
         return []
-    namespace = os.environ.get("DEVAI_NAMESPACE") or "devai"
+    namespace = namespace or os.environ.get("DEVAI_NAMESPACE") or "devai"
     env: list[dict[str, Any]] = [
         {"name": "DEVAI_SANDBOX_WORKSPACE", "value": workspace_service_host(record.id, namespace=namespace)},
         {
@@ -155,7 +170,7 @@ def _workspace_env(record: SandboxRecord) -> list[dict[str, Any]]:
     return env
 
 
-def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
+def _pinned_env(record: SandboxRecord, *, namespace: str = "") -> list[dict[str, Any]]:
     """The spec, flattened into env so the pod cannot resolve it differently."""
     from devai.sandbox.egress import proxy_env  # local: egress reads SANDBOX_LABEL from here
 
@@ -183,7 +198,8 @@ def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
         env.append({"name": "DEVAI_SANDBOX_DATASET", "value": f"{spec.dataset.ref}@{spec.dataset.version}"})
     # The only route out: the NetworkPolicy denies the internet, so a tool that
     # ignores these variables fails closed rather than escaping the allowlist.
-    env.extend(proxy_env(record.id))
+    env.extend(proxy_env(record.id, namespace=namespace or None))
+    env.append({"name": "HOME", "value": "/devai/work"})
     env.append(
         {
             "name": "DEVAI_SANDBOX_TOKEN",
@@ -192,7 +208,7 @@ def _pinned_env(record: SandboxRecord) -> list[dict[str, Any]]:
             },
         }
     )
-    env.extend(_workspace_env(record))
+    env.extend(_workspace_env(record, namespace=namespace))
     return env
 
 

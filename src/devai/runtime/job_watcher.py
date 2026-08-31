@@ -183,18 +183,12 @@ class JobWatcher:
             logger.error("job watcher: kubernetes_asyncio missing — loop exiting")
             return
 
-        label_selector = "devai.tesserix.app/role=runner"
-        cfg = self._runtime.config
+        stream_fn, stream_kwargs = self._stream_args()
 
         while not self._stopping.is_set():
             w = watch.Watch()
             try:
-                async with w.stream(
-                    self._runtime.batch_v1.list_namespaced_job,
-                    namespace=cfg.namespace,
-                    label_selector=label_selector,
-                    timeout_seconds=300,  # cycle every 5 min — Watch can stall otherwise
-                ) as stream:
+                async with w.stream(stream_fn, **stream_kwargs) as stream:
                     async for event in stream:
                         if self._stopping.is_set():
                             break
@@ -215,6 +209,14 @@ class JobWatcher:
 
         logger.info("job watcher: loop drained")
 
+    def _stream_args(self) -> tuple[Any, dict[str, Any]]:
+        """Cluster-wide watch: sandbox Jobs live in their own devai-sbx-*
+        namespaces, so a single-namespace watch would go blind to them."""
+        return self._runtime.batch_v1.list_job_for_all_namespaces, {
+            "label_selector": "devai.tesserix.app/role=runner",
+            "timeout_seconds": 300,  # cycle every 5 min — Watch can stall otherwise
+        }
+
     async def _handle_event(self, event: dict[str, Any]) -> None:
         """Inspect a Job watch event; signal waiters if it reached terminal."""
         obj = event.get("object")
@@ -222,7 +224,7 @@ class JobWatcher:
             return
         await self._process_job(obj)
 
-    async def poll_once(self, job_name: str) -> bool:
+    async def poll_once(self, job_name: str, namespace: str | None = None) -> bool:
         """Fallback path for a missed watch event: read the Job directly and
         process it. Returns True if the Job is terminal (outcome parked +
         waiter fired). Best-effort — a transient API error returns False so the
@@ -233,7 +235,7 @@ class JobWatcher:
         can't strand the stage until its timeout.
         """
         try:
-            job = await self._runtime.get_job(job_name)
+            job = await self._runtime.get_job(job_name, namespace=namespace)
         except Exception:  # noqa: BLE001 — keep polling; the watch may still catch it
             logger.debug("job watcher: poll_once(%s) get_job failed", job_name, exc_info=True)
             return False
@@ -274,10 +276,11 @@ class JobWatcher:
             return True
 
         ok = condition_type == "Complete" or (succeeded and not failed)
-        pod_name = await self._runtime.find_pod_for_job(job_name)
+        job_ns = _safe_get(obj, ["metadata", "namespace"])
+        pod_name = await self._runtime.find_pod_for_job(job_name, namespace=job_ns)
         logs = ""
         if pod_name is not None:
-            logs = _cap_logs(await self._runtime.pod_logs(pod_name, tail_lines=_MAX_LOG_TAIL_LINES))
+            logs = _cap_logs(await self._runtime.pod_logs(pod_name, namespace=job_ns, tail_lines=_MAX_LOG_TAIL_LINES))
 
         # Recover the structured result + checkpoint timeline from the pod's
         # line-protocol stdout (LOG::/CHECKPOINT::/RESULT::).

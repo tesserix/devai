@@ -40,9 +40,12 @@ def _selector(sandbox_id: str) -> dict[str, Any]:
     return {"matchLabels": {SANDBOX_LABEL: sandbox_id}}
 
 
-def build_isolation_manifests(record: SandboxRecord, *, namespace: str) -> list[dict[str, Any]]:
+def build_isolation_manifests(
+    record: SandboxRecord, *, namespace: str, control_plane_namespace: str = "devai"
+) -> list[dict[str, Any]]:
     """Return the objects that fence this sandbox in, in creation order."""
     sid = record.id
+    # The namespace itself is the fence; no PriorityClass scope split needed.
     quota = {
         "apiVersion": "v1",
         "kind": "ResourceQuota",
@@ -54,9 +57,6 @@ def build_isolation_manifests(record: SandboxRecord, *, namespace: str) -> list[
                 "requests.memory": _QUOTA_MEMORY,
                 "limits.cpu": _QUOTA_CPU,
                 "limits.memory": _QUOTA_MEMORY,
-            },
-            "scopeSelector": {
-                "matchExpressions": [{"operator": "In", "scopeName": "PriorityClass", "values": ["devai-sandbox"]}]
             },
         },
     }
@@ -82,17 +82,21 @@ def build_isolation_manifests(record: SandboxRecord, *, namespace: str) -> list[
         "spec": {
             "podSelector": _selector(sid),
             "policyTypes": ["Egress", "Ingress"],
-            "egress": _egress_rules(namespace),
-            "ingress": _ingress_rules(sid),
+            "egress": _egress_rules(namespace, control_plane_namespace),
+            "ingress": _ingress_rules(control_plane_namespace),
         },
     }
     return [quota, limits, policy]
 
 
-def _egress_rules(namespace: str) -> list[dict[str, Any]]:
-    """DNS, then the in-namespace control plane. Nothing else, including the
-    internet — a sandboxed agent reaches the outside world through the tool
-    gateway, which is the thing that can record and mock the call."""
+def _egress_rules(namespace: str, control_plane_namespace: str) -> list[dict[str, Any]]:
+    """DNS, the sandbox's own namespace, then the control-plane *pods* only.
+
+    Nothing else, including the internet — a sandboxed agent reaches the
+    outside world through the tool gateway, which is the thing that can record
+    and mock the call. The pod selector on the control-plane rule is what
+    keeps Postgres/Redis in that namespace unreachable.
+    """
     return [
         {
             "to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}],
@@ -101,22 +105,31 @@ def _egress_rules(namespace: str) -> list[dict[str, Any]]:
         {
             "to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": namespace}}}],
         },
+        {
+            "to": [
+                {
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": control_plane_namespace}},
+                    "podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}},
+                }
+            ],
+        },
     ]
 
 
-def _ingress_rules(sandbox_id: str) -> list[dict[str, Any]]:
-    """The control plane, and this sandbox's own pods. Nothing else.
+def _ingress_rules(control_plane_namespace: str) -> list[dict[str, Any]]:
+    """The control-plane pods, and anything in the sandbox's own namespace.
 
-    Sandboxes share a namespace, so without this one sandbox could talk to
-    another's workspace — including its IDE, which trusts whoever reaches it.
-    The second rule is what keeps a run's own runner able to reach the
-    workspace it was given.
+    Cross-sandbox traffic is impossible by namespace boundary now; the empty
+    podSelector admits only this namespace's own pods (runner → workspace).
     """
     return [
         {
             "from": [
-                {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}}},
-                {"podSelector": {"matchLabels": {SANDBOX_LABEL: sandbox_id}}},
+                {
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": control_plane_namespace}},
+                    "podSelector": {"matchLabels": {"app.kubernetes.io/name": "devai"}},
+                },
+                {"podSelector": {}},
             ]
         }
     ]

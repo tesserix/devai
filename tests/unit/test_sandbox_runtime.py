@@ -257,6 +257,42 @@ def test_the_pod_runs_restricted() -> None:
     assert sc["capabilities"]["drop"] == ["ALL"]
 
 
+# ── per-sandbox namespace on the boundary ─────────────────────────────────
+
+
+def _ns_record() -> SandboxRecord:
+    record = _record()
+    record.detail["namespace"] = "devai-sbx-x"
+    return record
+
+
+def test_boundary_stamps_record_namespace() -> None:
+    job = _job(_ns_record())
+    assert job["metadata"]["namespace"] == "devai-sbx-x"
+    assert "devai-sbx-x.svc" in _env(job)["HTTP_PROXY"]["value"]
+
+
+def test_boundary_legacy_record_keeps_job_namespace() -> None:
+    # No recorded namespace → the job keeps the control-plane one it was built with.
+    assert _job()["metadata"]["namespace"] == "devai"
+
+
+def test_boundary_readonly_rootfs() -> None:
+    job = _job()
+    container = job["spec"]["template"]["spec"]["containers"][0]
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
+    assert {"name": "tmp", "mountPath": "/tmp"} in container["volumeMounts"]
+    assert {"name": "tmp", "emptyDir": {}} in job["spec"]["template"]["spec"]["volumes"]
+    assert _env(job)["HOME"]["value"] == "/devai/work"
+
+
+def test_boundary_runtime_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEVAI_SANDBOX_RUNTIME_CLASS", "gvisor")
+    assert _job()["spec"]["template"]["spec"]["runtimeClassName"] == "gvisor"
+    monkeypatch.delenv("DEVAI_SANDBOX_RUNTIME_CLASS")
+    assert "runtimeClassName" not in _job()["spec"]["template"]["spec"]
+
+
 # ── dispatch hook ─────────────────────────────────────────────────────────
 
 
@@ -353,6 +389,9 @@ class _FakeRuntime:
     async def delete_manifest(self, kind: str, name: str, namespace: str) -> None:
         self.deleted.append((kind, name))
 
+    async def delete_namespace(self, name: str) -> None:
+        self.deleted_namespaces = [*getattr(self, "deleted_namespaces", []), name]
+
 
 class _FakeStore:
     def __init__(self) -> None:
@@ -370,9 +409,9 @@ async def test_provisioning_walks_pending_to_ready() -> None:
 
     assert store.statuses == ["provisioning", "ready"]
     assert record.status is SandboxStatus.READY
-    # quota, limits, egress policy, the sandbox's own Secret, then the proxy's
-    # configmap/pod/service
-    assert len(runtime.created) == 7
+    # namespace, service account, quota, limits, egress policy, the sandbox's
+    # own Secret, then the proxy's configmap/pod/service
+    assert len(runtime.created) == 9
 
 
 @pytest.mark.asyncio
@@ -414,7 +453,61 @@ async def test_teardown_removes_every_isolation_object() -> None:
         "Service",
         "Secret",
     }
+    assert getattr(runtime, "deleted_namespaces", []) == []
     assert store.statuses[-1] == "destroyed"
+
+
+# ── per-sandbox namespace lifecycle ───────────────────────────────────────
+
+
+class _FakeBroker:
+    def __init__(self) -> None:
+        self.revoked: list[str] = []
+
+    async def grant(self, record: Any, *, kind: str, scope: str) -> tuple[str, str]:
+        return ("grant-1", "tok")
+
+    async def revoke_all(self, sandbox_id: str) -> None:
+        self.revoked.append(sandbox_id)
+
+
+@pytest.mark.asyncio
+async def test_provision_creates_namespace_first_and_records_it() -> None:
+    runtime, store = _FakeRuntime(), _FakeStore()
+
+    record = await SandboxProvisioner(runtime, store).provision(_record())
+
+    ns = f"devai-sbx-{record.id}"
+    kinds = [m["kind"] for m in runtime.created]
+    assert kinds[0] == "Namespace"
+    assert kinds[1] == "ServiceAccount"
+    assert runtime.created[0]["metadata"]["name"] == ns
+    for manifest in runtime.created[1:]:
+        assert manifest["metadata"]["namespace"] == ns
+    assert record.detail["namespace"] == ns
+
+
+@pytest.mark.asyncio
+async def test_teardown_namespaced_record_deletes_namespace() -> None:
+    runtime, store, broker = _FakeRuntime(), _FakeStore(), _FakeBroker()
+    record = _record().model_copy(update={"detail": {"namespace": "devai-sbx-sb-123"}})
+
+    await SandboxProvisioner(runtime, store, broker=broker).teardown(record)
+
+    assert runtime.deleted_namespaces == ["devai-sbx-sb-123"]
+    assert runtime.deleted == []
+    assert broker.revoked == [record.id]
+    assert store.statuses[-1] == "destroyed"
+
+
+@pytest.mark.asyncio
+async def test_teardown_legacy_record_uses_object_loop() -> None:
+    runtime, store = _FakeRuntime(), _FakeStore()
+
+    await SandboxProvisioner(runtime, store).teardown(_record())
+
+    assert getattr(runtime, "deleted_namespaces", []) == []
+    assert runtime.deleted  # per-object deletes, as before
 
 
 # ── cluster client dispatch ───────────────────────────────────────────────
@@ -503,3 +596,37 @@ def test_the_workspace_kinds_are_routable_to_a_k8s_api() -> None:
         ("Service", "service"),
     ):
         assert rt._manifest_api(kind)[1] == suffix  # noqa: SLF001
+
+
+# ── per-sandbox namespace isolation ───────────────────────────────────────
+
+
+def test_isolation_quota_is_namespace_wide() -> None:
+    quota = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x"))["ResourceQuota"]
+    # The namespace is the fence now; a PriorityClass scope split the shared
+    # namespace, which no longer exists.
+    assert "scopeSelector" not in quota["spec"]
+
+
+def test_network_policy_egress_targets_control_plane_pods_only() -> None:
+    np = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))[
+        "NetworkPolicy"
+    ]
+    rules = np["spec"]["egress"]
+    own = rules[1]["to"][0]["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"]
+    assert own == "devai-sbx-x"
+    cp = rules[2]["to"][0]
+    assert cp["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"] == "devai"
+    # Pods only — Postgres/Redis in the control-plane namespace stay dark.
+    assert cp["podSelector"]["matchLabels"]["app.kubernetes.io/name"] == "devai"
+
+
+def test_network_policy_ingress_is_control_plane_and_own_namespace() -> None:
+    np = _by_kind(build_isolation_manifests(_record(), namespace="devai-sbx-x", control_plane_namespace="devai"))[
+        "NetworkPolicy"
+    ]
+    frm = np["spec"]["ingress"][0]["from"]
+    assert {"podSelector": {}} in frm  # any pod in the sandbox's own namespace
+    cp = next(e for e in frm if "namespaceSelector" in e)
+    assert cp["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"] == "devai"
+    assert cp["podSelector"]["matchLabels"]["app.kubernetes.io/name"] == "devai"

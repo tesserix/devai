@@ -34,6 +34,40 @@ the sandbox. Tenant, team, or platform credentials cannot be borrowed by another
 user. The runtime expires, while its traces and evaluation results remain as durable
 evidence owned by the same principal.
 
+## Isolation model
+
+Each sandbox lives in its own throwaway Kubernetes namespace, `devai-sbx-<id>`,
+created at provision time and deleted wholesale on destroy or expiry — namespace
+deletion is the teardown, and Kubernetes garbage collection removes every object
+inside it. Nothing a sandbox creates can outlive it or leak into the control-plane
+namespace.
+
+The namespace is fenced four ways:
+
+- **Pod Security.** The namespace carries `pod-security.kubernetes.io/enforce: restricted`,
+  and runner jobs additionally run with a read-only root filesystem (a `tmp`
+  emptyDir is the only writable scratch besides the workspace volume, with
+  `HOME=/devai/work`).
+- **Network.** A default-deny NetworkPolicy allows egress only to DNS, the
+  sandbox's own namespace, and the DevAI control-plane pods — not the control-plane
+  namespace as a whole, so Postgres and Redis are unreachable from inside a
+  sandbox. Ingress is limited to control-plane pods and the sandbox's own
+  namespace, so no sandbox can reach another.
+- **Resources.** A namespace-wide ResourceQuota and LimitRange cap what any
+  single sandbox can consume.
+- **Credentials.** Secrets are scoped to the sandbox namespace; the workspace
+  capability token is read from the sandbox's own Secret, never a shared one.
+
+An orphan reaper sweeps for `devai-sbx-*` namespaces whose sandbox record no
+longer exists and deletes them (with a grace pass for namespaces already
+Terminating), so a crashed teardown never strands a namespace.
+
+The runtime class is pluggable: setting `DEVAI_SANDBOX_RUNTIME_CLASS` stamps
+`runtimeClassName` on runner pods, so kernel-level isolation (gVisor, or a
+microVM runtime such as Kata) can be adopted later with a config change and no
+code change. Today the boundary is namespace + PSA + NetworkPolicy on the shared
+node pool.
+
 ## What an evaluation is
 
 An evaluation is a test suite for non-deterministic software. Instead of asserting

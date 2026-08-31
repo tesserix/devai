@@ -240,7 +240,7 @@ class JobRunnerStage(PipelineStage):
                     await asyncio.wait_for(event.wait(), timeout=8.0)
                     break  # the watcher fired
                 except TimeoutError:
-                    if await watcher.poll_once(created_name):
+                    if await watcher.poll_once(created_name, namespace=job_spec["metadata"].get("namespace")):
                         break  # poll found it terminal and parked the outcome
         except asyncio.CancelledError:
             # Executor timed out or task was cancelled — best-effort delete

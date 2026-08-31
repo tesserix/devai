@@ -66,6 +66,11 @@ serviceAccount:
   create: true
   name: ""
 
+sandbox:
+  # Grants the control-plane SA cluster RBAC to create/delete the
+  # per-sandbox devai-sbx-* namespaces and the objects inside them.
+  namespaceIsolation: true
+
 # ── Bundled datastores (kind has no CNPG / managed Redis) ──
 postgres:
   enabled: true
