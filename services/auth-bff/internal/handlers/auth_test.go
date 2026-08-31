@@ -45,6 +45,46 @@ func TestLogout_AllowsBrowserGet(t *testing.T) {
 	}
 }
 
+func TestLogout_RejectsCrossSiteRequests(t *testing.T) {
+	sessions, err := session.NewManager(session.Config{
+		CookieName: "devai_session",
+		EncryptKey: "01234567890123456789012345678901",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAuthHandler(AuthDeps{Session: sessions})
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	cases := []struct {
+		name    string
+		method  string
+		headers map[string]string
+		want    int
+	}{
+		{"cross-site GET img tag", http.MethodGet, map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusForbidden},
+		{"cross-site POST form", http.MethodPost, map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusForbidden},
+		{"legacy cross-origin POST", http.MethodPost, map[string]string{"Origin": "https://evil.example"}, http.StatusForbidden},
+		{"opaque origin POST", http.MethodPost, map[string]string{"Origin": "null"}, http.StatusForbidden},
+		{"direct navigation GET", http.MethodGet, map[string]string{"Sec-Fetch-Site": "none"}, http.StatusSeeOther},
+		{"same-site navigation GET", http.MethodGet, map[string]string{"Sec-Fetch-Site": "same-site"}, http.StatusSeeOther},
+		{"same-origin POST", http.MethodPost, map[string]string{"Sec-Fetch-Site": "same-origin"}, http.StatusOK},
+		{"non-browser POST", http.MethodPost, nil, http.StatusOK},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, "/auth/logout", nil)
+		for k, v := range tc.headers {
+			req.Header.Set(k, v)
+		}
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		if res.Code != tc.want {
+			t.Errorf("%s: status = %d, want %d", tc.name, res.Code, tc.want)
+		}
+	}
+}
+
 func TestAutoLogin_MintsShortLivedCLISession(t *testing.T) {
 	sessions, err := session.NewManager(session.Config{
 		CookieName: "devai_session",
