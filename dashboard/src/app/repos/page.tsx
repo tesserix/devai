@@ -294,7 +294,25 @@ export default function ReposPage() {
         })}
       </div>
 
-      {error && (
+      {error?.includes("No GitHub connection yet") ? (
+        <div
+          className="panel px-4 py-5 text-sm"
+          style={{ color: "var(--ink-muted)" }}
+        >
+          <div className="font-medium mb-1" style={{ color: "var(--ink-strong)" }}>
+            Connect your GitHub to get started
+          </div>
+          <p className="mb-3">
+            Repos lists the repositories your own GitHub connection can see. Add a
+            personal access token or a GitHub App under Settings, and your
+            repositories appear here — tokens are stored in the platform&apos;s
+            secret manager, never in the browser.
+          </p>
+          <a href="/settings" className="btn-primary !py-1.5 inline-flex items-center gap-1.5">
+            Open Settings → Source Control
+          </a>
+        </div>
+      ) : error && (
         <div
           className="rounded-md px-3 py-2 text-sm font-mono"
           style={{

@@ -59,8 +59,22 @@ class OnboardingService:
         self._store = store
         self._org = org
         self._marker = marker_path
+        self._viewer = ""  # set on user-scoped siblings; "" = platform view
         self._catalog_cache: dict[str, _CacheEntry] = {}
         self._marker_cache: dict[str, _CacheEntry] = {}
+
+    def scoped_to(self, scm: Any, *, org: str, viewer: str = "") -> OnboardingService:
+        """A sibling service acting through someone else's SCM credentials.
+
+        Shares this service's store (one onboarding ledger) but lists and
+        mutates through the given client. ``org`` scopes the catalog ("" =
+        every repo the token can see); ``viewer`` restricts the onboarded
+        listing to that org plus rows the viewer onboarded themselves, so
+        one tenant's repo names never show up in another tenant's list.
+        """
+        sibling = OnboardingService(scm=scm, store=self._store, org=org, marker_path=self._marker)
+        sibling._viewer = viewer
+        return sibling
 
     # ----------------------------------------------------------------- #
     # Catalog
@@ -337,6 +351,8 @@ class OnboardingService:
         """
         import httpx
 
+        if not self._org:
+            raise ValueError("set an Organization on your Source Control connection before creating repositories")
         owner = self._org
         full = f"{owner}/{name}"
 
@@ -478,7 +494,11 @@ class OnboardingService:
         return await self._store.get(owner, name)
 
     async def list_onboarded(self, state: OnboardingState | str | None = None) -> list[OnboardedRepo]:
-        return await self._store.list(state=state)
+        rows = await self._store.list(state=state)
+        if not self._viewer:
+            return rows
+        org = self._org.lower()
+        return [r for r in rows if (org and r.owner.lower() == org) or r.onboarded_by == self._viewer]
 
     async def mark_ready(self, owner: str, name: str) -> OnboardedRepo:
         """Promote the draft onboarding PR to a real (ready-for-review) PR."""

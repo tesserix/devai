@@ -144,6 +144,17 @@ def create_app(
                 settings_service = None
                 app.state.settings_service = None
 
+        # Per-user SCM resolution for HTTP surfaces (Repos page). One resolver
+        # per app so N requests by the same user share one client + token cache.
+        app.state.scm_resolver = None
+        if settings_service is not None:
+            try:
+                from devai.settings.scm_resolver import PrincipalSCMResolver
+
+                app.state.scm_resolver = PrincipalSCMResolver(config, settings_service)
+            except Exception:  # noqa: BLE001
+                logger.exception("Per-user SCM resolver failed to start — platform SCM only")
+
         # Start the Fiber-style pipeline runtime when enabled. SCM is
         # constructed lazily so this doesn't trip start-up when the SCM
         # provider isn't configured yet.

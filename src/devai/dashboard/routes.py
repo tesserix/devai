@@ -428,43 +428,92 @@ async def move_item(request: Request, org: str, project_number: int) -> dict[str
     return {"status": "moved"}
 
 
+class _CallerSCM:
+    """The SCM client a request may act through, plus its org scope.
+
+    ``owned`` — the client was built ad hoc from platform config and must be
+    closed after use. Resolver-cached user clients are long-lived: never close.
+    """
+
+    def __init__(self, client: Any, org: str, owned: bool) -> None:
+        self.client = client
+        self.org = org
+        self.owned = owned
+
+    async def close(self) -> None:
+        if self.owned:
+            await self.client.close()
+
+
+async def _caller_scm(request: Request, *, soft: bool = False) -> _CallerSCM | None:
+    """Own Source Control connection first; the platform's GitHub only for
+    admins (or when auth is off, as in local dev). ``soft`` returns None for
+    advisory listings instead of raising the connect-your-GitHub 403."""
+    from devai.identity import extract_principal
+    from devai.onboarding.routes import CONNECT_HINT
+
+    config = request.app.state.config
+    try:
+        principal = await extract_principal(request)
+    except Exception:  # noqa: BLE001 — identity lookup failure must not 500 a listing
+        principal = None
+    resolver = getattr(request.app.state, "scm_resolver", None)
+    if resolver is not None and principal is not None:
+        try:
+            pair = await resolver.resolve_with_overlay(principal)
+        except Exception:  # noqa: BLE001 — degrade rather than 500
+            pair = None
+        if pair is not None:
+            client, overlay = pair
+            return _CallerSCM(client, str(getattr(overlay, "scm_organization", "") or ""), owned=False)
+    roles = list(getattr(principal, "roles", []) or []) if principal is not None else []
+    if not getattr(config, "require_auth", False) or "admin" in roles:
+        org = str(getattr(config, "github_org", "") or "tesserix")
+        return _CallerSCM(create_scm_client(config), org, owned=True)
+    if soft:
+        return None
+    raise HTTPException(status_code=403, detail=CONNECT_HINT)
+
+
 @router.get("/api/repos")
 async def list_repos(request: Request) -> list[dict[str, Any]]:
-    """List repositories accessible to the GitHub App installation.
+    """List repositories the caller can run pipelines on.
 
-    Auth: Dashboard is behind Keycloak; this uses the App token, not user OAuth.
+    A user with their own Source Control connection sees their repos; platform
+    owners see the GitHub App installation's. Others get an empty list until
+    they connect GitHub in Settings.
     """
-    config = request.app.state.config
-    from devai.scm.factory import create_scm_client
-
-    scm = create_scm_client(config)
+    caller = await _caller_scm(request, soft=True)
+    if caller is None:
+        return []
     try:
-        repos = await scm.list_installation_repos()
+        repos = await caller.client.list_installation_repos(org=caller.org)
         return sorted(repos, key=lambda r: r["full_name"].lower())
     except Exception as e:
         logger.warning("Failed to list repos: %s", e)
         return []
     finally:
-        await scm.close()
+        await caller.close()
 
 
 @router.get("/api/repos/check")
-async def check_repo_name(request: Request, name: str, org: str = "tesserix") -> dict[str, Any]:
-    """Check if a repository name already exists in the org."""
+async def check_repo_name(request: Request, name: str, org: str = "") -> dict[str, Any]:
+    """Check if a repository name already exists in the caller's org."""
     if not name.strip():
         return {"available": False, "reason": "Name is required"}
 
-    config = request.app.state.config
-    from devai.scm.factory import create_scm_client
-
-    scm = create_scm_client(config)
+    caller = await _caller_scm(request)
+    org = org or caller.org
+    if not org:
+        await caller.close()
+        return {"available": False, "reason": "Set an Organization on your Source Control connection first"}
     try:
-        await scm.get_repo_info(f"{org}/{name.strip()}")
+        await caller.client.get_repo_info(f"{org}/{name.strip()}")
         return {"available": False, "reason": "Repository already exists"}
     except Exception:
         return {"available": True, "reason": ""}
     finally:
-        await scm.close()
+        await caller.close()
 
 
 @router.post("/api/repos/create")
@@ -472,7 +521,6 @@ async def create_repo(request: Request) -> dict[str, Any]:
     """Create a new repository via the GitHub App."""
     await _require_principal(request)  # CODE-1 gate (dormant when require_auth False)
     body = await request.json()
-    org = body.get("org", "tesserix")
     name = body.get("name", "").strip()
     description = body.get("description", "")
     private = body.get("private", True)
@@ -480,11 +528,12 @@ async def create_repo(request: Request) -> dict[str, Any]:
     if not name:
         raise HTTPException(status_code=400, detail="Repository name is required")
 
-    # Check if repo already exists
-    config = request.app.state.config
-    from devai.scm.factory import create_scm_client
-
-    scm = create_scm_client(config)
+    caller = await _caller_scm(request)
+    org = body.get("org", "") or caller.org
+    if not org:
+        await caller.close()
+        raise HTTPException(status_code=400, detail="Set an Organization on your Source Control connection first")
+    scm = caller.client
     try:
         try:
             await scm.get_repo_info(f"{org}/{name}")
@@ -502,25 +551,25 @@ async def create_repo(request: Request) -> dict[str, Any]:
         logger.warning("Failed to create repo: %s", e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
-        await scm.close()
+        await caller.close()
 
 
 @router.get("/api/projects")
 async def list_projects(request: Request) -> list[dict[str, Any]]:
-    """List GitHub Projects v2 for the configured org."""
-    config = request.app.state.config
-    org = getattr(config, "github_org", "tesserix")
-    from devai.scm.factory import create_scm_client
-
-    scm = create_scm_client(config)
+    """List GitHub Projects v2 for the caller's org."""
+    caller = await _caller_scm(request, soft=True)
+    if caller is None or not caller.org:
+        if caller is not None:
+            await caller.close()
+        return []
     try:
-        projects = await scm.list_org_projects(org)
+        projects = await caller.client.list_org_projects(caller.org)
         return projects
     except Exception as e:
         logger.warning("Failed to list projects: %s", e)
         return []
     finally:
-        await scm.close()
+        await caller.close()
 
 
 @router.post("/api/projects/create")
@@ -535,13 +584,13 @@ async def create_project_endpoint(request: Request) -> dict[str, Any]:
     if not title:
         raise HTTPException(status_code=400, detail="Project title is required")
 
-    config = request.app.state.config
-    org = getattr(config, "github_org", "tesserix")
-    from devai.scm.factory import create_scm_client
-
-    scm = create_scm_client(config)
+    caller = await _caller_scm(request)
+    if not caller.org:
+        await caller.close()
+        raise HTTPException(status_code=400, detail="Set an Organization on your Source Control connection first")
+    scm = caller.client
     try:
-        project = await scm.create_project(org, title, description)
+        project = await scm.create_project(caller.org, title, description)
         if repo:
             await scm.link_repo_to_project(project["id"], repo)
         return project
@@ -549,7 +598,7 @@ async def create_project_endpoint(request: Request) -> dict[str, Any]:
         logger.warning("Failed to create project: %s", e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
-        await scm.close()
+        await caller.close()
 
 
 @router.post("/api/repos/scaffold")
@@ -564,10 +613,8 @@ async def scaffold_repo(request: Request) -> dict[str, Any]:
     if not repo:
         raise HTTPException(status_code=400, detail="Repository name is required")
 
-    config = request.app.state.config
-    from devai.scm.factory import create_scm_client
-
-    scm = create_scm_client(config)
+    caller = await _caller_scm(request)
+    scm = caller.client
     created_files: list[str] = []
     try:
         default_branch = await scm.get_default_branch(repo)
@@ -632,7 +679,7 @@ async def scaffold_repo(request: Request) -> dict[str, Any]:
         logger.warning("Failed to scaffold repo %s: %s", repo, e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
-        await scm.close()
+        await caller.close()
 
 
 def _generate_claude_md(repo: str, tech_stack: str = "") -> str:
