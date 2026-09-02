@@ -150,21 +150,20 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "0.122.0"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
-    { name = "distro" },
     { name = "docstring-parser" },
-    { name = "httpx" },
+    { name = "httpx2" },
     { name = "jiter" },
     { name = "pydantic" },
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fa/23/9987d70b74e3481d5bc5d2021d3e10fd5f60c1f7b54088ea86506d9b7f2b/anthropic-0.122.0.tar.gz", hash = "sha256:ffec56ae96657c8d19fa575ec96f140f380c353a07ab7d61b92eb18ee6536601", size = 1021535, upload-time = "2026-08-13T18:36:00.307Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/50/463166f02179ab279edb61de1589a6f69cb3838d6a2fb6f2c92a3f8042f1/anthropic-1.3.0.tar.gz", hash = "sha256:6873492a77ede8849a161ab1bc78bc9a1e492a006d0b5bb4c57ac77845df838a", size = 1148177, upload-time = "2026-09-01T17:37:10.392Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/5b/f5c87e71097a9f89f1b414d1ef7ae8439051fae57d5e4ee90946082982b8/anthropic-0.122.0-py3-none-any.whl", hash = "sha256:45ec906452ffae6b5f7f0c53d01f50bfb7e4ce878d7ae8e4309d13171e557e67", size = 1041853, upload-time = "2026-08-13T18:36:01.831Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/5d/7863a9961d320c23787c7b594956afe4e878f9c0ae2376b11a20e416791d/anthropic-1.3.0-py3-none-any.whl", hash = "sha256:e7e7dbebf9f3c84a23954ab989378af6ae10a4d1804c81e9fea4b5ced695ce75", size = 1296959, upload-time = "2026-09-01T17:37:08.525Z" },
 ]
 
 [[package]]
@@ -731,7 +730,7 @@ kit = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.117.0" },
+    { name = "anthropic", specifier = ">=1.2.0" },
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "fakeredis", marker = "extra == 'dev'", specifier = ">=2.26.0" },
@@ -754,8 +753,8 @@ requires-dist = [
     { name = "keyring", specifier = ">=25.6.0" },
     { name = "kubernetes-asyncio", specifier = ">=36.1.0" },
     { name = "langchain-anthropic", specifier = ">=0.3" },
-    { name = "langchain-community", specifier = ">=0.3" },
-    { name = "langchain-core", specifier = ">=0.3" },
+    { name = "langchain-community", specifier = ">=0.4.2" },
+    { name = "langchain-core", specifier = ">=1.6.1" },
     { name = "langchain-openai", specifier = ">=1.3.5" },
     { name = "langgraph", specifier = ">=0.2" },
     { name = "langsmith", specifier = ">=0.2" },
@@ -775,23 +774,23 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "pygithub", specifier = ">=2.6.0" },
     { name = "pyjwt", specifier = ">=2.10.0" },
-    { name = "pypdf", marker = "extra == 'docs'", specifier = ">=6.15.0" },
+    { name = "pypdf", marker = "extra == 'docs'", specifier = ">=6.16.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "python-ulid", specifier = ">=4.0.1" },
     { name = "pyyaml", marker = "extra == 'docs'", specifier = ">=6.0.3" },
-    { name = "redis", extras = ["hiredis"], specifier = ">=8.0.0" },
+    { name = "redis", extras = ["hiredis"], specifier = ">=8.1.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.23.1" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.19" },
     { name = "slack-sdk", specifier = ">=3.43.0,<4" },
     { name = "structlog", specifier = ">=26.1.0" },
-    { name = "temporalio", specifier = ">=1.7.0" },
+    { name = "temporalio", specifier = ">=1.32.0" },
     { name = "tesserix-adk", marker = "extra == 'kit'", git = "https://github.com/tesserix/agent-development-kit?rev=v0.53.1" },
     { name = "typer", extras = ["all"], specifier = ">=0.27.0" },
     { name = "types-jsonschema", marker = "extra == 'dev'", specifier = ">=4.26.0.20250822" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
 ]
 provides-extras = ["docs", "kit", "dev"]
 
@@ -1735,16 +1734,16 @@ wheels = [
 
 [[package]]
 name = "langchain-anthropic"
-version = "1.4.8"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
     { name = "langchain-core" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/98/22/40ab129b08329ca295b391aa1d48267692b42594757084c6918e22b655ac/langchain_anthropic-1.4.8.tar.gz", hash = "sha256:c76891b2044d56105ff13c106ed12650637b53bd598a4bdf15b4796eefa2a4ec", size = 708524, upload-time = "2026-06-26T21:28:46.916Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/fc/52f6d1d6069bafb08626e204c89c49c8dd4a536eedbb94f0b7e78668594d/langchain_anthropic-1.7.0.tar.gz", hash = "sha256:d48e3c118ff8d3eea83f17b50234a2d2ff491a2375d565f212eb990e7e3856cb", size = 750068, upload-time = "2026-08-27T15:23:59.261Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/14/746235c4da89d9bc6a608c5f489f628e03feb8f697195c146e452c8f23c8/langchain_anthropic-1.4.8-py3-none-any.whl", hash = "sha256:778e9301b6fd517824f76ec1776975ce8add97a1f6a36c50ae3c2f4b03a66f7f", size = 52366, upload-time = "2026-06-26T21:28:45.535Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/ce/e4367713080bc750e1dba845409c058f196543d1a0dc99683e2ef062f581/langchain_anthropic-1.7.0-py3-none-any.whl", hash = "sha256:68b34369aa01dad0c67bc690b8c47e09d06bd30fb28f320ad19ddc71c4445dc0", size = 60475, upload-time = "2026-08-27T15:23:57.989Z" },
 ]
 
 [[package]]
@@ -1789,7 +1788,7 @@ wheels = [
 
 [[package]]
 name = "langchain-core"
-version = "1.5.6"
+version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1803,9 +1802,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/27/b9/893806b89f77e1271fe6e10ce41682ff5fe43d071564e1d8e39dbb5d4d6d/langchain_core-1.5.6.tar.gz", hash = "sha256:b5f73bd9688c457b31ec73657a0ad56948f889fae27acee79286e9c285632ee6", size = 984873, upload-time = "2026-08-17T21:26:35.921Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/12/aff76ca89c219ebe6f9dd3c5dbc4e3b1cf5450e9fc7037dccad23d45cd7a/langchain_core-1.6.1.tar.gz", hash = "sha256:1b156cb395aac4f009a8a1b38a574c7d948fe2d5f74c96e0d8a5017b4149e04f", size = 1003359, upload-time = "2026-08-27T19:31:14.956Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/0a/890504397885c9d1ae45f2e06c3000dd9f4445439602b6a990a88b32c0ac/langchain_core-1.5.6-py3-none-any.whl", hash = "sha256:d6cf37bf695ecc22cddeb8461a684e353190b2ce430d99eb22bc11c0c7c00ea5", size = 567016, upload-time = "2026-08-17T21:26:34.595Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/25/f50dd65673c819aa33d3c34df58c115dbb6ec627d19f93e6e401dd0fc8d7/langchain_core-1.6.1-py3-none-any.whl", hash = "sha256:954a84132a5cb0435d27b910e336347b6744ecc18fbeef1e2de7029a0959841a", size = 571478, upload-time = "2026-08-27T19:31:13.34Z" },
 ]
 
 [[package]]
@@ -3019,11 +3018,11 @@ wheels = [
 
 [[package]]
 name = "pypdf"
-version = "6.15.0"
+version = "6.16.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/17/17/ee75a92718ec7212de831e71454d702225aa5e474a805cce169806044453/pypdf-6.15.0.tar.gz", hash = "sha256:d39c4d955a76409284a905e2d65b40076d77ab76129e0faaeeb6612403ecfc79", size = 6993794, upload-time = "2026-08-06T13:06:49.929Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/5a/df92d1c1ef8806ca28f20f978ee059894868d93de797a7e2edebe7fe1a43/pypdf-6.16.1.tar.gz", hash = "sha256:c4d1b43ddae921387321cf63936cd16a7743b91d2da92f165c149a195c972ba9", size = 7003737, upload-time = "2026-08-14T12:24:04.531Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/af/72/ce3067ac31e214a66388159f8462ddb8c13dd00170f24d555a1f1ae8ee91/pypdf-6.15.0-py3-none-any.whl", hash = "sha256:14e001d6504822cb1ca9c7ed9a69bccb320f59b320730f55af804361abe4d5ee", size = 378123, upload-time = "2026-08-06T13:06:47.709Z" },
+    { url = "https://files.pythonhosted.org/packages/33/a1/724b18d6757ab7253a8fecd3a430eb8d980ed26872ba16651e7b5ddfc63f/pypdf-6.16.1-py3-none-any.whl", hash = "sha256:63fec31c4092ae50b6729beedcb469055b60d20c834bde1c402df241f371f644", size = 382924, upload-time = "2026-08-14T12:24:02.854Z" },
 ]
 
 [[package]]
@@ -3210,11 +3209,11 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "8.0.0"
+version = "8.1.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/53/ae/ed461cca5780b5fc8b9fe8ca0ed98d89508645fb9d880c24cc42c087678f/redis-8.0.0.tar.gz", hash = "sha256:a00c5355432051ac14e593b8b197fc76c887ee12d55a0984f69328a1115fdc49", size = 5101591, upload-time = "2026-05-28T12:45:13.5Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/99/604f0b666d4c616d891cf77ebb9db6bb21601344c051aebf1b72b9ff915f/redis-8.1.0.tar.gz", hash = "sha256:6e1a19beef9225c83efd689c7e6b7da2d5215b1f42cd13b7fc3714d0a09c7b25", size = 5254356, upload-time = "2026-07-30T08:51:00.269Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/e3/b519734372d305bd547534a9f32e4ce9f98552af753dce72cf3483a0ff0b/redis-8.0.0-py3-none-any.whl", hash = "sha256:c938c18338585009f0bc310f4c7e4e4b4d37639356c4ac072cedf3af570c8dc7", size = 499870, upload-time = "2026-05-28T12:45:11.697Z" },
+    { url = "https://files.pythonhosted.org/packages/66/9d/c5731f6e3608663d4d3656fd8d3aecee8b509c3082818f5a13eae925baea/redis-8.1.0-py3-none-any.whl", hash = "sha256:a4fe1aac3d3b3cc791d4b3d5931c5a956045dc951ee74d1c913ee3ac4d2ee9fb", size = 560618, upload-time = "2026-07-30T08:50:58.497Z" },
 ]
 
 [package.optional-dependencies]
@@ -3647,7 +3646,7 @@ wheels = [
 
 [[package]]
 name = "temporalio"
-version = "1.27.2"
+version = "1.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nexus-rpc" },
@@ -3655,13 +3654,15 @@ dependencies = [
     { name = "types-protobuf" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ca/62/2bc1a9ad29382a3a99f088907ef2024a94420cfef340be1b33026c632828/temporalio-1.27.2.tar.gz", hash = "sha256:633bf2379492f3db1e887d1e64fdac00d9c2ddc3e9382b831d5af68256912e92", size = 2503041, upload-time = "2026-05-14T02:17:57.565Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/d8/18cf5bbbcc4b4c884d7723c9b54bf8d1d2556d9fbef3e99599dd3db12034/temporalio-1.32.0.tar.gz", hash = "sha256:2cfa50ec7ebdab66902b80c3a09da3258883d68540811ebfbf44f7f293a4d7d0", size = 2997642, upload-time = "2026-08-24T21:24:37.631Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/85/9da14f9fbdfae95435d29353bb1c55891581ad6b23c86ca56e72d83035ed/temporalio-1.27.2-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:860f706380faafec8f183f9194d0883c8033a4211c5d19c2c962c45b06cf99e9", size = 14602829, upload-time = "2026-05-14T02:17:45.624Z" },
-    { url = "https://files.pythonhosted.org/packages/24/51/b7437991e71eea082dc53222da11f064974917cd59063ba57e13e5895fbc/temporalio-1.27.2-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:a8dc0c680e351f3132809861888d8326dbd5030dd4e570663597e7d4768d9502", size = 13997680, upload-time = "2026-05-14T02:17:53.968Z" },
-    { url = "https://files.pythonhosted.org/packages/8c/5d/358065040e6f0cedbf669acd333622999eec737ff868ca7829d727b77746/temporalio-1.27.2-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:805f3de4d193dec52e040e41dbfc9ab44be0206d2e81142ceefaf7b7208058d1", size = 14252199, upload-time = "2026-05-14T02:17:36.972Z" },
-    { url = "https://files.pythonhosted.org/packages/72/8a/85d2eab07c3e23fc1124203e76857c69ab9b22d8ccebad0835e294edb754/temporalio-1.27.2-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5bc996cb501b8a918f50037ccee6facb05bb70984acada4c2a3e01f5e7957a38", size = 14779945, upload-time = "2026-05-14T02:18:05.513Z" },
-    { url = "https://files.pythonhosted.org/packages/67/81/c9b08609e2a92ecf62c97c59cabfa0608337c8d5cc9941eed5d9a7778840/temporalio-1.27.2-cp310-abi3-win_amd64.whl", hash = "sha256:62a84ae9a60c17932971e4ca3b0f3cd6f32f173b8183e759989376503fb95af6", size = 14981897, upload-time = "2026-05-14T02:17:27.333Z" },
+    { url = "https://files.pythonhosted.org/packages/37/0b/adad9dcd8b96c760cd04dcc75f0a0f136aabdb78c4b180219589749469a4/temporalio-1.32.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:47c128732e5d49235c9daeeb084d55093cee5ebc200ccc3afaeb4468f08d809e", size = 13796063, upload-time = "2026-08-24T21:24:16.638Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/84/6cc96518a2aff3ce9fb132479811bb29db563fbcdc947c279df8f089721a/temporalio-1.32.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:e78a209dc5ef3303bc6a3033fe11ffd813b778e4b176ec18d20386d65952daa9", size = 13467827, upload-time = "2026-08-24T21:24:19.731Z" },
+    { url = "https://files.pythonhosted.org/packages/92/d0/720e5e9bb51ae1af6b9fea4d5c56d6ac6e94fbf4c8b86a6b0b318b6aef1e/temporalio-1.32.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a86be3a6d237ea6cc2d632015a5df4cead2aa3143b9601721428b53b87df81e2", size = 13854003, upload-time = "2026-08-24T21:24:22.743Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/6b/8c8973ad314efc8c124e9a0f602ae96533c7e624b3cde7fcc9704aa46dd2/temporalio-1.32.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4dd44a60ba54901560011a32f085353c0f5e7dac6b8d7a7e0c7c4ba508c6bf5d", size = 14193177, upload-time = "2026-08-24T21:24:25.849Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/ad/7496f8424a6ccc9b6ce6c629f9375744e8a439e9a692bd27b4f77b99977a/temporalio-1.32.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6a7100b1f1bf781f8f1800f89bb787b3dd7ce883e78603442d0c7a40e1143a86", size = 13920043, upload-time = "2026-08-24T21:24:28.667Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/16/73fa24d69e70035323217e87d33cb3df6415e1906db07b2112c9a6b09e33/temporalio-1.32.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:311abb9f0650f4ad9f24944ef16d8ed47954ddc3075c1e8c73dcd968d70ccdce", size = 14309243, upload-time = "2026-08-24T21:24:31.727Z" },
+    { url = "https://files.pythonhosted.org/packages/07/72/4a49f38f294f9cc1ba15c0b5272adfa7d2a0da38e924ed7f0b1ea2e5bbc9/temporalio-1.32.0-cp310-abi3-win_amd64.whl", hash = "sha256:158386bcd9a6dce1ab63d732fc967c5a5830e15c3012ffaa4b8772bdac099e0f", size = 15196754, upload-time = "2026-08-24T21:24:34.931Z" },
 ]
 
 [[package]]
@@ -3886,15 +3887,15 @@ wheels = [
 
 [[package]]
 name = "uvicorn"
-version = "0.52.3"
+version = "0.52.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "h11" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/28/64ca011edf31c715b4fad359c587ea52391aaffa125065695590241ff617/uvicorn-0.52.3.tar.gz", hash = "sha256:18857b9e6579300be55c91c0a1cfd37d9a2cf0cabea33b88275f199eb73b8b58", size = 100621, upload-time = "2026-08-13T16:50:02.899Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f2/0f/3f86e61397dd33bf2ccf28188c40db6a740658aeebbbf6e7dbc101a1f487/uvicorn-0.52.4.tar.gz", hash = "sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86", size = 100627, upload-time = "2026-08-19T06:27:41.821Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/2b/ebd108734a8204c6b4b93c681c9a38c5273b3ccd5d129fee4ffc1d97772c/uvicorn-0.52.3-py3-none-any.whl", hash = "sha256:116af2710dbf47c80f463cd20ee4884b6662f4c9f227d797ddc7279d2fcc2c7c", size = 79859, upload-time = "2026-08-13T16:50:01.323Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/79/4a20b54ab0491485ccd8c077db2d39187c7f12b3e15485d38a7be37c81b4/uvicorn-0.52.4-py3-none-any.whl", hash = "sha256:f86e41a149d7d05a9969337e3946a9c171c06a5d42680896daaba624aeac8da1", size = 79871, upload-time = "2026-08-19T06:27:40.36Z" },
 ]
 
 [package.optional-dependencies]
