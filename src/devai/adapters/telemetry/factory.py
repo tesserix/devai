@@ -70,6 +70,8 @@ def _build_langfuse(settings: Any) -> TelemetryAdapter:
         service_name=getattr(settings, "otel_service_name", "") or "devai",
         service_namespace=getattr(settings, "otel_service_namespace", "") or "devai",
         export_interval_ms=int(getattr(settings, "otel_export_interval_ms", 15000) or 15000),
+        # Langfuse takes traces only; metrics still go to the cluster collector.
+        metrics_endpoint=getattr(settings, "otel_endpoint", "") or "",
     )
 
 

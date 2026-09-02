@@ -29,6 +29,7 @@ class LangfuseTelemetryAdapter(TelemetryAdapter):
         service_name: str = "devai",
         service_namespace: str = "devai",
         export_interval_ms: int = 15000,
+        metrics_endpoint: str = "",
         otel: TelemetryAdapter | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -38,12 +39,18 @@ class LangfuseTelemetryAdapter(TelemetryAdapter):
             )
         self._base_url = base_url.rstrip("/")
         authorization = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+        # Langfuse's OTLP endpoint accepts traces only. Metrics go to the
+        # cluster collector (DEVAI_OTEL_ENDPOINT) without the Langfuse auth
+        # header; with no collector configured they are disabled, not shipped
+        # to an endpoint that drops them.
         self._otel = otel or OtelTelemetryAdapter(
             endpoint=f"{self._base_url}/api/public/otel",
             service_name=service_name,
             service_namespace=service_namespace,
             export_interval_ms=export_interval_ms,
             headers={"Authorization": f"Basic {authorization}"},
+            metrics_endpoint=metrics_endpoint,
+            metrics_headers=None,
         )
         self._client = client or httpx.AsyncClient(
             base_url=self._base_url,
@@ -91,15 +98,23 @@ class LangfuseTelemetryAdapter(TelemetryAdapter):
             "tags": ["devai", "evaluation", metric.agent],
         }
         scores = {"eval.pass_rate": metric.pass_rate, **metric.dimensions}
+        # Deterministic ids: Langfuse ingestion dedupes on event id, so
+        # re-emitting the same evaluation (retry, replayed run) upserts
+        # instead of stacking duplicate scores on the trace.
         batch = [
-            {"id": str(uuid.uuid4()), "timestamp": timestamp, "type": "trace-create", "body": trace_body},
+            {
+                "id": _event_id(metric.run_id, "trace"),
+                "timestamp": timestamp,
+                "type": "trace-create",
+                "body": trace_body,
+            },
             *[
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": _event_id(metric.run_id, f"score:{name}"),
                     "timestamp": timestamp,
                     "type": "score-create",
                     "body": {
-                        "id": str(uuid.uuid4()),
+                        "id": _event_id(metric.run_id, f"score:{name}"),
                         "traceId": metric.run_id,
                         "name": name,
                         "value": value,
@@ -127,6 +142,10 @@ class LangfuseTelemetryAdapter(TelemetryAdapter):
             "exporting": True,
             "endpoint": self._base_url,
         }
+
+
+def _event_id(run_id: str, kind: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"devai-eval:{run_id}:{kind}"))
 
 
 __all__ = ["LangfuseTelemetryAdapter"]

@@ -75,3 +75,62 @@ async def test_langfuse_failure_never_raises_into_the_evaluation_path() -> None:
     await adapter.record_evaluation(EvaluationMetric(run_id="eval-1", agent="agent", suite="suite@1"))
 
     await adapter.close()
+
+
+async def test_langfuse_ingestion_ids_are_deterministic_for_replays() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(207, json={"successes": [{"id": "ok"}], "errors": []})
+
+    client = httpx.AsyncClient(
+        base_url="https://langfuse.example",
+        transport=httpx.MockTransport(handler),
+        auth=("public-test-key", "secret-test-key"),
+    )
+    adapter = LangfuseTelemetryAdapter(
+        base_url="https://langfuse.example",
+        public_key="public-test-key",
+        secret_key="secret-test-key",
+        otel=NoopTelemetryAdapter(),
+        client=client,
+    )
+    metric = EvaluationMetric(run_id="eval-1", agent="agent", suite="suite@1", pass_rate=1.0)
+
+    await adapter.record_evaluation(metric)
+    await adapter.record_evaluation(metric)
+
+    first_ids = [event["id"] for event in requests[0]["batch"]]
+    second_ids = [event["id"] for event in requests[1]["batch"]]
+    # Same evaluation → same event ids, so Langfuse dedupes instead of stacking duplicates.
+    assert first_ids == second_ids
+    assert len(set(first_ids)) == len(first_ids)
+
+    await adapter.close()
+
+
+def test_langfuse_routes_metrics_to_the_collector_not_langfuse() -> None:
+    adapter = LangfuseTelemetryAdapter(
+        base_url="https://langfuse.example",
+        public_key="public-test-key",
+        secret_key="secret-test-key",
+        metrics_endpoint="http://otel-gateway.observability.svc.cluster.local:4318",
+        client=httpx.AsyncClient(base_url="https://langfuse.example"),
+    )
+
+    otel = adapter._otel
+    assert otel._endpoint == "https://langfuse.example/api/public/otel"
+    assert otel._metrics_endpoint == "http://otel-gateway.observability.svc.cluster.local:4318"
+
+
+def test_langfuse_without_a_collector_disables_metric_export() -> None:
+    adapter = LangfuseTelemetryAdapter(
+        base_url="https://langfuse.example",
+        public_key="public-test-key",
+        secret_key="secret-test-key",
+        client=httpx.AsyncClient(base_url="https://langfuse.example"),
+    )
+
+    # No collector endpoint → readerless meter provider, not metrics shipped to Langfuse.
+    assert adapter._otel._metrics_endpoint == ""

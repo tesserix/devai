@@ -177,3 +177,45 @@ async def test_provider_stream_refuses_when_bridge_does_not_declare_streaming() 
                 messages=(Message(role="user", content=[TextPart(text="hello")]),),
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_emits_adk_spend_through_the_telemetry_sink() -> None:
+    import contextlib
+
+    from devai.adapters.telemetry.noop import NoopTelemetryAdapter
+    from devai.adapters.telemetry.runtime import set_global_telemetry
+
+    class RecordingTelemetry(NoopTelemetryAdapter):
+        def __init__(self) -> None:
+            self.spans: list[tuple[str, dict[str, object]]] = []
+            self.counters: list[tuple[str, float, dict[str, str]]] = []
+
+        def span(self, name, *, attributes=None):
+            self.spans.append((name, dict(attributes or {})))
+            return contextlib.nullcontext(None)
+
+        def incr(self, name, value=1.0, attrs=None):
+            self.counters.append((name, value, dict(attrs or {})))
+
+    telemetry = RecordingTelemetry()
+    set_global_telemetry(telemetry)
+    try:
+        llm = ScriptedLLM([LLMResponse(text='{"summary":"ok"}', usage=LLMUsage(prompt_tokens=9, completion_tokens=4))])
+        runtime = TesserixSpecRuntime(llm=llm, dispatcher=ScriptedTools())
+        await runtime.run(
+            _spec(),
+            DevAITask(intent="Check production", triggered_by="owner@example.com"),
+            system_prompt="Review health.",
+            user_prompt="Check production",
+        )
+    finally:
+        set_global_telemetry(None)
+
+    span_names = [name for name, _ in telemetry.spans]
+    assert "adk.model_call" in span_names
+    counted = {name for name, _, _ in telemetry.counters}
+    assert {"adk.cost", "adk.tokens", "adk.calls"} <= counted
+    # Spend dimensions carry the attribution the run declared.
+    call_dims = next(dims for name, _, dims in telemetry.counters if name == "adk.calls")
+    assert call_dims["tenant"] == "devai"
