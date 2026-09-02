@@ -278,6 +278,7 @@ def register_capability_tools(*, overwrite: bool = False) -> None:
     import devai.tools.cloud_tools  # noqa: F401
     import devai.tools.gitops_tools  # noqa: F401
     import devai.tools.shell_tools  # noqa: F401
+    import devai.tools.weather_tools  # noqa: F401
     import devai.tools.web_tools  # noqa: F401
 
 

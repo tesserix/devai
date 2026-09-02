@@ -81,7 +81,17 @@ def test_job_spec_omits_unset_passthrough_vars(monkeypatch):
 
 
 def test_job_spec_embeds_agent_profile_for_audit():
-    profile = {"image": "x", "model_provider": "vertex_gemini", "model_name": "gemini-2.5-flash"}
+    profile = {
+        "image": "x",
+        "model_provider": "vertex_gemini",
+        "model_name": "gemini-2.5-flash",
+        "digest": "sha256:" + "a" * 64,
+    }
     spec = build_job_spec(_cfg(), _inputs(agent_profile=profile))
     env = _env_of(spec)
     assert json.loads(env["DEVAI_AGENT_PROFILE"]["value"]) == profile
+    assert spec["metadata"]["annotations"]["devai.tesserix.app/composition-digest"] == profile["digest"]
+    assert (
+        spec["spec"]["template"]["metadata"]["annotations"]["devai.tesserix.app/composition-digest"]
+        == profile["digest"]
+    )

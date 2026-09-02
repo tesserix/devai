@@ -21,6 +21,13 @@ spec:
   model:
     provider: devai-user-routing
     name: dynamic
+  limits:
+    maxTurns: 6
+    timeoutSeconds: 180
+  riskLevel: low
+  evalSuite:
+    ref: intake-golden-suite
+    version: '1'
   a2a:
     url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/intake
     preferredTransport: JSONRPC

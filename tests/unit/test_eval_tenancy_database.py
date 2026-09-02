@@ -68,3 +68,14 @@ async def test_tenant_admin_eval_analytics_never_reads_other_tenants() -> None:
     assert "detail->>'tenant_id' = $2" in query
     assert "detail->>'user_id'" not in query
     assert args == (7, "tenant-a")
+
+
+async def test_lifecycle_eval_analytics_scopes_native_tenant_and_subject_columns() -> None:
+    pool = _Pool()
+
+    await _database(pool).analytics_lifecycle_eval_runs(7, tenant_id="tenant-a", user_id="shared-uid")
+
+    query, args = pool.fetch_calls[0]
+    assert "r.tenant_id = $2" in query
+    assert "r.user_id = $3" in query
+    assert args == (7, "tenant-a", "shared-uid", 200)

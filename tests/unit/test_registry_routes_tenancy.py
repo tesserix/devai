@@ -749,6 +749,23 @@ def test_agent_prompt_reference_must_be_visible_to_the_publisher() -> None:
     assert client.post("/api/registry/agents", headers=alice, json=platform_agent).status_code == 201
 
 
+def test_platform_admin_can_publish_an_explicitly_public_catalog_artifact() -> None:
+    client, registry = _client()
+    manifest = _prompt_manifest("platform-weather-prompt")
+    manifest["metadata"]["visibility"] = "public"
+
+    response = client.post(
+        "/api/registry/prompts",
+        headers=_headers("publisher", "tenant-a", roles=["platform-admin"]),
+        json=manifest,
+    )
+
+    assert response.status_code == 201, response.text
+    metadata = registry.prompts["platform-weather-prompt"]["metadata"]
+    assert metadata["visibility"] == "public"
+    assert metadata["labels"]["devai.tesserix.app/visibility"] == "public"
+
+
 def test_only_owner_can_unpublish_private_agent() -> None:
     client, registry = _client()
     alice = _headers("alice", "tenant-a")

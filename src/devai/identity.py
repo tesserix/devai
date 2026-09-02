@@ -296,6 +296,9 @@ async def extract_principal(request: Request) -> Principal | None:
                 tenant_id=request.headers.get("x-forwarded-tenant", ""),
                 pool=request.headers.get("x-forwarded-pool", ""),
                 auth_provider="auth-bff",
+                roles=[
+                    role.strip() for role in request.headers.get("x-forwarded-roles", "").split(",") if role.strip()
+                ],
                 display_name=request.headers.get("x-forwarded-name", "") or fwd_email,
             )
             await _enrich_teams(principal, request)

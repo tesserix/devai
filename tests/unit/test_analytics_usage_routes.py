@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -49,12 +51,17 @@ class _Database:
         self.calls.append(("evals", days, tenant_id, user_id))
         return {"summary": {"evals": 1, "avg_score": 1.0, "pass_rate": 1.0}, "by_evaluator": [], "recent": []}
 
+    async def analytics_lifecycle_eval_runs(self, days: int, *, tenant_id: str = "", user_id: str = ""):
+        self.calls.append(("lifecycle", days, tenant_id, user_id))
+        return []
+
 
 def _app(principal: Principal | None, monkeypatch) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
     app.state.usage_ledger = _Ledger()
     app.state.analytics_db = _Database()
+    app.state.config = SimpleNamespace(langfuse_public_url="https://langfuse.example.test")
 
     async def _extract(_request):
         return principal
@@ -126,7 +133,12 @@ def test_eval_rollups_receive_the_same_tenant_and_subject_scope(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["scope"] == "me"
-    assert app.state.analytics_db.calls == [("evals", 7, "tenant-a", "shared-uid")]
+    assert response.json()["lifecycle"]["summary"]["runs"] == 0
+    assert response.json()["lifecycle"]["detail_url"] == "https://langfuse.example.test"
+    assert app.state.analytics_db.calls == [
+        ("evals", 7, "tenant-a", "shared-uid"),
+        ("lifecycle", 7, "tenant-a", "shared-uid"),
+    ]
 
 
 def test_tenant_admin_eval_rollup_is_tenant_scoped(monkeypatch):
@@ -140,4 +152,7 @@ def test_tenant_admin_eval_rollup_is_tenant_scoped(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["scope"] == "tenant"
-    assert app.state.analytics_db.calls == [("evals", 7, "tenant-a", "")]
+    assert app.state.analytics_db.calls == [
+        ("evals", 7, "tenant-a", ""),
+        ("lifecycle", 7, "tenant-a", ""),
+    ]

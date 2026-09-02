@@ -14,7 +14,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, Brain, RefreshCw, Radio, AlertTriangle, CheckCircle2 } from "lucide-react";
+import Link from "next/link";
+import { Activity, BarChart3, Brain, RefreshCw, Radio, AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import {
   api,
   type AgentStat,
@@ -470,12 +471,14 @@ export default function AnalyticsPage() {
       {/* ════ USAGE & QUALITY — evals, per-agent execution stats ════ */}
       {tab === "quality" && (
         <>
+      <LifecycleEvaluationPanel lifecycle={evals?.lifecycle ?? null} />
+
       {/* Evals — quality scores (pass rate, by evaluator) */}
       <section className="panel" style={{ padding: 16 }}>
-        <div className="label-eyebrow mb-3">Quality evals {evals?.scope === "me" ? "· your runs" : ""}</div>
+        <div className="label-eyebrow mb-3">Pipeline gate checks {evals?.scope === "me" ? "· your runs" : ""}</div>
         {!evals || evals.summary.evals === 0 ? (
           <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
-            No evals recorded yet. Quality gates (review, security, tests) score each run; scores will
+            No pipeline gate checks recorded yet. Review, security, and test scores will
             appear here as runs complete.
           </p>
         ) : (
@@ -565,6 +568,149 @@ export default function AnalyticsPage() {
         </>
       )}
     </div>
+  );
+}
+
+function LifecycleEvaluationPanel({
+  lifecycle,
+}: {
+  lifecycle: Awaited<ReturnType<typeof api.analytics.evals>>["lifecycle"] | null;
+}) {
+  if (!lifecycle || lifecycle.summary.runs === 0) {
+    return (
+      <section className="panel" style={{ padding: 16 }}>
+        <div className="label-eyebrow mb-2">Agent lifecycle scorecards</div>
+        <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
+          No sandbox evaluation runs in this window. Run an Agent&apos;s pinned EvalSuite to measure its prompt,
+          skills, tools, and MCP dependencies before publication.
+        </p>
+      </section>
+    );
+  }
+
+  const summary = lifecycle.summary;
+  return (
+    <section className="space-y-4">
+      <div className="panel" style={{ padding: 16 }}>
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div className="label-eyebrow">Agent lifecycle scorecards</div>
+            <p className="text-xs mt-1" style={{ color: "var(--ink-soft)" }}>
+              Durable sandbox evaluations attributed to every Agent, prompt, skill, tool, and MCP server used.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {lifecycle.detail_url && (
+              <a className="btn-secondary !py-1 !px-2 !text-xs" href={lifecycle.detail_url} target="_blank" rel="noreferrer">
+                Trace details <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+            <span className={`pill ${summary.failed ? "pill-warn" : "pill-ok"}`}>
+              {summary.failed ? `${summary.failed} failing cases` : "all gates passing"}
+            </span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <Kpi label="Eval runs" value={fmtNum(summary.runs)} sub={`${summary.cases} cases`} />
+          <Kpi label="Case pass rate" value={`${Math.round(summary.pass_rate * 100)}%`} sub={`${summary.passed} passed`} />
+          <Kpi label="Failed cases" value={fmtNum(summary.failed)} accent={summary.failed ? "error" : undefined} />
+          <Kpi label="Tokens" value={fmtNum(summary.tokens)} sub="agent + judge" />
+          <Kpi label="Cost" value={fmtUsd(summary.cost_usd)} sub="evaluations" />
+          <Kpi label="Avg p95 latency" value={fmtMs(summary.avg_p95_latency_ms)} sub="per suite run" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="panel xl:col-span-2" style={{ padding: 16 }}>
+          <div className="label-eyebrow mb-3">Artifact quality attribution</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left" style={{ color: "var(--ink-soft)" }}>
+                  <th className="pb-2 font-normal">Kind</th>
+                  <th className="pb-2 font-normal">Artifact</th>
+                  <th className="pb-2 font-normal">Measured through</th>
+                  <th className="pb-2 font-normal text-right">Runs</th>
+                  <th className="pb-2 font-normal text-right">Pass</th>
+                  <th className="pb-2 font-normal text-right">Tokens</th>
+                  <th className="pb-2 font-normal text-right">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lifecycle.artifacts.map((artifact) => (
+                  <tr key={`${artifact.kind}:${artifact.name}`} className="border-t" style={{ borderColor: "var(--surface-border)" }}>
+                    <td className="py-2"><span className="pill">{artifact.kind.replace("_", " ")}</span></td>
+                    <td className="py-2 font-mono text-xs" style={{ color: "var(--ink-strong)" }}>
+                      {artifact.kind === "agent" ? (
+                        <Link href={`/agents/${encodeURIComponent(artifact.name)}`} className="hover:underline">{artifact.name}</Link>
+                      ) : artifact.name}
+                    </td>
+                    <td className="py-2 text-xs" style={{ color: "var(--ink-soft)" }}>{artifact.agents.join(", ") || "—"}</td>
+                    <td className="py-2 text-right">{artifact.runs}</td>
+                    <td className="py-2 text-right">
+                      <span className={`pill ${artifact.pass_rate >= 1 ? "pill-ok" : "pill-warn"}`}>
+                        {Math.round(artifact.pass_rate * 100)}%
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">{fmtNum(artifact.tokens)}</td>
+                    <td className="py-2 text-right">{fmtUsd(artifact.cost_usd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="panel" style={{ padding: 16 }}>
+          <div className="label-eyebrow mb-3">Scoring dimensions</div>
+          <div className="space-y-3">
+            {lifecycle.dimensions.map((dimension) => (
+              <div key={dimension.name}>
+                <div className="flex justify-between gap-3 text-xs">
+                  <span className="font-mono" style={{ color: "var(--ink-strong)" }}>{dimension.name}</span>
+                  <span>{Math.round(dimension.pass_rate * 100)}% pass · {dimension.average.toFixed(2)}</span>
+                </div>
+                <div className="mt-1 h-1.5 rounded-full" style={{ background: "var(--surface-raised)" }}>
+                  <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, dimension.average * 100))}%`, background: "var(--accent)" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel" style={{ padding: 16 }}>
+        <div className="label-eyebrow mb-3">Recent evaluation evidence</div>
+        <div className="space-y-3">
+          {lifecycle.recent.slice(0, 10).map((run) => (
+            <div key={run.run_id} className="border-t pt-3 first:border-t-0 first:pt-0" style={{ borderColor: "var(--surface-border)" }}>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <Link href={`/agents/${encodeURIComponent(run.agent)}`} className="font-mono hover:underline" style={{ color: "var(--ink-strong)" }}>
+                  {run.agent}
+                </Link>
+                <span className="text-xs" style={{ color: "var(--ink-soft)" }}>
+                  {run.suite.name ? `${run.suite.name}@${run.suite.version}` : "dataset run"} · {new Date(run.created_at).toLocaleString()}
+                </span>
+              </div>
+              {run.failing_cases.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {run.failing_cases.map((failure) => (
+                    <a
+                      key={`${run.run_id}:${failure.case_id}`}
+                      href={failure.trace_url || undefined}
+                      className={`pill pill-error ${failure.trace_url ? "hover:underline" : ""}`}
+                      title={(failure.failures || []).join("; ")}
+                    >
+                      {failure.case_id}{failure.trace_url ? " · trace" : ""}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 

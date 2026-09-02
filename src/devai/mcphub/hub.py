@@ -20,6 +20,7 @@ downstream can't stall or sink the surface.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from collections.abc import Awaitable, Callable
@@ -42,6 +43,7 @@ from devai.sandbox.gateway import ToolGateway, guard_mcp_call
 
 if TYPE_CHECKING:
     from devai.registry.client import RegistryClient
+    from devai.registry.semantic import RegistrySemanticSearch
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ logger = logging.getLogger(__name__)
 LABEL_SERVER = "mcp.devai.io/server"
 LABEL_TIER = "devai.io/tier"
 ANNO_WIRE_NAME = "mcp.devai.io/wire-name"
+REGISTRY_SEARCH_TOOL = "devai__registry_search"
 
 
 class MCPHub:
@@ -61,12 +64,14 @@ class MCPHub:
         service_token: str = "",
         connect_timeout: float = 15.0,
         max_concurrency: int = 16,
+        capability_search: RegistrySemanticSearch | None = None,
     ):
         self._registry = registry
         self._service_token = service_token
         self._connect_timeout = connect_timeout
         self._sem = asyncio.Semaphore(max(1, max_concurrency))
         self._lock = asyncio.Lock()
+        self._capability_search = capability_search
 
         self._connections: dict[str, DownstreamConnection] = {}
         self._tools: dict[str, FederatedTool] = {}  # namespaced name -> tool
@@ -252,6 +257,8 @@ class MCPHub:
     def list_tools(self, profile: ToolProfile | None = None) -> BudgetResult:
         """Return the caller's budgeted, namespaced tool surface (§6.5)."""
         surface = list(self._tools.values())
+        if self._capability_search is not None:
+            surface.append(_registry_search_tool())
         if self.sandbox is not None:
             surface += self.sandbox.tools()
         return select(surface, profile or ToolProfile.default())
@@ -303,6 +310,8 @@ class MCPHub:
         )
 
     async def _call_downstream(self, name: str, arguments: dict[str, Any], *, identity: Any = None) -> Any:
+        if name == REGISTRY_SEARCH_TOOL and self._capability_search is not None:
+            return await self._search_registry(arguments, identity=identity)
         # A personal-leg tool (usr-…__…) routes to the caller's OWN server —
         # only ever resolvable with the caller's email, so isolation holds.
         if self.sandbox is not None and self.sandbox.owns(name):
@@ -314,6 +323,35 @@ class MCPHub:
         server, wire = route(name)
         conn = self._healthy_leg(server, name)
         return await conn.call_tool(wire, arguments or {})
+
+    async def _search_registry(self, arguments: dict[str, Any], *, identity: Any = None) -> str:
+        from devai.identity import Principal
+
+        capability_search = self._capability_search
+        if capability_search is None:
+            raise ValueError("registry semantic search is not configured")
+        query = arguments.get("query")
+        if not isinstance(query, str):
+            raise ValueError("registry search requires a string query")
+        raw_kinds = arguments.get("kinds")
+        if isinstance(raw_kinds, str):
+            kinds = [part.strip() for part in raw_kinds.split(",") if part.strip()]
+        elif isinstance(raw_kinds, list) and all(isinstance(kind, str) for kind in raw_kinds):
+            kinds = raw_kinds
+        elif raw_kinds is None:
+            kinds = None
+        else:
+            raise ValueError("registry search kinds must be an array of strings")
+        raw_limit = arguments.get("limit", 10)
+        if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
+            raise ValueError("registry search limit must be an integer")
+        result = await capability_search.search(
+            query,
+            principal=identity if isinstance(identity, Principal) else None,
+            kinds=kinds,
+            limit=raw_limit,
+        )
+        return json.dumps(result.to_dict(), sort_keys=True)
 
     async def get_prompt(self, name: str, arguments: dict[str, Any]) -> Any:
         server, wire = route(name)
@@ -353,3 +391,44 @@ async def _safe(coro: Awaitable[list[dict[str, Any]]]) -> list[dict[str, Any]]:
         return await coro
     except DownstreamError:
         return []
+
+
+def _registry_search_tool() -> FederatedTool:
+    return FederatedTool(
+        name=REGISTRY_SEARCH_TOOL,
+        server="devai",
+        wire_name="registry_search",
+        description=(
+            "Semantically search authorized registry tools, skills, agents, MCP servers, prompts, workflows, "
+            "blueprints, datasets, and evaluation suites. Returns exact registry identities and fetch paths; "
+            "it does not grant execution."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 512},
+                "kinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "tools",
+                            "skills",
+                            "agents",
+                            "mcp_servers",
+                            "prompts",
+                            "workflows",
+                            "blueprints",
+                            "datasets",
+                            "eval_suites",
+                        ],
+                    },
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        tier="core",
+        labels={"devai.io/domain": "registry", "devai.io/risk-level": "low"},
+    )

@@ -12,7 +12,6 @@ not configured" empty state without guessing from a 404.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 from collections.abc import Callable
 from copy import deepcopy
@@ -49,6 +48,7 @@ from devai.registry.client import (
     RegistryError,
     Skill,
 )
+from devai.registry.semantic import OWNER_LABEL, RegistrySemanticSearch, principal_owner_id
 
 if TYPE_CHECKING:
     from devai.identity import Principal
@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/registry", tags=["registry"])
 
-_OWNER_LABEL = "devai.tesserix.app/owner-id"
+_OWNER_LABEL = OWNER_LABEL
 _VISIBILITY_LABEL = "devai.tesserix.app/visibility"
 _RUNTIME_LABEL = "devai.io/runtime"
 _BUILD_GATE_LABEL = "devai.tesserix.app/build-gate"
@@ -66,7 +66,19 @@ _RISK_APPROVER_ANNOTATION = "devai.tesserix.app/risk-approver"
 _RISK_APPROVAL_REASON_ANNOTATION = "devai.tesserix.app/risk-approval-reason"
 _GATE_OVERRIDE_HEADER = "x-devai-eval-gate-override"
 _GATE_OVERRIDE_REASON_HEADER = "x-devai-eval-gate-override-reason"
-_MODEL_PROVIDERS = frozenset({"anthropic", "claude", "openai", "google", "gemini", "vertex", "vertex_gemini", "groq"})
+_MODEL_PROVIDERS = frozenset(
+    {
+        "anthropic",
+        "claude",
+        "devai-user-routing",
+        "openai",
+        "google",
+        "gemini",
+        "vertex",
+        "vertex_gemini",
+        "groq",
+    }
+)
 _RISK_LEVELS = frozenset({"low", "medium", "high", "critical"})
 
 type RegistryItem = Skill | Prompt | McpServer | Agent | Dataset | EvalSuite
@@ -165,12 +177,7 @@ async def _optional_principal(request: Request) -> Principal | None:
 
 
 def _owner_id(principal: Principal | None) -> str:
-    if principal is None:
-        return ""
-    scope = principal.user_scope_id.strip()
-    if not scope:
-        return ""
-    return hashlib.sha256(scope.encode()).hexdigest()[:32]
+    return principal_owner_id(principal)
 
 
 def _labels(item: RegistryItem | dict[str, Any]) -> dict[str, str]:
@@ -315,7 +322,7 @@ def _visibility(item: RegistryItem | dict[str, Any]) -> str:
     return str(value or "").strip().lower()
 
 
-def _visible(item: RegistryItem, principal: Principal | None) -> bool:
+def _visible(item: RegistryItem | dict[str, Any], principal: Principal | None) -> bool:
     owner = _labels(item).get(_OWNER_LABEL, "")
     if owner:
         return owner == _owner_id(principal)
@@ -340,6 +347,23 @@ async def _visible_item[T: RegistryItem](
 ) -> T | None:
     principal = await _optional_principal(request)
     item = await asyncio.to_thread(loader, name)
+    if item is None or not _visible(item, principal):
+        return None
+    return item
+
+
+async def _visible_envelope(
+    request: Request,
+    client: RegistryClient,
+    plural: str,
+    name: str,
+    tag: str = "",
+) -> dict[str, Any] | None:
+    principal = await _optional_principal(request)
+    if tag:
+        item = await asyncio.to_thread(client.get_artifact_envelope, plural, name, tag)
+    else:
+        item = await asyncio.to_thread(client.get_artifact_envelope, plural, name)
     if item is None or not _visible(item, principal):
         return None
     return item
@@ -377,6 +401,93 @@ async def registry_counts(request: Request) -> dict[str, int]:
         }
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+def _search_service(request: Request, client: RegistryClient) -> RegistrySemanticSearch:
+    service = getattr(request.app.state, "registry_search_service", None)
+    if isinstance(service, RegistrySemanticSearch):
+        return service
+    service = RegistrySemanticSearch(client)
+    request.app.state.registry_search_service = service
+    return service
+
+
+@router.get("/search")
+async def search_registry(
+    request: Request,
+    q: str,
+    kinds: str = "",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Find authorized registry artifacts by meaning and structured metadata."""
+    client = _client(request)
+    principal = await _optional_principal(request)
+    selected_kinds = [part.strip() for part in kinds.split(",") if part.strip()] or None
+    try:
+        result = await _search_service(request, client).search(
+            q,
+            principal=principal,
+            kinds=selected_kinds,
+            limit=limit,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return result.to_dict()
+
+
+@router.get("/artifacts/{plural}/{name:path}")
+async def get_registry_artifact(
+    request: Request,
+    plural: str,
+    name: str,
+    tag: str = "",
+) -> dict[str, Any]:
+    """Progressively fetch one exact search hit after object authorization."""
+    allowed = {
+        "tools",
+        "skills",
+        "agents",
+        "mcp-servers",
+        "prompts",
+        "workflows",
+        "blueprints",
+        "datasets",
+        "eval-suites",
+    }
+    if plural not in allowed:
+        raise HTTPException(status_code=404, detail=f"registry collection not found: {plural}")
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, plural, name, tag)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"registry artifact not found: {name}")
+    return item
+
+
+@router.get("/tools")
+async def list_registry_tools(request: Request) -> list[dict[str, Any]]:
+    client = _client(request)
+    principal, items = await asyncio.gather(
+        _optional_principal(request),
+        asyncio.to_thread(client.list_tool_artifacts),
+    )
+    return [item for item in items if _visible(item, principal)]
+
+
+@router.get("/tools/{name}")
+async def get_registry_tool(request: Request, name: str) -> dict[str, Any]:
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, "tools", name)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"tool not found: {name}")
+    return item
 
 
 @router.get("/skills")
@@ -525,6 +636,18 @@ async def list_datasets(request: Request) -> list[dict[str, Any]]:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
+@router.get("/datasets/{name}")
+async def get_dataset(request: Request, name: str) -> dict[str, Any]:
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, "datasets", name)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"dataset not found: {name}")
+    return item
+
+
 @router.get("/eval-suites")
 async def list_eval_suites(request: Request) -> list[dict[str, Any]]:
     client = _client(request)
@@ -533,6 +656,18 @@ async def list_eval_suites(request: Request) -> list[dict[str, Any]]:
         return [_to_dict(item) for item in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/eval-suites/{name}")
+async def get_eval_suite(request: Request, name: str) -> dict[str, Any]:
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, "eval-suites", name)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"evaluation suite not found: {name}")
+    return item
 
 
 @router.get("/agents/{name}/manifest")
@@ -594,6 +729,7 @@ async def refresh(request: Request) -> dict[str, str]:
 
 # plural → RegistryClient.publish_* method. Mirrors aregistry's POST /v0/{plural}.
 _PUBLISH_METHOD: dict[str, str] = {
+    "projects": "publish_project",
     "skills": "publish_skill",
     "prompts": "publish_prompt",
     "mcp-servers": "publish_mcp_server",
@@ -748,9 +884,13 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
             annotations[_RISK_APPROVER_ANNOTATION] = harness.approved_by
             annotations[_RISK_APPROVAL_REASON_ANNOTATION] = harness.approval_reason or ""
         meta["annotations"] = annotations
+    requested_visibility = str(meta.get("visibility") or "").strip().lower()
+    published_visibility = (
+        "public" if requested_visibility == "public" and "platform-admin" in set(principal.roles or []) else "private"
+    )
     labels[_OWNER_LABEL] = owner_id
-    labels[_VISIBILITY_LABEL] = "private"
-    meta["visibility"] = "private"
+    labels[_VISIBILITY_LABEL] = published_visibility
+    meta["visibility"] = published_visibility
 
     name = (meta.get("name") or "").strip()
     if not name:
@@ -790,6 +930,7 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"publish: {e}") from e
     client.refresh()
     response = dict(result) if isinstance(result, dict) else {"status": "published"}
+    response["visibility"] = published_visibility
     if gate is not None:
         response["gate"] = gate.model_dump(mode="json")
     if harness is not None:

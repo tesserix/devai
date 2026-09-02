@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
+from typing import Any
 
 from devai.config import settings
 from devai.mcphub.hub import MCPHub
@@ -47,7 +48,7 @@ async def _periodic_refresh(hub: MCPHub, interval: float) -> None:
             logger.warning("mcphub: periodic refresh failed; will retry", exc_info=True)
 
 
-def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
+def create_hub_app() -> Any:
     """Build the FastAPI app hosting the DevAI MCP Hub."""
     from fastapi import FastAPI, Request
     from starlette.responses import JSONResponse
@@ -62,15 +63,21 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
         app.state.hub = None
         app.state._refresh_task = None
         app.state._mcp_cm = None
+        app.state.registry_search_service = None
 
         if not settings.mcp_hub_enabled or registry is None:
             yield
             return
 
+        from devai.registry.semantic import RegistrySemanticSearch
+
+        capability_search = RegistrySemanticSearch(registry)
+        app.state.registry_search_service = capability_search
         hub = MCPHub(
             registry,
             service_token=settings.mcp_hub_service_token,
             connect_timeout=settings.mcp_hub_connect_timeout,
+            capability_search=capability_search,
         )
         app.state.hub = hub
         await hub.refresh()
@@ -85,7 +92,7 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
             app.state._mcp_cm = session_manager.run()
             await app.state._mcp_cm.__aenter__()
 
-            async def _mcp_asgi(scope, receive, send):  # noqa: ANN001
+            async def _mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
                 await session_manager.handle_request(scope, receive, send)
 
             app.mount("/mcp", _mcp_asgi)
@@ -124,7 +131,7 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
     )
 
     @app.middleware("http")
-    async def _identity_and_profile(request: Request, call_next):  # noqa: ANN001
+    async def _identity_and_profile(request: Request, call_next: Any) -> Any:
         """Terminate caller identity and resolve their tool-surface profile.
 
         Fail-closed gate (audit CODE-6): when the caller has no verified
@@ -161,7 +168,7 @@ def create_hub_app():  # noqa: ANN201 — FastAPI imported lazily
         return await call_next(request)
 
     @app.get("/healthz")
-    async def healthz():  # noqa: ANN202
+    async def healthz() -> Any:
         hub: MCPHub | None = getattr(app.state, "hub", None)
         if hub is None:
             return JSONResponse({"status": "ok", "service": "devai-mcp-hub", "hub": "disabled"})

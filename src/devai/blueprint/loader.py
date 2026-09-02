@@ -177,6 +177,7 @@ _ALLOWED_STAGE_KEYS = {
     "depends_on",
     "condition",
     "timeout",
+    "retries",
     "on_failure",
     "config",
     "parallel",

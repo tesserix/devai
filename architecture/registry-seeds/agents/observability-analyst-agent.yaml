@@ -22,6 +22,13 @@ spec:
   model:
     provider: devai-user-routing
     name: dynamic
+  limits:
+    maxTurns: 24
+    timeoutSeconds: 720
+  riskLevel: low
+  evalSuite:
+    ref: observability-analyst-golden-suite
+    version: '1'
   a2a:
     url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/observability-analyst
     preferredTransport: JSONRPC

@@ -21,6 +21,13 @@ spec:
   model:
     provider: devai-user-routing
     name: dynamic
+  limits:
+    maxTurns: 60
+    timeoutSeconds: 1200
+  riskLevel: medium
+  evalSuite:
+    ref: ci-monitor-golden-suite
+    version: '1'
   a2a:
     url: http://devai-api.devai.svc.cluster.local:8080/a2a/v1/ci-monitor
     preferredTransport: JSONRPC

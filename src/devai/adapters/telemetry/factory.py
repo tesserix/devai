@@ -34,7 +34,7 @@ from devai.adapters.telemetry.noop import NoopTelemetryAdapter
 
 logger = logging.getLogger(__name__)
 
-KNOWN_PROVIDERS = ("noop", "otel")
+KNOWN_PROVIDERS = ("noop", "otel", "langfuse")
 
 
 def _build_noop(settings: Any) -> TelemetryAdapter:  # noqa: ARG001
@@ -55,9 +55,28 @@ def _build_otel(settings: Any) -> TelemetryAdapter:
     )
 
 
+def _secret(value: Any) -> str:
+    getter = getattr(value, "get_secret_value", None)
+    return str(getter() if callable(getter) else value or "")
+
+
+def _build_langfuse(settings: Any) -> TelemetryAdapter:
+    from devai.adapters.telemetry.langfuse import LangfuseTelemetryAdapter
+
+    return LangfuseTelemetryAdapter(
+        base_url=getattr(settings, "langfuse_base_url", "") or "",
+        public_key=_secret(getattr(settings, "langfuse_public_key", "")),
+        secret_key=_secret(getattr(settings, "langfuse_secret_key", "")),
+        service_name=getattr(settings, "otel_service_name", "") or "devai",
+        service_namespace=getattr(settings, "otel_service_namespace", "") or "devai",
+        export_interval_ms=int(getattr(settings, "otel_export_interval_ms", 15000) or 15000),
+    )
+
+
 telemetry_registry: AdapterRegistry[TelemetryAdapter] = AdapterRegistry("telemetry")
 telemetry_registry.register("noop", _build_noop)
 telemetry_registry.register("otel", _build_otel)
+telemetry_registry.register("langfuse", _build_langfuse)
 
 
 def create_telemetry_adapter(settings: Any) -> TelemetryAdapter:

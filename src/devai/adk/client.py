@@ -8,6 +8,20 @@ import httpx
 
 from devai.services.redact import redact_secrets
 
+_PUBLISH_PLURALS = frozenset(
+    {
+        "projects",
+        "tools",
+        "mcp-servers",
+        "skills",
+        "prompts",
+        "datasets",
+        "eval-suites",
+        "blueprints",
+        "workflows",
+    }
+)
+
 
 class AdkError(Exception):
     """Base error for the public ADK surface."""
@@ -99,6 +113,22 @@ class SandboxClient:
             }
         path = "/api/registry/agents?overwrite=true" if overwrite else "/api/registry/agents"
         return self._request_object("POST", path, json=manifest, headers=headers)
+
+    def publish_artifact(
+        self,
+        plural: str,
+        manifest: dict[str, Any],
+        *,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        if plural not in _PUBLISH_PLURALS:
+            raise AdkError(f"unsupported Registry artifact collection: {plural}")
+        suffix = "?overwrite=true" if overwrite else ""
+        return self._request_object(
+            "POST",
+            f"/api/registry/{plural}{suffix}",
+            json=manifest,
+        )
 
     def destroy(self, sandbox_id: str) -> dict[str, Any]:
         return self._request_object("DELETE", f"/api/sandboxes/{sandbox_id}")

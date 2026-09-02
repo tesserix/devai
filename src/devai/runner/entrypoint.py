@@ -186,17 +186,30 @@ async def _run_agent(
             "stage": stage,
         }
 
-    # The runner constructs its own registry client so the
-    # SpecializationService can still hit aregistry for skill / prompt
-    # bodies (the env-baked profile only carries names). Construction is
-    # cheap and the client is bounded by a 30 s TTL cache.
-    registry_client = None
-    try:
-        from devai.registry import create_registry_client
+    resolved_composition = None
+    if agent_meta and agent_meta.get("composition") is not None:
+        try:
+            from devai.registry.composition import load_composition_snapshot
 
-        registry_client = create_registry_client(config)
-    except Exception:
-        logger.debug("runner: registry client unavailable — local YAML only", exc_info=True)
+            resolved_composition = load_composition_snapshot(agent_meta["composition"])
+        except Exception as error:  # noqa: BLE001 -- stable trust-boundary failure
+            return {
+                "ok": False,
+                "error": (f"agent {agent_name} failed: invalid resolved composition ({type(error).__name__})"),
+                "stage": stage,
+            }
+
+    # Older dispatchers and local, non-governed runs can still resolve live.
+    # Governed Jobs receive the complete verified snapshot above and need no
+    # Registry network access after dispatch.
+    registry_client = None
+    if resolved_composition is None:
+        try:
+            from devai.registry import create_registry_client
+
+            registry_client = create_registry_client(config)
+        except Exception:
+            logger.debug("runner: registry client unavailable — local YAML only", exc_info=True)
 
     service = SpecializationService(config, registry_client=registry_client)
     try:
@@ -236,7 +249,11 @@ async def _run_agent(
             state_slice["mcp_endpoints"] = _resolve_mcp_endpoints(agent_meta["mcp_servers"], registry_client, config)
 
     try:
-        patch = await service.invoke(agent_name, state_slice)
+        patch = await service.invoke(
+            agent_name,
+            state_slice,
+            resolved=resolved_composition,
+        )
     except Exception as e:  # noqa: BLE001
         return {
             "ok": False,
@@ -252,6 +269,8 @@ async def _run_agent(
         patch = {"value": patch}
     patch.setdefault("ok", True)
     patch.setdefault("stage", stage)
+    if agent_meta and agent_meta.get("digest"):
+        patch.setdefault("composition_digest", agent_meta["digest"])
     return patch
 
 

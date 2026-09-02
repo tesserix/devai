@@ -14,6 +14,8 @@ from typing import Any
 import pytest
 
 from devai.registry.client import Agent, ResolvedAgent, UnresolvedRef
+from devai.registry.composition import snapshot_composition
+from devai.runner.entrypoint import _run_agent
 from devai.specializations.loader import load_specialization_from_string
 from devai.specializations.service import (
     AgentNotAdmittedError,
@@ -220,6 +222,64 @@ async def test_capability_selects_only_the_canonical_reviewed_registry_agent(loc
     assert bundle.agent_name == "db-engineer-agent"
     assert bundle.spec.system_prompt == "You write migrations."
     assert registry.requested == ["db-engineer-agent"]
+
+
+async def test_pre_resolved_snapshot_is_admitted_without_a_second_registry_lookup(
+    local_dir: Path,
+) -> None:
+    registry = _ResolvingRegistry(RuntimeError("runner must not re-resolve"))
+    svc = _service(local_dir, registry)
+    await svc.start()
+
+    bundle = svc.admit_resolved("db_engineer", _resolved_db_agent())
+
+    assert bundle.agent_name == "db-engineer-agent"
+    assert bundle.resolved.resolved["skills"][0]["metadata"]["name"] == "db-engineer"
+    assert registry.requested == []
+
+
+async def test_runner_executes_verified_snapshot_without_a_registry_client(
+    local_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def execute_admitted_bundle(
+        _service: SpecializationService,
+        bundle: Any,
+        _state: dict[str, Any],
+        *,
+        deps: Any = None,
+    ) -> dict[str, Any]:
+        assert deps is None
+        assert bundle.agent_name == "db-engineer-agent"
+        return {"final_text": "reviewed snapshot executed"}
+
+    monkeypatch.setattr(SpecializationService, "invoke_bundle", execute_admitted_bundle)
+    snapshot = snapshot_composition(_resolved_db_agent())
+    config = SimpleNamespace(
+        specializations_dir=str(local_dir),
+        llm_gateway_required=True,
+        llm_gateway_base_url="http://ai-gateway:8080",
+        agentgateway_url="http://agentgateway-mcp:8080",
+    )
+
+    result = await _run_agent(
+        agent_name="db-engineer-agent",
+        stage="run_agent",
+        task_id="eval-run-1",
+        repo="tesserix/example",
+        intent="write a migration",
+        blueprint="database-change",
+        agent_meta={"composition": snapshot, "digest": snapshot["digest"]},
+        stage_config={},
+        config=config,
+    )
+
+    assert result == {
+        "final_text": "reviewed snapshot executed",
+        "ok": True,
+        "stage": "run_agent",
+        "composition_digest": snapshot["digest"],
+    }
 
 
 async def test_registry_publication_does_not_admit_a_new_capability(local_dir: Path) -> None:

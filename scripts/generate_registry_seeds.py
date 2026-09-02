@@ -9,6 +9,7 @@ under `architecture/registry-seeds/`:
     prompts/<name>-prompt-v1.yaml — Prompt CR (extracted system prompt)
     datasets/<name>-golden.yaml — default golden Dataset when no curated one exists
     eval-suites/<name>-golden-suite.yaml — owned EvalSuite for the Agent
+    blueprints/<name>.yaml — registry envelope for an opted-in executable Blueprint
 
 Run via `make registry-seeds`. Idempotent — re-runs overwrite existing
 files. The CI guard `make registry-seeds-check` calls this in --check
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,6 +33,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPECS_DIR = REPO_ROOT / "specializations"
+BLUEPRINTS_DIR = REPO_ROOT / "blueprints"
 SEEDS_DIR = REPO_ROOT / "architecture" / "registry-seeds"
 
 CATALOG_API_VERSION = "registry.solo.io/v1alpha1"
@@ -55,6 +58,7 @@ MUTATING_TOOL_MARKERS = (
     "_suspend",
     "_sync",
 )
+_DURATION = re.compile(r"^(\d+)([smh]?)$")
 
 
 def _kebab(name: str) -> str:
@@ -70,6 +74,22 @@ def _to_yaml(doc: dict[str, Any]) -> str:
 
 def _prompt_hash(prompt: str) -> str:
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
+
+
+def _duration_seconds(value: Any, *, default: int = 900) -> int:
+    if value is None or value == "":
+        return default
+    if type(value) is int and value > 0:
+        return value
+    match = _DURATION.fullmatch(str(value).strip().lower())
+    if match is None:
+        raise ValueError(f"unsupported duration: {value!r}")
+    amount = int(match.group(1))
+    multiplier = {"": 1, "s": 1, "m": 60, "h": 3600}[match.group(2)]
+    seconds = amount * multiplier
+    if not 1 <= seconds <= 86400:
+        raise ValueError(f"duration outside Agent contract: {value!r}")
+    return seconds
 
 
 def _skill_doc(spec: dict[str, Any]) -> dict[str, Any]:
@@ -108,7 +128,7 @@ def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
     title = str(spec.get("display_name") or name.replace("-", " ").title())
     description = str(spec.get("description") or "").strip()
     version = str((spec.get("metadata") or {}).get("version") or "1.0.1")
-    return {
+    document = {
         "apiVersion": AGENT_API_VERSION,
         "kind": "Agent",
         "metadata": {
@@ -133,6 +153,15 @@ def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
                 "provider": "devai-user-routing",
                 "name": "dynamic",
             },
+            "limits": {
+                "maxTurns": int(spec.get("max_turns") or 20),
+                "timeoutSeconds": _duration_seconds(spec.get("timeout")),
+            },
+            "riskLevel": risk,
+            "evalSuite": {
+                "ref": f"{name}-golden-suite",
+                "version": "1",
+            },
             "a2a": {
                 "url": f"{A2A_BASE_URL}/{name}",
                 "preferredTransport": "JSONRPC",
@@ -152,6 +181,10 @@ def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
             "promptRef": f"{name}-prompt-v1",
         },
     }
+    registry_tools = list((spec.get("metadata") or {}).get("registry_tools") or [])
+    if registry_tools:
+        document["spec"]["tools"] = registry_tools
+    return document
 
 
 def _prompt_doc(spec: dict[str, Any]) -> dict[str, Any]:
@@ -175,6 +208,57 @@ def _prompt_doc(spec: dict[str, Any]) -> dict[str, Any]:
             "skill": name,
             "systemPrompt": prompt,
             "userPromptTemplate": spec.get("user_prompt_template") or "",
+        },
+    }
+
+
+def _blueprint_doc(blueprint: dict[str, Any]) -> dict[str, Any]:
+    name = str(blueprint["name"])
+    metadata = blueprint.get("metadata") or {}
+    stages = list(blueprint.get("stages") or [])
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, str]] = []
+    for stage in stages:
+        config = stage.get("config") or {}
+        agent = str(stage.get("agent") or config.get("agent") or "")
+        node: dict[str, Any] = {
+            "id": str(stage["name"]),
+            "label": str(stage.get("title") or str(stage["name"]).replace("-", " ").title()),
+            "type": str(stage.get("type") or "deterministic"),
+        }
+        if agent:
+            capability = _kebab(agent).removesuffix("-agent")
+            node.update({"kind": "Agent", "ref": f"{capability}-agent"})
+        nodes.append(node)
+        edges.extend(
+            {"from": str(dependency), "to": str(stage["name"])}
+            for dependency in stage.get("depends_on") or []
+        )
+
+    labels = {
+        "devai.io/source": SOURCE_LABEL,
+        "devai.io/category": "workflow",
+    }
+    if metadata.get("domain"):
+        labels["devai.io/domain"] = str(metadata["domain"])
+    return {
+        "apiVersion": AGENT_API_VERSION,
+        "kind": "Blueprint",
+        "metadata": {
+            "name": name,
+            "namespace": NAMESPACE,
+            "tenantId": NAMESPACE,
+            "tag": str(metadata.get("version") or "1"),
+            "visibility": str(metadata.get("visibility") or VISIBILITY),
+            "labels": labels,
+        },
+        "spec": {
+            "title": str(metadata.get("title") or name.replace("-", " ").title()),
+            "description": str(blueprint.get("description") or ""),
+            "nodes": nodes,
+            "edges": edges,
+            "stages": stages,
+            "execution": {"engine": "devai", "version": "1"},
         },
     }
 
@@ -384,6 +468,21 @@ def main() -> int:
             else:
                 if _write_doc(target, doc):
                     written.append(str(target.relative_to(REPO_ROOT)))
+
+    for blueprint_path in sorted(BLUEPRINTS_DIR.glob("*.yaml")):
+        blueprint = _load_spec(blueprint_path)
+        metadata = blueprint.get("metadata") if isinstance(blueprint, dict) else {}
+        if not isinstance(metadata, dict) or metadata.get("registry_publish") is not True:
+            continue
+        target = SEEDS_DIR / "blueprints" / blueprint_path.name
+        document = _blueprint_doc(blueprint)
+        if args.check:
+            new_yaml = _to_yaml(document)
+            existing = target.read_text(encoding="utf-8") if target.exists() else ""
+            if new_yaml != existing:
+                drift.append(str(target.relative_to(REPO_ROOT)))
+        elif _write_doc(target, document):
+            written.append(str(target.relative_to(REPO_ROOT)))
 
     if args.check:
         if drift:

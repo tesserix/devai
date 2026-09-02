@@ -11,6 +11,7 @@ robust to either shape.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -22,6 +23,149 @@ logger = logging.getLogger(__name__)
 _SUCCESS_STATES = frozenset({"completed", "done", "succeeded"})
 _FAILURE_STATES = frozenset({"failed", "stage_failed", "error", "cancelled", "stopped"})
 _TERMINAL_STATES = _SUCCESS_STATES | _FAILURE_STATES
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    return value if isinstance(value, list) else []
+
+
+def _reference_names(value: Any) -> set[str]:
+    values = value if isinstance(value, list) else [value]
+    names: set[str] = set()
+    for item in values:
+        if isinstance(item, str) and item.strip():
+            names.add(item.strip())
+        elif isinstance(item, dict):
+            name = str(item.get("ref") or item.get("name") or "").strip()
+            if name:
+                names.add(name)
+    return names
+
+
+def _run_artifacts(row: dict[str, Any]) -> set[tuple[str, str]]:
+    configuration = _mapping(row.get("configuration"))
+    spec = _mapping(_mapping(configuration.get("draft")).get("spec"))
+    agent = str(row.get("agent") or _mapping(configuration.get("agent")).get("name") or "").strip()
+    artifacts = {("agent", agent)} if agent else set()
+    reference_fields = {
+        "prompt": (spec.get("prompts"), spec.get("promptRef")),
+        "skill": (spec.get("skills"), spec.get("skill")),
+        "tool": (spec.get("tools"), spec.get("builtinTools")),
+        "mcp_server": (spec.get("mcpServers"),),
+    }
+    for kind, groups in reference_fields.items():
+        for group in groups:
+            artifacts.update((kind, name) for name in _reference_names(group))
+    prompt = _mapping(configuration.get("prompt"))
+    prompt_name = str(prompt.get("ref") or prompt.get("name") or "").strip()
+    if prompt_name:
+        artifacts.add(("prompt", prompt_name))
+    return artifacts
+
+
+def summarize_lifecycle_evals(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate durable sandbox evaluations and attribute them to pinned artifacts."""
+    totals = {"runs": len(rows), "cases": 0, "passed": 0, "failed": 0, "tokens": 0, "cost_usd": 0.0}
+    latencies: list[float] = []
+    artifact_totals: dict[tuple[str, str], dict[str, Any]] = defaultdict(
+        lambda: {"runs": 0, "cases": 0, "passed": 0, "cost_usd": 0.0, "tokens": 0, "agents": set()}
+    )
+    dimension_totals: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"average_sum": 0.0, "pass_rate_sum": 0.0, "runs": 0.0}
+    )
+    recent: list[dict[str, Any]] = []
+
+    for row in rows:
+        summary = _mapping(row.get("summary"))
+        cases = int(summary.get("cases") or 0)
+        passed = int(summary.get("passed") or 0)
+        failed = int(summary.get("failed") or max(cases - passed, 0))
+        tokens = int(summary.get("total_tokens") or 0)
+        cost = float(summary.get("cost_usd") or 0.0)
+        latency = float(summary.get("p95_latency_ms") or 0.0)
+        totals["cases"] += cases
+        totals["passed"] += passed
+        totals["failed"] += failed
+        totals["tokens"] += tokens
+        totals["cost_usd"] += cost
+        if latency:
+            latencies.append(latency)
+
+        agent = str(row.get("agent") or "")
+        for artifact in _run_artifacts(row):
+            aggregate = artifact_totals[artifact]
+            aggregate["runs"] += 1
+            aggregate["cases"] += cases
+            aggregate["passed"] += passed
+            aggregate["cost_usd"] += cost
+            aggregate["tokens"] += tokens
+            if agent:
+                aggregate["agents"].add(agent)
+
+        for name, dimension in _mapping(summary.get("dimensions")).items():
+            values = _mapping(dimension)
+            aggregate = dimension_totals[str(name)]
+            aggregate["average_sum"] += float(values.get("average") or 0.0)
+            aggregate["pass_rate_sum"] += float(values.get("pass_rate") or 0.0)
+            aggregate["runs"] += 1
+
+        recent.append(
+            {
+                "run_id": str(row.get("run_id") or row.get("id") or ""),
+                "agent": agent,
+                "suite": _mapping(row.get("suite")),
+                "summary": summary,
+                "failing_cases": _list(row.get("failing_cases")),
+                "created_at": str(row.get("created_at") or ""),
+            }
+        )
+
+    totals["pass_rate"] = round(totals["passed"] / totals["cases"], 4) if totals["cases"] else 0.0
+    totals["cost_usd"] = round(float(totals["cost_usd"]), 6)
+    totals["avg_p95_latency_ms"] = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
+    artifacts = []
+    for (kind, name), aggregate in artifact_totals.items():
+        artifacts.append(
+            {
+                "kind": kind,
+                "name": name,
+                "runs": aggregate["runs"],
+                "cases": aggregate["cases"],
+                "pass_rate": round(aggregate["passed"] / aggregate["cases"], 4) if aggregate["cases"] else 0.0,
+                "cost_usd": round(aggregate["cost_usd"], 6),
+                "tokens": aggregate["tokens"],
+                "agents": sorted(aggregate["agents"]),
+            }
+        )
+    dimensions = [
+        {
+            "name": name,
+            "average": round(values["average_sum"] / values["runs"], 4),
+            "pass_rate": round(values["pass_rate_sum"] / values["runs"], 4),
+            "runs": int(values["runs"]),
+        }
+        for name, values in dimension_totals.items()
+    ]
+    return {
+        "summary": totals,
+        "artifacts": sorted(artifacts, key=lambda item: (item["kind"], item["name"])),
+        "dimensions": sorted(dimensions, key=lambda item: item["name"]),
+        "recent": recent[:50],
+    }
 
 
 def _epoch(value: Any) -> float | None:
@@ -163,5 +307,6 @@ def stage_stats(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 __all__ = [
     "runs_timeseries",
     "stage_stats",
+    "summarize_lifecycle_evals",
     "summarize_runs",
 ]

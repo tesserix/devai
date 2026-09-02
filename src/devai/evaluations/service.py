@@ -483,7 +483,9 @@ class EvaluationService:
 
     @staticmethod
     def _suite_from_row(row: dict[str, Any]) -> EvalSuite:
-        configuration = dict(row.get("thresholds") or {})
+        # asyncpg hands jsonb back as text — no json codec is registered on the pool.
+        raw = row.get("thresholds") or {}
+        configuration = dict(json.loads(raw) if isinstance(raw, str) else raw)
         judge = configuration.pop("_judge", None)
         return EvalSuite(
             name=row["name"],

@@ -330,7 +330,7 @@ class JobRunnerStage(PipelineStage):
             if governed:
                 raise RuntimeError("governed agent composition unavailable")
             return None
-        return {
+        profile = {
             "name": getattr(agent_meta, "name", agent_name),
             "image": getattr(agent_meta, "image", "") or "",
             "description": getattr(agent_meta, "description", "") or "",
@@ -340,11 +340,19 @@ class JobRunnerStage(PipelineStage):
             "model_provider": getattr(agent_meta, "model_provider", "") or "",
             "model_name": getattr(agent_meta, "model_name", "") or "",
             "skills": list(getattr(agent_meta, "skills", []) or []),
+            "tools": list(getattr(agent_meta, "tools", []) or []),
             "prompts": list(getattr(agent_meta, "prompts", []) or []),
             "mcp_servers": list(getattr(agent_meta, "mcp_servers", []) or []),
             # Registry labels, incl. `devai.io/runtime` — drives kagent routing.
             "labels": dict(getattr(agent_meta, "labels", {}) or {}),
         }
+        if governed:
+            from devai.registry.composition import snapshot_composition
+
+            composition = snapshot_composition(resolution)
+            profile["composition"] = composition
+            profile["digest"] = composition["digest"]
+        return profile
 
     # ── kagent A2A dispatch (opt-in Substrate actors) ────────────────
 

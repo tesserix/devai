@@ -40,7 +40,6 @@ from devai.adk import (
     EvalSuite,
     McpServer,
     Prompt,
-    Publisher,
     SandboxClient,
     Skill,
     scaffold_agent,
@@ -49,6 +48,7 @@ from devai.adk import (
     scaffold_skill,
 )
 from devai.config import settings
+from devai.registry import RegistryClient, RegistryError
 from devai.services.redact import scrub_structure
 
 adk_app = typer.Typer(
@@ -59,6 +59,42 @@ adk_app = typer.Typer(
 sandbox_app = typer.Typer(name="sandbox", help="Create, invoke, inspect, and destroy agent sandboxes.")
 adk_app.add_typer(sandbox_app, name="sandbox")
 console = Console()
+
+_ARTIFACT_ORDER = {
+    "Project": 0,
+    "Tool": 10,
+    "MCPServer": 20,
+    "Skill": 30,
+    "Prompt": 40,
+    "Dataset": 50,
+    "EvalSuite": 60,
+    "Agent": 70,
+    "Blueprint": 80,
+    "Workflow": 90,
+}
+_REGISTRY_PUBLISH_METHOD = {
+    "Project": "publish_project",
+    "Tool": "publish_tool",
+    "MCPServer": "publish_mcp_server",
+    "Skill": "publish_skill",
+    "Prompt": "publish_prompt",
+    "Dataset": "publish_dataset",
+    "EvalSuite": "publish_eval_suite",
+    "Blueprint": "publish_blueprint",
+    "Workflow": "publish_workflow",
+}
+_DEVAI_PUBLISH_PLURAL = {
+    "Project": "projects",
+    "Tool": "tools",
+    "MCPServer": "mcp-servers",
+    "Skill": "skills",
+    "Prompt": "prompts",
+    "Dataset": "datasets",
+    "EvalSuite": "eval-suites",
+    "Blueprint": "blueprints",
+    "Workflow": "workflows",
+}
+_GATED_RUNNABLE_KINDS = frozenset({"Agent", "Blueprint", "Workflow"})
 
 
 @adk_app.command("new-skill")
@@ -184,27 +220,42 @@ def publish(
     eval_run_id: str = typer.Option("", "--eval-run-id"),
     overwrite: bool = typer.Option(False, "--overwrite"),
     override_reason: str = typer.Option("", "--override-reason"),
+    dependencies_only: bool = typer.Option(
+        False,
+        "--dependencies-only",
+        help="Publish only non-runnable dependencies; skip Agent/Blueprint/Workflow.",
+    ),
 ) -> None:
-    files = list(_walk(target))
-    if not files:
+    try:
+        artifacts = _ordered_artifacts(target)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=2) from error
+    if not artifacts:
         console.print(f"[red]no YAML files under {target}[/]")
         raise typer.Exit(code=1)
 
     url = registry_url or settings.registry_url
-    pub: Publisher | None = None
+    registry_client: RegistryClient | None = None
     api_client: SandboxClient | None = None
+    use_devai_api = bool(api_url or session_cookie or api_token)
+    if use_devai_api:
+        api_client = _new_sandbox_client(
+            api_url=api_url,
+            session_cookie=session_cookie,
+            token=api_token,
+        )
     failures = 0
     table = Table("kind", "name", "status")
     try:
-        for f in files:
-            doc = yaml.safe_load(f.read_text()) or {}
-            try:
-                builder = _builder_for(doc)
-            except Exception as e:  # noqa: BLE001
-                table.add_row("?", str(f), f"[red]parse: {e}[/]")
-                failures += 1
+        for _path, doc in artifacts:
+            kind = str(doc["kind"])
+            metadata = _mapping(doc.get("metadata"))
+            name = str(metadata.get("name") or "")
+            if dependencies_only and kind in _GATED_RUNNABLE_KINDS:
+                table.add_row(kind, name, "[yellow]gated — skipped[/]")
                 continue
-            if doc.get("kind") == "Agent":
+            if kind == "Agent":
                 if api_client is None:
                     api_client = _new_sandbox_client(
                         api_url=api_url,
@@ -226,33 +277,62 @@ def publish(
                     )
                     gate = _mapping(response.get("gate"))
                     status = str(gate.get("status") or "published")
-                    table.add_row("agent", builder.name, f"[green]{status}[/]")
+                    table.add_row("agent", name, f"[green]{status}[/]")
                 except AdkError as error:
-                    table.add_row("agent", builder.name, f"[red]failed — {error}[/]")
+                    table.add_row("agent", name, f"[red]failed — {error}[/]")
+                    failures += 1
+                continue
+            if use_devai_api and api_client is not None:
+                plural = _DEVAI_PUBLISH_PLURAL.get(kind)
+                if plural is None:
+                    table.add_row(kind, name, "[red]failed — unsupported DevAI kind[/]")
+                    failures += 1
+                    continue
+                try:
+                    response = api_client.publish_artifact(
+                        plural,
+                        deepcopy(doc),
+                        overwrite=overwrite,
+                    )
+                    requested_visibility = str(metadata.get("visibility") or "").lower()
+                    if requested_visibility == "public" and response.get("visibility") != "public":
+                        raise AdkError("public seed publication requires the platform-admin role")
+                    table.add_row(kind, name, "[green]published[/]")
+                except AdkError as error:
+                    table.add_row(kind, name, f"[red]failed — {error}[/]")
                     failures += 1
                 continue
             if not url:
                 table.add_row(
-                    str(doc.get("kind") or "?"),
-                    builder.name,
+                    kind,
+                    name,
                     "[red]failed — pass --registry-url or set DEVAI_REGISTRY_URL[/]",
                 )
                 failures += 1
                 continue
-            if pub is None:
-                pub = Publisher(registry_url=url, token=token)
-            result = pub.publish(builder)
-            color = "green" if result.ok else "red"
-            table.add_row(
-                result.kind,
-                result.name,
-                f"[{color}]{result.status}[/]" + (f" — {result.error}" if not result.ok else ""),
-            )
+            if registry_client is None:
+                registry_client = RegistryClient(base_url=url, token=token)
+            method_name = _REGISTRY_PUBLISH_METHOD.get(kind)
+            if method_name is None:
+                table.add_row(kind, name, "[red]failed — unsupported Registry kind[/]")
+                failures += 1
+                continue
+            try:
+                getattr(registry_client, method_name)(deepcopy(doc))
+                table.add_row(kind, name, "[green]published[/]")
+            except RegistryError as error:
+                message = str(error)
+                if "duplicate version" in message or "409" in message:
+                    table.add_row(kind, name, "[green]exists[/]")
+                else:
+                    safe = scrub_structure({"error": message})["error"]
+                    table.add_row(kind, name, f"[red]failed — {safe}[/]")
+                    failures += 1
     finally:
         if api_client is not None:
             api_client.close()
     console.print(table)
-    if failures or (pub is not None and pub.summary().failed):
+    if failures:
         raise typer.Exit(code=2)
 
 
@@ -290,9 +370,10 @@ def _sandbox_spec_from_agent(
     metadata = _mapping(document.get("metadata"))
     name = str(metadata.get("name") or spec.get("name") or "")
     version = agent_version or str(spec.get("version") or metadata.get("tag") or "")
+    model_spec = _mapping(spec.get("model"))
     llm = _mapping(spec.get("llm"))
-    provider = str(llm.get("provider") or spec.get("modelProvider") or "")
-    model = str(llm.get("model") or spec.get("modelName") or "")
+    provider = str(model_spec.get("provider") or llm.get("provider") or spec.get("modelProvider") or "")
+    model = str(model_spec.get("name") or llm.get("model") or spec.get("modelName") or "")
     if not all((name, version, provider, model)):
         raise ValueError("agent needs a name, version, model provider, and model")
 
@@ -449,7 +530,7 @@ def _dataset_cases(
     spec = _mapping(document.get("spec"))
     metadata = _mapping(document.get("metadata"))
     name = str(metadata.get("name") or spec.get("name") or "")
-    version = str(spec.get("version") or "")
+    version = str(spec.get("version") or metadata.get("tag") or "")
     if expected_name and name != expected_name:
         raise ValueError(f"suite references Dataset/{expected_name}, but {path} contains Dataset/{name}")
     if expected_version and version != expected_version:
@@ -596,6 +677,24 @@ def _walk(target: Path) -> Iterator[Path]:
     if target.is_dir():
         yield from sorted(target.rglob("*.yaml"))
         yield from sorted(target.rglob("*.yml"))
+
+
+def _ordered_artifacts(target: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """Load supported artifacts and order every dependency before consumers."""
+    artifacts: list[tuple[Path, dict[str, Any]]] = []
+    for path in _walk(target):
+        document = _load_yaml(path)
+        kind = str(document.get("kind") or "")
+        if kind not in _ARTIFACT_ORDER:
+            raise ValueError(f"{path}: unsupported Registry kind {kind!r}")
+        metadata = _mapping(document.get("metadata"))
+        if not str(metadata.get("name") or "").strip():
+            raise ValueError(f"{path}: metadata.name is required")
+        artifacts.append((path, document))
+    return sorted(
+        artifacts,
+        key=lambda item: (_ARTIFACT_ORDER[str(item[1]["kind"])], item[0].as_posix()),
+    )
 
 
 def _builder_for(doc: dict[str, Any]) -> Skill | Prompt | McpServer | Agent | Dataset | EvalSuite:

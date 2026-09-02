@@ -1,0 +1,20 @@
+name: weather-agent
+description: Run the governed Weather Agent in one isolated Kubernetes Job.
+
+metadata:
+  domain: learning
+  title: Weather Agent
+  registry_publish: true
+  version: "1"
+  visibility: public
+
+stages:
+  - name: answer-weather
+    title: Answer weather question
+    type: agentic
+    stage: run_as_job
+    agent: weather
+    timeout: 5m
+    retries: 1
+    config:
+      agent: weather

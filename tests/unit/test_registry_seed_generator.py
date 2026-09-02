@@ -6,6 +6,8 @@ from types import ModuleType
 
 import yaml
 
+from devai.registry.routes import _agent_contract_errors
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -38,6 +40,40 @@ def test_agent_seed_uses_current_a2a_schema_and_dynamic_user_routing() -> None:
     assert "llm" not in manifest["spec"]
 
 
+def test_agent_seed_includes_explicit_registry_tool_references() -> None:
+    generator = _generator()
+    source = {
+        "name": "weather",
+        "metadata": {"registry_tools": ["weather-current"]},
+    }
+
+    manifest = generator._agent_doc(source)
+
+    assert manifest["spec"]["tools"] == ["weather-current"]
+
+
+def test_publishable_blueprint_seed_preserves_execution_and_agent_dependencies() -> None:
+    generator = _generator()
+    source = yaml.safe_load((REPO_ROOT / "blueprints/weather-agent.yaml").read_text())
+
+    manifest = generator._blueprint_doc(source)
+
+    assert manifest["kind"] == "Blueprint"
+    assert manifest["metadata"]["name"] == "weather-agent"
+    assert manifest["metadata"]["tag"] == "1"
+    assert manifest["spec"]["stages"] == source["stages"]
+    assert manifest["spec"]["nodes"] == [
+        {
+            "id": "answer-weather",
+            "label": "Answer weather question",
+            "type": "agentic",
+            "kind": "Agent",
+            "ref": "weather-agent",
+        }
+    ]
+    assert manifest["spec"]["edges"] == []
+
+
 def test_default_eval_seeds_are_owned_and_capability_aware() -> None:
     generator = _generator()
     source = yaml.safe_load((REPO_ROOT / "specializations/orchestration/release_manager.yaml").read_text())
@@ -59,7 +95,22 @@ def test_default_eval_seeds_are_owned_and_capability_aware() -> None:
     assert "scm_get_pull_request" not in cases["should-refuse"]["expect"]["tools_not_called"]
 
 
-def test_all_40_generated_agent_seeds_are_tesserix_adk_a2a_agents() -> None:
+def test_generated_agent_declares_its_release_gate_and_runtime_limits() -> None:
+    generator = _generator()
+    source = yaml.safe_load((REPO_ROOT / "specializations/specialists/weather.yaml").read_text())
+
+    agent = generator._agent_doc(source)
+
+    assert agent["spec"]["evalSuite"] == {
+        "ref": "weather-golden-suite",
+        "version": "1",
+    }
+    assert agent["spec"]["limits"] == {"maxTurns": 4, "timeoutSeconds": 120}
+    assert agent["spec"]["riskLevel"] == "low"
+    assert _agent_contract_errors(agent) == []
+
+
+def test_all_41_generated_agent_seeds_are_tesserix_adk_a2a_agents() -> None:
     generator = _generator()
     manifests = [
         generator._agent_doc(yaml.safe_load(path.read_text()))
@@ -67,9 +118,9 @@ def test_all_40_generated_agent_seeds_are_tesserix_adk_a2a_agents() -> None:
         if not path.name.startswith("_")
     ]
 
-    assert len(manifests) == 40
+    assert len(manifests) == 41
     assert {manifest["metadata"]["labels"]["ai.tesserix.dev/runtime"] for manifest in manifests} == {"tesserix-adk"}
-    assert len({manifest["spec"]["a2a"]["url"] for manifest in manifests}) == 40
+    assert len({manifest["spec"]["a2a"]["url"] for manifest in manifests}) == 41
 
 
 def test_all_generated_agents_reference_seeded_skill_and_prompt_artifacts() -> None:
@@ -87,7 +138,7 @@ def test_all_generated_agents_reference_seeded_skill_and_prompt_artifacts() -> N
         assert (seeds / "prompts" / f"{prompt}.yaml").is_file()
 
 
-def test_all_40_generated_agents_have_owned_golden_evaluations() -> None:
+def test_all_41_generated_agents_have_owned_golden_evaluations() -> None:
     seed_root = REPO_ROOT / "architecture" / "registry-seeds"
     agent_names = {
         yaml.safe_load(path.read_text())["metadata"]["name"] for path in (seed_root / "agents").glob("*.yaml")
@@ -101,6 +152,6 @@ def test_all_40_generated_agents_have_owned_golden_evaluations() -> None:
         for path in (seed_root / "datasets").glob("*.yaml")
     }
 
-    assert len(agent_names) == 40
+    assert len(agent_names) == 41
     assert suite_agents == agent_names
     assert dataset_agents == agent_names

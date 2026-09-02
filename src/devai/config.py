@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -569,8 +569,9 @@ class Settings(BaseSettings):
     cloudflare_zone_id: str = ""  # Primary zone for DNS/tunnel management
 
     # --- Observability / telemetry adapter (adapters/telemetry) ---
-    # DEVAI_TELEMETRY_PROVIDER picks the backend: "noop" (default; discards) or
-    # "otel" (OTLP/HTTP exporter → otel-collector). With metrics_enabled=False
+    # DEVAI_TELEMETRY_PROVIDER picks the backend: "noop" (default), "otel"
+    # (OTLP/HTTP exporter), or "langfuse" (OTLP traces + evaluation scores).
+    # With metrics_enabled=False
     # the factory forces Noop regardless of provider. The OTel backend exports
     # traces + metrics for HTTP requests, pipeline stages, and LLM calls. The
     # endpoint is the collector's OTLP/HTTP base (port 4318); the adapter
@@ -580,6 +581,10 @@ class Settings(BaseSettings):
     otel_service_name: str = "devai"
     otel_service_namespace: str = "devai"
     otel_export_interval_ms: int = 15000
+    langfuse_base_url: str = ""
+    langfuse_public_url: str = ""
+    langfuse_public_key: SecretStr = SecretStr("")
+    langfuse_secret_key: SecretStr = SecretStr("")
     metrics_enabled: bool = True
 
     # --- Logging & SLOs (dashboard /logs page) ---

@@ -180,6 +180,10 @@ def build_job_spec(
         "devai.tesserix.app/agent": _dns_safe(inputs.agent_name, max_len=32),
         "devai.tesserix.app/role": "runner",
     }
+    annotations: dict[str, str] = {}
+    composition_digest = str((inputs.agent_profile or {}).get("digest") or "")
+    if composition_digest:
+        annotations["devai.tesserix.app/composition-digest"] = composition_digest
 
     env: list[dict[str, Any]] = [
         {"name": "DEVAI_RUNNER_AGENT", "value": inputs.agent_name},
@@ -301,12 +305,13 @@ def build_job_spec(
             "name": job_name,
             "namespace": cfg.namespace,
             "labels": labels,
+            "annotations": annotations,
         },
         "spec": {
             "backoffLimit": cfg.default_backoff_limit,
             "ttlSecondsAfterFinished": cfg.default_ttl_seconds,
             "template": {
-                "metadata": {"labels": labels},
+                "metadata": {"labels": labels, "annotations": annotations},
                 "spec": pod_spec,
             },
         },

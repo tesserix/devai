@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from devai.adapters.telemetry import EvaluationMetric, NoopTelemetryAdapter, TelemetryAdapter
 from devai.sandbox.trace import Invocation
 
 if TYPE_CHECKING:
@@ -271,12 +272,14 @@ class EvalRunner:
         max_cases: int = _DEFAULT_MAX_CASES,
         max_concurrency: int = 4,
         judge_factory: Any | None = None,
+        telemetry: TelemetryAdapter | None = None,
     ) -> None:
         self._invoker = invoker
         self._store = store
         self._max_cases = max(1, max_cases)
         self._max_concurrency = max(1, max_concurrency)
         self._judge_factory = judge_factory
+        self._telemetry = telemetry or NoopTelemetryAdapter()
 
     @property
     def store(self) -> EvalStore:
@@ -352,6 +355,25 @@ class EvalRunner:
         run.duration_ms = int((time.perf_counter() - started) * 1000)
 
         await self._store.save(run, ttl_seconds=self._ttl(record))
+        summary = run.summary
+        suite = run.suite_ref or run.dataset_ref or {}
+        try:
+            await self._telemetry.record_evaluation(
+                EvaluationMetric(
+                    run_id=run.id,
+                    agent=run.agent,
+                    suite=f"{suite.get('name', 'inline')}@{suite.get('version', 'draft')}",
+                    pass_rate=float(summary["pass_rate"]),
+                    case_count=int(summary["cases"]),
+                    cost_usd=float(summary["cost_usd"]),
+                    total_tokens=int(summary["total_tokens"]),
+                    p95_latency_ms=float(summary["p95_latency_ms"]),
+                    dimensions={name: float(values["average"]) for name, values in summary["dimensions"].items()},
+                    failing_case_ids=[result.name for result in run.results if not result.passed],
+                )
+            )
+        except Exception:  # noqa: BLE001 — telemetry cannot invalidate a saved evaluation
+            logger.warning("evaluation telemetry failed for %s", run.id, exc_info=True)
         return run
 
     async def _one(
