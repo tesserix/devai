@@ -27,6 +27,7 @@ from tesserix_adk.core import (
     ToolDeclaration,
     Usage,
 )
+from tesserix_adk.observability import record_spend
 from tesserix_adk.runtime import AgentRunner as TesserixAgentRunner
 
 from devai.adapters.llm.base import (
@@ -49,6 +50,50 @@ if TYPE_CHECKING:
 
 _ADK_VERSION = importlib.metadata.version("tesserix-adk")
 _OWNER_CONTACT = "https://github.com/tesserix/devai/issues"
+
+
+class _AdkTracer:
+    """Bridge the ADK Tracer protocol onto the process telemetry adapter."""
+
+    def __init__(self, telemetry: Any) -> None:
+        self._telemetry = telemetry
+
+    def span(self, name: str, **attributes: Any) -> Any:
+        return self._telemetry.span(name, attributes=attributes)
+
+    def event(self, name: str, **attributes: Any) -> None:
+        with self._telemetry.span(name, attributes=attributes):
+            pass
+
+
+class _AdkMeter:
+    """Bridge the ADK Meter protocol onto the process telemetry adapter."""
+
+    def __init__(self, telemetry: Any) -> None:
+        self._telemetry = telemetry
+
+    def count(self, name: str, value: float, **dimensions: str) -> None:
+        self._telemetry.incr(name, value, dict(dimensions))
+
+
+def _emit_adk_spend(run: Any, *, task_id: str, spec_name: str) -> None:
+    """Export the run's spend through the ADK primitives — spans redacted and
+    attributed by the kit, counters never sampled. Failure is swallowed:
+    telemetry must not reach back into the run that produced it."""
+    from devai.adapters.telemetry import get_global_telemetry
+
+    telemetry = get_global_telemetry()
+    try:
+        record_spend(
+            run,
+            tracer=_AdkTracer(telemetry),
+            meter=_AdkMeter(telemetry),
+            extra={"devai.task": task_id, "devai.spec": spec_name},
+        )
+    except Exception:  # noqa: BLE001 — observability never breaks the run
+        import logging
+
+        logging.getLogger(__name__).debug("ADK spend export failed", exc_info=True)
 
 
 class DevAILLMProvider:
@@ -202,6 +247,8 @@ class TesserixSpecRuntime:
             run_id=f"{task.id}:{spec.name}",
             history=_image_history(images or []),
         )
+
+        _emit_adk_spend(run, task_id=task.id, spec_name=spec.name)
 
         trace = [
             {"kind": "runtime", "runtime": "tesserix-adk", "version": _ADK_VERSION},

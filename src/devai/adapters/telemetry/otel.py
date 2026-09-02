@@ -66,7 +66,13 @@ class OtelTelemetryAdapter(TelemetryAdapter):
         service_namespace: str = "devai",
         export_interval_ms: int = 15000,
         headers: dict[str, str] | None = None,
+        metrics_endpoint: str | None = None,
+        metrics_headers: dict[str, str] | None = None,
     ) -> None:
+        """`metrics_endpoint` routes metrics separately from traces (Langfuse
+        accepts only OTLP traces, so its adapter sends metrics to the cluster
+        collector instead). None inherits `endpoint`; "" disables metric export
+        entirely rather than shipping to an endpoint that drops them."""
         if not endpoint:
             raise AdapterNotConfigured("otel telemetry adapter requires DEVAI_OTEL_ENDPOINT")
 
@@ -100,20 +106,31 @@ class OtelTelemetryAdapter(TelemetryAdapter):
         )
         self._tracer_provider = TracerProvider(resource=resource)
         self._tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+        # Globals are set best-effort for third-party instrumentation, but the
+        # adapter always uses ITS OWN providers — a second construction (reload,
+        # tests) must not silently keep exporting through the first one.
         trace.set_tracer_provider(self._tracer_provider)
-        self._tracer = trace.get_tracer("devai")
+        self._tracer = self._tracer_provider.get_tracer("devai")
         self._trace_api = trace
 
-        # Metrics — periodic reader over OTLP/HTTP.
-        metric_exporter = OTLPMetricExporter(
-            endpoint=_normalize_signal_endpoint(endpoint, "metrics"),
-            headers=self._headers or None,
-        )
-        reader = PeriodicExportingMetricReader(
-            metric_exporter,
-            export_interval_millis=export_interval_ms,
-        )
-        self._meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
+        # Metrics — periodic reader over OTLP/HTTP, possibly to a different
+        # endpoint than traces. "" builds a readerless provider: instruments
+        # work, nothing is exported.
+        resolved_metrics_endpoint = endpoint if metrics_endpoint is None else metrics_endpoint
+        readers = []
+        if resolved_metrics_endpoint:
+            metric_exporter = OTLPMetricExporter(
+                endpoint=_normalize_signal_endpoint(resolved_metrics_endpoint, "metrics"),
+                headers=(metrics_headers if metrics_endpoint is not None else self._headers) or None,
+            )
+            readers.append(
+                PeriodicExportingMetricReader(
+                    metric_exporter,
+                    export_interval_millis=export_interval_ms,
+                )
+            )
+        self._metrics_endpoint = resolved_metrics_endpoint
+        self._meter_provider = MeterProvider(resource=resource, metric_readers=readers)
         metrics.set_meter_provider(self._meter_provider)
         meter = self._meter_provider.get_meter("devai")
 
@@ -285,6 +302,7 @@ class OtelTelemetryAdapter(TelemetryAdapter):
             "detail": f"exporting OTLP/HTTP to {self._endpoint}",
             "exporting": True,
             "endpoint": self._endpoint,
+            "metrics_endpoint": self._metrics_endpoint,
         }
 
 
