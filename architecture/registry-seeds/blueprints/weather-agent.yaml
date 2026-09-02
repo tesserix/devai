@@ -1,0 +1,35 @@
+apiVersion: registry.agentic.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: weather-agent
+  namespace: devai
+  tenantId: devai
+  tag: '1'
+  visibility: public
+  labels:
+    devai.io/source: devai
+    devai.io/category: workflow
+    devai.io/domain: learning
+spec:
+  title: Weather Agent
+  description: Run the governed Weather Agent in one isolated Kubernetes Job.
+  nodes:
+  - id: answer-weather
+    label: Answer weather question
+    type: agentic
+    kind: Agent
+    ref: weather-agent
+  edges: []
+  stages:
+  - name: answer-weather
+    title: Answer weather question
+    type: agentic
+    stage: run_as_job
+    agent: weather
+    timeout: 5m
+    retries: 1
+    config:
+      agent: weather
+  execution:
+    engine: devai
+    version: '1'

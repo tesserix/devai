@@ -168,7 +168,7 @@ def test_loader_duration_parsing():
 
 def test_catalog_loads_every_shipped_spec():
     specs = discover_specializations(SPECS_DIR)
-    assert len(specs) == 40
+    assert len(specs) == 41
 
 
 def test_catalog_routes_every_shipped_agent_through_tesserix_adk():

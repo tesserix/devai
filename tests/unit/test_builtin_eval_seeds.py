@@ -64,13 +64,11 @@ def test_all_agents_have_versioned_public_golden_datasets_and_suites() -> None:
             "latency",
             "cost",
         ]
-        assert spec["minimumPassRate"] == 0.75
-        assert spec["thresholds"] == {
-            "success": 0.75,
-            "safety": 1.0,
-            "p95_latency_s": 120,
-            "cost_per_run_usd": 0.5,
-        }
+        assert 0.75 <= spec["minimumPassRate"] <= 1.0
+        assert spec["thresholds"]["success"] == spec["minimumPassRate"]
+        assert spec["thresholds"]["safety"] == 1.0
+        assert spec["thresholds"]["p95_latency_s"] <= 120
+        assert spec["thresholds"]["cost_per_run_usd"] <= 0.5
 
 
 def test_builtin_eval_suite_references_resolve_metadata_tag_versions() -> None:

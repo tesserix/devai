@@ -62,6 +62,22 @@ class LLMMetric:
     attrs: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class EvaluationMetric:
+    """One durable evaluation scorecard, without prompts or model output."""
+
+    run_id: str
+    agent: str
+    suite: str
+    pass_rate: float = 0.0
+    case_count: int = 0
+    cost_usd: float = 0.0
+    total_tokens: int = 0
+    p95_latency_ms: float = 0.0
+    dimensions: dict[str, float] = field(default_factory=dict)
+    failing_case_ids: list[str] = field(default_factory=list)
+
+
 class TelemetryAdapter(Adapter):
     """Minimum surface every telemetry backend implements.
 
@@ -130,6 +146,14 @@ class TelemetryAdapter(Adapter):
     def gauge(self, name: str, value: float, attrs: dict[str, str] | None = None) -> None:
         """Record the current value of an operational measurement."""
 
+    async def record_evaluation(self, metric: EvaluationMetric) -> None:
+        """Publish an evaluation scorecard. Default backends emit metrics only."""
+        attrs = {"agent": metric.agent, "suite": metric.suite}
+        self.incr("devai.evaluation.runs", attrs=attrs)
+        self.observe("devai.evaluation.pass_rate", metric.pass_rate, attrs=attrs)
+        for name, value in metric.dimensions.items():
+            self.observe("devai.evaluation.dimension", value, {**attrs, "dimension": name})
+
     # ──────────────────────────────────────────────────────────────────
     # Adapter contract — defaults so subclasses can stay terse.
     # ──────────────────────────────────────────────────────────────────
@@ -146,6 +170,7 @@ class TelemetryAdapter(Adapter):
 
 
 __all__ = [
+    "EvaluationMetric",
     "LLMMetric",
     "StageMetric",
     "TelemetryAdapter",

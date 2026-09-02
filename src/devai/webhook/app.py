@@ -420,6 +420,7 @@ def create_app(
                         max_cases=int(getattr(config, "sandbox_max_eval_cases_per_run", 50) or 50),
                         max_concurrency=int(getattr(config, "sandbox_eval_max_concurrency", 4) or 4),
                         judge_factory=JudgeFactory(sandbox_deps),
+                        telemetry=app.state.telemetry,
                     )
                     logger.info("Evaluation runner ready (backend=%s)", evaluation_invoker.execution_backend)
                 logger.info("Sandbox invoker ready")

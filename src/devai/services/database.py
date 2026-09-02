@@ -776,6 +776,45 @@ class Database:
             logger.debug("analytics_evals query failed", exc_info=True)
             return {"summary": {"evals": 0, "avg_score": 0, "pass_rate": 0}, "by_evaluator": [], "recent": []}
 
+    async def analytics_lifecycle_eval_runs(
+        self,
+        days: int = 30,
+        *,
+        tenant_id: str = "",
+        user_id: str = "",
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Durable sandbox evaluation scorecards scoped to the caller."""
+        where = "r.created_at >= NOW() - make_interval(days => $1)"
+        args: list[Any] = [days]
+        if tenant_id:
+            args.append(tenant_id)
+            where += f" AND r.tenant_id = ${len(args)}"
+        if user_id:
+            args.append(user_id)
+            where += f" AND r.user_id = ${len(args)}"
+        args.append(limit)
+        rows = await self.pool.fetch(
+            f"""SELECT r.id AS run_id, r.agent, r.configuration, r.suite_ref AS suite,
+                       r.summary, r.created_at,
+                       COALESCE(
+                         (SELECT jsonb_agg(jsonb_build_object(
+                                    'case_id', cr.case_id,
+                                    'trace_url', cr.result->>'trace_url',
+                                    'failures', cr.result->'failures')
+                                  ORDER BY cr.case_index)
+                            FROM eval_case_results cr
+                           WHERE cr.eval_run_id = r.id AND NOT cr.passed),
+                         '[]'::jsonb
+                       ) AS failing_cases
+                  FROM eval_runs r
+                 WHERE {where}
+                 ORDER BY r.created_at DESC
+                 LIMIT ${len(args)}""",
+            *args,
+        )
+        return [dict(row) for row in rows]
+
     async def analytics_memory_summary(self) -> dict[str, Any]:
         """Corpus-level memory stats from agent_memories (pgvector store)."""
         row = await self.pool.fetchrow(

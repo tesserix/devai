@@ -37,6 +37,7 @@ BLUEPRINTS = sorted(discover_blueprints(BLUEPRINTS_DIR).items())
 NEEDS_RUNTIME = {
     "app-scaffold": "every stage is run_as_job — needs the K8s job runner",
     "sre-monitor": "SRE agents need the cluster + provider clients",
+    "weather-agent": "the Weather Agent executes in an isolated K8s Job",
 }
 
 

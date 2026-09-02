@@ -434,6 +434,9 @@ class RegistryClient:
 
     # ---- write surface ----------------------------------------------------
 
+    def publish_project(self, body: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v0/projects", body)
+
     def publish_skill(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v0/skills", body)
 

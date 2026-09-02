@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from devai.ci.agent_evals import compare_scorecards, main, render_comparison_markdown, resolve_impact
@@ -22,6 +23,9 @@ def _catalog(root: Path) -> None:
             "metadata": {"name": "reviewer-agent", "labels": {"devai.io/skill": "reviewer"}},
             "spec": {
                 "promptRef": "reviewer-prompt-v1",
+                "skills": ["reviewer"],
+                "tools": ["reviewer-direct"],
+                "mcpServers": ["reviewer-mcp"],
                 "runtime": {"pythonClass": "devai.agents.reviewer.ReviewerAgent"},
             },
         },
@@ -52,7 +56,45 @@ def _catalog(root: Path) -> None:
     _write_yaml(
         root,
         "architecture/registry-seeds/datasets/reviewer-golden.yaml",
-        {"kind": "Dataset", "metadata": {"name": "reviewer-golden"}, "spec": {"version": "1", "cases": []}},
+        {
+            "kind": "Dataset",
+            "metadata": {"name": "reviewer-golden", "labels": {"devai.io/agent": "reviewer-agent"}},
+            "spec": {"version": "1", "cases": []},
+        },
+    )
+    _write_yaml(
+        root,
+        "architecture/registry-seeds/skills/reviewer.yaml",
+        {"kind": "Skill", "metadata": {"name": "reviewer"}, "spec": {"tools": ["reviewer-tool"]}},
+    )
+    _write_yaml(
+        root,
+        "architecture/registry-seeds/prompts/reviewer-prompt-v1.yaml",
+        {"kind": "Prompt", "metadata": {"name": "reviewer-prompt-v1"}, "spec": {}},
+    )
+    _write_yaml(
+        root,
+        "architecture/registry-seeds/tools/reviewer-tool.yaml",
+        {"kind": "Tool", "metadata": {"name": "reviewer-tool"}, "spec": {}},
+    )
+    _write_yaml(
+        root,
+        "architecture/registry-seeds/tools/reviewer-direct.yaml",
+        {"kind": "Tool", "metadata": {"name": "reviewer-direct"}, "spec": {}},
+    )
+    _write_yaml(
+        root,
+        "architecture/registry-seeds/mcp-servers/reviewer-mcp.yaml",
+        {"kind": "MCPServer", "metadata": {"name": "reviewer-mcp"}, "spec": {}},
+    )
+    _write_yaml(
+        root,
+        "architecture/registry-seeds/blueprints/reviewer-workflow.yaml",
+        {
+            "kind": "Blueprint",
+            "metadata": {"name": "reviewer-workflow"},
+            "spec": {"stages": [{"name": "review", "stage": "run_as_job", "config": {"agent": "reviewer-agent"}}]},
+        },
     )
 
 
@@ -73,7 +115,18 @@ def test_resolve_impact_maps_agent_and_prompt_changes_to_the_owned_suite(tmp_pat
                 "agent": "reviewer-agent",
                 "agent_path": "architecture/registry-seeds/agents/reviewer-agent.yaml",
                 "dataset_path": "architecture/registry-seeds/datasets/reviewer-golden.yaml",
+                "dependency_paths": [
+                    "architecture/registry-seeds/tools/reviewer-direct.yaml",
+                    "architecture/registry-seeds/tools/reviewer-tool.yaml",
+                    "architecture/registry-seeds/mcp-servers/reviewer-mcp.yaml",
+                    "architecture/registry-seeds/skills/reviewer.yaml",
+                    "architecture/registry-seeds/prompts/reviewer-prompt-v1.yaml",
+                    "architecture/registry-seeds/datasets/reviewer-golden.yaml",
+                    "architecture/registry-seeds/eval-suites/reviewer-golden-suite.yaml",
+                ],
+                "changed_dependency_paths": ["architecture/registry-seeds/prompts/reviewer-prompt-v1.yaml"],
                 "judge": False,
+                "release_paths": ["architecture/registry-seeds/agents/reviewer-agent.yaml"],
                 "suite": "reviewer-golden-suite",
                 "suite_path": "architecture/registry-seeds/eval-suites/reviewer-golden-suite.yaml",
             }
@@ -92,6 +145,44 @@ def test_resolve_impact_maps_specializations_and_python_sources(tmp_path: Path) 
     assert [item["agent"] for item in specific["evaluations"]] == ["reviewer-agent"]
     assert [item["agent"] for item in specialization["evaluations"]] == ["reviewer-agent"]
     assert [item["agent"] for item in shared["evaluations"]] == ["reviewer-agent"]
+
+
+@pytest.mark.parametrize(
+    "changed_path",
+    [
+        "architecture/registry-seeds/skills/reviewer.yaml",
+        "architecture/registry-seeds/tools/reviewer-tool.yaml",
+        "architecture/registry-seeds/tools/reviewer-direct.yaml",
+        "architecture/registry-seeds/mcp-servers/reviewer-mcp.yaml",
+        "architecture/registry-seeds/datasets/reviewer-golden.yaml",
+        "architecture/registry-seeds/eval-suites/reviewer-golden-suite.yaml",
+    ],
+    ids=["skill", "skill-tool", "direct-tool", "mcp-server", "dataset", "eval-suite"],
+)
+def test_resolve_impact_maps_registry_dependencies_to_the_consuming_agent(
+    tmp_path: Path,
+    changed_path: str,
+) -> None:
+    _catalog(tmp_path)
+
+    impact = resolve_impact(tmp_path, [changed_path])
+
+    assert [item["agent"] for item in impact["evaluations"]] == ["reviewer-agent"]
+
+
+def test_resolve_impact_maps_a_blueprint_to_each_agent_it_runs(tmp_path: Path) -> None:
+    _catalog(tmp_path)
+
+    impact = resolve_impact(
+        tmp_path,
+        ["architecture/registry-seeds/blueprints/reviewer-workflow.yaml"],
+    )
+
+    assert [item["agent"] for item in impact["evaluations"]] == ["reviewer-agent"]
+    assert impact["evaluations"][0]["release_paths"] == [
+        "architecture/registry-seeds/agents/reviewer-agent.yaml",
+        "architecture/registry-seeds/blueprints/reviewer-workflow.yaml",
+    ]
 
 
 def test_resolve_impact_reports_uncovered_agents_and_ignores_unrelated_changes(tmp_path: Path) -> None:

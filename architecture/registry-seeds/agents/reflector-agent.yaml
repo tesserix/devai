@@ -21,6 +21,13 @@ spec:
   model:
     provider: devai-user-routing
     name: dynamic
+  limits:
+    maxTurns: 8
+    timeoutSeconds: 180
+  riskLevel: low
+  evalSuite:
+    ref: reflector-golden-suite
+    version: '1'
   a2a:
     url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/reflector
     preferredTransport: JSONRPC

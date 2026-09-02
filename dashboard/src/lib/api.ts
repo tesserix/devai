@@ -1174,6 +1174,7 @@ export const api = {
         summary: { evals: number; avg_score: number; pass_rate: number };
         by_evaluator: { evaluator: string; evals: number; avg_score: number; pass_rate: number }[];
         recent: { run_id: string; stage: string; evaluator: string; score: number; passed: boolean; created_at: string }[];
+        lifecycle: LifecycleEvaluationAnalytics;
       }>(`/analytics/evals?days=${days}`),
     sreSummary: () => apiFetch<AnalyticsSRESummary>("/analytics/sre/summary"),
     memory: (days = 30) => apiFetch<MemoryAnalytics>(`/analytics/memory?days=${days}`),
@@ -1793,6 +1794,39 @@ export interface UsageRow {
   cost_usd: number;
   duration_ms: number;
   errors: number;
+}
+
+export interface LifecycleEvaluationAnalytics {
+  detail_url: string;
+  summary: {
+    runs: number;
+    cases: number;
+    passed: number;
+    failed: number;
+    pass_rate: number;
+    tokens: number;
+    cost_usd: number;
+    avg_p95_latency_ms: number;
+  };
+  artifacts: {
+    kind: "agent" | "prompt" | "skill" | "tool" | "mcp_server";
+    name: string;
+    runs: number;
+    cases: number;
+    pass_rate: number;
+    cost_usd: number;
+    tokens: number;
+    agents: string[];
+  }[];
+  dimensions: { name: string; average: number; pass_rate: number; runs: number }[];
+  recent: {
+    run_id: string;
+    agent: string;
+    suite: { name?: string; version?: string };
+    summary: Record<string, unknown>;
+    failing_cases: { case_id: string; trace_url?: string; failures?: string[] }[];
+    created_at: string;
+  }[];
 }
 
 export interface AnalyticsSRESummary {

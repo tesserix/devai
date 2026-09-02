@@ -108,7 +108,7 @@ def test_all_catalog_agents_have_valid_adk_definitions() -> None:
 
     definitions = {name: definition_for_specialization(spec) for name, spec in specs.items()}
 
-    assert len(definitions) == 40
+    assert len(definitions) == 41
     assert {definition.agent.name for definition in definitions.values()} == {name.replace("_", "-") for name in specs}
     assert all(definition.revision for definition in definitions.values())
 

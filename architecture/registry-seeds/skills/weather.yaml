@@ -1,0 +1,58 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: Skill
+metadata:
+  name: weather
+  namespace: devai
+  visibility: public
+  labels:
+    devai.io/source: devai
+    devai.io/category: specialist
+    devai.io/risk-level: low
+spec:
+  displayName: Weather Agent
+  description: Answers current-weather questions for the deterministic Weather sample and reports unsupported
+    locations without inventing observations.
+  category: specialist
+  tools:
+  - weather-current
+  handoverSchema:
+    location:
+      type: string
+      required: true
+      description: Canonical requested location.
+    available:
+      type: boolean
+      required: true
+      description: Whether a reviewed weather observation was available.
+    temperature:
+      type: number
+      required: false
+      description: Temperature returned by the tool when available.
+    unit:
+      type: string
+      required: false
+      description: celsius or fahrenheit.
+    condition:
+      type: string
+      required: false
+      description: Weather condition returned by the tool.
+    observed_at:
+      type: string
+      required: false
+      description: RFC 3339 observation timestamp supplied by the tool.
+    source:
+      type: string
+      required: false
+      description: Provenance supplied by the tool.
+    summary:
+      type: string
+      required: true
+      description: Concise answer that does not claim unsupported facts.
+  contextKeys: []
+  outputKey: weather_output
+  metadata:
+    owner: agent-platform
+    status: yaml_only
+    version: 1.0.0
+    registry_tools:
+    - weather-current

@@ -6,6 +6,14 @@ on:
     paths:
       - 'architecture/registry-seeds/agents/**'
       - 'architecture/registry-seeds/prompts/**'
+      - 'architecture/registry-seeds/skills/**'
+      - 'architecture/registry-seeds/tools/**'
+      - 'architecture/registry-seeds/mcp-servers/**'
+      - 'architecture/registry-seeds/datasets/**'
+      - 'architecture/registry-seeds/eval-suites/**'
+      - 'architecture/registry-seeds/blueprints/**'
+      - 'architecture/registry-seeds/workflows/**'
+      - 'blueprints/**'
       - 'specializations/**'
       - 'src/devai/agents/**'
       - '.github/workflows/agent-evals.yaml'
@@ -14,6 +22,14 @@ on:
     paths:
       - 'architecture/registry-seeds/agents/**'
       - 'architecture/registry-seeds/prompts/**'
+      - 'architecture/registry-seeds/skills/**'
+      - 'architecture/registry-seeds/tools/**'
+      - 'architecture/registry-seeds/mcp-servers/**'
+      - 'architecture/registry-seeds/datasets/**'
+      - 'architecture/registry-seeds/eval-suites/**'
+      - 'architecture/registry-seeds/blueprints/**'
+      - 'architecture/registry-seeds/workflows/**'
+      - 'blueprints/**'
       - 'specializations/**'
       - 'src/devai/agents/**'
       - '.github/workflows/agent-evals.yaml'
@@ -115,9 +131,51 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  publish_dependencies:
+    name: Publish dependencies for ${{ matrix.agent }}
+    needs: [impact, live_config]
+    if: >-
+      needs.impact.outputs.has_evals == 'true' &&
+      needs.live_config.outputs.enabled == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.impact.outputs.matrix) }}
+    env:
+      DEVAI_API_URL: ${{ vars.DEVAI_CI_API_URL }}
+      DEVAI_SESSION_COOKIE: ${{ secrets.DEVAI_CI_SESSION_COOKIE }}
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install DevAI
+        run: python -m pip install --disable-pip-version-check -e .
+
+      - name: Publish changed dependencies
+        if: github.event_name == 'push'
+        env:
+          CHANGED_DEPENDENCY_PATHS: ${{ toJSON(matrix.changed_dependency_paths) }}
+        run: |
+          mapfile -t changed_dependency_paths < <(jq -r '.[]' <<< "$CHANGED_DEPENDENCY_PATHS")
+          for artifact in "${changed_dependency_paths[@]}"; do
+            devai adk publish "$artifact" \
+              --api-url "$DEVAI_API_URL" \
+              --session-cookie "$DEVAI_SESSION_COOKIE" \
+              --dependencies-only \
+              --overwrite
+          done
+
   evaluate:
     name: Evaluate ${{ matrix.agent }}
-    needs: [impact, live_config]
+    needs: [impact, live_config, publish_dependencies]
     if: >-
       needs.impact.outputs.has_evals == 'true' &&
       needs.live_config.outputs.enabled == 'true' &&
@@ -237,9 +295,34 @@ jobs:
           set -e
           printf 'eval=%s\ncompare=%s\n' "$eval_status" "$compare_status" \
             > "eval-output/${AGENT}-status.txt"
+          candidate_run_id="$(jq -er '.id' "eval-output/${AGENT}-candidate.json")"
+          echo "candidate_run_id=$candidate_run_id" >> "$GITHUB_OUTPUT"
           if [[ "$eval_status" -ne 0 || "$compare_status" -ne 0 ]]; then
             exit 1
           fi
+
+      - name: Publish evaluated Agent and workflows
+        if: github.event_name == 'push'
+        env:
+          AGENT_PATH: ${{ matrix.agent_path }}
+          CANDIDATE_RUN_ID: ${{ steps.gate.outputs.candidate_run_id }}
+          RELEASE_PATHS: ${{ toJSON(matrix.release_paths) }}
+        run: |
+          devai adk publish "$AGENT_PATH" \
+            --api-url "$DEVAI_API_URL" \
+            --session-cookie "$DEVAI_SESSION_COOKIE" \
+            --eval-run-id "$CANDIDATE_RUN_ID" \
+            --overwrite
+          mapfile -t release_paths < <(jq -r '.[]' <<< "$RELEASE_PATHS")
+          for artifact in "${release_paths[@]}"; do
+            if [[ "$artifact" == "$AGENT_PATH" ]]; then
+              continue
+            fi
+            devai adk publish "$artifact" \
+              --api-url "$DEVAI_API_URL" \
+              --session-cookie "$DEVAI_SESSION_COOKIE" \
+              --overwrite
+          done
 
       - name: Destroy isolated sandbox
         if: always() && steps.sandbox.outputs.sandbox_id != ''
@@ -291,6 +374,9 @@ jobs:
             fi
           } > scorecard.md
           failed=false
+          if [[ "$LIVE_EVALS_ENABLED" != 'true' ]]; then
+            failed=true
+          fi
           if [[ "$LIVE_EVALS_ENABLED" == 'true' && "$EVALUATE_RESULT" != 'success' ]]; then
             failed=true
             {

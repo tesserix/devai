@@ -32,7 +32,9 @@ _BUILD_GATE_LABEL = "devai.tesserix.app/build-gate"
 _SECURITY_GATE_LABEL = "devai.tesserix.app/security-gate"
 _RISK_APPROVER_ANNOTATION = "devai.tesserix.app/risk-approver"
 _RISK_APPROVAL_REASON_ANNOTATION = "devai.tesserix.app/risk-approval-reason"
-_MODEL_PROVIDERS = frozenset({"anthropic", "claude", "openai", "google", "gemini", "vertex", "vertex_gemini", "groq"})
+_MODEL_PROVIDERS = frozenset(
+    {"anthropic", "claude", "devai-user-routing", "openai", "google", "gemini", "vertex", "vertex_gemini", "groq"}
+)
 _RISK_LEVELS = frozenset({"low", "medium", "high", "critical"})
 
 

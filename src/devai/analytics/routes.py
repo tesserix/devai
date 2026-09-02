@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Query, Request
 
-from devai.analytics.service import runs_timeseries, stage_stats, summarize_runs
+from devai.analytics.service import runs_timeseries, stage_stats, summarize_lifecycle_evals, summarize_runs
 
 logger = logging.getLogger(__name__)
 
@@ -221,12 +221,15 @@ async def pricing(request: Request) -> dict[str, Any]:
 async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
     """Quality eval scores the caller may see — their OWN runs, or (admin)
     everyone's. Pass-rate, average score, by-evaluator, recent."""
+    config = getattr(request.app.state, "config", None)
+    detail_url = str(getattr(config, "langfuse_public_url", "") or "")
     db = await get_db(request)
     if db is None:
         return {
             "summary": {"evals": 0, "avg_score": 0, "pass_rate": 0},
             "by_evaluator": [],
             "recent": [],
+            "lifecycle": {**summarize_lifecycle_evals([]), "detail_url": detail_url},
             "scope": "none",
         }
     scope_tenant, scope_user, can_list_users = await _usage_scope(request)
@@ -235,6 +238,18 @@ async def evals(request: Request, days: int = Query(30, ge=1, le=365)) -> dict[s
         tenant_id=scope_tenant,
         user_id="" if can_list_users else scope_user,
     )
+    try:
+        lifecycle_rows = await db.analytics_lifecycle_eval_runs(
+            days,
+            tenant_id=scope_tenant,
+            user_id="" if can_list_users else scope_user,
+        )
+    except Exception:  # noqa: BLE001 — older schemas degrade to the empty scorecard
+        logger.debug("analytics: durable evaluation rollup unavailable", exc_info=True)
+        lifecycle_rows = []
+    lifecycle = summarize_lifecycle_evals(lifecycle_rows)
+    lifecycle["detail_url"] = detail_url
+    out["lifecycle"] = lifecycle
     out["scope"] = "all" if can_list_users and not scope_tenant else ("tenant" if can_list_users else "me")
     return out
 

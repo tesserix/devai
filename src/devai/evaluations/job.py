@@ -88,7 +88,7 @@ class JobEvaluationInvoker:
                     latency_ms=int((time.perf_counter() - started) * 1000),
                 )
             )
-        invocation.wall_clock_ms = int((time.perf_counter() - started) * 1000)
+        invocation.wall_clock_ms = max(1, int((time.perf_counter() - started) * 1000))
         await self._traces.save(invocation, ttl_seconds=self._ttl(record))
         return invocation
 

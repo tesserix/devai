@@ -17,6 +17,8 @@ import devai.agentic.kagent_client as kc
 from devai.pipeline.interfaces import StageDeps
 from devai.pipeline.stages.job_runner import JobRunnerStage
 from devai.pipeline.types import DevAITask
+from devai.registry.client import Agent, ResolvedAgent
+from devai.registry.composition import load_composition_snapshot
 from devai.sandbox.models import AgentRef, ModelRef, SandboxRecord, SandboxSpec, SandboxStatus
 from devai.settings.models import Connector, Scope
 
@@ -134,6 +136,62 @@ async def test_required_gateway_stage_fails_before_dispatch_when_registry_resolu
         await _stage(deps).execute(DevAITask(id="task-1", intent="review"))
 
     assert "private registry detail" not in str(caught.value)
+
+
+async def test_required_gateway_dispatch_bakes_the_full_resolved_composition() -> None:
+    resolved = ResolvedAgent(
+        agent=Agent(
+            name="review-code-agent",
+            description="Reviewer",
+            version="1.2.3",
+            model_provider="devai-user-routing",
+            model_name="dynamic",
+            skills=["review-code"],
+            tools=["read-diff"],
+            prompts=["review-code-prompt-v1"],
+        ),
+        resolved={
+            "skills": [
+                {
+                    "kind": "Skill",
+                    "metadata": {"name": "review-code", "tag": "1.2.3"},
+                    "spec": {"tools": ["read-diff"]},
+                }
+            ],
+            "tools": [
+                {
+                    "kind": "Tool",
+                    "metadata": {"name": "read-diff", "tag": "4"},
+                    "spec": {"riskLevel": "low"},
+                }
+            ],
+            "prompts": [
+                {
+                    "kind": "Prompt",
+                    "metadata": {"name": "review-code-prompt-v1", "tag": "2"},
+                    "spec": {"systemPrompt": "Review the diff."},
+                }
+            ],
+        },
+        unresolved=[],
+    )
+    config = SimpleNamespace(
+        llm_gateway_required=True,
+        llm_gateway_base_url="http://ai-gateway:8080",
+        agentgateway_url="http://agentgateway-mcp:8080",
+        kagent_url="",
+    )
+    registry = SimpleNamespace(resolve_agent=lambda name: resolved)
+    stage = _stage(StageDeps(config=config, extra={"registry_client": registry}))
+
+    profile = await stage._fetch_agent_profile("review_code")
+
+    assert profile is not None
+    assert profile["tools"] == ["read-diff"]
+    restored = load_composition_snapshot(profile["composition"])
+    assert restored.resolved["skills"][0]["metadata"]["tag"] == "1.2.3"
+    assert restored.resolved["tools"][0]["metadata"]["tag"] == "4"
+    assert profile["digest"] == profile["composition"]["digest"]
 
 
 @pytest.mark.asyncio

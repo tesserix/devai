@@ -23,6 +23,13 @@ spec:
   model:
     provider: devai-user-routing
     name: dynamic
+  limits:
+    maxTurns: 12
+    timeoutSeconds: 300
+  riskLevel: low
+  evalSuite:
+    ref: sre-orchestrator-golden-suite
+    version: '1'
   a2a:
     url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/sre-orchestrator
     preferredTransport: JSONRPC

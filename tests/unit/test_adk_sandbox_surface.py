@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from devai.adk import Agent, Dataset, EvalSuite, Publisher, Rubric, SandboxClient
 from devai.adk.client import AdkAPIError
 from devai.adk.validation import validate_artifacts
-from devai.cli.adk_commands import _builder_for, adk_app
+from devai.cli.adk_commands import _builder_for, _dataset_cases, _ordered_artifacts, adk_app
 from devai.registry import RegistryClient
 
 
@@ -475,6 +475,25 @@ def test_sandbox_client_covers_registry_import_search_and_comparison() -> None:
     assert seen[3].headers["idempotency-key"] == "comparison-1"
 
 
+def test_sandbox_client_publishes_dependencies_through_the_devai_api() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(201, json={"name": "weather-current", "visibility": "public"})
+
+    client = SandboxClient(base_url="https://devai.example", transport=httpx.MockTransport(handle))
+    result = client.publish_artifact(
+        "tools",
+        {"kind": "Tool", "metadata": {"name": "weather-current"}, "spec": {}},
+        overwrite=True,
+    )
+
+    assert result["visibility"] == "public"
+    assert seen[0].url.path == "/api/registry/tools"
+    assert seen[0].url.query == b"overwrite=true"
+
+
 def test_sandbox_client_returns_a_typed_redacted_error() -> None:
     def handle(_: httpx.Request) -> httpx.Response:
         return httpx.Response(422, json={"detail": "Authorization: Bearer sk-secret-value"})
@@ -677,6 +696,33 @@ def test_cli_sandbox_create_builds_a_draft_spec(tmp_path: Path, monkeypatch: pyt
     assert fake.created["draft"]["metadata"]["name"] == "reviewer"
 
 
+def test_cli_sandbox_create_reads_the_current_agent_model_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _write_artifact(
+        tmp_path,
+        "agents",
+        "reviewer",
+        "Agent",
+        {
+            "version": "7",
+            "model": {"provider": "devai-user-routing", "name": "dynamic"},
+        },
+    )
+    fake = _CLIClient()
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: fake)
+
+    result = CliRunner().invoke(
+        adk_app,
+        ["sandbox", "create", str(agent), "--output", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.created is not None
+    assert fake.created["model"] == {"provider": "devai-user-routing", "model": "dynamic"}
+
+
 def test_cli_sandbox_create_pins_an_unpublished_agent_to_the_candidate_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -830,6 +876,168 @@ def test_cli_agent_publish_uses_owner_scoped_api_and_attaches_eval_run(
     assert fake.published["metadata"]["annotations"] == {"devai.tesserix.app/eval-run-id": "eval-durable"}
 
 
+def test_cli_publish_orders_dependencies_and_preserves_raw_manifests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = _write_artifact(
+        tmp_path,
+        "tools",
+        "weather-current",
+        "Tool",
+        {"inputSchema": {"type": "object", "required": ["location"]}},
+    )
+    _write_artifact(tmp_path, "skills", "weather", "Skill", {"tools": ["weather-current"]})
+    _write_artifact(tmp_path, "prompts", "weather-v1", "Prompt", {"systemPrompt": "Use the tool."})
+    _write_artifact(tmp_path, "datasets", "weather-golden", "Dataset", {"cases": []})
+    _write_artifact(
+        tmp_path,
+        "eval-suites",
+        "weather-gate",
+        "EvalSuite",
+        {"datasetRef": {"ref": "weather-golden", "version": "1"}},
+    )
+    _write_artifact(
+        tmp_path,
+        "agents",
+        "weather-agent",
+        "Agent",
+        {"evalSuite": {"ref": "weather-gate", "version": "1"}},
+    )
+    _write_artifact(
+        tmp_path,
+        "blueprints",
+        "weather-flow",
+        "Blueprint",
+        {"nodes": [{"ref": "weather-agent"}]},
+    )
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class Registry:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        def publish_tool(self, body: dict[str, Any]) -> dict[str, Any]:
+            calls.append(("Tool", body))
+            return {}
+
+        def publish_skill(self, body: dict[str, Any]) -> dict[str, Any]:
+            calls.append(("Skill", body))
+            return {}
+
+        def publish_prompt(self, body: dict[str, Any]) -> dict[str, Any]:
+            calls.append(("Prompt", body))
+            return {}
+
+        def publish_dataset(self, body: dict[str, Any]) -> dict[str, Any]:
+            calls.append(("Dataset", body))
+            return {}
+
+        def publish_eval_suite(self, body: dict[str, Any]) -> dict[str, Any]:
+            calls.append(("EvalSuite", body))
+            return {}
+
+        def publish_blueprint(self, body: dict[str, Any]) -> dict[str, Any]:
+            calls.append(("Blueprint", body))
+            return {}
+
+    class API(_CLIClient):
+        def publish_agent(
+            self,
+            manifest: dict[str, Any],
+            *,
+            overwrite: bool = False,
+            override_reason: str = "",
+        ) -> dict[str, Any]:
+            del overwrite, override_reason
+            calls.append(("Agent", manifest))
+            return {"gate": {"status": "passed"}}
+
+    monkeypatch.setattr("devai.cli.adk_commands.RegistryClient", Registry)
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: API())
+
+    result = CliRunner().invoke(
+        adk_app,
+        [
+            "publish",
+            str(tmp_path),
+            "--registry-url",
+            "https://registry.example",
+            "--eval-run-id",
+            "eval-weather",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [kind for kind, _ in calls] == [
+        "Tool",
+        "Skill",
+        "Prompt",
+        "Dataset",
+        "EvalSuite",
+        "Agent",
+        "Blueprint",
+    ]
+    assert calls[0][1] == yaml.safe_load(tool.read_text(encoding="utf-8"))
+    assert calls[5][1]["metadata"]["annotations"] == {"devai.tesserix.app/eval-run-id": "eval-weather"}
+
+
+def test_artifact_order_places_mcp_tools_before_skills_and_agents(tmp_path: Path) -> None:
+    _write_artifact(tmp_path, "agents", "agent", "Agent", {})
+    _write_artifact(tmp_path, "mcp-servers", "server", "MCPServer", {})
+    _write_artifact(tmp_path, "tools", "tool", "Tool", {})
+    _write_artifact(tmp_path, "skills", "skill", "Skill", {})
+
+    assert [document["kind"] for _, document in _ordered_artifacts(tmp_path)] == [
+        "Tool",
+        "MCPServer",
+        "Skill",
+        "Agent",
+    ]
+
+
+def test_cli_dependencies_only_uses_devai_and_never_publishes_runnable_objects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_artifact(tmp_path, "tools", "weather-current", "Tool", {})
+    _write_artifact(tmp_path, "agents", "weather-agent", "Agent", {})
+    _write_artifact(tmp_path, "blueprints", "weather-flow", "Blueprint", {})
+    published: list[str] = []
+
+    class API(_CLIClient):
+        def publish_artifact(
+            self,
+            plural: str,
+            manifest: dict[str, Any],
+            *,
+            overwrite: bool = False,
+        ) -> dict[str, Any]:
+            del manifest, overwrite
+            published.append(plural)
+            return {"visibility": "private"}
+
+        def publish_agent(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("dependencies-only must not publish an Agent")
+
+    monkeypatch.setattr("devai.cli.adk_commands._new_sandbox_client", lambda **_: API())
+
+    result = CliRunner().invoke(
+        adk_app,
+        [
+            "publish",
+            str(tmp_path),
+            "--api-url",
+            "https://devai.example",
+            "--dependencies-only",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert published == ["tools"]
+    assert result.output.count("gated") == 2
+
+
 def test_cli_adk_test_exits_nonzero_and_names_failed_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     dataset = _write_artifact(
         tmp_path,
@@ -882,6 +1090,24 @@ def test_cli_adk_test_resolves_suite_dataset_and_applies_threshold(
     assert "bad" in result.output
     assert "50.0%" in result.output
     assert "eval-durable" in result.output
+
+
+def test_dataset_cases_accepts_the_registry_dataset_version_tag(
+    tmp_path: Path,
+) -> None:
+    dataset = _write_artifact(
+        tmp_path,
+        "datasets",
+        "smoke",
+        "Dataset",
+        {"cases": [{"name": "ok", "input": "go"}]},
+    )
+    document = yaml.safe_load(dataset.read_text(encoding="utf-8"))
+    document["metadata"]["tag"] = "3"
+    dataset.write_text(yaml.safe_dump(document), encoding="utf-8")
+    cases = _dataset_cases(dataset, expected_name="smoke", expected_version="3")
+
+    assert cases == [{"name": "ok", "input": "go"}]
 
 
 def test_cli_adk_test_emits_redacted_machine_readable_scorecard(

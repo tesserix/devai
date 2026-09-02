@@ -350,6 +350,7 @@ class JobRunnerStage(PipelineStage):
             "model_provider": getattr(agent_meta, "model_provider", "") or "",
             "model_name": getattr(agent_meta, "model_name", "") or "",
             "skills": list(getattr(agent_meta, "skills", []) or []),
+            "tools": list(getattr(agent_meta, "tools", []) or []),
             "prompts": list(getattr(agent_meta, "prompts", []) or []),
             "mcp_servers": list(getattr(agent_meta, "mcp_servers", []) or []),
             # Registry labels, incl. `devai.io/runtime` — drives kagent routing.
@@ -364,6 +365,12 @@ class JobRunnerStage(PipelineStage):
         raw = getattr(agent_meta, "raw", None)
         if isinstance(raw, dict) and raw and EVAL_GATE_LABEL in profile["labels"]:
             profile["envelope"] = raw
+        if governed:
+            from devai.registry.composition import snapshot_composition
+
+            composition = snapshot_composition(resolution)
+            profile["composition"] = composition
+            profile["digest"] = composition["digest"]
         return profile
 
     # ── kagent A2A dispatch (opt-in Substrate actors) ────────────────

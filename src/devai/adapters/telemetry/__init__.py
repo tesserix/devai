@@ -20,6 +20,7 @@ the OTel SDK.
 """
 
 from devai.adapters.telemetry.base import (
+    EvaluationMetric,
     LLMMetric,
     StageMetric,
     TelemetryAdapter,
@@ -37,6 +38,7 @@ from devai.adapters.telemetry.runtime import (
 
 __all__ = [
     "KNOWN_PROVIDERS",
+    "EvaluationMetric",
     "LLMMetric",
     "NoopTelemetryAdapter",
     "StageMetric",

@@ -105,6 +105,7 @@ async def test_extract_principal_prefers_auth_bff_headers() -> None:
             "x-forwarded-uid": "alice-uid",
             "x-forwarded-tenant": "tenant-1",
             "x-forwarded-name": "Alice",
+            "x-forwarded-roles": "developer,platform-admin",
         }
     )
     principal = await extract_principal(req)
@@ -114,6 +115,7 @@ async def test_extract_principal_prefers_auth_bff_headers() -> None:
     assert principal.tenant_id == "tenant-1"
     assert principal.auth_provider == "auth-bff"
     assert principal.display_name == "Alice"
+    assert principal.roles == ["developer", "platform-admin"]
 
 
 @pytest.mark.asyncio
