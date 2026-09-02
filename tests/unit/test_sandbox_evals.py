@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from devai.adapters.llm.base import LLMAdapter, LLMResponse, LLMUsage, ToolCall
+from devai.adapters.telemetry.base import EvaluationMetric
+from devai.adapters.telemetry.noop import NoopTelemetryAdapter
 from devai.config import Settings
 from devai.evaluations.judge import LLMJudge
 from devai.evaluations.models import JudgeConfig, JudgeRubric
@@ -55,6 +57,14 @@ class _ScriptedLLM(LLMAdapter):
 
     async def generate(self, request):  # type: ignore[override]
         return self._responses.pop(0) if len(self._responses) > 1 else self._responses[0]
+
+
+class _EvaluationTelemetry(NoopTelemetryAdapter):
+    def __init__(self) -> None:
+        self.evaluations: list[EvaluationMetric] = []
+
+    async def record_evaluation(self, metric: EvaluationMetric) -> None:
+        self.evaluations.append(metric)
 
 
 def _record() -> SandboxRecord:
@@ -270,6 +280,30 @@ async def test_a_run_is_readable_afterwards_so_two_runs_can_be_compared() -> Non
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
     }
+
+
+@pytest.mark.asyncio
+async def test_a_durable_run_emits_the_same_scorecard_to_telemetry() -> None:
+    telemetry = _EvaluationTelemetry()
+    runner = _runner(_ScriptedLLM([LLMResponse(text="ok")]), telemetry=telemetry)
+
+    run = await runner.run(
+        _record(),
+        [EvalCase(name="c1", input="go", expect=EvalExpect(contains=["ok"]))],
+        triggered_by="sam@example.com",
+        suite_ref={"name": "release-golden", "version": "1"},
+        scorers=["task_completion"],
+    )
+
+    assert len(telemetry.evaluations) == 1
+    metric = telemetry.evaluations[0]
+    assert metric.run_id == run.id
+    assert metric.agent == "release-notes-writer"
+    assert metric.suite == "release-golden@1"
+    assert metric.pass_rate == 1.0
+    assert metric.case_count == 1
+    assert metric.dimensions == {"task_completion": 1.0}
+    assert metric.p95_latency_ms > 0
 
 
 @pytest.mark.asyncio

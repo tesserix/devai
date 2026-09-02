@@ -258,6 +258,28 @@ async def get_registry_artifact(
     return item
 
 
+@router.get("/tools")
+async def list_registry_tools(request: Request) -> list[dict[str, Any]]:
+    client = _client(request)
+    principal, items = await asyncio.gather(
+        _optional_principal(request),
+        asyncio.to_thread(client.list_tool_artifacts),
+    )
+    return [item for item in items if _visible(item, principal)]
+
+
+@router.get("/tools/{name}")
+async def get_registry_tool(request: Request, name: str) -> dict[str, Any]:
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, "tools", name)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"tool not found: {name}")
+    return item
+
+
 @router.get("/skills")
 async def list_skills(request: Request) -> list[dict[str, Any]]:
     client = _client(request)
@@ -404,6 +426,18 @@ async def list_datasets(request: Request) -> list[dict[str, Any]]:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
+@router.get("/datasets/{name}")
+async def get_dataset(request: Request, name: str) -> dict[str, Any]:
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, "datasets", name)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"dataset not found: {name}")
+    return item
+
+
 @router.get("/eval-suites")
 async def list_eval_suites(request: Request) -> list[dict[str, Any]]:
     client = _client(request)
@@ -412,6 +446,18 @@ async def list_eval_suites(request: Request) -> list[dict[str, Any]]:
         return [_to_dict(item) for item in items]
     except RegistryError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/eval-suites/{name}")
+async def get_eval_suite(request: Request, name: str) -> dict[str, Any]:
+    client = _client(request)
+    try:
+        item = await _visible_envelope(request, client, "eval-suites", name)
+    except RegistryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"evaluation suite not found: {name}")
+    return item
 
 
 @router.get("/agents/{name}/manifest")
@@ -539,9 +585,13 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
         meta["labels"] = labels
     if not isinstance(labels, dict):
         raise HTTPException(status_code=400, detail="manifest.metadata.labels must be an object")
+    requested_visibility = str(meta.get("visibility") or "").strip().lower()
+    published_visibility = (
+        "public" if requested_visibility == "public" and "platform-admin" in set(principal.roles or []) else "private"
+    )
     labels[_OWNER_LABEL] = owner_id
-    labels[_VISIBILITY_LABEL] = "private"
-    meta["visibility"] = "private"
+    labels[_VISIBILITY_LABEL] = published_visibility
+    meta["visibility"] = published_visibility
 
     name = (meta.get("name") or "").strip()
     if not name:
@@ -576,6 +626,7 @@ async def publish(request: Request, plural: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"publish: {e}") from e
     client.refresh()
     response = dict(result) if isinstance(result, dict) else {"status": "published"}
+    response["visibility"] = published_visibility
     return response
 
 

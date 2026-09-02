@@ -20,6 +20,13 @@ spec:
   model:
     provider: devai-user-routing
     name: dynamic
+  limits:
+    maxTurns: 25
+    timeoutSeconds: 600
+  riskLevel: low
+  evalSuite:
+    ref: perf-monitor-golden-suite
+    version: '1'
   a2a:
     url: http://agentgateway-mcp.agentgateway-system.svc.cluster.local:8082/a2a/v1/perf-monitor
     preferredTransport: JSONRPC

@@ -134,21 +134,9 @@ class SpecializationService:
             return None
 
     async def resolve_governed(self, capability: str) -> GovernedAgent:
-        # Accept both registry (`capacity-planner-agent`) and role (`capacity_planner_agent`)
-        # spellings — callers arrive with either.
-        normalized = capability.strip().lower().replace("-", "_").removesuffix("_agent")
-        if normalized not in self._reviewed_capabilities:
-            raise AgentNotAdmittedError("capability is not admitted")
-        spec = self.get_full(normalized)
-        if spec is None:
-            raise AgentNotAdmittedError("capability is not admitted")
+        normalized, _ = self._reviewed_spec(capability)
         if self._registry_client is None:
             raise AgentUnavailableError("registry is not configured")
-        if not bool(getattr(self.config, "llm_gateway_required", False)):
-            raise AgentUnavailableError("mandatory LLM gateway routing is disabled")
-        if not str(getattr(self.config, "llm_gateway_base_url", "") or "").strip():
-            raise AgentUnavailableError("mandatory LLM gateway is not configured")
-
         agent_name = f"{normalized.replace('_', '-')}-agent"
         try:
             resolved = await asyncio.to_thread(self._registry_client.resolve_agent, agent_name)
@@ -160,6 +148,25 @@ class SpecializationService:
             )
             raise AgentUnavailableError("registry resolution failed") from None
 
+        return self.admit_resolved(normalized, resolved)
+
+    def _reviewed_spec(self, capability: str) -> tuple[str, Specialization]:
+        normalized = capability.strip().lower().replace("-", "_").removesuffix("_agent")
+        if normalized not in self._reviewed_capabilities:
+            raise AgentNotAdmittedError("capability is not admitted")
+        spec = self.get_full(normalized)
+        if spec is None:
+            raise AgentNotAdmittedError("capability is not admitted")
+        if not bool(getattr(self.config, "llm_gateway_required", False)):
+            raise AgentUnavailableError("mandatory LLM gateway routing is disabled")
+        if not str(getattr(self.config, "llm_gateway_base_url", "") or "").strip():
+            raise AgentUnavailableError("mandatory LLM gateway is not configured")
+        return normalized, spec
+
+    def admit_resolved(self, capability: str, resolved: Any) -> GovernedAgent:
+        """Admit a dispatcher-resolved snapshot without another Registry read."""
+        normalized, spec = self._reviewed_spec(capability)
+        agent_name = f"{normalized.replace('_', '-')}-agent"
         self._validate_governed_bundle(spec, agent_name, resolved)
         if resolved.resolved.get("mcpServers") and not str(getattr(self.config, "agentgateway_url", "") or "").strip():
             raise AgentUnavailableError("mandatory MCP gateway is not configured")
@@ -289,6 +296,7 @@ class SpecializationService:
         state: dict[str, Any],
         *,
         deps: Any = None,
+        resolved: Any = None,
     ) -> dict[str, Any] | None:
         """Run a YAML specialization through the Agent SDK and return its patch.
 
@@ -307,7 +315,11 @@ class SpecializationService:
         built from ``config``, no Redis) is constructed.
         """
         if bool(getattr(self.config, "llm_gateway_required", False)):
-            bundle = await self.resolve_governed(agent_name)
+            bundle = (
+                self.admit_resolved(agent_name, resolved)
+                if resolved is not None
+                else await self.resolve_governed(agent_name)
+            )
             return await self.invoke_bundle(bundle, state, deps=deps)
 
         spec = self.get_full(agent_name)

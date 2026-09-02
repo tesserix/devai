@@ -35,3 +35,6 @@ CLAUDE.md
 
 # Subagent-driven-development scratch workspace (not part of the project)
 .superpowers/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
