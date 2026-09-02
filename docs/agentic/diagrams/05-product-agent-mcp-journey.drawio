@@ -1,109 +1,57 @@
-<mxfile host="app.diagrams.net" modified="2026-09-02T00:00:00.000Z" agent="DevAI" version="24.7.17">
+<mxfile host="app.diagrams.net" modified="2026-09-02T10:30:00.000Z" agent="DevAI" version="24.7.17">
   <diagram id="product-agent-mcp" name="Product to MCP journey">
-    <mxGraphModel dx="1740" dy="1120" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+    <mxGraphModel dx="2300" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1600" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
-        <mxCell id="title" value="How a product request becomes an agent-driven MCP tool call" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#111827" vertex="1" parent="1">
-          <mxGeometry x="300" y="30" width="1200" height="50" as="geometry"/>
-        </mxCell>
-        <mxCell id="subtitle" value="Registry defines what may run · DevAI supplies context · Tesserix ADK runs the loop · Gateways control outbound traffic" style="text;html=1;align=center;verticalAlign=middle;fontSize=14;fontColor=#4b5563" vertex="1" parent="1">
-          <mxGeometry x="300" y="80" width="1200" height="30" as="geometry"/>
-        </mxCell>
+        <mxCell id="title" value="Product request → DevAI agent → governed MCP tools → observable result" style="text;html=1;align=center;verticalAlign=middle;fontSize=26;fontStyle=1;fontColor=#111827" vertex="1" parent="1"><mxGeometry x="300" y="20" width="1800" height="45" as="geometry"/></mxCell>
+        <mxCell id="subtitle" value="Read left to right, then follow the numbered step down to the next row" style="text;html=1;align=center;verticalAlign=middle;fontSize=15;fontColor=#4b5563" vertex="1" parent="1"><mxGeometry x="500" y="65" width="1400" height="30" as="geometry"/></mxCell>
 
-        <mxCell id="controlLane" value="CONTROL PLANE" style="swimlane;html=1;rounded=1;startSize=34;horizontal=1;fillColor=#eef2ff;strokeColor=#6366f1;fontColor=#312e81;fontStyle=1;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="250" y="140" width="610" height="300" as="geometry"/>
-        </mxCell>
-        <mxCell id="runtimeLane" value="AGENT EXECUTION" style="swimlane;html=1;rounded=1;startSize=34;horizontal=1;fillColor=#ecfdf5;strokeColor=#16a34a;fontColor=#14532d;fontStyle=1;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="900" y="140" width="390" height="300" as="geometry"/>
-        </mxCell>
-        <mxCell id="dataLane" value="POLICY DATA PLANE" style="swimlane;html=1;rounded=1;startSize=34;horizontal=1;fillColor=#fff7ed;strokeColor=#ea580c;fontColor=#7c2d12;fontStyle=1;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="1330" y="140" width="390" height="650" as="geometry"/>
-        </mxCell>
+        <mxCell id="controlLane" value="1 · REQUEST AND CONTROL PLANE" style="swimlane;html=1;rounded=1;startSize=38;horizontal=1;fillColor=#eef2ff;strokeColor=#6366f1;fontColor=#312e81;fontStyle=1;fontSize=14" vertex="1" parent="1"><mxGeometry x="60" y="120" width="2280" height="270" as="geometry"/></mxCell>
+        <mxCell id="product" value="1  PRODUCT / USER&#xa;&#xa;UI · API · webhook&#xa;&#xa;Request + authenticated principal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#475569;fontColor=#0f172a;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="120" y="205" width="240" height="125" as="geometry"/></mxCell>
+        <mxCell id="api" value="2  DevAI API&#xa;&#xa;Authenticate tenant&#xa;Validate request + limits&#xa;Create run ID + trace ID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#312e81;strokeColor=#1e1b4b;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="440" y="195" width="250" height="145" as="geometry"/></mxCell>
+        <mxCell id="workflow" value="3  BLUEPRINT + TEMPORAL&#xa;&#xa;Choose the next agent stage&#xa;Persist progress + retries&#xa;Resume long-running work" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#312e81;strokeColor=#1e1b4b;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="770" y="195" width="270" height="145" as="geometry"/></mxCell>
+        <mxCell id="registry" value="4  AGENT REGISTRY&#xa;&#xa;Resolve exact Agent version&#xa;Skills + prompts + tool refs&#xa;MCP servers + policy + digest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6b21a8;strokeColor=#4c1d95;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1120" y="190" width="290" height="155" as="geometry"/></mxCell>
+        <mxCell id="controlNote" value="The Registry defines what may run. It does not carry conversation state or execute tool calls." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#faf5ff;strokeColor=#a855f7;fontColor=#581c87;fontSize=14" vertex="1" parent="1"><mxGeometry x="1530" y="215" width="690" height="105" as="geometry"/></mxCell>
 
-        <mxCell id="product" value="1  PRODUCT / USER&#xa;UI · API · webhook&#xa;&#xa;request + authenticated identity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#4b5563;fontColor=#111827;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="30" y="240" width="180" height="120" as="geometry"/>
-        </mxCell>
-        <mxCell id="api" value="2  DevAI API&#xa;validate tenant + input&#xa;create run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#312e81;strokeColor=#1e1b4b;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="290" y="230" width="170" height="110" as="geometry"/>
-        </mxCell>
-        <mxCell id="workflow" value="3  Blueprint + Temporal&#xa;choose agent stage&#xa;persist progress" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#312e81;strokeColor=#1e1b4b;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="500" y="230" width="170" height="110" as="geometry"/>
-        </mxCell>
-        <mxCell id="registry" value="4  Agent Registry&#xa;agent + version&#xa;Skill + Prompt + Tool&#xa;MCP Server references" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6b21a8;strokeColor=#4c1d95;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="700" y="215" width="140" height="140" as="geometry"/>
-        </mxCell>
-        <mxCell id="runner" value="5  Runner pod&#xa;verified composition&#xa;+ bounded context" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#166534;strokeColor=#14532d;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="940" y="215" width="150" height="120" as="geometry"/>
-        </mxCell>
-        <mxCell id="adk" value="6  Tesserix ADK&#xa;model / tool loop&#xa;budgets + typed output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#166534;strokeColor=#14532d;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="1120" y="215" width="140" height="120" as="geometry"/>
-        </mxCell>
+        <mxCell id="executionLane" value="2 · ONE GOVERNED AGENT EXECUTION" style="swimlane;html=1;rounded=1;startSize=38;horizontal=1;fillColor=#ecfdf5;strokeColor=#16a34a;fontColor=#14532d;fontStyle=1;fontSize=14" vertex="1" parent="1"><mxGeometry x="60" y="430" width="2280" height="300" as="geometry"/></mxCell>
+        <mxCell id="executionNote" value="DISPATCH CONTRACT&#xa;&#xa;Verified composition snapshot&#xa;Bounded budgets and deadline&#xa;No mutable Registry lookup required" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;fontColor=#14532d;fontSize=14" vertex="1" parent="1"><mxGeometry x="120" y="520" width="500" height="135" as="geometry"/></mxCell>
+        <mxCell id="runner" value="5  RUNNER JOB&#xa;&#xa;Install telemetry&#xa;Load verified snapshot&#xa;Flush on every exit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#166534;strokeColor=#14532d;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1050" y="510" width="230" height="145" as="geometry"/></mxCell>
+        <mxCell id="context" value="6  BOUNDED CONTEXT&#xa;&#xa;Task + repository&#xa;Prior-stage handover&#xa;Memory + principal settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontColor=#14532d;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1340" y="510" width="245" height="145" as="geometry"/></mxCell>
+        <mxCell id="adk" value="7  TESSERIX ADK&#xa;&#xa;Model ↔ tool loop&#xa;Typed output validation&#xa;Turn · token · time budgets" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#166534;strokeColor=#14532d;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1645" y="510" width="245" height="145" as="geometry"/></mxCell>
+        <mxCell id="aigw" value="AI GATEWAY&#xa;&#xa;Provider policy&#xa;Model routing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9a3412;strokeColor=#7c2d12;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1950" y="520" width="180" height="125" as="geometry"/></mxCell>
+        <mxCell id="models" value="MODEL&#xa;PROVIDERS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#64748b;dashed=1;fontColor=#0f172a;fontSize=14;fontStyle=1" vertex="1" parent="1"><mxGeometry x="2180" y="530" width="125" height="105" as="geometry"/></mxCell>
 
-        <mxCell id="context" value="CONTEXT&#xa;task · repo · prior stages&#xa;memory · attachments&#xa;principal settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontColor=#14532d;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="985" y="360" width="220" height="65" as="geometry"/>
-        </mxCell>
-        <mxCell id="aigw" value="AI Gateway&#xa;provider policy + routing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9a3412;strokeColor=#7c2d12;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="1380" y="215" width="150" height="90" as="geometry"/>
-        </mxCell>
-        <mxCell id="mcpgw" value="AgentGateway&#xa;MCP authz + routing&#xa;+ telemetry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9a3412;strokeColor=#7c2d12;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="1380" y="390" width="150" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="models" value="Model providers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b7280;dashed=1;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="1570" y="225" width="120" height="70" as="geometry"/>
-        </mxCell>
-        <mxCell id="mcp" value="MCP servers&#xa;SCM · DevAI · SRE&#xa;product capabilities" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b7280;dashed=1;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="1570" y="390" width="120" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="systems" value="DURABLE OWNERS&#xa;&#xa;Product APIs / PostgreSQL&#xa;mutation + idempotency&#xa;&#xa;Temporal&#xa;workflow history&#xa;&#xa;SCM / object storage&#xa;code + artifacts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b7280;dashed=1;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="1380" y="565" width="310" height="190" as="geometry"/>
-        </mxCell>
+        <mxCell id="toolLane" value="3 · MCP TOOL AND DURABLE DATA PLANE" style="swimlane;html=1;rounded=1;startSize=38;horizontal=1;fillColor=#fff7ed;strokeColor=#ea580c;fontColor=#7c2d12;fontStyle=1;fontSize=14" vertex="1" parent="1"><mxGeometry x="60" y="770" width="2280" height="270" as="geometry"/></mxCell>
+        <mxCell id="stateless" value="STATELESS MCP RULE&#xa;&#xa;Any healthy replica can handle the next call.&#xa;Pods keep no durable user, conversation, workflow, or idempotency state.&#xa;Retries are safe because mutations use tenant-scoped idempotency keys." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fefce8;strokeColor=#ca8a04;fontColor=#713f12;fontSize=15;fontStyle=1" vertex="1" parent="1"><mxGeometry x="120" y="850" width="1000" height="135" as="geometry"/></mxCell>
+        <mxCell id="mcpgw" value="8  AGENTGATEWAY&#xa;&#xa;MCP authentication + authz&#xa;Route selected server&#xa;Policy + gateway telemetry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9a3412;strokeColor=#7c2d12;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1280" y="835" width="260" height="145" as="geometry"/></mxCell>
+        <mxCell id="mcp" value="9  MCP SERVERS&#xa;&#xa;tools/list + tools/call&#xa;SCM · DevAI · SRE&#xa;Product capabilities" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c2410c;fontColor=#7c2d12;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1620" y="835" width="250" height="145" as="geometry"/></mxCell>
+        <mxCell id="owners" value="10  DURABLE OWNERS&#xa;&#xa;Product APIs + PostgreSQL&#xa;Temporal workflow history&#xa;SCM + object storage&#xa;Mutation + idempotency truth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#64748b;dashed=1;fontColor=#0f172a;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1950" y="825" width="300" height="165" as="geometry"/></mxCell>
 
-        <mxCell id="note" value="STATELESS RULE&#xa;Any healthy MCP replica can handle the next call.&#xa;Pods keep no durable user, conversation, workflow, or idempotency state." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fefce8;strokeColor=#ca8a04;fontColor=#713f12;fontSize=14;fontStyle=1" vertex="1" parent="1">
-          <mxGeometry x="330" y="510" width="850" height="90" as="geometry"/>
-        </mxCell>
-        <mxCell id="legend" value="Registry = what may run     ·     Context = what this request knows     ·     Gateways = how calls leave     ·     Durable systems = source of truth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fafb;strokeColor=#d1d5db;fontColor=#374151;fontSize=14" vertex="1" parent="1">
-          <mxGeometry x="330" y="640" width="850" height="70" as="geometry"/>
-        </mxCell>
+        <mxCell id="observeLane" value="4 · QUALITY, TRACES, AND INVESTIGATION" style="swimlane;html=1;rounded=1;startSize=38;horizontal=1;fillColor=#f0fdfa;strokeColor=#0f766e;fontColor=#134e4a;fontStyle=1;fontSize=14" vertex="1" parent="1"><mxGeometry x="60" y="1080" width="2280" height="320" as="geometry"/></mxCell>
+        <mxCell id="eval" value="11  EVALUATION SERVICE&#xa;&#xa;Exact · regex · schema&#xa;Tool trajectory · completion&#xa;Latency · token · cost · judge" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f766e;strokeColor=#134e4a;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="160" y="1170" width="280" height="155" as="geometry"/></mxCell>
+        <mxCell id="evaldb" value="POSTGRESQL&#xa;&#xa;Durable cases + scores&#xa;Comparisons + gate results&#xa;Authoritative quality record" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0f766e;fontColor=#134e4a;fontSize=15;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="520" y="1170" width="280" height="155" as="geometry"/></mxCell>
+        <mxCell id="langfuse" value="OTLP + LANGFUSE&#xa;&#xa;runner.run → agent.run&#xa;mcp.connect → tool.call&#xa;Numeric evaluation scores" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f766e;strokeColor=#134e4a;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="900" y="1170" width="280" height="155" as="geometry"/></mxCell>
+        <mxCell id="ui" value="DEVAI OBSERVABILITY UI&#xa;&#xa;Run timeline + scorecards&#xa;Evaluation comparisons&#xa;Trace deep links + investigation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f766e;strokeColor=#134e4a;fontColor=#ffffff;fontSize=15;fontStyle=1;strokeWidth=2" vertex="1" parent="1"><mxGeometry x="1280" y="1170" width="300" height="155" as="geometry"/></mxCell>
+        <mxCell id="privacy" value="SAFE TELEMETRY METADATA ONLY&#xa;&#xa;Run · trace · stage · agent&#xa;Server · route · tool · status · usage&#xa;&#xa;Never prompts, arguments, results, user/email, access tokens, or credentials" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fefce8;strokeColor=#ca8a04;fontColor=#713f12;fontSize=14;fontStyle=1" vertex="1" parent="1"><mxGeometry x="1680" y="1155" width="560" height="185" as="geometry"/></mxCell>
 
-        <mxCell id="observeLane" value="QUALITY + OBSERVABILITY" style="swimlane;html=1;rounded=1;startSize=34;horizontal=1;fillColor=#f0fdfa;strokeColor=#0f766e;fontColor=#134e4a;fontStyle=1;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="250" y="820" width="1470" height="230" as="geometry"/>
-        </mxCell>
-        <mxCell id="eval" value="Evaluation service&#xa;deterministic + judge scorers&#xa;quality gates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f766e;strokeColor=#134e4a;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="300" y="890" width="220" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="evaldb" value="PostgreSQL&#xa;durable cases · scores&#xa;comparisons · gate results" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0f766e;fontColor=#134e4a;fontSize=13;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="580" y="890" width="220" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="langfuse" value="OTLP + Langfuse&#xa;runner · agent · model&#xa;MCP · tool spans + scores" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f766e;strokeColor=#134e4a;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="860" y="890" width="220" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="observabilityUi" value="DevAI observability UI&#xa;run timeline · scorecards&#xa;comparisons · trace links" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f766e;strokeColor=#134e4a;fontColor=#ffffff;fontSize=14;fontStyle=1;strokeWidth=2" vertex="1" parent="1">
-          <mxGeometry x="1140" y="890" width="230" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="privacy" value="Safe metadata only&#xa;run / trace / stage / agent / server / tool / status / usage&#xa;No prompts · arguments · results · user/email · credentials" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fefce8;strokeColor=#ca8a04;fontColor=#713f12;fontSize=13" vertex="1" parent="1">
-          <mxGeometry x="1430" y="880" width="250" height="120" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="e1" value="request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="product" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e2" value="durable run" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="api" target="workflow"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e3" value="resolve exact version" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="workflow" target="registry"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e4" value="verified snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="registry" target="runner"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e5" value="run" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="runner" target="adk"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e6" value="prompt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="context" target="adk"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e7" value="model request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="adk" target="aigw"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="aigw" target="models"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e9" value="tools/list · tools/call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="adk" target="mcpgw"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e10" value="selected route" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="mcpgw" target="mcp"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e11" value="authorized operation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=12" edge="1" parent="1" source="mcp" target="systems"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e12" value="typed result + trace" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeWidth=2;fontSize=12" edge="1" parent="1" source="adk" target="workflow"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e13" value="status / result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeWidth=2;fontSize=12" edge="1" parent="1" source="workflow" target="product"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e14" value="evaluation inputs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;dashed=1;strokeColor=#0f766e;strokeWidth=2;fontSize=12" edge="1" parent="1" source="workflow" target="eval"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e15" value="cases + scores" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2;fontSize=12" edge="1" parent="1" source="eval" target="evaldb"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e16" value="numeric scores" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2;fontSize=12" edge="1" parent="1" source="eval" target="langfuse"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e17" value="correlated spans" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2;fontSize=12" edge="1" parent="1" source="adk" target="langfuse"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e18" value="quality data" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2;fontSize=12" edge="1" parent="1" source="evaldb" target="observabilityUi"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e19" value="trace deep link" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2;fontSize=12" edge="1" parent="1" source="langfuse" target="observabilityUi"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="product" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="api" target="workflow"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="workflow" target="registry"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" value="verified snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="registry" target="runner"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1265" y="405"/><mxPoint x="1165" y="405"/></Array></mxGeometry></mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="runner" target="context"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="context" target="adk"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="model request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="adk" target="aigw"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="aigw" target="models"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" value="tools/list + tools/call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="adk" target="mcpgw"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1768" y="750"/><mxPoint x="1410" y="750"/></Array></mxGeometry></mxCell>
+        <mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2" edge="1" parent="1" source="mcpgw" target="mcp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="authorized operation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="mcp" target="owners"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" value="evaluation inputs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;dashed=1;strokeColor=#0f766e;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="workflow" target="eval"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="905" y="410"/><mxPoint x="90" y="410"/><mxPoint x="90" y="1248"/></Array></mxGeometry></mxCell>
+        <mxCell id="e13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2" edge="1" parent="1" source="eval" target="evaldb"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" value="numeric scores" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="evaldb" target="langfuse"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" value="correlated spans" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;dashed=1;strokeColor=#0f766e;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="adk" target="langfuse"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1768" y="750"/><mxPoint x="1195" y="750"/><mxPoint x="1195" y="1120"/><mxPoint x="1040" y="1120"/></Array></mxGeometry></mxCell>
+        <mxCell id="e16" value="scorecards + trace links" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#0f766e;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="langfuse" target="ui"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e17" value="quality API" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;dashed=1;strokeColor=#0f766e;strokeWidth=2;fontSize=13;labelBackgroundColor=#ffffff" edge="1" parent="1" source="evaldb" target="ui"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="660" y="1365"/><mxPoint x="1430" y="1365"/></Array></mxGeometry></mxCell>
       </root>
     </mxGraphModel>
   </diagram>
