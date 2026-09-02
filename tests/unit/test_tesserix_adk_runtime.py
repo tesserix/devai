@@ -1,17 +1,72 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tesserix_adk.core import Message, ModelRequest, RunEventKind, StopReason, TextPart
 
 from devai.adapters.llm.base import LLMAdapter, LLMRequest, LLMResponse, LLMUsage, ToolCall, ToolSpec
+from devai.adapters.telemetry.noop import NoopTelemetryAdapter
+from devai.adapters.telemetry.runtime import set_global_telemetry
 from devai.agentruntime.tesserix import DevAILLMProvider, TesserixSpecRuntime, definition_for_specialization
 from devai.pipeline.types import DevAITask
 from devai.specializations.base import HandoverField, Specialization
 from devai.specializations.loader import discover_specializations
 from devai.tools.dispatch import ToolDispatcher
+
+
+class ScriptedMCPConnection:
+    def __init__(self, spec: Any) -> None:
+        self.spec = spec
+        self.connected = False
+        self.closed = False
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    @property
+    def name(self) -> str:
+        return str(self.spec.name)
+
+    async def connect(self) -> None:
+        self.connected = True
+
+    async def list_tools(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "get_ticket",
+                "description": "Read one issue from the configured SCM.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"number": {"type": "integer"}},
+                    "required": ["number"],
+                },
+            }
+        ]
+
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> object:
+        self.calls.append((name, arguments))
+        return {"content": [{"type": "text", "text": "issue is ready"}]}
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class RecordingTelemetry(NoopTelemetryAdapter):
+    def __init__(self) -> None:
+        self.spans: list[tuple[str, dict[str, object]]] = []
+
+    @contextmanager
+    def span(self, name: str, *, attributes: dict[str, Any] | None = None):
+        recorded = dict(attributes or {})
+        self.spans.append((name, recorded))
+
+        class Span:
+            def set_attribute(self, key: str, value: object) -> None:
+                recorded[key] = value
+
+        yield Span()
 
 
 class ScriptedLLM(LLMAdapter):
@@ -146,6 +201,122 @@ async def test_runtime_executes_tools_and_returns_typed_handover() -> None:
     assert tools.calls == [("get_logs", {"service": "api"})]
     assert result.trace_steps[0]["runtime"] == "tesserix-adk"
     assert any(step["kind"] == RunEventKind.OUTPUT_VALIDATED.value for step in result.trace_steps)
+
+
+@pytest.mark.asyncio
+async def test_runtime_discovers_and_invokes_gateway_mcp_tools() -> None:
+    llm = ScriptedLLM(
+        [
+            LLMResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call-mcp",
+                        name="scm-mcp__get_ticket",
+                        arguments={"number": 42},
+                    )
+                ]
+            ),
+            LLMResponse(text='{"summary":"issue is ready"}'),
+        ]
+    )
+    connections: list[ScriptedMCPConnection] = []
+
+    def connection_factory(spec: Any) -> ScriptedMCPConnection:
+        connection = ScriptedMCPConnection(spec)
+        connections.append(connection)
+        return connection
+
+    runtime = TesserixSpecRuntime(
+        llm=llm,
+        dispatcher=ScriptedTools(),
+        mcp_connection_factory=connection_factory,
+    )
+    task = DevAITask(
+        intent="Inspect issue 42",
+        triggered_by="owner@example.com",
+        agent_context={
+            "mcp_endpoints": [
+                {
+                    "name": "scm-mcp",
+                    "endpoint": "https://mcp.example.com/mcp/scm-mcp",
+                    "type": "streamable-http",
+                    "routed_via": "agentgateway",
+                }
+            ]
+        },
+    )
+
+    result = await runtime.run(
+        _spec(),
+        task,
+        system_prompt="Review the issue.",
+        user_prompt="Inspect issue 42",
+    )
+
+    assert result.patch == {"summary": "issue is ready"}
+    assert connections[0].connected
+    assert connections[0].closed
+    assert connections[0].calls == [("get_ticket", {"number": 42})]
+    assert {tool.name for tool in llm.requests[0].tools} == {"scm-mcp__get_ticket"}
+
+
+@pytest.mark.asyncio
+async def test_runtime_emits_correlated_agent_and_mcp_spans() -> None:
+    telemetry = RecordingTelemetry()
+    set_global_telemetry(telemetry)
+    llm = ScriptedLLM(
+        [
+            LLMResponse(tool_calls=[ToolCall(id="call-mcp", name="scm-mcp__get_ticket", arguments={"number": 7})]),
+            LLMResponse(text='{"summary":"traced"}'),
+        ]
+    )
+
+    try:
+        runtime = TesserixSpecRuntime(
+            llm=llm,
+            dispatcher=ScriptedTools(),
+            mcp_connection_factory=ScriptedMCPConnection,
+        )
+        await runtime.run(
+            _spec(),
+            DevAITask(
+                id="run-7",
+                intent="Trace issue",
+                trace_id="0123456789abcdef0123456789abcdef",
+                principal={"tenant_id": "tenant-a", "uid": "user-a"},
+                agent_context={
+                    "mcp_endpoints": [
+                        {
+                            "name": "scm-mcp",
+                            "endpoint": "https://mcp.example.com/mcp/scm-mcp",
+                            "type": "streamable-http",
+                            "routed_via": "agentgateway",
+                        }
+                    ]
+                },
+            ),
+            system_prompt="Trace the issue.",
+            user_prompt="Trace issue 7",
+        )
+    finally:
+        set_global_telemetry(None)
+
+    spans = dict(telemetry.spans)
+    assert spans["agent.run"] == {
+        "devai.agent": "health_reviewer",
+        "devai.run_id": "run-7",
+        "devai.trace_id": "0123456789abcdef0123456789abcdef",
+        "devai.tenant_id": "tenant-a",
+        "devai.runtime": "tesserix-adk",
+        "devai.status": "completed",
+        "devai.model_calls": 2,
+        "devai.tool_calls": 1,
+        "gen_ai.usage.input_tokens": 0,
+        "gen_ai.usage.output_tokens": 0,
+    }
+    assert spans["mcp.connect"]["mcp.server"] == "scm-mcp"
+    assert spans["tool.call"]["tool.name"] == "scm-mcp__get_ticket"
+    assert spans["tool.call"]["tool.transport"] == "mcp"
 
 
 @pytest.mark.asyncio

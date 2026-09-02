@@ -89,59 +89,69 @@ async def _run() -> int:
 
     # Build the minimum config + adapters the agent needs.
     config = _load_settings()
-    # Prefer the dispatcher-baked profile (DEVAI_AGENT_PROFILE env). The
-    # JobRunnerStage already paid the aregistry round-trip; re-fetching
-    # would be redundant and breaks if aregistry's network policy denies
-    # the runner pod. Fall through to a live aregistry call when the env
-    # is empty (older dispatchers, manual `kubectl run` for debugging).
-    agent_meta = _decode_agent_profile_from_env()
-    if agent_meta is None:
-        agent_meta = await _resolve_agent(agent_name, config)
-    if agent_meta:
-        logger.info(
-            "runner: agent profile resolved name=%s model=%s/%s skills=%d prompts=%d mcp_servers=%d",
-            agent_meta.get("name"),
-            agent_meta.get("model_provider") or "-",
-            agent_meta.get("model_name") or "-",
-            len(agent_meta.get("skills") or []),
-            len(agent_meta.get("prompts") or []),
-            len(agent_meta.get("mcp_servers") or []),
-        )
+    from devai.adapters.telemetry import create_telemetry_adapter, set_global_telemetry
 
-    # Stage handlers fall into a few buckets. Most run a Specialization
-    # (YAML) or a legacy Python agent. A small set have special semantics
-    # (scan a repo, scaffold a real app, spin a preview pod, …). These are
-    # keyed by the *agent* name (e.g. scan_repo) since one stage type
-    # (run_as_job) hosts many such agents; fall back to the stage name for
-    # handlers that are genuinely stage-scoped.
-    handler = _STAGE_HANDLERS.get(agent_name) or _STAGE_HANDLERS.get(stage)
-    if handler is None:
-        handler = _run_agent
-
+    telemetry = create_telemetry_adapter(config)
+    set_global_telemetry(telemetry)
     try:
-        result = await handler(
-            agent_name=agent_name,
-            stage=stage,
-            task_id=task_id,
-            repo=repo,
-            intent=intent,
-            blueprint=blueprint,
-            agent_meta=agent_meta,
-            stage_config=stage_config,
-            config=config,
-            triggered_by=triggered_by,
-            trace_id=trace_id,
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("runner: handler %s raised", stage)
-        _emit_result({"ok": False, "error": traceback.format_exc(limit=20)})
-        return 1
+        try:
+            with telemetry.span(
+                "runner.run",
+                attributes={
+                    "devai.run_id": task_id,
+                    "devai.stage": stage,
+                    "devai.agent": agent_name,
+                    "devai.trace_id": trace_id,
+                },
+            ):
+                # Prefer the dispatcher-baked profile. Fall through to a live
+                # Registry call only for older/manual dispatchers.
+                agent_meta = _decode_agent_profile_from_env()
+                if agent_meta is None:
+                    agent_meta = await _resolve_agent(agent_name, config)
+                if agent_meta:
+                    logger.info(
+                        "runner: agent profile resolved name=%s model=%s/%s skills=%d prompts=%d mcp_servers=%d",
+                        agent_meta.get("name"),
+                        agent_meta.get("model_provider") or "-",
+                        agent_meta.get("model_name") or "-",
+                        len(agent_meta.get("skills") or []),
+                        len(agent_meta.get("prompts") or []),
+                        len(agent_meta.get("mcp_servers") or []),
+                    )
 
-    if not isinstance(result, dict):
-        result = {"value": result}
-    result.setdefault("ok", True)
-    _emit_result(result)
-    return 0 if result.get("ok") else 1
+                handler = _STAGE_HANDLERS.get(agent_name) or _STAGE_HANDLERS.get(stage)
+                if handler is None:
+                    handler = _run_agent
+                result = await handler(
+                    agent_name=agent_name,
+                    stage=stage,
+                    task_id=task_id,
+                    repo=repo,
+                    intent=intent,
+                    blueprint=blueprint,
+                    agent_meta=agent_meta,
+                    stage_config=stage_config,
+                    config=config,
+                    triggered_by=triggered_by,
+                    trace_id=trace_id,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("runner: stage %s failed", stage)
+            _emit_result({"ok": False, "error": traceback.format_exc(limit=20)})
+            return 1
+
+        if not isinstance(result, dict):
+            result = {"value": result}
+        result.setdefault("ok", True)
+        _emit_result(result)
+        return 0 if result.get("ok") else 1
+    finally:
+        try:
+            await telemetry.close()
+        except Exception:  # noqa: BLE001
+            logger.warning("runner: telemetry flush failed provider=%s", telemetry.provider_name)
+        set_global_telemetry(None)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -406,7 +416,7 @@ async def _invoke_legacy(agent_name: str, state: dict[str, Any], config: Any) ->
 # ─────────────────────────────────────────────────────────────────────
 
 
-async def _stage_scan_repo(*, repo: str, intent: str, stage_config: dict[str, Any], **_: Any) -> dict[str, Any]:
+async def _stage_scan_repo(*, repo: str, intent: str, stage_config: dict[str, Any], **_extra: Any) -> dict[str, Any]:
     """Light scan that classifies a repo as blank vs not.
 
     Mirrors the logic of `/api/scm/repos/<owner>/<name>/scan` but runs
@@ -429,7 +439,7 @@ async def _stage_scan_repo(*, repo: str, intent: str, stage_config: dict[str, An
     )
     found = [m for m in markers if os.path.exists(os.path.join(work, m))]
     file_count = 0
-    for root, _, files in os.walk(work):
+    for root, _dirs, files in os.walk(work):
         if ".git" in root:
             continue
         file_count += len(files)
@@ -545,7 +555,8 @@ def _decode_stage_config() -> dict[str, Any]:
     if not raw:
         return {}
     try:
-        return json.loads(raw)
+        decoded = json.loads(raw)
+        return decoded if isinstance(decoded, dict) else {}
     except Exception:  # noqa: BLE001
         return {}
 
@@ -644,7 +655,7 @@ def _load_settings() -> Any:
     try:
         from devai.config import Settings
 
-        return Settings()  # type: ignore[call-arg]
+        return Settings()
     except Exception:  # noqa: BLE001
         logger.exception("Settings construction failed in runner")
         return None
