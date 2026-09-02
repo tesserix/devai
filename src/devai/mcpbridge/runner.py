@@ -81,7 +81,7 @@ def command_allowed(command: str, allowed: list[str]) -> bool:
 
 @asynccontextmanager
 async def stdio_session(spec: LaunchSpec, env: dict[str, str], *, timeout: float = 60.0):
-    """Spawn the stdio MCP server, yield an initialized ClientSession, tear down.
+    """Spawn the stdio MCP server, discover it, then tear it down.
 
     MUST be entered and exited within the SAME task: the mcp SDK's stdio
     transport uses anyio task groups whose cancel scopes are task-bound, so a
@@ -97,7 +97,7 @@ async def stdio_session(spec: LaunchSpec, env: dict[str, str], *, timeout: float
     params = StdioServerParameters(command=spec.command, args=spec.args, env=env or None)
     async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
         with anyio.fail_after(timeout):
-            await session.initialize()
+            await session.discover()
         yield session
 
 

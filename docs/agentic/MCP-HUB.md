@@ -259,13 +259,15 @@ A correct mux federates the entire surface, each namespaced to avoid collisions:
 Merging only `tools` is the common, wrong shortcut — agents that use prompts/
 resources would silently lose them.
 
-### 6.2 Session & capability negotiation (`initialize`)
-- The Hub runs its **own `initialize`** with each downstream (capability discovery)
-  and a **single `initialize`** with the client. It advertises the **union** of
-  downstream capabilities it can proxy (tools/prompts/resources/logging/completion).
-- One **client session** (`Mcp-Session-Id`) maps to a **set of downstream sessions**
-  (one per server). The Hub owns this fan-out table for the session's lifetime;
-  downstream reconnects are transparent to the client.
+### 6.2 Stateless capability discovery (`server/discover`)
+- The Hub and every downstream connection use MCP `2026-07-28`
+  **`server/discover`**, followed by independently complete list/call requests.
+- Every request carries matching protocol, method/name, client capability, and
+  client identity metadata. `initialize`, `notifications/initialized`, GET event
+  streams, and `Mcp-Session-Id` are rejected.
+- The Hub keeps a refreshable cache of downstream descriptions for efficiency,
+  but correctness never depends on the caller reaching the same Hub or downstream
+  replica. The next request can rebuild or reread the surface from external state.
 
 ### 6.3 Routing & correlation (the hard part)
 - **Forward routing**: a namespaced request (`analyst__X`) → strip prefix → the
@@ -278,16 +280,13 @@ resources would silently lose them.
   `notifications/progress` from a downstream reaches the right client call;
   `notifications/cancelled` is forwarded to the owning downstream.
 
-### 6.4 Reverse path (server→client fan-in) — must not be dropped
-- **List-changed**: `notifications/{tools,prompts,resources}/list_changed` and
-  `resources/updated` from any downstream → the Hub re-aggregates and emits a single
-  `list_changed` to the client. (Also fired on registry/cache changes — §5.5.)
-- **Sampling**: a downstream's **`sampling/createMessage`** (server asks the client's
-  LLM to complete) is routed **up** to the client and the result back down. Skipping
-  this breaks agentic downstream servers — it's the most-missed piece.
-- **Elicitation / roots**: `elicitation/create` and `roots/list` are likewise
-  proxied client↔downstream.
-- **Logging**: `notifications/message` forwarded (tagged with the source server).
+### 6.4 Reverse path is explicit opt-in
+- The default Hub exposes request/response tools, prompts, and resources only.
+  A registry refresh changes the next stateless list response; it does not rely
+  on a retained client connection or `list_changed` notification.
+- Sampling, elicitation, roots, resource subscriptions, and
+  `subscriptions/listen` are not advertised. Adding one requires an explicit
+  durable subscription design; a pod-local callback is not a correctness path.
 
 ### 6.5 Scoping, budgeting, auth, degradation
 - **Per-caller surface budgeting (the ~40-tool ceiling):** never expose the raw
@@ -298,7 +297,7 @@ resources would silently lose them.
   pool); inject each **downstream's** auth per `MCPServer.spec.authMode` (`jwt` →
   service token, `none`, `header`, `mtls`). Callers never hold downstream creds.
 - **Degradation**: an unreachable/`degraded` downstream is dropped from the
-  aggregate (its primitives disappear, a `list_changed` fires, in-flight calls to it
+  aggregate (its primitives disappear from the next list and in-flight calls to it
   error cleanly) — the rest keep serving. Never fail the whole Hub for one bad mux leg.
 - **Concurrency**: bounded connection pool per downstream; `tools/list` fan-out runs
   in parallel with per-leg timeouts; slow/blocked legs can't stall the aggregate.
@@ -335,8 +334,8 @@ caller.
 | **1 — Tools first-class ✅ DONE** | `kind:Tool` artifacts generated from each MCPServer's tool list + devai `ToolSpec` schemas, labelled `mcp.devai.io/server`; `toolSelector` added to all 5 MCPServers. Generator: `_import/generate_tools.py`. | **Met:** `/v0/tools` → 53 (UI Tools tab populated); `labelSelector=devai.io/domain=security` → 6; each Tool has inputSchema + server label + wire-name annotation. |
 | **2 — Selector + operator + resolver (registry tier) ✅ DONE** | `spec.toolSelector` on the 5 MCPServers; `resolveMCPServerTools` validates + resolves selector → `.status.tools`, with **NOTIFY** on miss (`Resolved=False` condition). Endpoint: `/v0/servers/{name}/resolved`. | **Met:** a labelled Tool auto-appears in its server's resolved set; an unresolved tool surfaces a clear `Resolved=False` message. |
 | **3 — Upstream sources + pull-through cache ✅ DONE** | `agentic-registry/internal/resolve`: `Source` chain + `Resolver` with **write-through** caching; generic HTTP source (`TOOL_SOURCE_URLS`); unresolved refs try upstream before NOTIFY. | **Met:** a tool absent locally but present upstream is fetched, **persisted as `kind:Tool`** (cache labels + provenance annotations), and bound; second resolve is a registry hit. Tests: `internal/resolve/resolve_test.go`. |
-| **4 — The Hub ✅ DONE** | `devai-mcp-hub` (`src/devai/mcphub/`): registry discovery, downstream federation, collision-free namespacing (`server__tool`), per-caller profile budgeting, auth termination + downstream injection, graceful degradation, periodic refresh + `list_changed`. Dedicated ASGI app + `devai-mcp-hub` entrypoint. | **Met:** one `/mcp` lists a scoped, namespaced tool set; `tools/call` routes to the right downstream with injected auth; an unreachable leg is dropped from the aggregate and in-flight calls error cleanly. Tests: `tests/unit/test_mcphub.py` (20). |
-| **5 — Gateway + scale** | Route `…/mcp` → Hub via agentgateway; onboard ≥2 new external MCPs via registry only; `tools/list_changed` on registry/cache change. | New MCP onboarded with zero Hub code change; declaring a tool not yet in the registry auto-pulls + caches it; surface stays within the per-caller budget. |
+| **4 — The Hub ✅ DONE** | `devai-mcp-hub` (`src/devai/mcphub/`): registry discovery, downstream federation, collision-free namespacing (`server__tool`), per-caller profile budgeting, auth termination + downstream injection, graceful degradation, and periodic refresh. Dedicated ASGI app + `devai-mcp-hub` entrypoint. | **Met:** one `/mcp` lists a scoped, namespaced tool set; `tools/call` routes to the right downstream with injected auth; an unreachable leg is dropped from the aggregate and in-flight calls error cleanly. Tests: `tests/unit/test_mcphub.py` (20). |
+| **5 — Gateway + scale** | Route `…/mcp` → Hub via agentgateway; onboard ≥2 new external MCPs via registry only; refresh the external capability cache. | New MCP onboarded with zero Hub code change; declaring a tool not yet in the registry auto-pulls + caches it; surface stays within the per-caller budget. |
 
 ### 8.1 Deploying the Hub (Phase 4)
 

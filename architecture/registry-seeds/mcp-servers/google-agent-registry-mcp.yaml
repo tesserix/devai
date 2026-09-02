@@ -8,6 +8,7 @@ metadata:
     devai.io/source: google-cloud
     devai.io/category: registry
     mcp.tesserix.app/gateway-export: 'false'
+    mcp.tesserix.app/class: directory
 spec:
   name: google-agent-registry-mcp
   displayName: Google Agent Registry MCP

@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any
 
+from devai.mcp_stateless import stateless_asgi
 from devai.mcpbridge.runner import LaunchSpec, command_allowed, stdio_session
 from devai.registry import create_registry_client
 
@@ -91,7 +93,10 @@ async def load_catalog_specs_resilient(
     last_err: Exception | None = None
     for i in range(1, attempts + 1):
         try:
-            records = create_registry_client(settings).list_mcp_servers()
+            client = create_registry_client(settings)
+            if client is None:
+                raise RuntimeError("registry URL is not configured")
+            records = client.list_mcp_servers()
             return _specs_from_records(records)
         except Exception as e:  # noqa: BLE001
             last_err = e
@@ -117,23 +122,19 @@ def _build_bridge_server(name: str, spec: LaunchSpec) -> Any:
     import mcp.types as t
     from mcp.server.lowlevel import Server
 
-    server: Any = Server(f"devai-bridge-{name}")
-
-    @server.list_tools()
-    async def _list_tools() -> list[Any]:
+    async def _list_tools(_ctx: Any, _params: Any) -> Any:
         async with stdio_session(spec, _env_for(spec)) as s:
-            return list((await s.list_tools()).tools)
+            return t.ListToolsResult(tools=list((await s.list_tools()).tools))
 
-    @server.call_tool()
-    async def _call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
+    async def _call_tool(_ctx: Any, params: Any) -> Any:
         async with stdio_session(spec, _env_for(spec)) as s:
-            result = await s.call_tool(tool_name, arguments or {})
+            result = await s.call_tool(params.name, params.arguments or {})
         content = getattr(result, "content", None)
         if content is not None:
-            return content
-        return [t.TextContent(type="text", text=str(result))]
+            return t.CallToolResult(content=content, is_error=bool(getattr(result, "isError", False)))
+        return t.CallToolResult(content=[t.TextContent(type="text", text=str(result))])
 
-    return server
+    return Server(f"devai-bridge-{name}", on_list_tools=_list_tools, on_call_tool=_call_tool)
 
 
 def create_bridge_app(settings: Any) -> Any:
@@ -145,7 +146,7 @@ def create_bridge_app(settings: Any) -> Any:
     mounted: dict[str, LaunchSpec] = {}
 
     @asynccontextmanager
-    async def lifespan(app: Any):  # noqa: ANN001
+    async def lifespan(app: Any) -> AsyncIterator[None]:  # noqa: ANN001
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
         specs = await load_catalog_specs_resilient(settings)
@@ -161,13 +162,7 @@ def create_bridge_app(settings: Any) -> Any:
                 await cm.__aenter__()
                 entered.append(cm)
 
-                def _asgi(scope, receive, send, _m=manager):  # noqa: ANN001
-                    if scope.get("type") == "http" and scope.get("path", "") in ("", scope.get("root_path", "")):
-                        scope = dict(scope)
-                        scope["path"] = "/"
-                    return _m.handle_request(scope, receive, send)
-
-                app.mount(f"/bridge/{name}", _asgi)
+                app.mount(f"/bridge/{name}", stateless_asgi(manager.handle_request, normalize_mount=True))
                 mounted[name] = spec
                 logger.info("mcpbridge: mounted /bridge/%s (%s)", name, spec.command)
             except Exception:  # noqa: BLE001

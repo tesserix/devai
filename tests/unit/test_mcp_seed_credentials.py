@@ -19,6 +19,7 @@ INTERNAL_MCP_SERVERS = (
 )
 GATEWAY_ROUTED_MCP_SERVERS = ("gitops-mcp", "sample-mcp", "scm-mcp")
 DIRECTORY_ONLY_MCP_SERVERS = ("analyst-mcp", "devai-mcp", "sre-mcp")
+PRODUCT_MCP_SERVERS = ("homechef-mcp", "mark8ly-mcp", "platform-mcp")
 HUB_ONLY_MCP_SERVERS = ("google-agent-registry-mcp", "google-vertex-mcp")
 
 
@@ -36,6 +37,16 @@ def test_unimplemented_mcp_endpoints_are_directory_only() -> None:
 
         assert manifest["spec"]["catalog"] is True, name
         assert manifest["metadata"]["labels"]["mcp.devai.io/catalog"] == "true", name
+        assert manifest["metadata"]["labels"]["mcp.tesserix.app/class"] == "directory", name
+
+
+def test_routed_servers_declare_modern_protocol_and_explicit_remote() -> None:
+    for name in GATEWAY_ROUTED_MCP_SERVERS + PRODUCT_MCP_SERVERS:
+        manifest = yaml.safe_load((SEEDS / f"{name}.yaml").read_text())
+
+        assert manifest["metadata"]["labels"]["mcp.tesserix.app/class"] == "platform", name
+        assert manifest["spec"]["protocolVersion"] == "2026-07-28", name
+        assert manifest["spec"]["remotes"] == [{"type": "streamableHttp", "url": manifest["spec"]["endpoint"]}], name
 
 
 def test_adc_servers_remain_hub_visible_but_are_not_gateway_exported() -> None:
@@ -44,6 +55,7 @@ def test_adc_servers_remain_hub_visible_but_are_not_gateway_exported() -> None:
 
         assert manifest["spec"]["gatewayExport"] is False, name
         assert manifest["metadata"]["labels"]["mcp.tesserix.app/gateway-export"] == "false", name
+        assert manifest["metadata"]["labels"]["mcp.tesserix.app/class"] == "directory", name
         assert manifest["spec"].get("catalog") is not True, name
 
 
@@ -55,3 +67,13 @@ def test_internal_mcp_servers_select_identity_aware_kubernetes_services() -> Non
             "namespaces": {"matchLabels": {"kubernetes.io/metadata.name": "devai"}},
             "services": {"matchLabels": {"mcp.tesserix.app/server": name}},
         }, name
+
+
+def test_external_catalog_is_directory_only_and_protocol_unverified() -> None:
+    for path in SEEDS.glob("catalog-*.yaml"):
+        manifest = yaml.safe_load(path.read_text())
+        labels = manifest["metadata"]["labels"]
+
+        assert labels["mcp.tesserix.app/class"] == "directory", path.name
+        assert labels["mcp.tesserix.app/protocol-status"] == "unverified", path.name
+        assert "remotes" not in manifest["spec"], path.name

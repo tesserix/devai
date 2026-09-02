@@ -29,6 +29,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from devai.mcp_stateless import stateless_asgi
+
 if TYPE_CHECKING:
     from devai.config import Settings
 
@@ -175,21 +177,26 @@ def build_domain_server(name: str, tools: list[DomainTool]) -> Any:
     from mcp.server.lowlevel import Server  # lazy
 
     by_name = {tool.name: tool for tool in tools}
-    server: Any = Server(f"devai-{name}-mcp")
 
-    @server.list_tools()
-    async def _list_tools() -> list[Any]:
-        return [t.Tool(name=tool.name, description=tool.description, inputSchema=tool.input_schema) for tool in tools]
+    async def _list_tools(_ctx: Any, _params: Any) -> Any:
+        return t.ListToolsResult(
+            tools=[
+                t.Tool(name=tool.name, description=tool.description, input_schema=tool.input_schema) for tool in tools
+            ]
+        )
 
-    @server.call_tool()
-    async def _call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
-        tool = by_name.get(tool_name)
+    async def _call_tool(_ctx: Any, params: Any) -> Any:
+        tool = by_name.get(params.name)
         if tool is None:
-            return [t.TextContent(type="text", text=f"ERROR: unknown tool {tool_name!r}")]
-        result = await tool.handler(arguments or {})
-        return [t.TextContent(type="text", text=result if isinstance(result, str) else str(result))]
+            return t.CallToolResult(
+                content=[t.TextContent(type="text", text=f"ERROR: unknown tool {params.name!r}")], is_error=True
+            )
+        result = await tool.handler(params.arguments or {})
+        return t.CallToolResult(
+            content=[t.TextContent(type="text", text=result if isinstance(result, str) else str(result))]
+        )
 
-    return server
+    return Server(f"devai-{name}-mcp", on_list_tools=_list_tools, on_call_tool=_call_tool)
 
 
 async def mount_domain_servers(app: Any, settings: Settings) -> list[Any]:
@@ -220,18 +227,7 @@ async def mount_domain_servers(app: Any, settings: Settings) -> list[Any]:
             await cm.__aenter__()
             entered.append(cm)
 
-            def _asgi(scope, receive, send, _m=manager):  # noqa: ANN001 — bind per loop
-                # Slash-agnostic: a mount strips its prefix, so a client that
-                # dials the seed endpoint verbatim (".../mcp/scm", no trailing
-                # slash — the MCP SDK does NOT follow the 307) arrives with
-                # path "". Normalize to "/" so both forms serve instead of
-                # 404 → "Session terminated" at the Hub.
-                if scope.get("type") == "http" and scope.get("path", "") in ("", scope.get("root_path", "")):
-                    scope = dict(scope)
-                    scope["path"] = "/"
-                return _m.handle_request(scope, receive, send)
-
-            app.mount(f"/mcp/{segment}", _asgi)
+            app.mount(f"/mcp/{segment}", stateless_asgi(manager.handle_request, normalize_mount=True))
             logger.info("mcphub: mounted downstream domain /mcp/%s (%d tools)", segment, len(tools))
         except Exception:  # noqa: BLE001 — one bad domain must not break startup
             logger.exception("mcphub: failed to mount domain /mcp/%s", segment)

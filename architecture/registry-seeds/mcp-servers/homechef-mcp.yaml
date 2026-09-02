@@ -8,6 +8,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: product-support
     mcp.tesserix.app/tenant: homechef
+    mcp.tesserix.app/class: platform
 spec:
   name: homechef-mcp
   displayName: HomeChef (fe3dr) Support MCP
@@ -18,6 +19,10 @@ spec:
     for the chef/admin to review. The AI never issues a refund itself; money
     only moves when a human resolves the issue.
   endpoint: http://homechef-mcp.homechef.svc.cluster.local:8765/mcp
+  protocolVersion: '2026-07-28'
+  remotes:
+  - type: streamableHttp
+    url: http://homechef-mcp.homechef.svc.cluster.local:8765/mcp
   authMode: apikey
   tools:
   - get_order_status

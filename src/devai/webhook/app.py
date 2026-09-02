@@ -617,10 +617,12 @@ def create_app(
             if "mcp" in messaging_service.channels:
                 try:
                     from devai.adapters.messaging.mcp import build_mcp_server
+                    from devai.mcp_stateless import stateless_asgi
 
                     mcp_server = build_mcp_server(messaging_service)
                     app.state.mcp_server = mcp_server
-                    app.mount("/mcp", mcp_server.streamable_http_app())
+                    mcp_app = mcp_server.streamable_http_app(stateless_http=True)
+                    app.mount("/mcp", stateless_asgi(mcp_app, normalize_mount=True))
                     # The streamable-http app needs its session manager running.
                     app.state._mcp_session_cm = mcp_server.session_manager.run()
                     await app.state._mcp_session_cm.__aenter__()

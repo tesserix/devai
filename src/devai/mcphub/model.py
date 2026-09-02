@@ -85,7 +85,7 @@ def route_uri(uri: str) -> tuple[str, str]:
 
 
 # Health states for a downstream leg. ``ready`` is in the aggregate; ``degraded``
-# / ``unreachable`` are dropped from the surface (a list_changed fires) but never
+# / ``unreachable`` are dropped from the next listed surface but never
 # fail the whole Hub (docs §6.5 degradation).
 HEALTH_READY = "ready"
 HEALTH_DEGRADED = "degraded"

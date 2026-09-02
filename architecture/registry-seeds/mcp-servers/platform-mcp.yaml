@@ -8,6 +8,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: product-support
     mcp.tesserix.app/tenant: platform
+    mcp.tesserix.app/class: platform
 spec:
   name: platform-mcp
   displayName: Tesserix Home (Company) MCP
@@ -18,6 +19,10 @@ spec:
     and the shared knowledge base, and captures sales/contact leads with
     submit_contact_lead. No per-customer order data.
   endpoint: http://platform-mcp.support-platform.svc.cluster.local:8765/mcp
+  protocolVersion: '2026-07-28'
+  remotes:
+  - type: streamableHttp
+    url: http://platform-mcp.support-platform.svc.cluster.local:8765/mcp
   authMode: apikey
   tools:
   - get_platform_overview
