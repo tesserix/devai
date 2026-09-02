@@ -80,6 +80,36 @@ def test_job_spec_omits_unset_passthrough_vars(monkeypatch):
     assert "DEVAI_VERTEX_PROJECT" not in _env_of(spec)
 
 
+def test_job_spec_propagates_runner_telemetry_without_copying_secrets(monkeypatch):
+    monkeypatch.setenv("DEVAI_TELEMETRY_PROVIDER", "langfuse")
+    monkeypatch.setenv("DEVAI_LANGFUSE_BASE_URL", "http://langfuse.observability:3000")
+    monkeypatch.setenv("DEVAI_LANGFUSE_PUBLIC_URL", "https://langfuse.example")
+    monkeypatch.setenv("DEVAI_OTEL_ENDPOINT", "http://otel-gateway:4318")
+    monkeypatch.setenv("DEVAI_OTEL_SERVICE_NAMESPACE", "devai-prod")
+    monkeypatch.setenv("DEVAI_OTEL_EXPORT_INTERVAL_MS", "5000")
+    monkeypatch.setenv("DEVAI_METRICS_ENABLED", "true")
+    monkeypatch.setenv("DEVAI_LANGFUSE_PUBLIC_KEY", "must-not-be-copied")
+    monkeypatch.setenv("DEVAI_LANGFUSE_SECRET_KEY", "must-not-be-copied")
+
+    env = _env_of(build_job_spec(_cfg(), _inputs()))
+
+    assert env["DEVAI_TELEMETRY_PROVIDER"]["value"] == "langfuse"
+    assert env["DEVAI_LANGFUSE_BASE_URL"]["value"] == "http://langfuse.observability:3000"
+    assert env["DEVAI_LANGFUSE_PUBLIC_URL"]["value"] == "https://langfuse.example"
+    assert env["DEVAI_OTEL_ENDPOINT"]["value"] == "http://otel-gateway:4318"
+    assert env["DEVAI_OTEL_SERVICE_NAME"]["value"] == "devai-runner"
+    assert env["DEVAI_OTEL_SERVICE_NAMESPACE"]["value"] == "devai-prod"
+    assert env["DEVAI_OTEL_EXPORT_INTERVAL_MS"]["value"] == "5000"
+    assert env["DEVAI_METRICS_ENABLED"]["value"] == "true"
+    for key in ("DEVAI_LANGFUSE_PUBLIC_KEY", "DEVAI_LANGFUSE_SECRET_KEY"):
+        assert "value" not in env[key]
+        assert env[key]["valueFrom"]["secretKeyRef"] == {
+            "name": "devai-langfuse-secrets",
+            "key": key,
+            "optional": True,
+        }
+
+
 def test_job_spec_embeds_agent_profile_for_audit():
     profile = {
         "image": "x",
