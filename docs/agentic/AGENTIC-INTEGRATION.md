@@ -348,12 +348,16 @@ identity / control-plane wiring degrades to "system" attribution.
 
 ## 6. Open work
 
+For a concise product-to-agent-to-MCP view, including evaluation scores and trace flow, see
+[Product → DevAI agent → MCP: the complete journey](PRODUCT-AGENT-MCP-JOURNEY.md).
+
 | Status | Item |
 |---|---|
 | ✅ Done | **kagent dispatch (opt-in, per-agent).** `JobRunnerStage` routes an agent over A2A through the kagent controller when its registry record carries `devai.io/runtime=kagent` and `DEVAI_KAGENT_URL` is set; otherwise it dispatches a K8s Job. Definite pre-acceptance failures use the Job path; accepted or ambiguous outcomes fail closed to prevent duplicate tool calls. `kagent-agent-sync` reconciles the same labelled agents into Deployments. See `src/devai/pipeline/stages/job_runner.py::_maybe_dispatch_kagent` + `src/devai/agentic/kagent_client.py` |
 | ✅ Done | **Dynamic on/off switch.** kagent is a `kagent` connector in the Settings catalog (`settings/models.py`, provider `on`/`off` → `kagent_enabled`, plus optional controller URL/namespace fields). Resolved per run through `build_overlay` with full scope precedence (user → team → org → tenant → global → `DEVAI_KAGENT_ENABLED` base), so toggling it lands on the next run with **no restart**. The Settings UI renders it automatically from the catalog. `JobRunnerStage._kagent_settings` reads the overlay before dispatch. |
 | ⚠️ Caveat | Confirm the kagent controller's A2A `message/send` contract in-cluster before labelling a hot-path agent — the result-shape parsing in `extract_a2a_text` is defensive but unverified against the live 0.9.7 controller |
-| ⚠️ Deferred | **agentgateway provider backends.** The gateway is in the topology but solo.io's MCP routing rules are not configured for our specific MCP servers — currently `routed_via=agentgateway` produces a URL that resolves on path but agentgateway's MCP backend resolution is still TODO in `tesserix-k8s/charts/apps/agentgateway` |
+| ⚠️ Qualification pending | **AgentGateway MCP routing.** GitOps now reconciles per-server MCP routes through `tesserix-k8s/charts/apps/agentgateway-route-sync/`, and the Tesserix ADK discovers and invokes Registry-selected endpoints through AgentGateway. An approved deployment must still prove live `tools/list`, `tools/call`, authorization, telemetry, and fail-closed behavior before this is called production-qualified. |
 | ✅ Done | Aregistry profile injection into Job env (this PR) |
 | ✅ Done | Identity propagation end-to-end (prior PR) |
 | ✅ Done | MCP endpoint resolver with agentgateway fallback (this PR) |
+| ✅ Done | Runner-side ADK/MCP/tool spans plus evaluation score export; ephemeral Jobs inherit non-secret telemetry configuration and mount Langfuse keys by Secret reference |

@@ -4,7 +4,9 @@
 **Audience:** anyone who needs to understand, operate, extend, or **rebuild** this platform.
 **Companions:** `docs/plans/vertex-multi-model/IMPLEMENTATION-PLAN.md` (LLM plane),
 `docs/deploy/CONTROL-PLANES.md` (prod deploy runbook), `docs/IMPROVEMENT_PLAN.md`
-(authoritative gap backlog), `docs/agentic/MCP-HUB.md`, `docs/agentic/IMPLEMENTATION-PLAN-SDK-ADK.md`.
+(authoritative gap backlog), `docs/agentic/MCP-HUB.md`,
+`docs/agentic/PRODUCT-AGENT-MCP-JOURNEY.md` (simple product/ADK/MCP/observability view),
+`docs/agentic/IMPLEMENTATION-PLAN-SDK-ADK.md`.
 
 ---
 

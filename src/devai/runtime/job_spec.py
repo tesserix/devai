@@ -232,10 +232,23 @@ def build_job_spec(
         "DEVAI_LLM_TIER_STANDARD",
         "DEVAI_LLM_TIER_HEAVY",
         "DEVAI_LLM_TIER_FRONTIER",
+        # Runner-local telemetry configuration. Only non-secret settings are
+        # copied from the dispatcher; Langfuse credentials are mounted below.
+        "DEVAI_TELEMETRY_PROVIDER",
+        "DEVAI_OTEL_ENDPOINT",
+        "DEVAI_OTEL_SERVICE_NAMESPACE",
+        "DEVAI_OTEL_EXPORT_INTERVAL_MS",
+        "DEVAI_LANGFUSE_BASE_URL",
+        "DEVAI_LANGFUSE_PUBLIC_URL",
+        "DEVAI_METRICS_ENABLED",
     ):
         value = os.environ.get(plain_key, "")
         if value:
             env.append({"name": plain_key, "value": value})
+
+    # Keep runner spans distinguishable from API/worker spans even though the
+    # remaining telemetry settings are inherited from the dispatcher.
+    env.append({"name": "DEVAI_OTEL_SERVICE_NAME", "value": "devai-runner"})
 
     # Secrets reused from devai-api-secrets so the runner can talk to the
     # same LLM gateways without holding a separate copy.
@@ -252,6 +265,20 @@ def build_job_spec(
                 "valueFrom": {
                     "secretKeyRef": {
                         "name": "devai-api-secrets",
+                        "key": secret_key,
+                        "optional": True,
+                    }
+                },
+            }
+        )
+
+    for secret_key in ("DEVAI_LANGFUSE_PUBLIC_KEY", "DEVAI_LANGFUSE_SECRET_KEY"):
+        env.append(
+            {
+                "name": secret_key,
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": "devai-langfuse-secrets",
                         "key": secret_key,
                         "optional": True,
                     }

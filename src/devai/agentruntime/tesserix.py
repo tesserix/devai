@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import base64
 import importlib.metadata
-from collections.abc import AsyncIterator, Sequence
-from typing import TYPE_CHECKING, Any
+import json
+from collections.abc import AsyncIterator, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, create_model
 from tesserix_adk.core import (
@@ -39,13 +40,32 @@ from devai.adapters.llm.base import (
 from devai.adapters.llm.base import (
     ToolCall as DevAIToolCall,
 )
+from devai.adapters.telemetry.runtime import get_global_telemetry
 from devai.agentruntime.runner import AgentRunResult
+from devai.mcphub.downstream import DownstreamConnection
+from devai.mcphub.model import DownstreamSpec, namespaced
 from devai.pipeline.types import DevAITask
 from devai.specializations.base import HandoverField, Specialization
 from devai.tools.dispatch import ToolDispatcher
 
 if TYPE_CHECKING:
     from tesserix_adk.core.streaming import StreamEvent
+
+
+class MCPConnection(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    async def connect(self) -> None: ...
+
+    async def list_tools(self) -> list[dict[str, Any]]: ...
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any: ...
+
+    async def close(self) -> None: ...
+
+
+MCPConnectionFactory = Callable[[DownstreamSpec], MCPConnection]
 
 _ADK_VERSION = importlib.metadata.version("tesserix-adk")
 _OWNER_CONTACT = "https://github.com/tesserix/devai/issues"
@@ -144,32 +164,103 @@ class DevAILLMProvider:
 
 
 class DevAIToolRegistry:
-    """Expose one specialization's existing tool dispatcher to the ADK loop."""
+    """Expose one specialization's local and Registry-resolved MCP tools."""
 
-    def __init__(self, dispatcher: ToolDispatcher, allowed: list[str]) -> None:
+    def __init__(
+        self,
+        dispatcher: ToolDispatcher,
+        allowed: list[str],
+        *,
+        mcp_endpoints: object = None,
+        connection_factory: MCPConnectionFactory = DownstreamConnection,
+    ) -> None:
         self._dispatcher = dispatcher
-        self._tools = tuple(_tool_declaration(spec) for spec in dispatcher.build_tool_specs(allowed))
+        self._tools = list(_tool_declaration(spec) for spec in dispatcher.build_tool_specs(allowed))
+        self._mcp_specs = _mcp_specs(mcp_endpoints)
+        self._connection_factory = connection_factory
+        self._connections: list[MCPConnection] = []
+        self._mcp_tools: dict[str, tuple[MCPConnection, str]] = {}
+        self._telemetry = get_global_telemetry()
+
+    async def connect(self) -> None:
+        try:
+            for spec in self._mcp_specs:
+                connection = self._connection_factory(spec)
+                self._connections.append(connection)
+                attributes = {
+                    "mcp.server": spec.name,
+                    "mcp.transport": spec.transport,
+                    "mcp.routed_via": spec.labels.get("routed_via", ""),
+                }
+                with self._telemetry.span("mcp.connect", attributes=attributes):
+                    await connection.connect()
+                    discovered = await connection.list_tools()
+                for tool in discovered:
+                    wire_name = tool.get("name")
+                    if not isinstance(wire_name, str) or not wire_name:
+                        raise RuntimeError("MCP server returned an invalid tool")
+                    name = namespaced(spec.name, wire_name)
+                    if name in self._mcp_tools:
+                        raise RuntimeError("MCP server returned a duplicate tool")
+                    description = tool.get("description")
+                    parameters = tool.get("inputSchema")
+                    self._tools.append(
+                        ToolDeclaration(
+                            name=name,
+                            description=description if isinstance(description, str) else "",
+                            parameters=(dict(parameters) if isinstance(parameters, dict) else {"type": "object"}),
+                        )
+                    )
+                    self._mcp_tools[name] = (connection, wire_name)
+        except Exception as error:
+            await self.close()
+            raise RuntimeError("required MCP capability is unavailable") from error
+
+    async def close(self) -> None:
+        while self._connections:
+            connection = self._connections.pop()
+            await connection.close()
 
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(tool.name for tool in self._tools)
 
     def declarations(self) -> tuple[ToolDeclaration, ...]:
-        return self._tools
+        return tuple(self._tools)
 
     async def invoke(self, name: str, arguments: Any) -> str:
         if not isinstance(arguments, dict):
             raise TypeError("tool arguments must be an object")
-        return await self._dispatcher.execute(name, dict(arguments))
+        remote = self._mcp_tools.get(name)
+        if remote is not None:
+            connection, wire_name = remote
+            attributes = {
+                "tool.name": name,
+                "tool.transport": "mcp",
+                "mcp.server": connection.name,
+            }
+            with self._telemetry.span("tool.call", attributes=attributes):
+                return _mcp_result(await connection.call_tool(wire_name, dict(arguments)))
+        with self._telemetry.span(
+            "tool.call",
+            attributes={"tool.name": name, "tool.transport": "local"},
+        ):
+            return await self._dispatcher.execute(name, dict(arguments))
 
 
 class TesserixSpecRuntime:
     """Run one DevAI specialization through Tesserix ADK."""
 
-    def __init__(self, *, llm: LLMAdapter, dispatcher: ToolDispatcher) -> None:
+    def __init__(
+        self,
+        *,
+        llm: LLMAdapter,
+        dispatcher: ToolDispatcher,
+        mcp_connection_factory: MCPConnectionFactory = DownstreamConnection,
+    ) -> None:
         self._provider = DevAILLMProvider(llm)
-        self._tools = DevAIToolRegistry(dispatcher, [])
         self._dispatcher = dispatcher
+        self._mcp_connection_factory = mcp_connection_factory
 
     async def run(
         self,
@@ -180,32 +271,71 @@ class TesserixSpecRuntime:
         user_prompt: str,
         images: list[dict[str, str]] | None = None,
     ) -> AgentRunResult:
-        tools = DevAIToolRegistry(self._dispatcher, list(spec.allowed_tools))
-        definition = definition_for_specialization(spec, tools=tools.names)
-        runner = TesserixAgentRunner(
-            provider=self._provider,
-            tools=tools if tools.names else None,
-            max_iterations=min(max(1, spec.max_turns), 60),
-        )
         tenant, user = _identity_for(task)
-        if system_prompt.strip() != definition.agent.instructions:
-            definition = definition.model_copy(
-                update={
-                    "agent": definition.agent.model_copy(update={"instructions": system_prompt.strip()}),
-                }
+        attributes = {
+            "devai.agent": spec.name,
+            "devai.run_id": task.id,
+            "devai.trace_id": task.trace_id or "",
+            "devai.tenant_id": tenant,
+            "devai.runtime": "tesserix-adk",
+        }
+        with get_global_telemetry().span("agent.run", attributes=attributes) as agent_span:
+            tools = DevAIToolRegistry(
+                self._dispatcher,
+                list(spec.allowed_tools),
+                mcp_endpoints=task.agent_context.get("mcp_endpoints"),
+                connection_factory=self._mcp_connection_factory,
             )
-        run = await runner.run(
-            definition,
-            user_prompt,
-            tenant=tenant,
-            user=user,
-            run_id=f"{task.id}:{spec.name}",
-            history=_image_history(images or []),
-        )
+            await tools.connect()
+            try:
+                definition = definition_for_specialization(spec, tools=tools.names)
+                runner = TesserixAgentRunner(
+                    provider=self._provider,
+                    tools=tools if tools.names else None,
+                    max_iterations=min(max(1, spec.max_turns), 60),
+                )
+                if system_prompt.strip() != definition.agent.instructions:
+                    definition = definition.model_copy(
+                        update={
+                            "agent": definition.agent.model_copy(update={"instructions": system_prompt.strip()}),
+                        }
+                    )
+                run = await runner.run(
+                    definition,
+                    user_prompt,
+                    tenant=tenant,
+                    user=user,
+                    run_id=f"{task.id}:{spec.name}",
+                    history=_image_history(images or []),
+                )
+            finally:
+                await tools.close()
+
+            set_attribute = getattr(agent_span, "set_attribute", None)
+            if callable(set_attribute):
+                set_attribute("devai.status", run.state.value)
+                set_attribute(
+                    "devai.model_calls",
+                    sum(event.kind is RunEventKind.MODEL_CALL for event in run.events),
+                )
+                set_attribute(
+                    "devai.tool_calls",
+                    sum(event.kind is RunEventKind.TOOL_CALL for event in run.events),
+                )
+                set_attribute("gen_ai.usage.input_tokens", run.usage.input_tokens)
+                set_attribute("gen_ai.usage.output_tokens", run.usage.output_tokens)
 
         trace = [
-            {"kind": "runtime", "runtime": "tesserix-adk", "version": _ADK_VERSION},
-            *[{"kind": event.kind.value, "name": event.name or ""} for event in run.events],
+            {
+                "kind": "runtime",
+                "runtime": "tesserix-adk",
+                "version": _ADK_VERSION,
+                "run_id": task.id,
+                "trace_id": task.trace_id or "",
+                "agent": spec.name,
+                "status": run.state.value,
+            },
+            *[_event_trace(event) for event in run.events],
         ]
         output = run.output.model_dump(mode="json") if isinstance(run.output, BaseModel) else {}
         final_text = _last_assistant_text(run.messages)
@@ -302,6 +432,65 @@ def _field_type(field: HandoverField) -> Any:
 
 def _tool_declaration(spec: ToolSpec) -> ToolDeclaration:
     return ToolDeclaration(name=spec.name, description=spec.description, parameters=dict(spec.parameters))
+
+
+def _mcp_specs(value: object) -> tuple[DownstreamSpec, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("MCP endpoints must be a list")
+
+    specs: list[DownstreamSpec] = []
+    for endpoint in value:
+        if not isinstance(endpoint, dict):
+            raise ValueError("MCP endpoint must be an object")
+        name = endpoint.get("name")
+        url = endpoint.get("endpoint")
+        routed_via = endpoint.get("routed_via")
+        if not isinstance(name, str) or not name or not isinstance(url, str) or not url:
+            raise ValueError("MCP endpoint identity is incomplete")
+        if routed_via not in {"agentgateway", "direct"}:
+            raise ValueError("MCP endpoint route is invalid")
+        transport = endpoint.get("transport")
+        if transport is None:
+            transport = endpoint.get("type")
+        if transport not in {"streamable-http", "sse"}:
+            transport = "streamable-http"
+        specs.append(
+            DownstreamSpec(
+                name=name,
+                endpoint=url,
+                transport=transport,
+                labels={"routed_via": routed_via},
+            )
+        )
+    return tuple(specs)
+
+
+def _mcp_result(value: Any) -> str:
+    if isinstance(value, str):
+        encoded = value
+    elif hasattr(value, "model_dump"):
+        encoded = json.dumps(value.model_dump(mode="json"), separators=(",", ":"))
+    else:
+        encoded = json.dumps(value, default=str, separators=(",", ":"))
+    maximum = 100_000
+    if len(encoded) <= maximum:
+        return encoded
+    return f"{encoded[:maximum]}...[truncated]"
+
+
+def _event_trace(event: Any) -> dict[str, Any]:
+    step: dict[str, Any] = {"kind": event.kind.value, "name": event.name or ""}
+    if event.at is not None:
+        step["at"] = event.at
+    if event.usage is not None:
+        step["usage"] = {
+            "input_tokens": event.usage.input_tokens,
+            "output_tokens": event.usage.output_tokens,
+            "cached_tokens": event.usage.cached_tokens,
+        }
+    return step
 
 
 def _stop_reason(reason: str, has_tool_calls: bool) -> StopReason:

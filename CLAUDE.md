@@ -8,6 +8,7 @@ DevAI is an AI-powered Application Lifecycle Management (ALM) + SRE monitoring p
 - [Platform architecture](docs/PLATFORM-ARCHITECTURE.md) — system boundaries and runtime data flow.
 - [Agent Registry publishing](docs/agentic/AGENT-REGISTRY-PUBLISHING.md) — gated user artifacts and GitOps-managed built-ins.
 - [Agentic integration](docs/agentic/AGENTIC-INTEGRATION.md) — AgentGateway, Agent Registry, MCP Hub, and provider routing.
+- [Product → agent → MCP journey](docs/agentic/PRODUCT-AGENT-MCP-JOURNEY.md) — simple architecture, request sequence, stateless boundaries, traces, and evaluation scores.
 
 ---
 
