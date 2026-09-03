@@ -8,6 +8,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: lifecycle
     mcp.devai.io/catalog: 'true'
+    mcp.tesserix.app/class: directory
 spec:
   name: devai-mcp
   displayName: DevAI Pipeline MCP

@@ -70,10 +70,11 @@ dependencies = [
     # Shipped in the image so the worker can run without a custom build.
     "temporalio>=1.32.0",
     # Remote conversational channels (src/devai/adapters/messaging). MCP server
-    # (FastMCP, Streamable HTTP) exposes DevAI at /mcp; slack_sdk backs the
+    # (MCPServer, Streamable HTTP) exposes DevAI at /mcp; slack_sdk backs the
     # Slack Events API channel. Both are imported lazily inside their channels,
     # so a deployment with those channels disabled never loads them.
-    "mcp>=1.28.1,<2",
+    "mcp>=2.1.1,<3",
+    "httpx2>=2.5,<3",
     "slack-sdk>=3.43.0,<4",
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
     # provisions per-user/per-tenant secrets into Google Secret Manager.

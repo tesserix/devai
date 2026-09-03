@@ -8,6 +8,7 @@ metadata:
     devai.io/source: google-cloud
     devai.io/category: llm
     mcp.tesserix.app/gateway-export: 'false'
+    mcp.tesserix.app/class: directory
 spec:
   name: google-vertex-mcp
   displayName: Google Vertex AI MCP (generate)

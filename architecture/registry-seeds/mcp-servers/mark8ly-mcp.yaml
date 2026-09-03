@@ -1,4 +1,4 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: MCPServer
 metadata:
   name: mark8ly-mcp
@@ -8,6 +8,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: product-support
     mcp.tesserix.app/tenant: mark8ly
+    mcp.tesserix.app/class: platform
 spec:
   name: mark8ly-mcp
   displayName: Mark8ly Support MCP
@@ -18,6 +19,10 @@ spec:
     approve. The AI never issues a refund itself; money only moves when a human
     approves the request in the admin dashboard.
   endpoint: http://mark8ly-mcp.mark8ly.svc.cluster.local:8765/mcp
+  protocolVersion: '2026-07-28'
+  remotes:
+  - type: streamableHttp
+    url: http://mark8ly-mcp.mark8ly.svc.cluster.local:8765/mcp
   authMode: apikey
   tools:
   - get_order

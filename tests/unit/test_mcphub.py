@@ -307,15 +307,9 @@ async def test_hub_call_to_unknown_leg_errors_cleanly(hub):
         await hub.call_tool("broken-mcp__whatever", {})
 
 
-async def test_hub_on_changed_fires(hub):
-    fired = []
-
-    async def _on_changed():
-        fired.append(True)
-
-    hub.on_changed = _on_changed
+async def test_hub_refresh_needs_no_reverse_session_callback(hub):
     await hub.refresh()
-    assert fired == [True]
+    assert not hasattr(hub, "on_changed")
 
 
 # --------------------------------------------------------------------------- #

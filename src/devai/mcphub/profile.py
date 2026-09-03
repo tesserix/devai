@@ -82,7 +82,7 @@ def select(tools: list[FederatedTool], profile: ToolProfile) -> BudgetResult:
 
     Deterministic by sorting on the namespaced name before the budget cut, so a
     given (catalog, profile) always yields the same surface — important for
-    cacheability and for ``tools/list_changed`` to mean something.
+    cacheability and for repeated stateless discovery to remain stable.
     """
     eligible: list[FederatedTool] = []
     dropped_filter: list[str] = []

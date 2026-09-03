@@ -540,6 +540,8 @@ def _doc(c: dict) -> dict:
                 "mcp.devai.io/catalog": "true",
                 "mcp.devai.io/auth-kind": c["auth"],
                 "mcp.devai.io/native": native,
+                "mcp.tesserix.app/class": "directory",
+                "mcp.tesserix.app/protocol-status": "unverified",
             },
         },
         "spec": spec,

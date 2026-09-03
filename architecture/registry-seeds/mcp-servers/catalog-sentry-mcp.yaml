@@ -10,6 +10,8 @@ metadata:
     mcp.devai.io/catalog: 'true'
     mcp.devai.io/auth-kind: oauth
     mcp.devai.io/native: http
+    mcp.tesserix.app/class: directory
+    mcp.tesserix.app/protocol-status: unverified
 spec:
   name: catalog-sentry-mcp
   displayName: Sentry

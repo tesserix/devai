@@ -1,4 +1,4 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: MCPServer
 metadata:
   name: gitops-mcp
@@ -7,11 +7,16 @@ metadata:
   labels:
     devai.io/source: devai
     devai.io/category: gitops
+    mcp.tesserix.app/class: platform
 spec:
   name: gitops-mcp
   displayName: DevAI GitOps MCP
   description: "GitOps delivery operations across all three controllers behind one interface — Argo CD (app status, sync, history, rollback), Kargo (stages, freight, promotions), and Flux CD (kustomizations, helm releases, sources, reconcile, suspend). Backed by the adapters.gitops family; mutating tools are gated by DEVAI_GITOPS_MUTATIONS_ENABLED and audited."
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/gitops/
+  protocolVersion: '2026-07-28'
+  remotes:
+  - type: streamableHttp
+    url: http://devai-api.devai.svc.cluster.local:8080/mcp/gitops/
   serviceSelector:
     namespaces:
       matchLabels:

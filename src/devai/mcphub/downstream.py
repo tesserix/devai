@@ -1,10 +1,10 @@
 """A single downstream MCP connection (the MCP SDK glue).
 
 Each :class:`DownstreamConnection` is the Hub acting as an MCP *client* to one
-downstream server (docs/agentic/MCP-HUB.md §6.2): it runs its own ``initialize``
-handshake, discovers the downstream's capabilities, and forwards
-list/call/get/read for every primitive. The session is long-lived (one client
-session fans out to a set of downstream sessions for its lifetime).
+downstream server (docs/agentic/MCP-HUB.md §6.2): it uses stateless
+``server/discover``, records the downstream's capabilities, and forwards
+list/call/get/read for every primitive. Transport connections may be pooled for
+efficiency, but protocol correctness does not depend on connection affinity.
 
 The ``mcp`` SDK is imported **lazily** inside :meth:`connect` so importing this
 module — and the rest of the Hub's pure logic + tests — never requires the SDK
@@ -36,7 +36,7 @@ class DownstreamError(RuntimeError):
 
 
 class DownstreamConnection:
-    """Long-lived MCP client session to one downstream server."""
+    """MCP client connection to one downstream server."""
 
     def __init__(self, spec: DownstreamSpec, *, headers: dict[str, str] | None = None, timeout: float = 30.0):
         self.spec = spec
@@ -57,7 +57,7 @@ class DownstreamConnection:
     # -- lifecycle ----------------------------------------------------------
 
     async def connect(self) -> None:
-        """Open the transport, start a session, run ``initialize``.
+        """Open the transport and discover the stateless server surface.
 
         Sets ``spec.health`` to ``ready`` on success, ``unreachable`` on
         failure. Raises :class:`DownstreamError` on failure so the Hub can drop
@@ -69,10 +69,10 @@ class DownstreamConnection:
             from mcp import ClientSession  # lazy
 
             session = await stack.enter_async_context(ClientSession(read, write))
-            init = await session.initialize()
+            discovery = await session.discover()
             self._session = session
             self._stack = stack
-            self.capabilities = self._extract_capabilities(init)
+            self.capabilities = self._extract_capabilities(discovery)
             self.spec.health = HEALTH_READY
             logger.info("mcphub: connected downstream %r (caps=%s)", self.name, sorted(self.capabilities))
         except Exception as e:  # noqa: BLE001 — normalize every failure
@@ -122,9 +122,18 @@ class DownstreamConnection:
 
             ctx = sse_client(self.spec.endpoint, headers=self._headers)
         else:  # streamable-http (default)
-            from mcp.client.streamable_http import streamablehttp_client  # lazy
+            import httpx2  # lazy
+            from mcp.client.streamable_http import streamable_http_client  # lazy
 
-            ctx = streamablehttp_client(self.spec.endpoint, headers=self._headers)
+            client = await stack.enter_async_context(
+                httpx2.AsyncClient(
+                    headers=self._headers,
+                    timeout=self._timeout,
+                    follow_redirects=False,
+                    trust_env=False,
+                )
+            )
+            ctx = streamable_http_client(self.spec.endpoint, http_client=client, terminate_on_close=False)
         streams = await stack.enter_async_context(ctx)
         # streamable-http yields (read, write, get_session_id); sse yields (read, write).
         read, write = streams[0], streams[1]
@@ -209,14 +218,14 @@ class DownstreamConnection:
         }
 
     @staticmethod
-    def _extract_capabilities(init: Any) -> dict[str, Any]:
-        """Project the downstream's ``initialize`` capabilities to a plain dict.
+    def _extract_capabilities(discovery: Any) -> dict[str, Any]:
+        """Project ``server/discover`` capabilities to a plain dict.
 
         The Hub advertises the union of what it can proxy; here we record what
         THIS leg supports so we don't call ``prompts/list`` on a server that
         doesn't have prompts.
         """
-        caps = getattr(init, "capabilities", None)
+        caps = getattr(discovery, "capabilities", None)
         if caps is None:
             return {}
         out: dict[str, Any] = {}

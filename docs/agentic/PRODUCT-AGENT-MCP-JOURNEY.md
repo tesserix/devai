@@ -120,7 +120,7 @@ sequenceDiagram
     WF->>WF: Reject unresolved or drifted composition
     WF->>RUN: Dispatch verified snapshot + bounded context
     RUN->>OBS: Open runner.run → agent.run spans
-    RUN->>GW: MCP initialize and tools/list
+    RUN->>GW: MCP server/discover then self-contained tools/list
     RUN->>OBS: mcp.connect span (server + route only)
     GW->>TOOL: Route selected MCP server
     TOOL-->>RUN: Namespaced tool schemas

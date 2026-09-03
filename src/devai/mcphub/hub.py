@@ -9,8 +9,8 @@ MCP-HUB.md §6). :class:`MCPHub` owns:
   - **Enrichment** — overlays each tool with its registry ``kind:Tool`` metadata
     (tier/labels) so per-caller budgeting (§6.5) is meaningful.
   - **Routing** — a ``tools/call`` for ``analyst__X`` goes to the ``analyst`` leg.
-  - **Degradation** — an unreachable/degraded leg is dropped from the aggregate
-    (a ``list_changed`` fires); the rest keep serving. One bad leg never fails
+  - **Degradation** — an unreachable/degraded leg is dropped from the aggregate;
+    the next self-contained list sees the change. One bad leg never fails
     the Hub.
 
 Aggregation runs all legs in parallel with per-leg isolation: a slow or broken
@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
@@ -83,10 +83,6 @@ class MCPHub:
         # the calling principal, never shared across users.
         self.personal = PersonalLegs(connect_timeout=connect_timeout)
 
-        # Reverse path: set by the server to emit a single tools/list_changed to
-        # clients when the aggregate changes (registry/cache change, leg drop).
-        self.on_changed: Callable[[], Awaitable[None]] | None = None
-
         # None outside a sandbox — the hub then behaves exactly as before.
         self._gateway = ToolGateway.from_env(os.environ)
 
@@ -102,8 +98,7 @@ class MCPHub:
 
         Idempotent and safe to call on a timer or a registry-change signal.
         Holds a lock so concurrent refreshes don't interleave the connection
-        table. Always finishes with a list_changed notification if the surface
-        moved.
+        table. The next stateless list request observes the rebuilt surface.
         """
         async with self._lock:
             specs = discover(self._registry)
@@ -125,10 +120,6 @@ class MCPHub:
             if self.sandbox is not None:
                 # A reaped sandbox must leave no stale tools in the aggregate.
                 await self.sandbox.probe()
-
-        if self.on_changed is not None:
-            with suppress(Exception):
-                await self.on_changed()
 
     async def close(self) -> None:
         async with self._lock:

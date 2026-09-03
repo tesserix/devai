@@ -8,7 +8,7 @@ Lifecycle:
   1. Build the registry-driven :class:`MCPHub`, do a first ``refresh()``.
   2. Mount the low-level MCP server over Streamable HTTP at ``/mcp``.
   3. Run a periodic refresh so newly-published MCPServers/Tools appear with zero
-     redeploy (and a ``tools/list_changed`` fires on change — §6.4).
+     redeploy; the next stateless list request observes the change.
 An HTTP middleware terminates the caller's identity and resolves their
 :class:`ToolProfile` before each MCP request (per-caller budgeting, §6.5).
 
@@ -88,21 +88,13 @@ def create_hub_app() -> Any:
             from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
             server = build_hub_server(hub)
-            session_manager = StreamableHTTPSessionManager(app=server)
+            from devai.mcp_stateless import stateless_asgi
+
+            session_manager = StreamableHTTPSessionManager(app=server, stateless=True)
             app.state._mcp_cm = session_manager.run()
             await app.state._mcp_cm.__aenter__()
 
-            async def _mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
-                await session_manager.handle_request(scope, receive, send)
-
-            app.mount("/mcp", _mcp_asgi)
-
-            # Reverse path: when the aggregate changes, tell connected clients.
-            async def _notify_changed() -> None:
-                with contextlib.suppress(Exception):
-                    await server.request_context.session.send_tool_list_changed()
-
-            hub.on_changed = _notify_changed
+            app.mount("/mcp", stateless_asgi(session_manager.handle_request, normalize_mount=True))
             logger.info("mcphub: MCP Hub mounted at /mcp")
         except ImportError:
             logger.warning("mcphub: mcp SDK absent — /mcp unmounted, /healthz still served")

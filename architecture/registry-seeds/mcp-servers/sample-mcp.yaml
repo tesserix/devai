@@ -1,4 +1,4 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: MCPServer
 metadata:
   name: sample-mcp
@@ -8,6 +8,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: sample
     devai.io/lifecycle: test
+    mcp.tesserix.app/class: platform
 spec:
   name: sample-mcp
   displayName: Sample MCP (test fixture)
@@ -15,6 +16,10 @@ spec:
     \ and the dashboard's MCP Servers tile. Safe to delete once verified \u2014 no real backend; the endpoint\
     \ is a placeholder."
   endpoint: http://devai-api.devai.svc.cluster.local:8080/mcp/sample/
+  protocolVersion: '2026-07-28'
+  remotes:
+  - type: streamableHttp
+    url: http://devai-api.devai.svc.cluster.local:8080/mcp/sample/
   serviceSelector:
     namespaces:
       matchLabels:

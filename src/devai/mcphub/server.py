@@ -1,6 +1,6 @@
 """The Hub's client-facing MCP server (one ``/mcp`` for everything).
 
-Built on the **low-level** ``mcp.server.lowlevel.Server`` rather than FastMCP,
+Built on the **low-level** ``mcp.server.lowlevel.Server`` rather than MCPServer,
 because the tool/prompt/resource lists are **dynamic** (resolved per caller from
 the registry-driven aggregate) and calls must be **routed** to a downstream by
 name — neither fits FastMCP's static decorator model.
@@ -103,60 +103,70 @@ def build_hub_server(hub: MCPHub) -> Any:
     import mcp.types as t  # lazy
     from mcp.server.lowlevel import Server  # lazy
 
-    server: Any = Server("devai-mcp-hub")
-
-    @server.list_tools()
-    async def _list_tools() -> list[Any]:
+    async def _list_tools(_ctx: Any, _params: Any) -> Any:
         # Shared registry surface + the caller's OWN connected MCP servers.
         budget = await hub.list_tools_for(current_principal(), current_profile())
         if budget.truncated:
             logger.info(
                 "mcphub: served %d tools (%d cut to budget)", len(budget.selected), len(budget.dropped_by_budget)
             )
-        return [
-            t.Tool(name=ft.name, description=ft.description, inputSchema=ft.input_schema or {"type": "object"})
-            for ft in budget.selected
-        ]
+        return t.ListToolsResult(
+            tools=[
+                t.Tool(name=ft.name, description=ft.description, input_schema=ft.input_schema or {"type": "object"})
+                for ft in budget.selected
+            ]
+        )
 
-    @server.call_tool()
-    async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
-        result = await hub.call_tool(name, arguments, identity=current_principal())
+    async def _call_tool(_ctx: Any, params: Any) -> Any:
+        result = await hub.call_tool(params.name, params.arguments or {}, identity=current_principal())
         # Pass the downstream's content blocks straight through; if a leg returns
         # a bare value, wrap it so the client always gets valid content.
         content = getattr(result, "content", None)
         if content is not None:
-            return content
-        return [t.TextContent(type="text", text=str(result))]
+            return t.CallToolResult(content=content, is_error=bool(getattr(result, "isError", False)))
+        return t.CallToolResult(content=[t.TextContent(type="text", text=str(result))])
 
-    @server.list_prompts()
-    async def _list_prompts() -> list[Any]:
-        return [
-            t.Prompt(
-                name=fp.name,
-                description=fp.description,
-                arguments=[
-                    t.PromptArgument(
-                        name=a.get("name", ""), description=a.get("description", ""), required=a.get("required", False)
-                    )
-                    for a in fp.arguments
-                ],
-            )
-            for fp in hub.list_prompts()
-        ]
+    async def _list_prompts(_ctx: Any, _params: Any) -> Any:
+        return t.ListPromptsResult(
+            prompts=[
+                t.Prompt(
+                    name=fp.name,
+                    description=fp.description,
+                    arguments=[
+                        t.PromptArgument(
+                            name=a.get("name", ""),
+                            description=a.get("description", ""),
+                            required=a.get("required", False),
+                        )
+                        for a in fp.arguments
+                    ],
+                )
+                for fp in hub.list_prompts()
+            ]
+        )
 
-    @server.get_prompt()
-    async def _get_prompt(name: str, arguments: dict[str, Any] | None) -> Any:
-        return await hub.get_prompt(name, arguments or {})
+    async def _get_prompt(_ctx: Any, params: Any) -> Any:
+        return await hub.get_prompt(params.name, params.arguments or {})
 
-    @server.list_resources()
-    async def _list_resources() -> list[Any]:
-        return [
-            t.Resource(uri=fr.uri, name=fr.name or fr.uri, description=fr.description, mimeType=fr.mime_type or None)
-            for fr in hub.list_resources()
-        ]
+    async def _list_resources(_ctx: Any, _params: Any) -> Any:
+        return t.ListResourcesResult(
+            resources=[
+                t.Resource(
+                    uri=fr.uri, name=fr.name or fr.uri, description=fr.description, mime_type=fr.mime_type or None
+                )
+                for fr in hub.list_resources()
+            ]
+        )
 
-    @server.read_resource()
-    async def _read_resource(uri: Any) -> Any:
-        return await hub.read_resource(str(uri))
+    async def _read_resource(_ctx: Any, params: Any) -> Any:
+        return await hub.read_resource(str(params.uri))
 
-    return server
+    return Server(
+        "devai-mcp-hub",
+        on_list_tools=_list_tools,
+        on_call_tool=_call_tool,
+        on_list_prompts=_list_prompts,
+        on_get_prompt=_get_prompt,
+        on_list_resources=_list_resources,
+        on_read_resource=_read_resource,
+    )

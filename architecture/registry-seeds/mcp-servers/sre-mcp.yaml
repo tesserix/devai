@@ -8,6 +8,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: sre
     mcp.devai.io/catalog: 'true'
+    mcp.tesserix.app/class: directory
 spec:
   name: sre-mcp
   displayName: DevAI SRE MCP

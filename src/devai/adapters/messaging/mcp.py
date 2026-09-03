@@ -7,7 +7,7 @@ mounted into the main FastAPI app so it shares the ingress + port.
 This module has two parts:
   - ``McpChannel`` — the MessagingChannel binding (request/response; ``deliver``
     is a no-op, the tool returns ``dispatch()``'s value).
-  - ``build_mcp_server(service)`` — constructs the FastMCP server, registering
+  - ``build_mcp_server(service)`` — constructs the MCPServer, registering
     tools that each call the shared ``MessagingService``. Lazily imports ``mcp``
     so a deployment without the SDK simply doesn't enable the channel.
 
@@ -66,14 +66,14 @@ class McpChannel(MessagingChannel):
 
 
 def build_mcp_server(service: MessagingService) -> Any:
-    """Build the FastMCP server exposing DevAI's tools. Returns the FastMCP obj.
+    """Build the MCP server exposing DevAI's tools.
 
     Raises ImportError if the ``mcp`` SDK is absent — the caller (app wiring)
     catches it and leaves the channel unmounted.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
-    mcp = FastMCP("devai")
+    mcp = MCPServer("devai")
 
     @mcp.tool()
     async def chat(message: str, conversation_id: str | None = None) -> str:
