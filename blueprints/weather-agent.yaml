@@ -5,6 +5,7 @@ metadata:
   domain: learning
   title: Weather Agent
   registry_publish: true
+  registry_name: weather-workflow
   version: "1"
   visibility: public
 

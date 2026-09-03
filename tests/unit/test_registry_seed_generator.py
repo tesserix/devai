@@ -28,7 +28,7 @@ def test_agent_seed_uses_current_a2a_schema_and_dynamic_user_routing() -> None:
 
     assert manifest["apiVersion"] == "registry.agentic.dev/v1alpha1"
     assert manifest["metadata"]["tenantId"] == "devai"
-    assert manifest["metadata"]["tag"] == "1.0.2"
+    assert manifest["metadata"]["tag"] == "1.0.3"
     assert manifest["metadata"]["labels"]["ai.tesserix.dev/runtime"] == "tesserix-adk"
     assert manifest["spec"]["model"] == {"provider": "devai-user-routing", "name": "dynamic"}
     assert manifest["spec"]["a2a"]["url"] == (
@@ -61,7 +61,7 @@ def test_publishable_blueprint_seed_preserves_execution_and_agent_dependencies()
     manifest = generator._blueprint_doc(source)
 
     assert manifest["kind"] == "Blueprint"
-    assert manifest["metadata"]["name"] == "weather-agent"
+    assert manifest["metadata"]["name"] == "weather-workflow"
     assert manifest["metadata"]["tag"] == "1"
     assert manifest["spec"]["stages"] == source["stages"]
     assert manifest["spec"]["nodes"] == [

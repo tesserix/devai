@@ -127,7 +127,7 @@ def _agent_doc(spec: dict[str, Any]) -> dict[str, Any]:
     risk = str(spec.get("risk_level") or "medium")
     title = str(spec.get("display_name") or name.replace("-", " ").title())
     description = str(spec.get("description") or "").strip()
-    version = str((spec.get("metadata") or {}).get("version") or "1.0.2")
+    version = str((spec.get("metadata") or {}).get("version") or "1.0.3")
     document = {
         "apiVersion": AGENT_API_VERSION,
         "kind": "Agent",
@@ -215,6 +215,7 @@ def _prompt_doc(spec: dict[str, Any]) -> dict[str, Any]:
 def _blueprint_doc(blueprint: dict[str, Any]) -> dict[str, Any]:
     name = str(blueprint["name"])
     metadata = blueprint.get("metadata") or {}
+    registry_name = str(metadata.get("registry_name") or name)
     stages = list(blueprint.get("stages") or [])
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, str]] = []
@@ -231,8 +232,7 @@ def _blueprint_doc(blueprint: dict[str, Any]) -> dict[str, Any]:
             node.update({"kind": "Agent", "ref": f"{capability}-agent"})
         nodes.append(node)
         edges.extend(
-            {"from": str(dependency), "to": str(stage["name"])}
-            for dependency in stage.get("depends_on") or []
+            {"from": str(dependency), "to": str(stage["name"])} for dependency in stage.get("depends_on") or []
         )
 
     labels = {
@@ -245,7 +245,7 @@ def _blueprint_doc(blueprint: dict[str, Any]) -> dict[str, Any]:
         "apiVersion": AGENT_API_VERSION,
         "kind": "Blueprint",
         "metadata": {
-            "name": name,
+            "name": registry_name,
             "namespace": NAMESPACE,
             "tenantId": NAMESPACE,
             "tag": str(metadata.get("version") or "1"),
