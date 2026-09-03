@@ -20,6 +20,12 @@ INTERNAL_MCP_SERVERS = (
 GATEWAY_ROUTED_MCP_SERVERS = ("gitops-mcp", "sample-mcp", "scm-mcp")
 DIRECTORY_ONLY_MCP_SERVERS = ("analyst-mcp", "devai-mcp", "sre-mcp")
 PRODUCT_MCP_SERVERS = ("homechef-mcp", "mark8ly-mcp", "platform-mcp", "stockpilot-mcp")
+PRODUCT_GATEWAY_CREDENTIALS = {
+    "homechef-mcp": "HOMECHEF_MCP_KEY",
+    "mark8ly-mcp": "MARK8LY_MCP_KEY",
+    "platform-mcp": "PLATFORM_MCP_KEY",
+    "stockpilot-mcp": "STOCKPILOT_MCP_KEY",
+}
 HUB_ONLY_MCP_SERVERS = ("google-agent-registry-mcp", "google-vertex-mcp")
 
 
@@ -48,6 +54,18 @@ def test_routed_servers_declare_modern_protocol_and_explicit_remote() -> None:
         assert manifest["metadata"]["labels"]["mcp.tesserix.app/class"] == "platform", name
         assert manifest["spec"]["protocolVersion"] == "2026-07-28", name
         assert manifest["spec"]["remotes"] == [{"type": "streamableHttp", "url": manifest["spec"]["endpoint"]}], name
+
+
+def test_product_mcp_servers_broker_their_upstream_api_keys() -> None:
+    for name, key in PRODUCT_GATEWAY_CREDENTIALS.items():
+        manifest = yaml.safe_load((SEEDS / f"{name}.yaml").read_text())
+
+        assert manifest["spec"]["authMode"] == "apikey", name
+        assert manifest["spec"]["credentialRef"] == {
+            "secretName": "product-mcp-upstream-keys",
+            "key": key,
+            "header": "X-MCP-Key",
+        }, name
 
 
 def test_adc_servers_remain_hub_visible_but_are_not_gateway_exported() -> None:
