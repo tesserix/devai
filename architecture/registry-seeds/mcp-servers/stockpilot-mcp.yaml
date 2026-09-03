@@ -1,0 +1,34 @@
+apiVersion: registry.solo.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: stockpilot-mcp
+  namespace: devai
+  visibility: internal
+  labels:
+    devai.io/source: devai
+    devai.io/category: product-support
+    mcp.tesserix.app/tenant: stockpilot
+    mcp.tesserix.app/class: platform
+spec:
+  name: stockpilot-mcp
+  displayName: Stockpilot Support MCP
+  description: >-
+    Read-only customer-support tools for Stockpilot portfolio summaries,
+    broker connectivity, agent traces, and recent trades. Trading authority
+    remains outside this support MCP.
+  endpoint: http://stockpilot-mcp.stockpilot.svc.cluster.local:8765/mcp
+  protocolVersion: '2026-07-28'
+  remotes:
+  - type: streamableHttp
+    url: http://stockpilot-mcp.stockpilot.svc.cluster.local:8765/mcp
+  authMode: apikey
+  tools:
+  - get_portfolio_summary
+  - get_broker_status
+  - get_agent_trace
+  - list_recent_trades
+  - search_knowledge_base
+  - lookup_conversation
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: stockpilot-mcp

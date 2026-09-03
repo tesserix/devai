@@ -19,7 +19,7 @@ INTERNAL_MCP_SERVERS = (
 )
 GATEWAY_ROUTED_MCP_SERVERS = ("gitops-mcp", "sample-mcp", "scm-mcp")
 DIRECTORY_ONLY_MCP_SERVERS = ("analyst-mcp", "devai-mcp", "sre-mcp")
-PRODUCT_MCP_SERVERS = ("homechef-mcp", "mark8ly-mcp", "platform-mcp")
+PRODUCT_MCP_SERVERS = ("homechef-mcp", "mark8ly-mcp", "platform-mcp", "stockpilot-mcp")
 HUB_ONLY_MCP_SERVERS = ("google-agent-registry-mcp", "google-vertex-mcp")
 
 
