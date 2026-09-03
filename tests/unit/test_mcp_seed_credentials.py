@@ -26,6 +26,53 @@ PRODUCT_GATEWAY_CREDENTIALS = {
     "platform-mcp": "PLATFORM_MCP_KEY",
     "stockpilot-mcp": "STOCKPILOT_MCP_KEY",
 }
+PRODUCT_MCP_TOOLS = {
+    "homechef-mcp": {
+        "autoGetChefAvailability",
+        "autoGetOrder",
+        "autoListRecentOrders",
+        "autoTrackDelivery",
+        "create_refund_request",
+        "get_chef_availability",
+        "get_order_status",
+        "list_recent_orders",
+        "lookup_conversation",
+        "search_knowledge_base",
+        "track_delivery",
+    },
+    "mark8ly-mcp": {
+        "check_payment_status",
+        "create_refund_request",
+        "create_support_ticket",
+        "getStoreBranding",
+        "getStoreProduct",
+        "get_order",
+        "listProductsByCategory",
+        "listStoreCategories",
+        "listStoreProducts",
+        "list_recent_orders",
+        "list_returns",
+        "lookup_conversation",
+        "search_knowledge_base",
+    },
+    "platform-mcp": {
+        "get_platform_overview",
+        "lookup_conversation",
+        "search_knowledge_base",
+        "submit_contact_lead",
+    },
+    "stockpilot-mcp": {
+        "autoGetBrokerStatus",
+        "autoGetPortfolioSummary",
+        "autoListRecentTrades",
+        "get_agent_trace",
+        "get_broker_status",
+        "get_portfolio_summary",
+        "list_recent_trades",
+        "lookup_conversation",
+        "search_knowledge_base",
+    },
+}
 HUB_ONLY_MCP_SERVERS = ("google-agent-registry-mcp", "google-vertex-mcp")
 
 
@@ -66,6 +113,13 @@ def test_product_mcp_servers_broker_their_upstream_api_keys() -> None:
             "key": key,
             "header": "X-MCP-Key",
         }, name
+
+
+def test_product_mcp_seeds_declare_the_observed_tool_surface() -> None:
+    for name, expected_tools in PRODUCT_MCP_TOOLS.items():
+        manifest = yaml.safe_load((SEEDS / f"{name}.yaml").read_text())
+
+        assert set(manifest["spec"]["tools"]) == expected_tools, name
 
 
 def test_adc_servers_remain_hub_visible_but_are_not_gateway_exported() -> None:

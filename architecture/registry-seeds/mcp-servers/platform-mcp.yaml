@@ -32,6 +32,7 @@ spec:
   - get_platform_overview
   - submit_contact_lead
   - search_knowledge_base
+  - lookup_conversation
   toolSelector:
     matchLabels:
       mcp.devai.io/server: platform-mcp

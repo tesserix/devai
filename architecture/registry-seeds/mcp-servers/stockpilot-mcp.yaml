@@ -27,6 +27,9 @@ spec:
     key: STOCKPILOT_MCP_KEY
     header: X-MCP-Key
   tools:
+  - autoGetBrokerStatus
+  - autoGetPortfolioSummary
+  - autoListRecentTrades
   - get_portfolio_summary
   - get_broker_status
   - get_agent_trace
