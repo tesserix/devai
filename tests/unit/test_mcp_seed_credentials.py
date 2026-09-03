@@ -19,9 +19,10 @@ INTERNAL_MCP_SERVERS = (
 )
 GATEWAY_ROUTED_MCP_SERVERS = ("gitops-mcp", "sample-mcp", "scm-mcp")
 DIRECTORY_ONLY_MCP_SERVERS = ("analyst-mcp", "devai-mcp", "sre-mcp")
-PRODUCT_MCP_SERVERS = ("homechef-mcp", "mark8ly-mcp", "platform-mcp", "stockpilot-mcp")
+PRODUCT_MCP_SERVERS = ("homechef-mcp", "kora-mcp", "mark8ly-mcp", "platform-mcp", "stockpilot-mcp")
 PRODUCT_GATEWAY_CREDENTIALS = {
     "homechef-mcp": "HOMECHEF_MCP_KEY",
+    "kora-mcp": "KORA_MCP_KEY",
     "mark8ly-mcp": "MARK8LY_MCP_KEY",
     "platform-mcp": "PLATFORM_MCP_KEY",
     "stockpilot-mcp": "STOCKPILOT_MCP_KEY",
@@ -40,6 +41,7 @@ PRODUCT_MCP_TOOLS = {
         "search_knowledge_base",
         "track_delivery",
     },
+    "kora-mcp": {"search_nutrition"},
     "mark8ly-mcp": {
         "check_payment_status",
         "create_refund_request",

@@ -8,6 +8,7 @@ metadata:
     devai.io/source: devai
     devai.io/category: nutrition
     mcp.tesserix.app/tenant: kora
+    mcp.tesserix.app/class: platform
 spec:
   name: kora-mcp
   displayName: Kora Nutrition MCP
@@ -15,7 +16,15 @@ spec:
     Read-only access to Kora's reviewed nutrition database. This server never
     creates logs, changes profiles, or mutates user data.
   endpoint: http://kora-mcp.kora.svc.cluster.local:8765/mcp
+  protocolVersion: '2026-07-28'
+  remotes:
+  - type: streamableHttp
+    url: http://kora-mcp.kora.svc.cluster.local:8765/mcp
   authMode: apikey
+  credentialRef:
+    secretName: product-mcp-upstream-keys
+    key: KORA_MCP_KEY
+    header: X-MCP-Key
   tools:
   - search_nutrition
   toolSelector:
