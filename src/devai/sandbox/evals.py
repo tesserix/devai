@@ -39,10 +39,38 @@ logger = logging.getLogger(__name__)
 _PREFIX = "devai:sandbox"
 _GLOBAL_PREFIX = "devai:evaluation"
 _DEFAULT_MAX_CASES = 50
+OCRStatus = Literal["completed", "partial", "review_required", "rejected"]
+
+
+def _default_ocr_statuses() -> list[OCRStatus]:
+    return ["completed", "partial", "review_required"]
 
 
 class EvaluationInvoker(Protocol):
     async def invoke(self, record: SandboxRecord, *, message: str, triggered_by: str) -> Invocation: ...
+
+
+class OCRTableCell(BaseModel):
+    row: int = Field(ge=0)
+    column: int = Field(ge=0)
+    text: str = Field(max_length=10_000)
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class OCRExpect(BaseModel):
+    reference_text: str | None = Field(default=None, max_length=100_000)
+    expected_fields: dict[str, Any] = Field(default_factory=dict, max_length=500)
+    expected_table_cells: list[OCRTableCell] = Field(default_factory=list, max_length=10_000)
+    expected_document_type: str | None = Field(default=None, min_length=1, max_length=100)
+    acceptable_statuses: list[OCRStatus] = Field(default_factory=_default_ocr_statuses, min_length=1, max_length=4)
+    max_character_error_rate: float | None = Field(default=None, ge=0, le=1)
+    max_word_error_rate: float | None = Field(default=None, ge=0, le=1)
+    min_field_f1: float | None = Field(default=None, ge=0, le=1)
+    min_table_cell_accuracy: float | None = Field(default=None, ge=0, le=1)
+    require_citations: bool = True
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class EvalExpect(BaseModel):
@@ -60,6 +88,7 @@ class EvalExpect(BaseModel):
     max_total_tokens: int | None = None
     max_latency_ms: int | None = None
     max_cost_usd: float | None = None
+    ocr: OCRExpect | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -513,7 +542,6 @@ class EvalRunner:
             )
         except Exception:  # noqa: BLE001 — telemetry cannot invalidate a saved evaluation
             logger.warning("evaluation telemetry failed for %s", run.id, exc_info=True)
-        return run
 
     async def _one(
         self,

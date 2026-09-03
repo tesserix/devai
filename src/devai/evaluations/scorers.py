@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
+from rapidfuzz.distance import Levenshtein
 
 
 @dataclass(slots=True, frozen=True)
@@ -533,6 +534,161 @@ def cost(context: ScorerContext) -> ScorerResult:
     )
 
 
+def ocr_quality(context: ScorerContext) -> ScorerResult:
+    invocation = _invocation(context, "ocr_quality")
+    if isinstance(invocation, ScorerResult):
+        return invocation
+    expectation = getattr(context.expect, "ocr", None)
+    if expectation is None:
+        return _failed("ocr_quality", "OCR expectation is not configured")
+    steps = [
+        step
+        for step in invocation.steps
+        if step.kind == "tool" and step.name == "extract_document" and not step.error and step.mode != "block"
+    ]
+    if not steps:
+        return _failed("ocr_quality", "extract_document result is unavailable")
+    output = _json_object(steps[-1].output)
+    if output is None:
+        return _failed("ocr_quality", "extract_document result is invalid")
+
+    contract_errors: list[str] = []
+    status = output.get("status")
+    if status not in expectation.acceptable_statuses:
+        contract_errors.append("status")
+    if output.get("content_trust") != "untrusted":
+        contract_errors.append("content_trust")
+
+    detail: dict[str, Any] = {}
+    quality_scores: list[float] = [1.0 if not contract_errors else 0.0]
+    passed = not contract_errors
+
+    if expectation.reference_text is not None:
+        text_value = output.get("text")
+        actual_text = text_value if isinstance(text_value, str) else ""
+        character_error_rate = _error_rate(expectation.reference_text, actual_text, words=False)
+        word_error_rate = _error_rate(expectation.reference_text, actual_text, words=True)
+        detail["character_error_rate"] = character_error_rate
+        detail["word_error_rate"] = word_error_rate
+        quality_scores.extend([max(0.0, 1.0 - character_error_rate), max(0.0, 1.0 - word_error_rate)])
+        if (
+            expectation.max_character_error_rate is not None
+            and character_error_rate > expectation.max_character_error_rate
+        ):
+            passed = False
+        if expectation.max_word_error_rate is not None and word_error_rate > expectation.max_word_error_rate:
+            passed = False
+
+    fields, citation_coverage = _fields(output.get("fields"))
+    if expectation.expected_fields:
+        true_positives = sum(
+            1 for name, expected in expectation.expected_fields.items() if fields.get(name) == expected
+        )
+        precision = true_positives / len(fields) if fields else 0.0
+        recall = true_positives / len(expectation.expected_fields)
+        field_f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        detail.update(
+            {
+                "field_precision": round(precision, 6),
+                "field_recall": round(recall, 6),
+                "field_f1": round(field_f1, 6),
+            }
+        )
+        quality_scores.append(field_f1)
+        if expectation.min_field_f1 is not None and field_f1 < expectation.min_field_f1:
+            passed = False
+
+    if expectation.expected_table_cells:
+        actual_cells = _table_cells(output.get("tables"))
+        expected_cells = {(cell.row, cell.column, cell.text) for cell in expectation.expected_table_cells}
+        table_accuracy = len(expected_cells & actual_cells) / len(expected_cells)
+        detail["table_cell_accuracy"] = round(table_accuracy, 6)
+        quality_scores.append(table_accuracy)
+        if expectation.min_table_cell_accuracy is not None and table_accuracy < expectation.min_table_cell_accuracy:
+            passed = False
+
+    if expectation.expected_document_type is not None:
+        classification = output.get("classification")
+        actual_type = classification.get("type") if isinstance(classification, dict) else None
+        classification_accuracy = 1.0 if actual_type == expectation.expected_document_type else 0.0
+        detail["classification_accuracy"] = classification_accuracy
+        quality_scores.append(classification_accuracy)
+        if classification_accuracy == 0:
+            passed = False
+
+    if expectation.require_citations:
+        detail["citation_coverage"] = round(citation_coverage, 6)
+        quality_scores.append(citation_coverage)
+        if citation_coverage < 1.0:
+            passed = False
+
+    if contract_errors:
+        detail["contract_errors"] = contract_errors
+    return ScorerResult(
+        name="ocr_quality",
+        score=round(sum(quality_scores) / len(quality_scores), 6),
+        passed=passed,
+        detail=detail,
+    )
+
+
+def _json_object(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _error_rate(reference: str, actual: str, *, words: bool) -> float:
+    reference_units = reference.split() if words else list(reference)
+    actual_units = actual.split() if words else list(actual)
+    return round(Levenshtein.distance(reference_units, actual_units) / max(1, len(reference_units)), 6)
+
+
+def _fields(value: Any) -> tuple[dict[str, Any], float]:
+    if not isinstance(value, list):
+        return {}, 0.0
+    fields: dict[str, Any] = {}
+    cited = 0
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            continue
+        encoded = item.get("value_json")
+        if not isinstance(encoded, str):
+            continue
+        try:
+            fields[item["name"]] = json.loads(encoded)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item.get("citations"), list) and item["citations"]:
+            cited += 1
+    coverage = cited / len(fields) if fields else 1.0
+    return fields, coverage
+
+
+def _table_cells(value: Any) -> set[tuple[int, int, str]]:
+    if not isinstance(value, list):
+        return set()
+    cells: set[tuple[int, int, str]] = set()
+    for table in value:
+        if not isinstance(table, dict) or not isinstance(table.get("cells"), list):
+            continue
+        for cell in table["cells"]:
+            if (
+                isinstance(cell, dict)
+                and isinstance(cell.get("row"), int)
+                and isinstance(cell.get("column"), int)
+                and isinstance(cell.get("text"), str)
+            ):
+                cells.add((cell["row"], cell["column"], cell["text"]))
+    return cells
+
+
 async def llm_judge(context: ScorerContext) -> ScorerResult:
     if context.judge is None:
         return _failed("llm_judge", "judge runtime unavailable")
@@ -598,6 +754,7 @@ _DEFAULT_SCORERS: tuple[tuple[str, ScoreFunction], ...] = (
     ("latency", latency),
     ("tokens", tokens),
     ("cost", cost),
+    ("ocr_quality", ocr_quality),
     ("llm_judge", llm_judge),
     ("run_quality", run_quality),
 )

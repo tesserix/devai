@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from devai.sandbox.evals import EvalCase
+from devai.sandbox.evals import EvalCase, OCRExpect
 from devai.sandbox.models import SandboxSpec
 
 Name = Annotated[str, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
@@ -73,6 +73,7 @@ class DatasetCase(EvaluationModel):
         default_factory=dict,
         max_length=5,
     )
+    ocr: OCRExpect | None = None
 
     @model_validator(mode="after")
     def arguments_align_with_tools(self) -> DatasetCase:
@@ -97,6 +98,7 @@ class DatasetCase(EvaluationModel):
                     "max_total_tokens": self.max_total_tokens,
                     "max_latency_ms": self.max_latency_ms,
                     "max_cost_usd": self.max_cost_usd,
+                    "ocr": self.ocr.model_dump(mode="json") if self.ocr is not None else None,
                 },
                 "human_scores": self.human_scores,
             }

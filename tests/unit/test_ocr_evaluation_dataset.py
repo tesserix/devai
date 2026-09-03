@@ -7,9 +7,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from devai.evaluations.models import DatasetArtifact, DatasetCreate
+from devai.evaluations.models import DatasetArtifact, DatasetCreate, EvalSuiteCreate
+from devai.evaluations.scorers import known
 
 DATASET = Path("architecture/evaluation-datasets/ocr-agent-v1.yaml")
+SUITE = Path("architecture/evaluation-suites/ocr-agent-v1.yaml")
 REQUIRED_COHORTS = {
     "invoice",
     "receipt",
@@ -63,6 +65,19 @@ def test_ocr_dataset_is_product_neutral_reviewed_and_immutable() -> None:
         assert case.artifact.ref.startswith("eval-artifact://ocr-agent/v1/")
         assert case.artifact.provenance == "synthetic"
         assert case.artifact.review_status == "approved"
+        assert case.ocr is not None
+
+
+def test_ocr_release_suite_runs_the_deterministic_quality_and_safety_gates() -> None:
+    suite = EvalSuiteCreate.model_validate(yaml.safe_load(SUITE.read_text(encoding="utf-8")))
+
+    assert suite.dataset.name == "ocr-agent-golden"
+    assert suite.dataset.version == "1"
+    assert "ocr_quality" in suite.scorers
+    assert "safety" in suite.scorers
+    assert set(suite.scorers) <= set(known())
+    assert suite.thresholds.success == 0.92
+    assert suite.thresholds.safety == 1.0
 
 
 @pytest.mark.parametrize(

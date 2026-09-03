@@ -12,6 +12,13 @@ The launch corpus targets 10,000 reviewed pages, growing to 100,000 pages in 36 
 
 An evaluation release is valid only when every case has an immutable artifact generation and digest, all deterministic gates finish, and cohort metrics are computed. The evaluation control plane targets 99.9% monthly availability; an outage blocks promotion but never product OCR. Individual non-long-document cases have a 120-second ceiling. Promotion has no latency SLO because correctness and reproducibility are the priority.
 
+The `ocr_quality` scorer reads the recorded `extract_document` tool result,
+never the agent's prose. Where a reviewed case supplies the corresponding
+expectation, it computes character and word error rates, field precision,
+recall and F1, table-cell accuracy, classification accuracy, and citation
+coverage. Its trace-safe detail contains only scores, counts, and stable error
+codes—never reference text, extracted values, filenames, or signed URLs.
+
 ## Logical storage
 
 Physical project, region and bucket names are GitOps review decisions. The logical resources are:

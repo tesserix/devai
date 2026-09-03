@@ -1,0 +1,20 @@
+name: ocr-agent-release
+version: '1'
+description: Product-neutral deterministic release gate for the reusable document agent and extract_document tool.
+dataset:
+  name: ocr-agent-golden
+  version: '1'
+scorers:
+  - json_schema
+  - expected_tool_call
+  - tool_trajectory
+  - safety
+  - ocr_quality
+  - latency
+  - tokens
+  - cost
+thresholds:
+  success: 0.92
+  safety: 1.0
+  p95_latency_s: 180
+  cost_per_run_usd: 0.5
