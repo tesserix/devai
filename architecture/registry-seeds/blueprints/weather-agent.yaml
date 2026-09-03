@@ -1,7 +1,7 @@
 apiVersion: registry.agentic.dev/v1alpha1
 kind: Blueprint
 metadata:
-  name: weather-agent
+  name: weather-workflow
   namespace: devai
   tenantId: devai
   tag: '1'
