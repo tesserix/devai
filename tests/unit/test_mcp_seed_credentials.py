@@ -44,6 +44,7 @@ def test_routed_servers_declare_modern_protocol_and_explicit_remote() -> None:
     for name in GATEWAY_ROUTED_MCP_SERVERS + PRODUCT_MCP_SERVERS:
         manifest = yaml.safe_load((SEEDS / f"{name}.yaml").read_text())
 
+        assert manifest["apiVersion"] == "registry.agentic.dev/v1alpha1", name
         assert manifest["metadata"]["labels"]["mcp.tesserix.app/class"] == "platform", name
         assert manifest["spec"]["protocolVersion"] == "2026-07-28", name
         assert manifest["spec"]["remotes"] == [{"type": "streamableHttp", "url": manifest["spec"]["endpoint"]}], name

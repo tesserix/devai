@@ -1,4 +1,4 @@
-apiVersion: registry.solo.io/v1alpha1
+apiVersion: registry.agentic.dev/v1alpha1
 kind: MCPServer
 metadata:
   name: homechef-mcp
