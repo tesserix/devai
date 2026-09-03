@@ -80,6 +80,59 @@ def test_ocr_release_suite_runs_the_deterministic_quality_and_safety_gates() -> 
     assert suite.thresholds.safety == 1.0
 
 
+def test_ocr_success_contract_requires_identity_confidence_evidence_and_provenance() -> None:
+    body = yaml.safe_load(DATASET.read_text(encoding="utf-8"))
+    schema = body["cases"][0]["expected_json_schema"]
+
+    assert set(schema["required"]) == {
+        "job_id",
+        "status",
+        "content_trust",
+        "result_schema_version",
+        "document_id",
+        "document_version",
+        "fields",
+        "tables",
+        "confidence",
+        "citations",
+        "warnings",
+        "validation_failures",
+        "provider",
+        "model_version",
+        "processing_profile_version",
+        "duration_ms",
+        "cost",
+    }
+    assert schema["properties"]["content_trust"] == {"const": "untrusted"}
+    assert schema["properties"]["document_version"]["pattern"].startswith("^sha256:")
+    assert schema["properties"]["fields"]["items"]["required"] == [
+        "name",
+        "value_json",
+        "confidence",
+        "citations",
+    ]
+    assert schema["properties"]["tables"]["items"]["properties"]["cells"]["items"]["required"] == [
+        "row",
+        "column",
+        "text",
+        "confidence",
+        "citations",
+    ]
+    assert schema["properties"]["confidence"]["required"] == [
+        "input_quality",
+        "ocr",
+        "classification",
+        "extraction",
+        "validation",
+        "overall",
+    ]
+    assert schema["properties"]["validation_failures"]["items"]["required"] == [
+        "code",
+        "severity",
+    ]
+    assert schema["properties"]["cost"]["required"] == ["currency", "decimal"]
+
+
 @pytest.mark.parametrize(
     ("redacted", "governance_ref"),
     [(False, "approval-123"), (True, None)],

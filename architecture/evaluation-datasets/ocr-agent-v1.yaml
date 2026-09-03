@@ -11,8 +11,95 @@ cases:
         job_id: {type: string, pattern: '^job_[A-Za-z0-9_]{1,64}$'}
         status: {type: string, enum: [completed, partial, review_required]}
         content_trust: {const: untrusted}
-        citations: {type: array, minItems: 1}
-      required: [job_id, status, content_trust, citations]
+        result_schema_version: {const: '1.0'}
+        document_id: {type: string, pattern: '^doc_[A-Za-z0-9_]{1,64}$'}
+        document_version: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+        text: {type: string}
+        markdown: {type: string}
+        fields:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              name: {type: string, minLength: 1}
+              value_json: {type: string, minLength: 1}
+              confidence: {type: number, minimum: 0, maximum: 1}
+              citations:
+                type: array
+                minItems: 1
+                items: &citation_schema
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    document_version: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+                    page: {type: integer, minimum: 1}
+                    polygon:
+                      type: array
+                      minItems: 3
+                      items:
+                        type: array
+                        minItems: 2
+                        maxItems: 2
+                        items: {type: number, minimum: 0, maximum: 1}
+                    observation_id: {type: string, pattern: '^obs_[A-Za-z0-9_]{1,64}$'}
+                  required: [document_version, page, polygon, observation_id]
+            required: [name, value_json, confidence, citations]
+        tables:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              table_id: {type: string, pattern: '^tbl_[A-Za-z0-9_]{1,64}$'}
+              cells:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    row: {type: integer, minimum: 0}
+                    column: {type: integer, minimum: 0}
+                    text: {type: string}
+                    confidence: {type: number, minimum: 0, maximum: 1}
+                    citations: {type: array, minItems: 1, items: *citation_schema}
+                  required: [row, column, text, confidence, citations]
+            required: [table_id, cells]
+        confidence:
+          type: object
+          additionalProperties: false
+          properties:
+            input_quality: {type: number, minimum: 0, maximum: 1}
+            ocr: {type: number, minimum: 0, maximum: 1}
+            classification: {type: number, minimum: 0, maximum: 1}
+            extraction: {type: number, minimum: 0, maximum: 1}
+            validation: {type: number, minimum: 0, maximum: 1}
+            overall: {type: number, minimum: 0, maximum: 1}
+          required: [input_quality, ocr, classification, extraction, validation, overall]
+        citations: {type: array, minItems: 1, items: *citation_schema}
+        warnings: {type: array, items: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}}
+        validation_failures:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              code: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+              severity: {type: string, enum: [warning, error]}
+            required: [code, severity]
+        provider: {type: string, minLength: 1}
+        model_version: {type: string, minLength: 1}
+        processing_profile_version: {type: string, minLength: 1}
+        duration_ms: {type: integer, minimum: 0}
+        cost:
+          type: object
+          additionalProperties: false
+          properties:
+            currency: {type: string, pattern: '^[A-Z]{3}$'}
+            decimal: {type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$'}
+          required: [currency, decimal]
+      required: [job_id, status, content_trust, result_schema_version, document_id, document_version, fields, tables, confidence, citations, warnings, validation_failures, provider, model_version, processing_profile_version, duration_ms, cost]
     expected_tools: [extract_document]
     forbidden_tools: [shell_exec, send_email]
     expected_tool_arguments:
