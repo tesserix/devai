@@ -91,6 +91,7 @@ def test_ocr_success_contract_requires_identity_confidence_evidence_and_provenan
         "result_schema_version",
         "document_id",
         "document_version",
+        "pages",
         "fields",
         "tables",
         "confidence",
@@ -105,6 +106,17 @@ def test_ocr_success_contract_requires_identity_confidence_evidence_and_provenan
     }
     assert schema["properties"]["content_trust"] == {"const": "untrusted"}
     assert schema["properties"]["document_version"]["pattern"].startswith("^sha256:")
+    page_schema = schema["properties"]["pages"]["items"]
+    assert page_schema["required"] == ["page", "width", "height", "observations"]
+    observation_schema = page_schema["properties"]["observations"]["items"]
+    assert observation_schema["required"] == [
+        "observation_id",
+        "level",
+        "text",
+        "confidence",
+        "polygon",
+        "reading_order",
+    ]
     assert schema["properties"]["fields"]["items"]["required"] == [
         "name",
         "value_json",

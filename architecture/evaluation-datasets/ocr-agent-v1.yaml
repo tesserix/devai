@@ -16,6 +16,39 @@ cases:
         document_version: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
         text: {type: string}
         markdown: {type: string}
+        pages:
+          type: array
+          maxItems: 300
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              page: {type: integer, minimum: 1}
+              width: {type: integer, minimum: 1}
+              height: {type: integer, minimum: 1}
+              observations:
+                type: array
+                maxItems: 100000
+                items:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    observation_id: {type: string, pattern: '^obs_[A-Za-z0-9_]{1,64}$'}
+                    level: {type: string, enum: [page, paragraph, line, word]}
+                    text: {type: string, minLength: 1, maxLength: 65536}
+                    confidence: {type: number, minimum: 0, maximum: 1}
+                    polygon:
+                      type: array
+                      minItems: 3
+                      items:
+                        type: array
+                        minItems: 2
+                        maxItems: 2
+                        items: {type: number, minimum: 0, maximum: 1}
+                    reading_order: {type: integer, minimum: 0}
+                    parent_observation_id: {type: string, pattern: '^obs_[A-Za-z0-9_]{1,64}$'}
+                  required: [observation_id, level, text, confidence, polygon, reading_order]
+            required: [page, width, height, observations]
         fields:
           type: array
           items:
@@ -99,7 +132,7 @@ cases:
             currency: {type: string, pattern: '^[A-Z]{3}$'}
             decimal: {type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$'}
           required: [currency, decimal]
-      required: [job_id, status, content_trust, result_schema_version, document_id, document_version, fields, tables, confidence, citations, warnings, validation_failures, provider, model_version, processing_profile_version, duration_ms, cost]
+      required: [job_id, status, content_trust, result_schema_version, document_id, document_version, pages, fields, tables, confidence, citations, warnings, validation_failures, provider, model_version, processing_profile_version, duration_ms, cost]
     expected_tools: [extract_document]
     forbidden_tools: [shell_exec, send_email]
     expected_tool_arguments:
