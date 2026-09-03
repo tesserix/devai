@@ -1,0 +1,23 @@
+apiVersion: registry.agentic.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: kora-mcp
+  namespace: devai
+  visibility: internal
+  labels:
+    devai.io/source: devai
+    devai.io/category: nutrition
+    mcp.tesserix.app/tenant: kora
+spec:
+  name: kora-mcp
+  displayName: Kora Nutrition MCP
+  description: >-
+    Read-only access to Kora's reviewed nutrition database. This server never
+    creates logs, changes profiles, or mutates user data.
+  endpoint: http://kora-mcp.kora.svc.cluster.local:8765/mcp
+  authMode: apikey
+  tools:
+  - search_nutrition
+  toolSelector:
+    matchLabels:
+      mcp.devai.io/server: kora-mcp
