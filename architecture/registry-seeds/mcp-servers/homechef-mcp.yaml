@@ -29,6 +29,10 @@ spec:
     key: HOMECHEF_MCP_KEY
     header: X-MCP-Key
   tools:
+  - autoGetChefAvailability
+  - autoGetOrder
+  - autoListRecentOrders
+  - autoTrackDelivery
   - get_order_status
   - get_chef_availability
   - track_delivery

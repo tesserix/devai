@@ -29,6 +29,11 @@ spec:
     key: MARK8LY_MCP_KEY
     header: X-MCP-Key
   tools:
+  - getStoreBranding
+  - getStoreProduct
+  - listProductsByCategory
+  - listStoreCategories
+  - listStoreProducts
   - get_order
   - list_returns
   - list_recent_orders
