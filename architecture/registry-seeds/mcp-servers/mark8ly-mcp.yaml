@@ -24,6 +24,10 @@ spec:
   - type: streamableHttp
     url: http://mark8ly-mcp.mark8ly.svc.cluster.local:8765/mcp
   authMode: apikey
+  credentialRef:
+    secretName: product-mcp-upstream-keys
+    key: MARK8LY_MCP_KEY
+    header: X-MCP-Key
   tools:
   - get_order
   - list_returns

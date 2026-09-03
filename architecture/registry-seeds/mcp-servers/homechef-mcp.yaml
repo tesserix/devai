@@ -24,6 +24,10 @@ spec:
   - type: streamableHttp
     url: http://homechef-mcp.homechef.svc.cluster.local:8765/mcp
   authMode: apikey
+  credentialRef:
+    secretName: product-mcp-upstream-keys
+    key: HOMECHEF_MCP_KEY
+    header: X-MCP-Key
   tools:
   - get_order_status
   - get_chef_availability

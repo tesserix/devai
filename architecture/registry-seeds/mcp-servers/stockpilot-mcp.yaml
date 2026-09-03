@@ -22,6 +22,10 @@ spec:
   - type: streamableHttp
     url: http://stockpilot-mcp.stockpilot.svc.cluster.local:8765/mcp
   authMode: apikey
+  credentialRef:
+    secretName: product-mcp-upstream-keys
+    key: STOCKPILOT_MCP_KEY
+    header: X-MCP-Key
   tools:
   - get_portfolio_summary
   - get_broker_status

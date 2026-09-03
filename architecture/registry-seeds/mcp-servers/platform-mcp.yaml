@@ -24,6 +24,10 @@ spec:
   - type: streamableHttp
     url: http://platform-mcp.support-platform.svc.cluster.local:8765/mcp
   authMode: apikey
+  credentialRef:
+    secretName: product-mcp-upstream-keys
+    key: PLATFORM_MCP_KEY
+    header: X-MCP-Key
   tools:
   - get_platform_overview
   - submit_contact_lead
