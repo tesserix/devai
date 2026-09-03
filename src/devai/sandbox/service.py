@@ -317,6 +317,7 @@ class SandboxService:
             import_id=spec.import_id,
             registry_ref=str(imported.get("registry_ref") or ""),
             agent_digest=str(agent.get("digest") or ""),
+            product_id=str(agent.get("namespace") or "devai"),
             dependency_lock=list(imported.get("dependency_lock") or []),
             runtime=dict(agent.get("runtime") or {}),
             permissions=permissions,

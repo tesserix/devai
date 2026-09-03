@@ -39,6 +39,7 @@ class _Settings:
     otel_endpoint = ""
     otel_service_name = "devai-test"
     otel_service_namespace = "devai"
+    otel_deployment_environment = "dev"
     otel_export_interval_ms = 15000
 
 
@@ -102,6 +103,22 @@ def test_factory_unknown_provider_degrades() -> None:
 def test_known_providers() -> None:
     assert "noop" in KNOWN_PROVIDERS
     assert "otel" in KNOWN_PROVIDERS
+
+
+@pytest.mark.asyncio
+async def test_otel_resource_includes_the_deployment_environment() -> None:
+    from devai.adapters.telemetry.otel import OtelTelemetryAdapter
+
+    adapter = OtelTelemetryAdapter(
+        endpoint="http://collector.invalid:4318",
+        service_name="devai-runner",
+        service_namespace="kora",
+        deployment_environment="dev",
+    )
+    attributes = adapter._tracer_provider.resource.attributes
+    assert attributes["service.namespace"] == "kora"
+    assert attributes["deployment.environment.name"] == "dev"
+    await adapter.close()
 
 
 # ──────────────────────────────────────────────────────────────────────

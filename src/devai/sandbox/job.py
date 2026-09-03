@@ -90,7 +90,11 @@ def apply_sandbox_boundary(job: dict[str, Any], record: SandboxRecord) -> dict[s
     container.setdefault("volumeMounts", []).append({"name": "tmp", "mountPath": "/tmp"})
     pinned = _pinned_env(record, namespace=namespace)
     pinned_names = {e["name"] for e in pinned}
-    inherited = [e for e in _rescope_secrets(container.get("env", []), sid) if e["name"] not in pinned_names]
+    inherited = [
+        e
+        for e in _rescope_secrets(container.get("env", []), sid)
+        if e["name"] not in pinned_names and not e["name"].startswith("DEVAI_LANGFUSE_")
+    ]
     container["env"] = inherited + pinned
     return job
 
@@ -189,6 +193,12 @@ def _pinned_env(record: SandboxRecord, *, namespace: str = "") -> list[dict[str,
         {"name": "DEVAI_SANDBOX_MAX_TOKENS", "value": str(spec.limits.max_tokens)},
         {"name": "DEVAI_SANDBOX_MAX_COST_USD", "value": str(spec.limits.max_cost_usd)},
         {"name": "DEVAI_SANDBOX_MAX_WALL_CLOCK_S", "value": str(spec.limits.max_wall_clock_s)},
+        {"name": "DEVAI_TELEMETRY_PROVIDER", "value": "otel"},
+        {
+            "name": "DEVAI_OTEL_SERVICE_NAMESPACE",
+            "value": spec.import_snapshot.product_id if spec.import_snapshot is not None else "devai",
+        },
+        {"name": "DEVAI_OTEL_DEPLOYMENT_ENVIRONMENT", "value": "dev"},
     ]
     if spec.adk_version:
         env.append({"name": "DEVAI_ADK_VERSION", "value": spec.adk_version})

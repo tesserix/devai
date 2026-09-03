@@ -113,6 +113,10 @@ class ImportSnapshot(_Pinned):
     import_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
     registry_ref: str = Field(min_length=1)
     agent_digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+    product_id: str = Field(
+        default="devai",
+        pattern=r"^[a-z0-9](?:[-a-z0-9.]{0,251}[a-z0-9])?$",
+    )
     dependency_lock: list[dict[str, str]] = Field(default_factory=list)
     runtime: dict[str, Any]
     permissions: dict[str, Any] = Field(default_factory=dict)
