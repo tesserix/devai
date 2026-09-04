@@ -84,6 +84,7 @@ dependencies = [
     # attachments + the log-archive listing on the dashboard /logs page.
     # Imported lazily inside the gcs adapter only.
     "google-cloud-storage>=3.13.1",
+    "rapidfuzz>=3.14.3,<4",
     # Password hashing for the local_db identity backend (LOCAL/sandbox only).
     # Imported lazily inside src/devai/adapters/identity/local_db.py, so a
     # prod deployment (auth terminated at the auth-bff, noop backend) never

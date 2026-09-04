@@ -5,11 +5,16 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from devai.sandbox.evals import EvalCase
+from devai.sandbox.evals import EvalCase, OCRExpect
 from devai.sandbox.models import SandboxSpec
 
 Name = Annotated[str, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
 Version = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
+ArtifactRef = Annotated[
+    str,
+    Field(min_length=1, max_length=500, pattern=r"^eval-artifact://[A-Za-z0-9][A-Za-z0-9._/-]*$"),
+]
+Sha256Digest = Annotated[str, Field(pattern=r"^sha256:[a-f0-9]{64}$")]
 _MAX_DATASET_CASE_BYTES = 1024 * 1024
 
 JudgeDimension = Literal[
@@ -30,6 +35,24 @@ class ArtifactVersionRef(EvaluationModel):
     version: Version
 
 
+class DatasetArtifact(EvaluationModel):
+    ref: ArtifactRef
+    digest: Sha256Digest
+    media_type: Annotated[str, Field(min_length=3, max_length=100, pattern=r"^[a-z0-9.+-]+/[a-z0-9.+-]+$")]
+    provenance: Literal["synthetic", "licensed", "reviewed-production"]
+    review_status: Literal["approved"]
+    redacted: bool
+    governance_ref: Name | None = None
+
+    @model_validator(mode="after")
+    def governed_non_synthetic_source(self) -> DatasetArtifact:
+        if self.provenance != "synthetic" and self.governance_ref is None:
+            raise ValueError("non-synthetic artifacts require a governance reference")
+        if self.provenance == "reviewed-production" and not self.redacted:
+            raise ValueError("reviewed production artifacts must be redacted")
+        return self
+
+
 class DatasetCase(EvaluationModel):
     id: Name
     input: Annotated[str, Field(min_length=1, max_length=100_000)]
@@ -44,11 +67,13 @@ class DatasetCase(EvaluationModel):
     max_latency_ms: int | None = Field(default=None, gt=0)
     max_cost_usd: float | None = Field(default=None, ge=0)
     context: dict[str, Any] = Field(default_factory=dict)
+    artifact: DatasetArtifact | None = Field(default=None, exclude_if=lambda value: value is None)
     tags: list[Name] = Field(default_factory=list, max_length=100)
     human_scores: dict[JudgeDimension, Annotated[float, Field(ge=0, le=1)]] = Field(
         default_factory=dict,
         max_length=5,
     )
+    ocr: OCRExpect | None = None
 
     @model_validator(mode="after")
     def arguments_align_with_tools(self) -> DatasetCase:
@@ -73,6 +98,7 @@ class DatasetCase(EvaluationModel):
                     "max_total_tokens": self.max_total_tokens,
                     "max_latency_ms": self.max_latency_ms,
                     "max_cost_usd": self.max_cost_usd,
+                    "ocr": self.ocr.model_dump(mode="json") if self.ocr is not None else None,
                 },
                 "human_scores": self.human_scores,
             }
@@ -252,6 +278,7 @@ class EvaluationComparison(EvaluationModel):
 __all__ = [
     "ArtifactVersionRef",
     "DatasetCase",
+    "DatasetArtifact",
     "DatasetCreate",
     "DatasetVersion",
     "EvalSuite",
