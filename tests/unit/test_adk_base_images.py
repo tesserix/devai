@@ -6,6 +6,7 @@ ADK_BASE = (
     "sha256:4e38ff684b5c9936b855cac13aa71db619de23bca6d379d01e6156c4f402a56b"
 )
 ADK_VERSION = "0.54.0"
+ADK_RELEASE_COMMIT = "07f37da3a38cafbe978d296a2954ab543ee22ce9"
 
 
 def test_agent_images_use_the_verified_adk_base() -> None:
@@ -22,7 +23,8 @@ def test_agent_images_use_the_verified_adk_base() -> None:
 def test_kit_extra_pins_the_same_adk_release() -> None:
     project = Path("pyproject.toml").read_text()
 
-    assert f"agent-development-kit@v{ADK_VERSION}" in project
+    assert f"agent-development-kit@{ADK_RELEASE_COMMIT}" in project
+    assert f"agent-development-kit@v{ADK_VERSION}" not in project
 
 
 def test_application_dependencies_preserve_the_adk_base_constraints() -> None:
