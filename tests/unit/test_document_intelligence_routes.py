@@ -82,3 +82,32 @@ async def test_document_upload_keeps_signed_storage_capability_server_side(monke
     assert response.status_code == 200
     assert response.json() == {"upload_id": "upl_01TEST", "status": "uploaded"}
     assert "storage.example.test" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_document_status_proxies_only_the_scoped_opaque_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = FastAPI()
+    app.state.config = SimpleNamespace(
+        document_intelligence_service_url=_INTERNAL_OCR_URL,
+        document_intelligence_key_id="devai-v1",
+        document_intelligence_signing_key=_TEST_SIGNING_KEY,
+        document_intelligence_timeout_seconds=5.0,
+    )
+    app.include_router(routes.router)
+
+    async def principal(_: object) -> Principal:
+        return Principal(email="user@example.test", tenant_id="tenant-a")
+
+    class FakeClient:
+        async def get_upload_status(self, *_: object, **__: object) -> dict[str, object]:
+            return {"upload_id": "upl_01TEST", "status": "accepted"}
+
+    monkeypatch.setattr(routes, "require_principal", principal)
+    monkeypatch.setattr(routes, "_client", lambda _: FakeClient())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/document-intelligence/documents/upl_01TEST")
+
+    assert response.status_code == 200
+    assert response.json() == {"upload_id": "upl_01TEST", "status": "accepted"}
+    assert "storage" not in response.text

@@ -112,3 +112,29 @@ async def test_upload_completion_signs_the_opaque_upload_identifier() -> None:
     assert response["status"] == "uploaded"
     assert observed["path"] == "/v1/ocr/uploads/upl_01TEST/complete"
     assert observed["signature"]
+
+
+@pytest.mark.asyncio
+async def test_upload_status_signs_and_returns_only_the_opaque_lifecycle_state() -> None:
+    observed: dict[str, str] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed["path"] = request.url.path
+        observed["signature"] = request.headers["x-ocr-signature"]
+        return httpx.Response(200, json={"upload_id": "upl_01TEST", "status": "inspecting"})
+
+    client = DocumentIntelligenceClient(
+        base_url=_INTERNAL_OCR_URL,
+        key_id="devai-v1",
+        signing_key=_TEST_SIGNING_KEY,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        response = await client.get_upload_status(
+            http,
+            Principal(email="user@example.test", tenant_id="tenant-a"),
+            upload_id="upl_01TEST",
+        )
+
+    assert response == {"upload_id": "upl_01TEST", "status": "inspecting"}
+    assert observed["path"] == "/v1/ocr/uploads/upl_01TEST"
+    assert observed["signature"]
