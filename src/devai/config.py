@@ -205,6 +205,7 @@ class Settings(BaseSettings):
     # Server-side only: the dashboard never receives the URL's signing key or
     # cloud credentials. An empty URL keeps the OCR test surface disabled.
     document_intelligence_service_url: str = ""
+    document_intelligence_job_service_url: str = ""
     document_intelligence_key_id: str = ""
     document_intelligence_signing_key: SecretStr = SecretStr("")
     document_intelligence_timeout_seconds: float = Field(default=10.0, ge=1.0, le=30.0)

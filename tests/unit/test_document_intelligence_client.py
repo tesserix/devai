@@ -11,6 +11,83 @@ from devai.identity import Principal
 
 _TEST_SIGNING_KEY = "ab" * 32
 _INTERNAL_OCR_URL = "http://" + ".".join(("ocr-service", "document-intelligence", "svc", "cluster", "local")) + ":8080"
+_INTERNAL_OCR_JOB_URL = (
+    "http://" + ".".join(("ocr-job-service", "document-intelligence", "svc", "cluster", "local")) + ":8080"
+)
+
+
+@pytest.mark.asyncio
+async def test_create_job_uses_the_dedicated_job_capability_endpoint() -> None:
+    observed: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed["url"] = str(request.url)
+        observed["headers"] = dict(request.headers)
+        observed["body"] = request.content
+        return httpx.Response(
+            202,
+            json={
+                "job_id": "job_01TEST",
+                "status": "accepted",
+                "created_at": "2026-09-05T00:00:00Z",
+                "status_url": "/v1/ocr/jobs/job_01TEST",
+                "result_url": "/v1/ocr/jobs/job_01TEST/result",
+            },
+        )
+
+    client = DocumentIntelligenceClient(
+        base_url=_INTERNAL_OCR_URL,
+        job_base_url=_INTERNAL_OCR_JOB_URL,
+        key_id="devai-v1",
+        signing_key=_TEST_SIGNING_KEY,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        response = await client.create_job(
+            http,
+            Principal(email="user@example.test", tenant_id="tenant-a"),
+            upload_id="upl_01TEST",
+            idempotency_key="job-1",
+        )
+
+    assert response == {"job_id": "job_01TEST", "status": "accepted"}
+    assert observed["url"] == f"{_INTERNAL_OCR_JOB_URL}/v1/ocr/jobs"
+    assert observed["headers"]["idempotency-key"] == "job-1"
+    assert observed["headers"]["x-ocr-signature"]
+    assert b"upl_01TEST" in observed["body"]
+
+
+@pytest.mark.asyncio
+async def test_job_status_uses_the_dedicated_job_capability_endpoint() -> None:
+    observed: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed["url"] = str(request.url)
+        observed["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={
+                "job_id": "job_01TEST",
+                "status": "completed",
+                "created_at": "2026-09-05T00:00:00Z",
+            },
+        )
+
+    client = DocumentIntelligenceClient(
+        base_url=_INTERNAL_OCR_URL,
+        job_base_url=_INTERNAL_OCR_JOB_URL,
+        key_id="devai-v1",
+        signing_key=_TEST_SIGNING_KEY,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        response = await client.get_job_status(
+            http,
+            Principal(email="user@example.test", tenant_id="tenant-a"),
+            job_id="job_01TEST",
+        )
+
+    assert response == {"job_id": "job_01TEST", "status": "completed"}
+    assert observed["url"] == f"{_INTERNAL_OCR_JOB_URL}/v1/ocr/jobs/job_01TEST"
+    assert observed["headers"]["x-ocr-signature"]
 
 
 @pytest.mark.asyncio
@@ -34,6 +111,7 @@ async def test_upload_intent_uses_a_server_signed_tenant_scope() -> None:
 
     client = DocumentIntelligenceClient(
         base_url=_INTERNAL_OCR_URL,
+        job_base_url=_INTERNAL_OCR_JOB_URL,
         key_id="devai-v1",
         signing_key=_TEST_SIGNING_KEY,
     )
@@ -69,6 +147,7 @@ async def test_upload_intent_uses_a_server_signed_tenant_scope() -> None:
 async def test_upload_intent_rejects_an_unscoped_principal_without_network_io() -> None:
     client = DocumentIntelligenceClient(
         base_url=_INTERNAL_OCR_URL,
+        job_base_url=_INTERNAL_OCR_JOB_URL,
         key_id="devai-v1",
         signing_key=_TEST_SIGNING_KEY,
     )
@@ -99,6 +178,7 @@ async def test_upload_completion_signs_the_opaque_upload_identifier() -> None:
 
     client = DocumentIntelligenceClient(
         base_url=_INTERNAL_OCR_URL,
+        job_base_url=_INTERNAL_OCR_JOB_URL,
         key_id="devai-v1",
         signing_key=_TEST_SIGNING_KEY,
     )
@@ -125,6 +205,7 @@ async def test_upload_status_signs_and_returns_only_the_opaque_lifecycle_state()
 
     client = DocumentIntelligenceClient(
         base_url=_INTERNAL_OCR_URL,
+        job_base_url=_INTERNAL_OCR_JOB_URL,
         key_id="devai-v1",
         signing_key=_TEST_SIGNING_KEY,
     )

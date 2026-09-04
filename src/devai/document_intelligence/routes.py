@@ -67,6 +67,41 @@ async def get_document_status(request: Request, upload_id: str) -> dict[str, str
         raise HTTPException(status_code=503, detail="document service is unavailable") from error
 
 
+@router.post("/documents/{upload_id}/jobs", status_code=202)
+async def create_document_job(
+    request: Request,
+    upload_id: str,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+) -> dict[str, str]:
+    principal = await require_principal(request)
+    try:
+        client = _client(request)
+        async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
+            return await client.create_job(
+                http,
+                principal,
+                upload_id=upload_id,
+                idempotency_key=idempotency_key,
+            )
+    except DocumentIntelligenceError as error:
+        raise HTTPException(status_code=422, detail="document job was rejected") from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="document service is unavailable") from error
+
+
+@router.get("/jobs/{job_id}")
+async def get_document_job_status(request: Request, job_id: str) -> dict[str, str]:
+    principal = await require_principal(request)
+    try:
+        client = _client(request)
+        async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
+            return await client.get_job_status(http, principal, job_id=job_id)
+    except DocumentIntelligenceError as error:
+        raise HTTPException(status_code=422, detail="document job status was rejected") from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="document service is unavailable") from error
+
+
 class UploadTooLargeError(ValueError):
     """Raised when a sandbox upload exceeds the service's hard size limit."""
 
@@ -120,11 +155,18 @@ def _client(request: Request) -> DocumentIntelligenceClient:
     signing_key = config.document_intelligence_signing_key
     if hasattr(signing_key, "get_secret_value"):
         signing_key = signing_key.get_secret_value()
-    if not config.document_intelligence_service_url or not config.document_intelligence_key_id or not signing_key:
+    job_service_url = getattr(config, "document_intelligence_job_service_url", "")
+    if (
+        not config.document_intelligence_service_url
+        or not job_service_url
+        or not config.document_intelligence_key_id
+        or not signing_key
+    ):
         raise HTTPException(status_code=503, detail="document service is not configured")
     try:
         return DocumentIntelligenceClient(
             base_url=config.document_intelligence_service_url,
+            job_base_url=job_service_url,
             key_id=config.document_intelligence_key_id,
             signing_key=str(signing_key),
         )

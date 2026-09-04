@@ -19,7 +19,22 @@ _SUPPORTED_CONTENT_TYPES = frozenset({"application/pdf", "image/jpeg", "image/pn
 _KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _DIGEST_PATTERN = re.compile(r"^sha256:[a-f0-9]{64}$")
 _UPLOAD_ID_PATTERN = re.compile(r"^upl_[A-Za-z0-9_]{1,64}$")
+_JOB_ID_PATTERN = re.compile(r"^job_[A-Za-z0-9_]{1,64}$")
 _UPLOAD_STATUSES = frozenset({"reserved", "uploaded", "inspecting", "accepted", "rejected", "expired"})
+_JOB_STATUSES = frozenset(
+    {
+        "accepted",
+        "inspecting",
+        "processing",
+        "validating",
+        "cancelling",
+        "cancelled",
+        "rejected",
+        "partial",
+        "review_required",
+        "completed",
+    }
+)
 
 
 class DocumentIntelligenceError(ValueError):
@@ -29,8 +44,9 @@ class DocumentIntelligenceError(ValueError):
 class DocumentIntelligenceClient:
     """Signs product-scoped requests after DevAI has verified the caller."""
 
-    def __init__(self, *, base_url: str, key_id: str, signing_key: str) -> None:
-        self._base_url = _validate_base_url(base_url)
+    def __init__(self, *, base_url: str, job_base_url: str, key_id: str, signing_key: str) -> None:
+        self._upload_base_url = _validate_base_url(base_url)
+        self._job_base_url = _validate_base_url(job_base_url)
         if not _KEY_ID_PATTERN.fullmatch(key_id):
             raise DocumentIntelligenceError("document-intelligence key identifier is invalid")
         try:
@@ -44,7 +60,9 @@ class DocumentIntelligenceClient:
 
     def __repr__(self) -> str:
         return (
-            f"DocumentIntelligenceClient(base_url={self._base_url!r}, key_id={self._key_id!r}, signing_key=[redacted])"
+            "DocumentIntelligenceClient("
+            f"upload_base_url={self._upload_base_url!r}, job_base_url={self._job_base_url!r}, "
+            f"key_id={self._key_id!r}, signing_key=[redacted])"
         )
 
     async def create_upload_intent(
@@ -60,7 +78,7 @@ class DocumentIntelligenceClient:
         _validate_upload_request(content_type, content_length, sha256, idempotency_key)
         path = "/v1/ocr/uploads"
         response = await http.post(
-            f"{self._base_url}{path}",
+            f"{self._upload_base_url}{path}",
             headers={
                 **self._signed_headers(principal, "POST", path),
                 "Idempotency-Key": idempotency_key,
@@ -89,7 +107,7 @@ class DocumentIntelligenceClient:
             raise DocumentIntelligenceError("document upload identifier is invalid")
         path = f"/v1/ocr/uploads/{upload_id}/complete"
         response = await http.post(
-            f"{self._base_url}{path}",
+            f"{self._upload_base_url}{path}",
             headers=self._signed_headers(principal, "POST", path),
         )
         if response.is_error:
@@ -110,7 +128,7 @@ class DocumentIntelligenceClient:
             raise DocumentIntelligenceError("document upload identifier is invalid")
         path = f"/v1/ocr/uploads/{upload_id}"
         response = await http.get(
-            f"{self._base_url}{path}",
+            f"{self._upload_base_url}{path}",
             headers=self._signed_headers(principal, "GET", path),
         )
         if response.is_error:
@@ -124,6 +142,73 @@ class DocumentIntelligenceClient:
         ):
             raise DocumentIntelligenceError("document-intelligence response is invalid")
         return {"upload_id": upload_id, "status": str(payload["status"])}
+
+    async def create_job(
+        self,
+        http: httpx.AsyncClient,
+        principal: Principal,
+        *,
+        upload_id: str,
+        idempotency_key: str,
+    ) -> dict[str, str]:
+        if not _UPLOAD_ID_PATTERN.fullmatch(upload_id):
+            raise DocumentIntelligenceError("document upload identifier is invalid")
+        _validate_idempotency_key(idempotency_key)
+        path = "/v1/ocr/jobs"
+        response = await http.post(
+            f"{self._job_base_url}{path}",
+            headers={
+                **self._signed_headers(principal, "POST", path),
+                "Idempotency-Key": idempotency_key,
+            },
+            json={
+                "source": {"upload_id": upload_id},
+                "document_type": "auto",
+                "processing_class": "interactive",
+            },
+        )
+        if response.is_error:
+            raise DocumentIntelligenceError(f"document-intelligence request failed with status {response.status_code}")
+        payload = response.json()
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"job_id", "status", "created_at", "status_url", "result_url"}
+            or not isinstance(payload.get("job_id"), str)
+            or not _JOB_ID_PATTERN.fullmatch(str(payload["job_id"]))
+            or payload.get("status") not in _JOB_STATUSES
+            or not isinstance(payload.get("created_at"), str)
+            or not isinstance(payload.get("status_url"), str)
+            or not isinstance(payload.get("result_url"), str)
+        ):
+            raise DocumentIntelligenceError("document-intelligence response is invalid")
+        return {"job_id": str(payload["job_id"]), "status": str(payload["status"])}
+
+    async def get_job_status(
+        self,
+        http: httpx.AsyncClient,
+        principal: Principal,
+        *,
+        job_id: str,
+    ) -> dict[str, str]:
+        if not _JOB_ID_PATTERN.fullmatch(job_id):
+            raise DocumentIntelligenceError("document job identifier is invalid")
+        path = f"/v1/ocr/jobs/{job_id}"
+        response = await http.get(
+            f"{self._job_base_url}{path}",
+            headers=self._signed_headers(principal, "GET", path),
+        )
+        if response.is_error:
+            raise DocumentIntelligenceError(f"document-intelligence request failed with status {response.status_code}")
+        payload = response.json()
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"job_id", "status", "created_at"}
+            or payload.get("job_id") != job_id
+            or payload.get("status") not in _JOB_STATUSES
+            or not isinstance(payload.get("created_at"), str)
+        ):
+            raise DocumentIntelligenceError("document-intelligence response is invalid")
+        return {"job_id": job_id, "status": str(payload["status"])}
 
     def _signed_headers(self, principal: Principal, method: str, path_and_query: str) -> dict[str, str]:
         tenant_id = _ocr_tenant_id(principal)
@@ -169,5 +254,9 @@ def _validate_upload_request(content_type: str, content_length: int, sha256: str
         raise DocumentIntelligenceError("document content length is invalid")
     if not _DIGEST_PATTERN.fullmatch(sha256):
         raise DocumentIntelligenceError("document digest is invalid")
+    _validate_idempotency_key(idempotency_key)
+
+
+def _validate_idempotency_key(idempotency_key: str) -> None:
     if not 1 <= len(idempotency_key) <= 128 or not idempotency_key.isascii() or not idempotency_key.isprintable():
         raise DocumentIntelligenceError("document idempotency key is invalid")
