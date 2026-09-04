@@ -62,6 +62,23 @@ An orphan reaper sweeps for `devai-sbx-*` namespaces whose sandbox record no
 longer exists and deletes them (with a grace pass for namespaces already
 Terminating), so a crashed teardown never strands a namespace.
 
+## Product-scoped development telemetry
+
+Sandbox runners export OTLP to the shared collector; they never receive or call
+Langfuse with product credentials. Every runner is forced to emit
+`deployment.environment.name=dev`. For an imported agent,
+`service.namespace` is the Agent Registry namespace copied from the signed,
+immutable import envelope. Built-in DevAI agents use `service.namespace=devai`.
+Prompts, tool output, dataset content, `project_id`, and other request fields
+cannot override either attribute.
+
+The ingest tier allowlists exact product and environment pairs and selects the
+matching project-scoped credential there. For example, `kora + dev` reaches the
+Kora development project, while `kora + prod` uses a separate production route.
+An unknown or incomplete pair is dropped. Direct Langfuse settings are removed
+from every sandbox Job even when the DevAI control plane itself uses that
+adapter.
+
 The runtime class is pluggable: setting `DEVAI_SANDBOX_RUNTIME_CLASS` stamps
 `runtimeClassName` on runner pods, so kernel-level isolation (gVisor, or a
 microVM runtime such as Kata) can be adopted later with a config change and no

@@ -217,6 +217,7 @@ def _portable_import(import_id: str) -> dict[str, Any]:
         "state": "ready",
         "agent": {
             "name": "support",
+            "namespace": "acme",
             "version": "1.4.0",
             "digest": "sha256:" + "a" * 64,
             "runtime": {
@@ -270,6 +271,7 @@ async def test_create_from_import_copies_the_exact_lock_into_the_sandbox() -> No
     assert record.spec.agent.name == "support"
     assert record.spec.agent.version == "1.4.0"
     assert record.spec.import_snapshot.agent_digest == "sha256:" + "a" * 64
+    assert record.spec.import_snapshot.product_id == "acme"
     assert record.spec.import_snapshot.dependency_lock[0]["version"] == "1.0.0"
     assert db.rows[record.id]["spec"]["import_snapshot"]["runtime"]["type"] == "container"
 

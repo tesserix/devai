@@ -79,6 +79,7 @@ def _imported_record(sandbox_id: str = "sb-portable") -> SandboxRecord:
         import_id="bf2ef27d-98a2-4ce4-b87a-c6952d2d5d09",
         registry_ref="registry://acme/agents/acme/support@1.4.0",
         agent_digest="sha256:" + "a" * 64,
+        product_id="kora",
         dependency_lock=[],
         runtime={
             "type": "container",
@@ -174,6 +175,20 @@ def test_production_secrets_never_reach_a_sandbox() -> None:
         if "valueFrom" in e and "secretKeyRef" in e["valueFrom"]
     }
     assert "devai-api-secrets" not in referenced
+
+
+def test_sandbox_telemetry_is_otlp_only_and_forced_to_development() -> None:
+    env = _env(_job())
+    assert env["DEVAI_TELEMETRY_PROVIDER"]["value"] == "otel"
+    assert env["DEVAI_OTEL_SERVICE_NAMESPACE"]["value"] == "devai"
+    assert env["DEVAI_OTEL_DEPLOYMENT_ENVIRONMENT"]["value"] == "dev"
+    assert not {name for name in env if name.startswith("DEVAI_LANGFUSE_")}
+
+
+def test_imported_agent_uses_the_signed_registry_namespace_as_product() -> None:
+    env = _env(_job(_imported_record()))
+    assert env["DEVAI_OTEL_SERVICE_NAMESPACE"]["value"] == "kora"
+    assert env["DEVAI_OTEL_DEPLOYMENT_ENVIRONMENT"]["value"] == "dev"
 
 
 def test_credentials_come_from_a_sandbox_scoped_secret() -> None:

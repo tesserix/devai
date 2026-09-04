@@ -64,6 +64,7 @@ class OtelTelemetryAdapter(TelemetryAdapter):
         endpoint: str,
         service_name: str = "devai",
         service_namespace: str = "devai",
+        deployment_environment: str = "prod",
         export_interval_ms: int = 15000,
         headers: dict[str, str] | None = None,
         metrics_endpoint: str | None = None,
@@ -96,6 +97,7 @@ class OtelTelemetryAdapter(TelemetryAdapter):
             {
                 "service.name": service_name,
                 "service.namespace": service_namespace,
+                "deployment.environment.name": deployment_environment,
             }
         )
 

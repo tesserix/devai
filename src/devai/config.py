@@ -609,6 +609,7 @@ class Settings(BaseSettings):
     otel_endpoint: str = ""  # e.g. http://otel-collector.observability.svc.cluster.local:4318
     otel_service_name: str = "devai"
     otel_service_namespace: str = "devai"
+    otel_deployment_environment: str = "prod"
     otel_export_interval_ms: int = 15000
     langfuse_base_url: str = ""
     langfuse_public_url: str = ""
