@@ -2,10 +2,10 @@ import tomllib
 from pathlib import Path
 
 ADK_BASE = (
-    "ghcr.io/tesserix/base-python-adk-3.14:20260829@"
-    "sha256:5a6fd1863ed7f37f3929cc596d0ec063c3077c11713cd334f14d1df2b30ef386"
+    "ghcr.io/tesserix/base-python-adk-3.14:weekly@"
+    "sha256:4e38ff684b5c9936b855cac13aa71db619de23bca6d379d01e6156c4f402a56b"
 )
-ADK_VERSION = "0.53.1"
+ADK_VERSION = "0.54.0"
 
 
 def test_agent_images_use_the_verified_adk_base() -> None:
