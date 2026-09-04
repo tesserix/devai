@@ -200,6 +200,15 @@ class Settings(BaseSettings):
 
     # --- Dashboard ---
     dashboard_base_url: str = "http://localhost:8080"
+
+    # --- Shared document intelligence ---
+    # Server-side only: the dashboard never receives the URL's signing key or
+    # cloud credentials. An empty URL keeps the OCR test surface disabled.
+    document_intelligence_service_url: str = ""
+    document_intelligence_key_id: str = ""
+    document_intelligence_signing_key: SecretStr = SecretStr("")
+    document_intelligence_timeout_seconds: float = Field(default=10.0, ge=1.0, le=30.0)
+
     # Public origin used to build the MCP OAuth redirect URI
     # (<public_base_url>/api/settings/mcp/oauth/callback). Must match what the
     # OAuth app / dynamic registration is allowed to redirect to.
