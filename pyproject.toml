@@ -98,10 +98,9 @@ docs = [
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0.3",
 ]
-# The agent runtime. A direct reference because the kit repo is private and
-# publishes to GitHub releases rather than PyPI, so installing it needs a token.
+# The agent runtime is pinned to the immutable tag that backs the GitHub Release.
 kit = [
-    "tesserix-adk @ git+https://github.com/tesserix/agent-development-kit@v0.53.1",
+    "tesserix-adk @ git+https://github.com/tesserix/agent-development-kit@v0.54.0",
 ]
 dev = [
     "pytest>=9.1.1",

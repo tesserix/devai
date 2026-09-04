@@ -17,6 +17,7 @@ const state = {
   board: { columns: {} },
   runs: [],
   activeTab: 'board',
+  ocr: { status: '', result: null },
   permissions: {
     autoMode: false,     // true = no gates, auto-continue full epic
     gates: {
@@ -251,6 +252,35 @@ async function loadClaudeMd() {
   } catch (e) { /* no file yet */ }
 }
 
+async function uploadOcrDocument() {
+  const input = document.getElementById('ocr-file');
+  const file = input?.files?.[0];
+  if (!file) {
+    showToast('Choose a PDF or supported image first', 'warning');
+    return;
+  }
+  state.ocr.status = 'Uploading through the protected DevAI sandbox…';
+  state.ocr.result = null;
+  render();
+  try {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const uploadResponse = await fetch('/api/document-intelligence/documents', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: form,
+    });
+    if (!uploadResponse.ok) throw new Error('upload verification was rejected');
+    state.ocr.result = await uploadResponse.json();
+    state.ocr.status = 'Upload verified and queued for sandbox inspection.';
+    showToast('Document upload verified', 'success');
+  } catch (error) {
+    state.ocr.status = error instanceof Error ? error.message : 'Document upload failed';
+    showToast('Document upload failed', 'error');
+  }
+  render();
+}
+
 // --- UI ---
 function switchTab(tab) {
   state.activeTab = tab;
@@ -293,6 +323,7 @@ function render() {
       ${state.activeTab === 'board' ? renderBoard() : ''}
       ${state.activeTab === 'pipeline' ? renderPipeline() : ''}
       ${state.activeTab === 'governance' ? renderGovernance() : ''}
+      ${state.activeTab === 'ocr' ? renderOcr() : ''}
     </div>
     ${renderTriggerDialog()}
     <div id="toast" class="toast"></div>
@@ -334,6 +365,7 @@ function renderTopNav() {
           <button class="top-nav-link ${state.activeTab === 'board' ? 'active' : ''}" onclick="switchTab('board')">Board</button>
           <button class="top-nav-link ${state.activeTab === 'pipeline' ? 'active' : ''}" onclick="switchTab('pipeline')">Pipeline</button>
           <button class="top-nav-link ${state.activeTab === 'governance' ? 'active' : ''}" onclick="switchTab('governance')">Governance</button>
+          <button class="top-nav-link ${state.activeTab === 'ocr' ? 'active' : ''}" onclick="switchTab('ocr')">OCR Test</button>
         </div>
       </div>
       <div class="top-nav-actions">
@@ -421,6 +453,7 @@ function renderTabs() {
       <button class="tab ${state.activeTab === 'board' ? 'active' : ''}" onclick="switchTab('board')">Board</button>
       <button class="tab ${state.activeTab === 'pipeline' ? 'active' : ''}" onclick="switchTab('pipeline')">Pipeline Runs</button>
       <button class="tab ${state.activeTab === 'governance' ? 'active' : ''}" onclick="switchTab('governance')">Governance (CLAUDE.md)</button>
+      <button class="tab ${state.activeTab === 'ocr' ? 'active' : ''}" onclick="switchTab('ocr')">OCR Test</button>
     </div>
   `;
 }
@@ -608,6 +641,25 @@ function renderGovernance() {
           </div>
         </div>
       </div>
+    </div>
+  `;
+}
+
+function renderOcr() {
+  const result = state.ocr.result;
+  return `
+    <div class="card" style="padding: 24px; cursor: default; max-width: 760px;">
+      <h3 class="h5">Document Intelligence Sandbox</h3>
+      <p class="text-body-sm text-muted" style="margin: 8px 0 20px;">
+        Upload a PDF, PNG, JPEG, TIFF, or WebP for the disposable DevAI sandbox. Files are isolated from production and removed after 24 hours.
+      </p>
+      <div class="form-group">
+        <label class="form-label" for="ocr-file">Document</label>
+        <input id="ocr-file" class="form-input" type="file" accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp">
+      </div>
+      <button class="btn btn-primary" onclick="uploadOcrDocument()">Upload and verify</button>
+      ${state.ocr.status ? `<p class="form-helper" style="margin-top: 16px;">${escapeHtml(state.ocr.status)}</p>` : ''}
+      ${result ? `<pre class="form-textarea" style="margin-top: 16px; min-height: 80px; white-space: pre-wrap;">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ''}
     </div>
   `;
 }

@@ -997,6 +997,10 @@ def create_app(
 
     app.include_router(dashboard_router)
 
+    from devai.document_intelligence.routes import router as document_intelligence_router
+
+    app.include_router(document_intelligence_router)
+
     # Local username/password auth at /auth. The adapter decides the mode:
     # local_db actually checks passwords (kind sandbox); every other provider
     # resolves to Noop ({"mode":"gip"} + 401), and in prod /auth/* is routed
