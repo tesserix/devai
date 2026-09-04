@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { FileSearch, RefreshCw, Upload } from "lucide-react";
 
 import {
+  createSandboxDocumentJob,
+  getSandboxDocumentJobStatus,
   getSandboxDocumentStatus,
+  type DocumentJobState,
   uploadSandboxDocument,
   type DocumentUploadState,
 } from "@/lib/document-intelligence";
@@ -15,6 +18,7 @@ const AUTO_REFRESH_LIMIT = 10;
 export function DocumentSandbox() {
   const [file, setFile] = useState<File | null>(null);
   const [upload, setUpload] = useState<DocumentUploadState | null>(null);
+  const [job, setJob] = useState<DocumentJobState | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshes, setRefreshes] = useState(0);
   const [message, setMessage] = useState("Choose a document to begin a disposable sandbox upload.");
@@ -40,6 +44,37 @@ export function DocumentSandbox() {
     }
   }
 
+  async function startJob() {
+    if (!upload || upload.status !== "accepted" || busy) return;
+
+    setBusy(true);
+    setMessage("Creating an OCR job through the protected DevAI sandbox…");
+    try {
+      const next = await createSandboxDocumentJob(upload.upload_id);
+      setJob(next);
+      setMessage(`Sandbox OCR job status: ${next.status}.`);
+    } catch {
+      setMessage("The OCR job was rejected or is temporarily unavailable.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshJob() {
+    if (!job || busy) return;
+
+    setBusy(true);
+    try {
+      const next = await getSandboxDocumentJobStatus(job.job_id);
+      setJob(next);
+      setMessage(`Sandbox OCR job status: ${next.status}.`);
+    } catch {
+      setMessage("Sandbox OCR job status is temporarily unavailable. Try refreshing again shortly.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (!upload || TERMINAL_UPLOAD_STATUSES.has(upload.status) || refreshes >= AUTO_REFRESH_LIMIT) return;
     const timer = window.setTimeout(() => {
@@ -53,6 +88,7 @@ export function DocumentSandbox() {
 
     setBusy(true);
     setUpload(null);
+    setJob(null);
     refreshesRef.current = 0;
     setRefreshes(0);
     setMessage("Uploading through the protected DevAI sandbox…");
@@ -68,6 +104,8 @@ export function DocumentSandbox() {
   }
 
   const canRefresh = upload !== null && !busy;
+  const canStartJob = upload?.status === "accepted" && !job && !busy;
+  const canRefreshJob = job !== null && !busy;
   const terminal = upload !== null && TERMINAL_UPLOAD_STATUSES.has(upload.status);
 
   return (
@@ -109,6 +147,12 @@ export function DocumentSandbox() {
           <button type="button" className="btn-secondary" disabled={!canRefresh} onClick={() => void refreshStatus()}>
             <RefreshCw className="h-4 w-4" /> Refresh status
           </button>
+          <button type="button" className="btn-secondary" disabled={!canStartJob} onClick={() => void startJob()}>
+            <FileSearch className="h-4 w-4" /> Start OCR
+          </button>
+          <button type="button" className="btn-secondary" disabled={!canRefreshJob} onClick={() => void refreshJob()}>
+            <RefreshCw className="h-4 w-4" /> Refresh OCR
+          </button>
         </div>
 
         <div className="mt-6 rounded-md border px-4 py-3 text-sm" style={{ borderColor: "var(--border-subtle)" }} aria-live="polite">
@@ -125,11 +169,23 @@ export function DocumentSandbox() {
               </div>
             </dl>
           )}
+          {job && (
+            <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+              <div>
+                <dt className="label-eyebrow">OCR job ID</dt>
+                <dd className="mt-1 font-mono" style={{ color: "var(--ink-strong)" }}>{job.job_id}</dd>
+              </div>
+              <div>
+                <dt className="label-eyebrow">OCR lifecycle</dt>
+                <dd className="mt-1 font-mono" style={{ color: "var(--ink-strong)" }}>{job.status}</dd>
+              </div>
+            </dl>
+          )}
         </div>
 
         {terminal && upload?.status === "accepted" && (
           <p className="mt-4 text-sm" style={{ color: "var(--ink-soft)" }}>
-            The upload passed sandbox inspection. OCR results are intentionally unavailable until an approved recognizer profile is released.
+            The upload passed sandbox inspection. Start OCR to exercise the durable job pipeline; results remain protected by the same authenticated tenant boundary.
           </p>
         )}
       </section>
