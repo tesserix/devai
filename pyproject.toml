@@ -99,9 +99,9 @@ docs = [
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0.3",
 ]
-# The agent runtime is pinned to the immutable tag that backs the GitHub Release.
+# The agent runtime is pinned to the commit behind the reviewed GitHub Release.
 kit = [
-    "tesserix-adk @ git+https://github.com/tesserix/agent-development-kit@v0.54.0",
+    "tesserix-adk @ git+https://github.com/tesserix/agent-development-kit@07f37da3a38cafbe978d296a2954ab543ee22ce9",
 ]
 dev = [
     "pytest>=9.1.1",
