@@ -54,6 +54,19 @@ async def upload_document(
         await file.close()
 
 
+@router.get("/documents/{upload_id}")
+async def get_document_status(request: Request, upload_id: str) -> dict[str, str]:
+    principal = await require_principal(request)
+    try:
+        client = _client(request)
+        async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
+            return await client.get_upload_status(http, principal, upload_id=upload_id)
+    except DocumentIntelligenceError as error:
+        raise HTTPException(status_code=422, detail="document status was rejected") from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="document service is unavailable") from error
+
+
 class UploadTooLargeError(ValueError):
     """Raised when a sandbox upload exceeds the service's hard size limit."""
 

@@ -19,6 +19,7 @@ _SUPPORTED_CONTENT_TYPES = frozenset({"application/pdf", "image/jpeg", "image/pn
 _KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _DIGEST_PATTERN = re.compile(r"^sha256:[a-f0-9]{64}$")
 _UPLOAD_ID_PATTERN = re.compile(r"^upl_[A-Za-z0-9_]{1,64}$")
+_UPLOAD_STATUSES = frozenset({"reserved", "uploaded", "inspecting", "accepted", "rejected", "expired"})
 
 
 class DocumentIntelligenceError(ValueError):
@@ -97,6 +98,32 @@ class DocumentIntelligenceClient:
         if not isinstance(payload, dict):
             raise DocumentIntelligenceError("document-intelligence response is invalid")
         return payload
+
+    async def get_upload_status(
+        self,
+        http: httpx.AsyncClient,
+        principal: Principal,
+        *,
+        upload_id: str,
+    ) -> dict[str, str]:
+        if not _UPLOAD_ID_PATTERN.fullmatch(upload_id):
+            raise DocumentIntelligenceError("document upload identifier is invalid")
+        path = f"/v1/ocr/uploads/{upload_id}"
+        response = await http.get(
+            f"{self._base_url}{path}",
+            headers=self._signed_headers(principal, "GET", path),
+        )
+        if response.is_error:
+            raise DocumentIntelligenceError(f"document-intelligence request failed with status {response.status_code}")
+        payload = response.json()
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"upload_id", "status"}
+            or payload.get("upload_id") != upload_id
+            or payload.get("status") not in _UPLOAD_STATUSES
+        ):
+            raise DocumentIntelligenceError("document-intelligence response is invalid")
+        return {"upload_id": upload_id, "status": str(payload["status"])}
 
     def _signed_headers(self, principal: Principal, method: str, path_and_query: str) -> dict[str, str]:
         tenant_id = _ocr_tenant_id(principal)
