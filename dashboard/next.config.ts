@@ -182,6 +182,13 @@ const nextConfig: NextConfig = {
         source: "/api/adk/:path*",
         destination: `${API_INTERNAL_URL}/api/adk/:path*`,
       },
+      // Document intelligence is a native, authenticated DevAI test route.
+      // Keep it before the legacy catch-all or it would be sent to
+      // /dashboard/api/document-intelligence instead of its real API mount.
+      {
+        source: "/api/document-intelligence/:path*",
+        destination: `${API_INTERNAL_URL}/api/document-intelligence/:path*`,
+      },
       // Durable evaluation runs, comparisons and invocation traces —
       // the Studio release gate depends on these.
       {

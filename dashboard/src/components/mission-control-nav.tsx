@@ -20,6 +20,7 @@ import {
   PackageOpen,
   Plus,
   Radio,
+  ScanText,
   ScrollText,
   Search,
   Settings,
@@ -72,6 +73,7 @@ const WORK: NavItem[] = [
   { href: "/runs", label: "Run history", Icon: ListChecks, description: "Every run, past and present" },
   { href: "/board", label: "Task board", Icon: FolderKanban, description: "Your GitHub issues as a Kanban" },
   { href: "/sandboxes", label: "Sandboxes", Icon: PackageOpen, description: "The workspace a run happened in — its diff and what it built" },
+  { href: "/document-intelligence", label: "Document sandbox", Icon: ScanText, description: "Upload a disposable document to test the shared OCR intake" },
   { href: "/feedback", label: "Feedback", Icon: MessageSquareText, description: "Share a story, bug, or task with the product team" },
 ];
 
