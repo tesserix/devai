@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseDocumentJobResult, parseDocumentJobState, parseDocumentUploadState } from "./document-intelligence.ts";
+import {
+  documentUploadFailureMessage,
+  parseDocumentJobResult,
+  parseDocumentJobState,
+  parseDocumentUploadState,
+} from "./document-intelligence.ts";
+
+test("maps upload failures to safe actionable guidance", () => {
+  assert.equal(documentUploadFailureMessage(413), "This file is larger than the sandbox's 100 MB upload limit.");
+  assert.equal(
+    documentUploadFailureMessage(422),
+    "This file could not be accepted. Use a valid PDF, PNG, JPEG, TIFF, or WebP and try again.",
+  );
+  assert.equal(
+    documentUploadFailureMessage(503),
+    "The upload service is temporarily unavailable. Try again shortly.",
+  );
+});
 
 test("accepts the minimal opaque upload lifecycle response", () => {
   assert.deepEqual(
