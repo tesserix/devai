@@ -65,6 +65,26 @@ export type DocumentJobResult = {
   text_truncated: boolean;
 };
 
+export class DocumentUploadError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(documentUploadFailureMessage(status));
+    this.name = "DocumentUploadError";
+    this.status = status;
+  }
+}
+
+export function documentUploadFailureMessage(status: number): string {
+  if (status === 413) return "This file is larger than the sandbox's 100 MB upload limit.";
+  if (status === 401 || status === 403) return "Your sandbox session has expired. Refresh the page and sign in again.";
+  if (status === 415 || status === 422) {
+    return "This file could not be accepted. Use a valid PDF, PNG, JPEG, TIFF, or WebP and try again.";
+  }
+  if (status === 429) return "Sandbox upload capacity is busy. Wait a moment, then try again.";
+  return "The upload service is temporarily unavailable. Try again shortly.";
+}
+
 function isDocumentUploadStatus(value: unknown): value is DocumentUploadStatus {
   return typeof value === "string" && DOCUMENT_UPLOAD_STATUSES.includes(value as DocumentUploadStatus);
 }
@@ -188,7 +208,7 @@ export function parseDocumentJobResult(value: unknown, expectedJobId?: string): 
 
 async function readUploadState(response: Response, expectedUploadId?: string): Promise<DocumentUploadState> {
   if (!response.ok) {
-    throw new Error("document request was rejected");
+    throw new DocumentUploadError(response.status);
   }
 
   try {

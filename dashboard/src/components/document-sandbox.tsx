@@ -8,6 +8,7 @@ import {
   getSandboxDocumentJobResult,
   getSandboxDocumentJobStatus,
   getSandboxDocumentStatus,
+  DocumentUploadError,
   type DocumentJobResult,
   type DocumentJobState,
   uploadSandboxDocument,
@@ -135,8 +136,12 @@ export function DocumentSandbox() {
       const next = await uploadSandboxDocument(file);
       setUpload(next);
       setMessage(`Sandbox upload status: ${next.status}.`);
-    } catch {
-      setMessage("Document upload was rejected or is temporarily unavailable.");
+    } catch (error) {
+      setMessage(
+        error instanceof DocumentUploadError
+          ? error.message
+          : "The upload service is temporarily unavailable. Try again shortly.",
+      );
     } finally {
       setBusy(false);
     }
@@ -171,17 +176,26 @@ export function DocumentSandbox() {
             id="document"
             type="file"
             accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp"
-            onChange={(event) => setFile(event.target.files?.item(0) ?? null)}
+            onChange={(event) => {
+              const selectedFile = event.target.files?.item(0) ?? null;
+              setFile(selectedFile);
+              setMessage(selectedFile
+                ? "Document selected. Next, click \"Upload selected document\" to send it for sandbox inspection."
+                : "Choose a document to begin a disposable sandbox upload.");
+            }}
             className="mt-2 block w-full text-sm"
           />
           <p className="mt-2 text-xs" style={{ color: "var(--ink-muted)" }}>
             File type and content are verified by the service; the browser selection is not a security decision.
           </p>
+          <p className="mt-2 text-xs font-medium" style={{ color: "var(--ink-soft)" }}>
+            Step 1: choose a file. Step 2: click the upload button below to send it for inspection.
+          </p>
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3">
           <button type="button" className="btn-primary" disabled={!file || busy} onClick={submit}>
-            <Upload className="h-4 w-4" /> {busy && !upload ? "Uploading…" : "Upload for inspection"}
+            <Upload className="h-4 w-4" /> {busy && !upload ? "Uploading selected document…" : "2. Upload selected document"}
           </button>
           <button type="button" className="btn-secondary" disabled={!canRefresh} onClick={() => void refreshStatus()}>
             <RefreshCw className="h-4 w-4" /> Refresh status
