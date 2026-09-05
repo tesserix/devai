@@ -91,6 +91,42 @@ async def test_job_status_uses_the_dedicated_job_capability_endpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancel_job_uses_the_scoped_durable_cancellation_endpoint() -> None:
+    observed: dict[str, str] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed["method"] = request.method
+        observed["path"] = request.url.path
+        observed["signature"] = request.headers["x-ocr-signature"]
+        return httpx.Response(
+            200,
+            json={
+                "job_id": "job_01TEST",
+                "status": "cancelling",
+                "created_at": "2026-09-05T00:00:00Z",
+            },
+        )
+
+    client = DocumentIntelligenceClient(
+        base_url=_INTERNAL_OCR_URL,
+        job_base_url=_INTERNAL_OCR_JOB_URL,
+        key_id="devai-v1",
+        signing_key=_TEST_SIGNING_KEY,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        response = await client.cancel_job(
+            http,
+            Principal(email="user@example.test", tenant_id="tenant-a"),
+            job_id="job_01TEST",
+        )
+
+    assert response == {"job_id": "job_01TEST", "status": "cancelling"}
+    assert observed["method"] == "POST"
+    assert observed["path"] == "/v1/ocr/jobs/job_01TEST/cancel"
+    assert observed["signature"]
+
+
+@pytest.mark.asyncio
 async def test_job_result_returns_only_the_bounded_sandbox_diagnostics_view() -> None:
     observed: dict[str, object] = {}
 
