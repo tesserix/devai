@@ -5,6 +5,7 @@ import { FileSearch, RefreshCw, Upload } from "lucide-react";
 
 import {
   createSandboxDocumentJob,
+  documentJobProgress,
   getSandboxDocumentJobResult,
   getSandboxDocumentJobStatus,
   getSandboxDocumentStatus,
@@ -20,6 +21,7 @@ const TERMINAL_JOB_STATUSES = new Set(["cancelled", "rejected", "partial", "revi
 const RESULT_READY_JOB_STATUSES = new Set(["partial", "review_required", "completed"]);
 const UPLOAD_AUTO_REFRESH_LIMIT = 10;
 const JOB_AUTO_REFRESH_LIMIT = 150;
+const OCR_PROGRESS_STAGES = ["Queued", "Preparing", "Extracting", "Validating"];
 
 function percentage(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -152,6 +154,13 @@ export function DocumentSandbox() {
   const canStartJob = upload?.status === "accepted" && !job && !busy;
   const canRefreshJob = job !== null && !busy;
   const terminal = upload !== null && TERMINAL_UPLOAD_STATUSES.has(upload.status);
+  const progress = job ? documentJobProgress(job.status) : null;
+  const activeProgressIndex = progress
+    ? ["queued", "preparing", "extracting", "validating"].indexOf(progress.stage)
+    : -1;
+  const successfulTerminal = job?.status === "completed"
+    || job?.status === "partial"
+    || job?.status === "review_required";
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
@@ -224,16 +233,36 @@ export function DocumentSandbox() {
             </dl>
           )}
           {job && (
-            <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-              <div>
-                <dt className="label-eyebrow">OCR job ID</dt>
-                <dd className="mt-1 font-mono" style={{ color: "var(--ink-strong)" }}>{job.job_id}</dd>
-              </div>
-              <div>
-                <dt className="label-eyebrow">OCR lifecycle</dt>
-                <dd className="mt-1 font-mono" style={{ color: "var(--ink-strong)" }}>{job.status}</dd>
-              </div>
-            </dl>
+            <>
+              <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="label-eyebrow">OCR job ID</dt>
+                  <dd className="mt-1 font-mono" style={{ color: "var(--ink-strong)" }}>{job.job_id}</dd>
+                </div>
+                <div>
+                  <dt className="label-eyebrow">OCR lifecycle</dt>
+                  <dd className="mt-1 font-mono" style={{ color: "var(--ink-strong)" }}>{job.status}</dd>
+                </div>
+              </dl>
+              {progress && (
+                <section className="mt-4" aria-label="Live OCR progress" aria-live="polite">
+                  <p className="label-eyebrow">Live OCR progress</p>
+                  <p className="mt-1 text-xs" style={{ color: "var(--ink-soft)" }}>{progress.message} Refreshing automatically for up to five minutes.</p>
+                  <ol className="mt-3 grid gap-2 sm:grid-cols-4">
+                    {OCR_PROGRESS_STAGES.map((stage, index) => {
+                      const complete = successfulTerminal || index < activeProgressIndex;
+                      const active = index === activeProgressIndex;
+                      return (
+                        <li key={stage} className="rounded border px-3 py-2 text-xs" style={{ borderColor: active ? "var(--accent)" : "var(--border-subtle)" }}>
+                          <p className="label-eyebrow">{complete ? "Complete" : active ? "Current" : "Waiting"}</p>
+                          <p className="mt-1 font-medium" style={{ color: "var(--ink-strong)" }}>{stage}</p>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </section>
+              )}
+            </>
           )}
         </div>
 
