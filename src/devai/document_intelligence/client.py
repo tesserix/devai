@@ -265,14 +265,24 @@ def _validate_base_url(value: str) -> str:
 
 
 def _sandbox_result_view(payload: object, job_id: str) -> dict[str, Any]:
-    if not isinstance(payload, dict) or payload.get("schema_version") != "1.0" or payload.get("content_trust") != "untrusted":
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != "1.0"
+        or payload.get("content_trust") != "untrusted"
+    ):
         raise DocumentIntelligenceError("document-intelligence result is invalid")
     text = payload.get("text")
     pages = payload.get("pages")
     fields = payload.get("fields")
     tables = payload.get("tables")
     citations = payload.get("citations")
-    if not isinstance(text, str) or not isinstance(pages, list) or not isinstance(fields, dict) or not isinstance(tables, list) or not isinstance(citations, list):
+    if (
+        not isinstance(text, str)
+        or not isinstance(pages, list)
+        or not isinstance(fields, dict)
+        or not isinstance(tables, list)
+        or not isinstance(citations, list)
+    ):
         raise DocumentIntelligenceError("document-intelligence result is invalid")
     if len(pages) > 300:
         raise DocumentIntelligenceError("document-intelligence result is invalid")
@@ -292,7 +302,9 @@ def _sandbox_result_view(payload: object, job_id: str) -> dict[str, Any]:
     profile = _optional_version_name(payload.get("processing_profile_version"))
     duration_ms = payload.get("duration_ms")
     cost = _cost(payload.get("cost"))
-    if not (duration_ms is None or isinstance(duration_ms, int) and not isinstance(duration_ms, bool) and duration_ms >= 0):
+    if not (
+        duration_ms is None or isinstance(duration_ms, int) and not isinstance(duration_ms, bool) and duration_ms >= 0
+    ):
         raise DocumentIntelligenceError("document-intelligence result is invalid")
 
     return {
@@ -366,9 +378,16 @@ def _result_fields(value: dict[object, object]) -> list[dict[str, Any]]:
             raise DocumentIntelligenceError("document-intelligence result is invalid")
         score = field.get("confidence")
         evidence = field.get("evidence")
-        if not isinstance(score, (int, float)) or isinstance(score, bool) or not 0 <= score <= 1 or not isinstance(evidence, list):
+        if (
+            not isinstance(score, (int, float))
+            or isinstance(score, bool)
+            or not 0 <= score <= 1
+            or not isinstance(evidence, list)
+        ):
             raise DocumentIntelligenceError("document-intelligence result is invalid")
-        pages = sorted({item.get("page") for item in evidence if isinstance(item, dict) and isinstance(item.get("page"), int)})
+        pages = sorted(
+            {item.get("page") for item in evidence if isinstance(item, dict) and isinstance(item.get("page"), int)}
+        )
         if not pages or any(page < 1 or page > 300 for page in pages):
             raise DocumentIntelligenceError("document-intelligence result is invalid")
         field_value = field.get("value")

@@ -99,7 +99,13 @@ async def test_job_result_proxies_only_the_bounded_sandbox_diagnostics(monkeypat
             assert kwargs == {"job_id": "job_01TEST"}
             return {
                 "job_id": "job_01TEST",
-                "summary": {"page_count": 1, "observation_count": 2, "field_count": 1, "table_count": 0, "citation_count": 1},
+                "summary": {
+                    "page_count": 1,
+                    "observation_count": 2,
+                    "field_count": 1,
+                    "table_count": 0,
+                    "citation_count": 1,
+                },
                 "confidence": None,
                 "warnings": [],
                 "validation_failures": [],

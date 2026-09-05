@@ -174,7 +174,9 @@ async def test_job_result_returns_only_the_bounded_sandbox_diagnostics_view() ->
         "citation_count": 1,
     }
     assert response["confidence"]["overall"] == 0.95
-    assert response["fields"] == [{"name": "total", "value": {"currency": "AUD", "decimal": "12.50"}, "confidence": 0.97, "pages": [1]}]
+    assert response["fields"] == [
+        {"name": "total", "value": {"currency": "AUD", "decimal": "12.50"}, "confidence": 0.97, "pages": [1]}
+    ]
     assert response["text_preview"] == "Invoice total 12.50"
     assert response["text_truncated"] is False
     assert "object_bucket" not in response
