@@ -12,11 +12,25 @@ import httpx
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 
 from devai.authz import require_principal
-from devai.document_intelligence.client import DocumentIntelligenceClient, DocumentIntelligenceError
+from devai.document_intelligence.client import (
+    DocumentIntelligenceClient,
+    DocumentIntelligenceError,
+    DocumentResultNotReadyError,
+)
+from devai.identity import Principal
 
 router = APIRouter(prefix="/api/document-intelligence", tags=["document-intelligence"])
 _MAXIMUM_UPLOAD_BYTES = 100 * 1024 * 1024
 _CHUNK_BYTES = 64 * 1024
+_SANDBOX_ROLES = frozenset({"admin", "platform-admin"})
+
+
+async def _sandbox_principal(request: Request) -> Principal:
+    # The sandbox is an operator surface: only allowlisted platform admins may drive it.
+    principal = await require_principal(request)
+    if not _SANDBOX_ROLES.intersection(principal.roles):
+        raise HTTPException(status_code=403, detail="document sandbox is restricted to platform admins")
+    return principal
 
 
 @router.post("/documents")
@@ -25,7 +39,7 @@ async def upload_document(
     file: UploadFile = File(),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, Any]:
-    principal = await require_principal(request)
+    principal = await _sandbox_principal(request)
     content_type = file.content_type or ""
     try:
         with SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b") as staged:
@@ -56,7 +70,7 @@ async def upload_document(
 
 @router.get("/documents/{upload_id}")
 async def get_document_status(request: Request, upload_id: str) -> dict[str, str]:
-    principal = await require_principal(request)
+    principal = await _sandbox_principal(request)
     try:
         client = _client(request)
         async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
@@ -73,7 +87,7 @@ async def create_document_job(
     upload_id: str,
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, str]:
-    principal = await require_principal(request)
+    principal = await _sandbox_principal(request)
     try:
         client = _client(request)
         async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
@@ -91,7 +105,7 @@ async def create_document_job(
 
 @router.get("/jobs/{job_id}")
 async def get_document_job_status(request: Request, job_id: str) -> dict[str, str]:
-    principal = await require_principal(request)
+    principal = await _sandbox_principal(request)
     try:
         client = _client(request)
         async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
@@ -104,11 +118,13 @@ async def get_document_job_status(request: Request, job_id: str) -> dict[str, st
 
 @router.get("/jobs/{job_id}/result")
 async def get_document_job_result(request: Request, job_id: str) -> dict[str, Any]:
-    principal = await require_principal(request)
+    principal = await _sandbox_principal(request)
     try:
         client = _client(request)
         async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
             return await client.get_job_result(http, principal, job_id=job_id)
+    except DocumentResultNotReadyError as error:
+        raise HTTPException(status_code=409, detail="document result is not ready") from error
     except DocumentIntelligenceError as error:
         raise HTTPException(status_code=422, detail="document result is unavailable") from error
     except httpx.HTTPError as error:

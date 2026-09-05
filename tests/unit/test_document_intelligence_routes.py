@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 
 from devai.document_intelligence import routes
+from devai.document_intelligence.client import DocumentResultNotReadyError
 from devai.identity import Principal
 
 _TEST_SIGNING_KEY = "ab" * 32
@@ -29,7 +30,7 @@ async def test_accepted_upload_creates_a_tenant_scoped_ocr_job(monkeypatch: pyte
     app.include_router(routes.router)
 
     async def principal(_: object) -> Principal:
-        return Principal(email="user@example.test", tenant_id="tenant-a")
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["admin"])
 
     class FakeClient:
         async def create_job(self, *_: object, **kwargs: object) -> dict[str, str]:
@@ -62,7 +63,7 @@ async def test_job_status_proxies_only_the_scoped_opaque_lifecycle(monkeypatch: 
     app.include_router(routes.router)
 
     async def principal(_: object) -> Principal:
-        return Principal(email="user@example.test", tenant_id="tenant-a")
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["admin"])
 
     class FakeClient:
         async def get_job_status(self, *_: object, **kwargs: object) -> dict[str, str]:
@@ -92,7 +93,7 @@ async def test_job_result_proxies_only_the_bounded_sandbox_diagnostics(monkeypat
     app.include_router(routes.router)
 
     async def principal(_: object) -> Principal:
-        return Principal(email="user@example.test", tenant_id="tenant-a")
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["admin"])
 
     class FakeClient:
         async def get_job_result(self, *_: object, **kwargs: object) -> dict[str, object]:
@@ -168,7 +169,7 @@ async def test_document_upload_keeps_signed_storage_capability_server_side(monke
     app.include_router(routes.router)
 
     async def principal(_: object) -> Principal:
-        return Principal(email="user@example.test", tenant_id="tenant-a")
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["admin"])
 
     async def upload(*_: object) -> None:
         return None
@@ -213,7 +214,7 @@ async def test_document_status_proxies_only_the_scoped_opaque_lifecycle(monkeypa
     app.include_router(routes.router)
 
     async def principal(_: object) -> Principal:
-        return Principal(email="user@example.test", tenant_id="tenant-a")
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["admin"])
 
     class FakeClient:
         async def get_upload_status(self, *_: object, **__: object) -> dict[str, object]:
@@ -228,3 +229,69 @@ async def test_document_status_proxies_only_the_scoped_opaque_lifecycle(monkeypa
     assert response.status_code == 200
     assert response.json() == {"upload_id": "upl_01TEST", "status": "accepted"}
     assert "storage" not in response.text
+
+
+def _app() -> FastAPI:
+    app = FastAPI()
+    app.state.config = SimpleNamespace(
+        document_intelligence_service_url=_INTERNAL_OCR_URL,
+        document_intelligence_job_service_url=_INTERNAL_OCR_JOB_URL,
+        document_intelligence_key_id="devai-v1",
+        document_intelligence_signing_key=_TEST_SIGNING_KEY,
+        document_intelligence_timeout_seconds=5.0,
+    )
+    app.include_router(routes.router)
+    return app
+
+
+@pytest.mark.asyncio
+async def test_job_result_reports_conflict_until_the_result_is_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def principal(_: object) -> Principal:
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["platform-admin"])
+
+    class FakeClient:
+        async def get_job_result(self, *_: object, **__: object) -> dict[str, object]:
+            raise DocumentResultNotReadyError("document result is not ready")
+
+    monkeypatch.setattr(routes, "require_principal", principal)
+    monkeypatch.setattr(routes, "_client", lambda _: FakeClient())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app()), base_url="http://test") as client:
+        response = await client.get("/api/document-intelligence/jobs/job_01TEST/result")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "document result is not ready"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/api/document-intelligence/documents"),
+        ("GET", "/api/document-intelligence/documents/upl_01TEST"),
+        ("POST", "/api/document-intelligence/documents/upl_01TEST/jobs"),
+        ("GET", "/api/document-intelligence/jobs/job_01TEST"),
+        ("GET", "/api/document-intelligence/jobs/job_01TEST/result"),
+    ],
+)
+async def test_sandbox_rejects_principals_without_an_admin_role(
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str
+) -> None:
+    async def principal(_: object) -> Principal:
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["member"])
+
+    class FakeClient:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"client.{name} must not be reached without an admin role")
+
+    monkeypatch.setattr(routes, "require_principal", principal)
+    monkeypatch.setattr(routes, "_client", lambda _: FakeClient())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app()), base_url="http://test") as client:
+        response = await client.request(
+            method,
+            path,
+            headers={"Idempotency-Key": "key-1"},
+            files={"file": ("a.pdf", b"%PDF-1.4", "application/pdf")} if path.endswith("/documents") else None,
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "document sandbox is restricted to platform admins"}

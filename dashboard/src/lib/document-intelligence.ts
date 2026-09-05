@@ -235,10 +235,23 @@ export function parseDocumentJobResult(value: unknown, expectedJobId?: string): 
   return response as DocumentJobResult;
 }
 
-async function readUploadState(response: Response, expectedUploadId?: string): Promise<DocumentUploadState> {
-  if (!response.ok) {
-    throw new DocumentUploadError(response.status);
+export const SANDBOX_FORBIDDEN_MESSAGE = "The document sandbox is restricted to platform admins.";
+
+export class DocumentResultNotReadyError extends Error {
+  constructor() {
+    super("document result is not ready");
+    this.name = "DocumentResultNotReadyError";
   }
+}
+
+function rejectUnlessOk(response: Response, message: string): void {
+  if (response.status === 403) throw new Error(SANDBOX_FORBIDDEN_MESSAGE);
+  if (!response.ok) throw new Error(message);
+}
+
+async function readUploadState(response: Response, expectedUploadId?: string): Promise<DocumentUploadState> {
+  if (response.status === 403) throw new Error(SANDBOX_FORBIDDEN_MESSAGE);
+  if (!response.ok) throw new DocumentUploadError(response.status);
 
   try {
     return parseDocumentUploadState(await response.json(), expectedUploadId);
@@ -248,9 +261,7 @@ async function readUploadState(response: Response, expectedUploadId?: string): P
 }
 
 async function readJobState(response: Response, expectedJobId?: string): Promise<DocumentJobState> {
-  if (!response.ok) {
-    throw new Error("document job was rejected");
-  }
+  rejectUnlessOk(response, "document job was rejected");
 
   try {
     return parseDocumentJobState(await response.json(), expectedJobId);
@@ -260,7 +271,8 @@ async function readJobState(response: Response, expectedJobId?: string): Promise
 }
 
 async function readJobResult(response: Response, expectedJobId?: string): Promise<DocumentJobResult> {
-  if (!response.ok) throw new Error("document result was not available");
+  if (response.status === 409) throw new DocumentResultNotReadyError();
+  rejectUnlessOk(response, "document result was not available");
   try {
     return parseDocumentJobResult(await response.json(), expectedJobId);
   } catch {

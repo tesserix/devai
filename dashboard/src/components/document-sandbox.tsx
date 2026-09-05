@@ -6,10 +6,12 @@ import { FileSearch, RefreshCw, Upload } from "lucide-react";
 import {
   createSandboxDocumentJob,
   documentJobProgress,
+  DocumentResultNotReadyError,
   getSandboxDocumentJobResult,
   getSandboxDocumentJobStatus,
   getSandboxDocumentStatus,
   DocumentUploadError,
+  SANDBOX_FORBIDDEN_MESSAGE,
   type DocumentJobResult,
   type DocumentJobState,
   uploadSandboxDocument,
@@ -22,9 +24,14 @@ const RESULT_READY_JOB_STATUSES = new Set(["partial", "review_required", "comple
 const UPLOAD_AUTO_REFRESH_LIMIT = 10;
 const JOB_AUTO_REFRESH_LIMIT = 150;
 const OCR_PROGRESS_STAGES = ["Queued", "Preparing", "Extracting", "Validating"];
+const JOB_POLL_INTERVAL_MS = 2_500;
 
 function percentage(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+function describe(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message === SANDBOX_FORBIDDEN_MESSAGE ? error.message : fallback;
 }
 
 export function DocumentSandbox() {
@@ -48,8 +55,8 @@ export function DocumentSandbox() {
       const next = await getSandboxDocumentStatus(upload.upload_id);
       setUpload(next);
       setMessage(`Sandbox inspection status: ${next.status}.`);
-    } catch {
-      setMessage("Sandbox inspection status is temporarily unavailable. Try refreshing again shortly.");
+    } catch (error) {
+      setMessage(describe(error, "Sandbox inspection status is temporarily unavailable. Try refreshing again shortly."));
     } finally {
       if (automatic) {
         refreshesRef.current += 1;
@@ -71,8 +78,8 @@ export function DocumentSandbox() {
       jobRefreshesRef.current = 0;
       setJobRefreshes(0);
       setMessage(`Sandbox OCR job status: ${next.status}.`);
-    } catch {
-      setMessage("The OCR job was rejected or is temporarily unavailable.");
+    } catch (error) {
+      setMessage(describe(error, "The OCR job was rejected or is temporarily unavailable."));
     } finally {
       setBusy(false);
     }
@@ -86,18 +93,22 @@ export function DocumentSandbox() {
     try {
       const next = await getSandboxDocumentJobStatus(job.job_id);
       setJob(next);
-      if (RESULT_READY_JOB_STATUSES.has(next.status)) {
+      if (RESULT_READY_JOB_STATUSES.has(next.status) && !result) {
         try {
           setResult(await getSandboxDocumentJobResult(next.job_id));
           setMessage(`Sandbox OCR job completed with ${next.status} evidence.`);
-        } catch {
-          setMessage(`Sandbox OCR job status: ${next.status}. Result details are not ready yet.`);
+        } catch (error) {
+          setMessage(
+            error instanceof DocumentResultNotReadyError
+              ? `Sandbox OCR job status: ${next.status}. Result details are not ready yet.`
+              : describe(error, `Sandbox OCR job status: ${next.status}. Result details could not be loaded.`),
+          );
         }
-      } else {
+      } else if (!RESULT_READY_JOB_STATUSES.has(next.status)) {
         setMessage(`Sandbox OCR job status: ${next.status}.`);
       }
-    } catch {
-      setMessage("Sandbox OCR job status is temporarily unavailable. Try refreshing again shortly.");
+    } catch (error) {
+      setMessage(describe(error, "Sandbox OCR job status is temporarily unavailable. Try refreshing again shortly."));
     } finally {
       if (automatic) {
         jobRefreshesRef.current += 1;
@@ -116,12 +127,14 @@ export function DocumentSandbox() {
   }, [busy, refreshes, upload]);
 
   useEffect(() => {
-    if (!job || TERMINAL_JOB_STATUSES.has(job.status) || jobRefreshes >= JOB_AUTO_REFRESH_LIMIT) return;
+    if (!job || jobRefreshes >= JOB_AUTO_REFRESH_LIMIT) return;
+    // Keep polling a result-bearing terminal status until the result itself has arrived.
+    if (TERMINAL_JOB_STATUSES.has(job.status) && (result || !RESULT_READY_JOB_STATUSES.has(job.status))) return;
     const timer = window.setTimeout(() => {
       void refreshJob(true);
-    }, 2_000);
+    }, JOB_POLL_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [busy, job, jobRefreshes]);
+  }, [busy, job, jobRefreshes, result]);
 
   async function submit() {
     if (!file || busy) return;
@@ -143,7 +156,7 @@ export function DocumentSandbox() {
       setMessage(
         error instanceof DocumentUploadError
           ? error.message
-          : "The upload service is temporarily unavailable. Try again shortly.",
+          : describe(error, "The upload service is temporarily unavailable. Try again shortly."),
       );
     } finally {
       setBusy(false);
