@@ -32,6 +32,11 @@ export type DocumentJobState = {
   status: (typeof DOCUMENT_JOB_STATUSES)[number];
 };
 
+export type DocumentJobProgress = {
+  stage: "queued" | "preparing" | "extracting" | "validating" | "complete" | "attention" | "cancelled";
+  message: string;
+};
+
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 type ConfidenceDimensions = {
@@ -83,6 +88,30 @@ export function documentUploadFailureMessage(status: number): string {
   }
   if (status === 429) return "Sandbox upload capacity is busy. Wait a moment, then try again.";
   return "The upload service is temporarily unavailable. Try again shortly.";
+}
+
+export function documentJobProgress(status: DocumentJobState["status"]): DocumentJobProgress {
+  switch (status) {
+    case "accepted":
+      return { stage: "queued", message: "Queued for durable OCR execution." };
+    case "inspecting":
+      return { stage: "preparing", message: "Preparing the document for OCR." };
+    case "processing":
+      return { stage: "extracting", message: "Extracting text, layout, and evidence." };
+    case "validating":
+      return { stage: "validating", message: "Validating extracted evidence." };
+    case "completed":
+      return { stage: "complete", message: "OCR completed. Result details are ready." };
+    case "partial":
+    case "review_required":
+      return { stage: "attention", message: "OCR finished with items requiring attention." };
+    case "cancelling":
+      return { stage: "cancelled", message: "Cancelling durable OCR execution." };
+    case "cancelled":
+      return { stage: "cancelled", message: "OCR was cancelled." };
+    case "rejected":
+      return { stage: "attention", message: "OCR could not process this document." };
+  }
 }
 
 function isDocumentUploadStatus(value: unknown): value is DocumentUploadStatus {

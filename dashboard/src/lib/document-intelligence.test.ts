@@ -2,11 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  documentJobProgress,
   documentUploadFailureMessage,
   parseDocumentJobResult,
   parseDocumentJobState,
   parseDocumentUploadState,
 } from "./document-intelligence.ts";
+
+test("derives progress only from the durable OCR lifecycle", () => {
+  assert.deepEqual(documentJobProgress("accepted"), {
+    stage: "queued",
+    message: "Queued for durable OCR execution.",
+  });
+  assert.deepEqual(documentJobProgress("processing"), {
+    stage: "extracting",
+    message: "Extracting text, layout, and evidence.",
+  });
+  assert.deepEqual(documentJobProgress("completed"), {
+    stage: "complete",
+    message: "OCR completed. Result details are ready.",
+  });
+});
 
 test("maps upload failures to safe actionable guidance", () => {
   assert.equal(documentUploadFailureMessage(413), "This file is larger than the sandbox's 100 MB upload limit.");
