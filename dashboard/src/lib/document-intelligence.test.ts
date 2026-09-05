@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseDocumentJobState, parseDocumentUploadState } from "./document-intelligence.ts";
+import { parseDocumentJobResult, parseDocumentJobState, parseDocumentUploadState } from "./document-intelligence.ts";
 
 test("accepts the minimal opaque upload lifecycle response", () => {
   assert.deepEqual(
@@ -42,5 +42,47 @@ test("rejects job lifecycle response fields that could expose document data", ()
   assert.throws(
     () => parseDocumentJobState({ job_id: "job_01TEST", status: "completed", text: "private" }),
     /invalid document job response/,
+  );
+});
+
+test("accepts a bounded document result diagnostics response", () => {
+  assert.deepEqual(
+    parseDocumentJobResult({
+      job_id: "job_01TEST",
+      summary: { page_count: 1, observation_count: 4, field_count: 2, table_count: 0, citation_count: 2 },
+      confidence: { input_quality: 0.9, ocr: 0.91, classification: 0.92, extraction: 0.93, validation: 1, overall: 0.92 },
+      warnings: ["low_quality_scan"],
+      validation_failures: [{ code: "total_mismatch", severity: "warning" }],
+      provider: "tesserix",
+      model_version: "ocr-1",
+      processing_profile_version: "printed-en-v1",
+      duration_ms: 42,
+      cost: { currency: "AUD", decimal: "0.0012" },
+      fields: [{ name: "total", value: { decimal: "12.50" }, confidence: 0.97, pages: [1] }],
+      text_preview: "Total 12.50",
+      text_truncated: false,
+    }, "job_01TEST"),
+    {
+      job_id: "job_01TEST",
+      summary: { page_count: 1, observation_count: 4, field_count: 2, table_count: 0, citation_count: 2 },
+      confidence: { input_quality: 0.9, ocr: 0.91, classification: 0.92, extraction: 0.93, validation: 1, overall: 0.92 },
+      warnings: ["low_quality_scan"],
+      validation_failures: [{ code: "total_mismatch", severity: "warning" }],
+      provider: "tesserix",
+      model_version: "ocr-1",
+      processing_profile_version: "printed-en-v1",
+      duration_ms: 42,
+      cost: { currency: "AUD", decimal: "0.0012" },
+      fields: [{ name: "total", value: { decimal: "12.50" }, confidence: 0.97, pages: [1] }],
+      text_preview: "Total 12.50",
+      text_truncated: false,
+    },
+  );
+});
+
+test("rejects unbounded or unexpected document result fields", () => {
+  assert.throws(
+    () => parseDocumentJobResult({ job_id: "job_01TEST", object_uri: "gs://private" }, "job_01TEST"),
+    /invalid document result response/,
   );
 });

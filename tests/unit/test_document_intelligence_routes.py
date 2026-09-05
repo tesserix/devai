@@ -80,6 +80,51 @@ async def test_job_status_proxies_only_the_scoped_opaque_lifecycle(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_job_result_proxies_only_the_bounded_sandbox_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = FastAPI()
+    app.state.config = SimpleNamespace(
+        document_intelligence_service_url=_INTERNAL_OCR_URL,
+        document_intelligence_job_service_url=_INTERNAL_OCR_JOB_URL,
+        document_intelligence_key_id="devai-v1",
+        document_intelligence_signing_key=_TEST_SIGNING_KEY,
+        document_intelligence_timeout_seconds=5.0,
+    )
+    app.include_router(routes.router)
+
+    async def principal(_: object) -> Principal:
+        return Principal(email="user@example.test", tenant_id="tenant-a")
+
+    class FakeClient:
+        async def get_job_result(self, *_: object, **kwargs: object) -> dict[str, object]:
+            assert kwargs == {"job_id": "job_01TEST"}
+            return {
+                "job_id": "job_01TEST",
+                "summary": {"page_count": 1, "observation_count": 2, "field_count": 1, "table_count": 0, "citation_count": 1},
+                "confidence": None,
+                "warnings": [],
+                "validation_failures": [],
+                "provider": "tesserix",
+                "model_version": "ocr-1",
+                "processing_profile_version": "printed-en-v1",
+                "duration_ms": 42,
+                "cost": None,
+                "fields": [],
+                "text_preview": "safe literal preview",
+                "text_truncated": False,
+            }
+
+    monkeypatch.setattr(routes, "require_principal", principal)
+    monkeypatch.setattr(routes, "_client", lambda _: FakeClient())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/document-intelligence/jobs/job_01TEST/result")
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["page_count"] == 1
+    assert "object_bucket" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_upload_intent_requires_a_verified_principal(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     app.state.config = SimpleNamespace(

@@ -793,7 +793,7 @@ requires-dist = [
     { name = "slack-sdk", specifier = ">=3.43.0,<4" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "temporalio", specifier = ">=1.32.0" },
-    { name = "tesserix-adk", marker = "extra == 'kit'", git = "https://github.com/tesserix/agent-development-kit?rev=v0.54.0" },
+    { name = "tesserix-adk", marker = "extra == 'kit'", git = "https://github.com/tesserix/agent-development-kit?rev=07f37da3a38cafbe978d296a2954ab543ee22ce9" },
     { name = "typer", extras = ["all"], specifier = ">=0.27.0" },
     { name = "types-jsonschema", marker = "extra == 'dev'", specifier = ">=4.26.0.20250822" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
@@ -3786,7 +3786,7 @@ wheels = [
 [[package]]
 name = "tesserix-adk"
 version = "0.54.0"
-source = { git = "https://github.com/tesserix/agent-development-kit?rev=v0.54.0#07f37da3a38cafbe978d296a2954ab543ee22ce9" }
+source = { git = "https://github.com/tesserix/agent-development-kit?rev=07f37da3a38cafbe978d296a2954ab543ee22ce9#07f37da3a38cafbe978d296a2954ab543ee22ce9" }
 dependencies = [
     { name = "httpx" },
     { name = "opentelemetry-api" },

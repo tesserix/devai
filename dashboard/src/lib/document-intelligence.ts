@@ -32,6 +32,39 @@ export type DocumentJobState = {
   status: (typeof DOCUMENT_JOB_STATUSES)[number];
 };
 
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+type ConfidenceDimensions = {
+  input_quality: number;
+  ocr: number;
+  classification: number;
+  extraction: number;
+  validation: number;
+  overall: number;
+};
+
+export type DocumentJobResult = {
+  job_id: string;
+  summary: {
+    page_count: number;
+    observation_count: number;
+    field_count: number;
+    table_count: number;
+    citation_count: number;
+  };
+  confidence: ConfidenceDimensions | null;
+  warnings: string[];
+  validation_failures: { code: string; severity: "warning" | "error" }[];
+  provider: string | null;
+  model_version: string | null;
+  processing_profile_version: string | null;
+  duration_ms: number | null;
+  cost: { currency: string; decimal: string } | null;
+  fields: { name: string; value: JsonValue; confidence: number; pages: number[] }[];
+  text_preview: string;
+  text_truncated: boolean;
+};
+
 function isDocumentUploadStatus(value: unknown): value is DocumentUploadStatus {
   return typeof value === "string" && DOCUMENT_UPLOAD_STATUSES.includes(value as DocumentUploadStatus);
 }
@@ -86,6 +119,73 @@ export function parseDocumentJobState(value: unknown, expectedJobId?: string): D
   return { job_id: response.job_id, status: response.status };
 }
 
+function isScore(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isInteger(value) && typeof value === "number" && value >= 0;
+}
+
+function isJsonValue(value: unknown, depth = 0): value is JsonValue {
+  if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (depth >= 10 || Array.isArray(value) && value.length > 100) return false;
+  if (Array.isArray(value)) return value.every((item) => isJsonValue(item, depth + 1));
+  return typeof value === "object" && Object.keys(value).length <= 100 && Object.values(value).every((item) => isJsonValue(item, depth + 1));
+}
+
+function isPageNumbers(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every(isCount);
+}
+
+export function parseDocumentJobResult(value: unknown, expectedJobId?: string): DocumentJobResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid document result response");
+  const response = value as Record<string, unknown>;
+  const expectedKeys = [
+    "job_id", "summary", "confidence", "warnings", "validation_failures", "provider", "model_version",
+    "processing_profile_version", "duration_ms", "cost", "fields", "text_preview", "text_truncated",
+  ];
+  if (Object.keys(response).length !== expectedKeys.length || !expectedKeys.every((key) => key in response)
+    || typeof response.job_id !== "string" || !response.job_id.startsWith("job_") || response.job_id.length > 256
+    || expectedJobId !== undefined && response.job_id !== expectedJobId || typeof response.text_preview !== "string"
+    || response.text_preview.length > 10_000 || typeof response.text_truncated !== "boolean") {
+    throw new Error("invalid document result response");
+  }
+  const summary = response.summary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) throw new Error("invalid document result response");
+  const summaryKeys = ["page_count", "observation_count", "field_count", "table_count", "citation_count"];
+  if (Object.keys(summary).length !== summaryKeys.length || !summaryKeys.every((key) => isCount((summary as Record<string, unknown>)[key]))) {
+    throw new Error("invalid document result response");
+  }
+  const confidence = response.confidence;
+  const confidenceKeys = ["input_quality", "ocr", "classification", "extraction", "validation", "overall"];
+  if (confidence !== null && (!confidence || typeof confidence !== "object" || Array.isArray(confidence)
+    || Object.keys(confidence).length !== confidenceKeys.length || !confidenceKeys.every((key) => isScore((confidence as Record<string, unknown>)[key])))) {
+    throw new Error("invalid document result response");
+  }
+  if (!Array.isArray(response.warnings) || response.warnings.length > 100 || !response.warnings.every((item) => typeof item === "string")
+    || !Array.isArray(response.validation_failures) || response.validation_failures.length > 100
+    || !response.validation_failures.every((item) => item && typeof item === "object" && !Array.isArray(item)
+      && Object.keys(item).length === 2 && typeof (item as Record<string, unknown>).code === "string"
+      && ["warning", "error"].includes((item as Record<string, unknown>).severity as string))
+    || !Array.isArray(response.fields) || response.fields.length > 100
+    || !response.fields.every((item) => item && typeof item === "object" && !Array.isArray(item)
+      && Object.keys(item).length === 4 && typeof (item as Record<string, unknown>).name === "string"
+      && isScore((item as Record<string, unknown>).confidence) && isJsonValue((item as Record<string, unknown>).value)
+      && isPageNumbers((item as Record<string, unknown>).pages))) {
+    throw new Error("invalid document result response");
+  }
+  for (const key of ["provider", "model_version", "processing_profile_version"] as const) {
+    if (response[key] !== null && typeof response[key] !== "string") throw new Error("invalid document result response");
+  }
+  if (response.duration_ms !== null && !isCount(response.duration_ms)) throw new Error("invalid document result response");
+  if (response.cost !== null && (!response.cost || typeof response.cost !== "object" || Array.isArray(response.cost)
+    || Object.keys(response.cost).length !== 2 || typeof (response.cost as Record<string, unknown>).currency !== "string"
+    || typeof (response.cost as Record<string, unknown>).decimal !== "string")) throw new Error("invalid document result response");
+  return response as DocumentJobResult;
+}
+
 async function readUploadState(response: Response, expectedUploadId?: string): Promise<DocumentUploadState> {
   if (!response.ok) {
     throw new Error("document request was rejected");
@@ -107,6 +207,15 @@ async function readJobState(response: Response, expectedJobId?: string): Promise
     return parseDocumentJobState(await response.json(), expectedJobId);
   } catch {
     throw new Error("invalid document job response");
+  }
+}
+
+async function readJobResult(response: Response, expectedJobId?: string): Promise<DocumentJobResult> {
+  if (!response.ok) throw new Error("document result was not available");
+  try {
+    return parseDocumentJobResult(await response.json(), expectedJobId);
+  } catch {
+    throw new Error("invalid document result response");
   }
 }
 
@@ -143,4 +252,11 @@ export async function getSandboxDocumentJobStatus(jobId: string): Promise<Docume
     credentials: "include",
   });
   return readJobState(response, jobId);
+}
+
+export async function getSandboxDocumentJobResult(jobId: string): Promise<DocumentJobResult> {
+  const response = await fetch(`/api/document-intelligence/jobs/${encodeURIComponent(jobId)}/result`, {
+    credentials: "include",
+  });
+  return readJobResult(response, jobId);
 }

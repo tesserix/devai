@@ -102,6 +102,19 @@ async def get_document_job_status(request: Request, job_id: str) -> dict[str, st
         raise HTTPException(status_code=503, detail="document service is unavailable") from error
 
 
+@router.get("/jobs/{job_id}/result")
+async def get_document_job_result(request: Request, job_id: str) -> dict[str, Any]:
+    principal = await require_principal(request)
+    try:
+        client = _client(request)
+        async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
+            return await client.get_job_result(http, principal, job_id=job_id)
+    except DocumentIntelligenceError as error:
+        raise HTTPException(status_code=422, detail="document result is unavailable") from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="document service is unavailable") from error
+
+
 class UploadTooLargeError(ValueError):
     """Raised when a sandbox upload exceeds the service's hard size limit."""
 
