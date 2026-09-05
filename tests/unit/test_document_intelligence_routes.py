@@ -81,6 +81,59 @@ async def test_job_status_proxies_only_the_scoped_opaque_lifecycle(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_cancel_job_proxies_only_the_scoped_opaque_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = FastAPI()
+    app.state.config = SimpleNamespace(
+        document_intelligence_service_url=_INTERNAL_OCR_URL,
+        document_intelligence_job_service_url=_INTERNAL_OCR_JOB_URL,
+        document_intelligence_key_id="devai-v1",
+        document_intelligence_signing_key=_TEST_SIGNING_KEY,
+        document_intelligence_timeout_seconds=5.0,
+    )
+    app.include_router(routes.router)
+
+    async def principal(_: object) -> Principal:
+        return Principal(email="user@example.test", tenant_id="tenant-a")
+
+    class FakeClient:
+        async def cancel_job(self, *_: object, **kwargs: object) -> dict[str, str]:
+            assert kwargs == {"job_id": "job_01TEST"}
+            return {"job_id": "job_01TEST", "status": "cancelling"}
+
+    monkeypatch.setattr(routes, "require_principal", principal)
+    monkeypatch.setattr(routes, "_client", lambda _: FakeClient())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/document-intelligence/jobs/job_01TEST/cancel")
+
+    assert response.status_code == 200
+    assert response.json() == {"job_id": "job_01TEST", "status": "cancelling"}
+
+
+@pytest.mark.asyncio
+async def test_cancel_job_requires_a_verified_principal(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = FastAPI()
+    app.state.config = SimpleNamespace(
+        document_intelligence_service_url=_INTERNAL_OCR_URL,
+        document_intelligence_job_service_url=_INTERNAL_OCR_JOB_URL,
+        document_intelligence_key_id="devai-v1",
+        document_intelligence_signing_key=_TEST_SIGNING_KEY,
+        document_intelligence_timeout_seconds=5.0,
+    )
+    app.include_router(routes.router)
+
+    async def missing_principal(_: object) -> Principal:
+        raise routes.HTTPException(status_code=401, detail="authentication required")
+
+    monkeypatch.setattr(routes, "require_principal", missing_principal)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/document-intelligence/jobs/job_01TEST/cancel")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_job_result_proxies_only_the_bounded_sandbox_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     app.state.config = SimpleNamespace(

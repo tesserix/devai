@@ -32,6 +32,11 @@ export type DocumentJobState = {
   status: (typeof DOCUMENT_JOB_STATUSES)[number];
 };
 
+export type DocumentSandboxSession = {
+  upload_id?: string;
+  job_id?: string;
+};
+
 export type DocumentJobProgress = {
   stage: "queued" | "preparing" | "extracting" | "validating" | "complete" | "attention" | "cancelled";
   message: string;
@@ -114,12 +119,48 @@ export function documentJobProgress(status: DocumentJobState["status"]): Documen
   }
 }
 
+export function canCancelDocumentJob(status: DocumentJobState["status"]): boolean {
+  return !["cancelling", "cancelled", "rejected", "partial", "review_required", "completed"].includes(status);
+}
+
+export function isDocumentJobActive(status: DocumentJobState["status"]): boolean {
+  return !["cancelled", "rejected", "partial", "review_required", "completed"].includes(status);
+}
+
 function isDocumentUploadStatus(value: unknown): value is DocumentUploadStatus {
   return typeof value === "string" && DOCUMENT_UPLOAD_STATUSES.includes(value as DocumentUploadStatus);
 }
 
 function isDocumentJobStatus(value: unknown): value is DocumentJobState["status"] {
   return typeof value === "string" && DOCUMENT_JOB_STATUSES.includes(value as DocumentJobState["status"]);
+}
+
+function isOpaqueSandboxIdentifier(value: unknown, prefix: "upl_" | "job_"): value is string {
+  return typeof value === "string" && value.startsWith(prefix) && value.length <= 256;
+}
+
+export function parseDocumentSandboxSession(value: string | null): DocumentSandboxSession | null {
+  if (value === null) return null;
+
+  try {
+    const session: unknown = JSON.parse(value);
+    if (!session || typeof session !== "object" || Array.isArray(session)) return null;
+    const fields = session as Record<string, unknown>;
+    const keys = Object.keys(fields);
+    if (keys.length === 0 || keys.length > 2 || !keys.every((key) => key === "upload_id" || key === "job_id")) return null;
+    if ("upload_id" in fields && !isOpaqueSandboxIdentifier(fields.upload_id, "upl_")) return null;
+    if ("job_id" in fields && !isOpaqueSandboxIdentifier(fields.job_id, "job_")) return null;
+    return {
+      ...(typeof fields.upload_id === "string" ? { upload_id: fields.upload_id } : {}),
+      ...(typeof fields.job_id === "string" ? { job_id: fields.job_id } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function serializeDocumentSandboxSession(session: DocumentSandboxSession): string {
+  return JSON.stringify(session);
 }
 
 export function parseDocumentUploadState(value: unknown, expectedUploadId?: string): DocumentUploadState {
@@ -310,6 +351,14 @@ export async function createSandboxDocumentJob(uploadId: string): Promise<Docume
 
 export async function getSandboxDocumentJobStatus(jobId: string): Promise<DocumentJobState> {
   const response = await fetch(`/api/document-intelligence/jobs/${encodeURIComponent(jobId)}`, {
+    credentials: "include",
+  });
+  return readJobState(response, jobId);
+}
+
+export async function cancelSandboxDocumentJob(jobId: string): Promise<DocumentJobState> {
+  const response = await fetch(`/api/document-intelligence/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
     credentials: "include",
   });
   return readJobState(response, jobId);

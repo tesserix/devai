@@ -1,17 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FileSearch, RefreshCw, Upload } from "lucide-react";
+import { FileSearch, RefreshCw, Upload, X } from "lucide-react";
 
 import {
+  canCancelDocumentJob,
+  cancelSandboxDocumentJob,
   createSandboxDocumentJob,
   documentJobProgress,
   DocumentResultNotReadyError,
   getSandboxDocumentJobResult,
   getSandboxDocumentJobStatus,
   getSandboxDocumentStatus,
+  isDocumentJobActive,
   DocumentUploadError,
+  parseDocumentSandboxSession,
   SANDBOX_FORBIDDEN_MESSAGE,
+  serializeDocumentSandboxSession,
   type DocumentJobResult,
   type DocumentJobState,
   uploadSandboxDocument,
@@ -25,6 +30,14 @@ const UPLOAD_AUTO_REFRESH_LIMIT = 10;
 const JOB_AUTO_REFRESH_LIMIT = 150;
 const OCR_PROGRESS_STAGES = ["Queued", "Preparing", "Extracting", "Validating"];
 const JOB_POLL_INTERVAL_MS = 2_500;
+const MAXIMUM_ACTIVITY_EVENTS = 20;
+const SANDBOX_SESSION_STORAGE_KEY = "devai.document-intelligence.sandbox-session.v1";
+
+type ActivityEvent = {
+  id: number;
+  message: string;
+  occurredAt: string;
+};
 
 function percentage(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -39,15 +52,77 @@ export function DocumentSandbox() {
   const [upload, setUpload] = useState<DocumentUploadState | null>(null);
   const [job, setJob] = useState<DocumentJobState | null>(null);
   const [result, setResult] = useState<DocumentJobResult | null>(null);
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [busy, setBusy] = useState(false);
+  const [restoring, setRestoring] = useState(true);
   const [refreshes, setRefreshes] = useState(0);
   const [jobRefreshes, setJobRefreshes] = useState(0);
   const [message, setMessage] = useState("Choose a document to begin a disposable sandbox upload.");
   const refreshesRef = useRef(0);
   const jobRefreshesRef = useRef(0);
+  const activityEventId = useRef(0);
+
+  function recordActivity(message: string) {
+    activityEventId.current += 1;
+    setActivityEvents((events) => [
+      ...events,
+      { id: activityEventId.current, message, occurredAt: new Date().toISOString() },
+    ].slice(-MAXIMUM_ACTIVITY_EVENTS));
+  }
+
+  function persistSession(session: { upload_id: string; job_id?: string }) {
+    try {
+      window.sessionStorage.setItem(SANDBOX_SESSION_STORAGE_KEY, serializeDocumentSandboxSession(session));
+    } catch {
+      recordActivity("This browser cannot retain the sandbox session after a refresh.");
+    }
+  }
+
+  useEffect(() => {
+    const session = parseDocumentSandboxSession(window.sessionStorage.getItem(SANDBOX_SESSION_STORAGE_KEY));
+    if (!session) {
+      setRestoring(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMessage("Restoring the last sandbox OCR session…");
+    void (async () => {
+      try {
+        const [restoredUpload, restoredJob] = await Promise.all([
+          session.upload_id ? getSandboxDocumentStatus(session.upload_id) : Promise.resolve(null),
+          session.job_id ? getSandboxDocumentJobStatus(session.job_id) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        if (restoredUpload) setUpload(restoredUpload);
+        if (restoredJob) {
+          setJob(restoredJob);
+          recordActivity(`OCR job status restored: ${restoredJob.status}.`);
+          if (RESULT_READY_JOB_STATUSES.has(restoredJob.status)) {
+            try {
+              setResult(await getSandboxDocumentJobResult(restoredJob.job_id));
+            } catch (error) {
+              if (!(error instanceof DocumentResultNotReadyError)) throw error;
+            }
+          }
+        }
+        if (!cancelled) setMessage("The last sandbox OCR session was restored.");
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(describe(error, "The previous sandbox OCR session could not be restored. Try refreshing again shortly."));
+        }
+      } finally {
+        if (!cancelled) setRestoring(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function refreshStatus(automatic = false) {
-    if (!upload || busy) return;
+    if (!upload || busy || restoring) return;
     if (automatic && refreshesRef.current >= UPLOAD_AUTO_REFRESH_LIMIT) return;
 
     setBusy(true);
@@ -57,6 +132,7 @@ export function DocumentSandbox() {
       setMessage(`Sandbox inspection status: ${next.status}.`);
     } catch (error) {
       setMessage(describe(error, "Sandbox inspection status is temporarily unavailable. Try refreshing again shortly."));
+      recordActivity("Inspection status refresh could not be completed.");
     } finally {
       if (automatic) {
         refreshesRef.current += 1;
@@ -67,17 +143,19 @@ export function DocumentSandbox() {
   }
 
   async function startJob() {
-    if (!upload || upload.status !== "accepted" || busy) return;
+    if (!upload || upload.status !== "accepted" || busy || restoring) return;
 
     setBusy(true);
     setMessage("Creating an OCR job through the protected DevAI sandbox…");
     try {
       const next = await createSandboxDocumentJob(upload.upload_id);
       setJob(next);
+      persistSession({ upload_id: upload.upload_id, job_id: next.job_id });
       setResult(null);
       jobRefreshesRef.current = 0;
       setJobRefreshes(0);
       setMessage(`Sandbox OCR job status: ${next.status}.`);
+      recordActivity(`OCR job status reported: ${next.status}.`);
     } catch (error) {
       setMessage(describe(error, "The OCR job was rejected or is temporarily unavailable."));
     } finally {
@@ -86,13 +164,14 @@ export function DocumentSandbox() {
   }
 
   async function refreshJob(automatic = false) {
-    if (!job || busy) return;
+    if (!job || busy || restoring) return;
     if (automatic && jobRefreshesRef.current >= JOB_AUTO_REFRESH_LIMIT) return;
 
     setBusy(true);
     try {
       const next = await getSandboxDocumentJobStatus(job.job_id);
       setJob(next);
+      if (next.status !== job.status) recordActivity(`OCR job status reported: ${next.status}.`);
       if (RESULT_READY_JOB_STATUSES.has(next.status) && !result) {
         try {
           setResult(await getSandboxDocumentJobResult(next.job_id));
@@ -109,11 +188,30 @@ export function DocumentSandbox() {
       }
     } catch (error) {
       setMessage(describe(error, "Sandbox OCR job status is temporarily unavailable. Try refreshing again shortly."));
+      recordActivity("OCR status refresh could not be completed.");
     } finally {
       if (automatic) {
         jobRefreshesRef.current += 1;
         setJobRefreshes(jobRefreshesRef.current);
       }
+      setBusy(false);
+    }
+  }
+
+  async function cancelJob() {
+    if (!job || !canCancelDocumentJob(job.status) || busy || restoring) return;
+
+    setBusy(true);
+    setMessage("Requesting durable OCR cancellation…");
+    try {
+      const next = await cancelSandboxDocumentJob(job.job_id);
+      setJob(next);
+      setMessage(`Sandbox OCR job status: ${next.status}.`);
+      recordActivity(`OCR cancellation status reported: ${next.status}.`);
+    } catch {
+      setMessage("The OCR cancellation request is temporarily unavailable. Try again shortly.");
+      recordActivity("OCR cancellation request could not be completed.");
+    } finally {
       setBusy(false);
     }
   }
@@ -124,7 +222,7 @@ export function DocumentSandbox() {
       void refreshStatus(true);
     }, 2_000);
     return () => window.clearTimeout(timer);
-  }, [busy, refreshes, upload]);
+  }, [busy, refreshes, restoring, upload]);
 
   useEffect(() => {
     if (!job || jobRefreshes >= JOB_AUTO_REFRESH_LIMIT) return;
@@ -134,15 +232,17 @@ export function DocumentSandbox() {
       void refreshJob(true);
     }, JOB_POLL_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [busy, job, jobRefreshes, result]);
+  }, [busy, job, jobRefreshes, restoring, result]);
 
   async function submit() {
-    if (!file || busy) return;
+    if (!file || busy || restoring) return;
 
     setBusy(true);
     setUpload(null);
     setJob(null);
     setResult(null);
+    setActivityEvents([]);
+    activityEventId.current = 0;
     refreshesRef.current = 0;
     setRefreshes(0);
     jobRefreshesRef.current = 0;
@@ -151,7 +251,9 @@ export function DocumentSandbox() {
     try {
       const next = await uploadSandboxDocument(file);
       setUpload(next);
+      persistSession({ upload_id: next.upload_id });
       setMessage(`Sandbox upload status: ${next.status}.`);
+      recordActivity(`Inspection status reported: ${next.status}.`);
     } catch (error) {
       setMessage(
         error instanceof DocumentUploadError
@@ -163,9 +265,11 @@ export function DocumentSandbox() {
     }
   }
 
-  const canRefresh = upload !== null && !busy;
-  const canStartJob = upload?.status === "accepted" && !job && !busy;
-  const canRefreshJob = job !== null && !busy;
+  const jobInProgress = job !== null && isDocumentJobActive(job.status);
+  const canRefresh = upload !== null && !busy && !restoring && !jobInProgress;
+  const canStartJob = upload?.status === "accepted" && !jobInProgress && !busy && !restoring;
+  const canRefreshJob = jobInProgress && !busy && !restoring;
+  const canCancelJob = job !== null && canCancelDocumentJob(job.status) && !busy && !restoring;
   const terminal = upload !== null && TERMINAL_UPLOAD_STATUSES.has(upload.status);
   const progress = job ? documentJobProgress(job.status) : null;
   const activeProgressIndex = progress
@@ -199,6 +303,7 @@ export function DocumentSandbox() {
             id="document"
             type="file"
             accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp"
+            disabled={busy || restoring || jobInProgress}
             onChange={(event) => {
               const selectedFile = event.target.files?.item(0) ?? null;
               setFile(selectedFile);
@@ -217,7 +322,7 @@ export function DocumentSandbox() {
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3">
-          <button type="button" className="btn-primary" disabled={!file || busy} onClick={submit}>
+          <button type="button" className="btn-primary" disabled={!file || busy || restoring || jobInProgress} onClick={submit}>
             <Upload className="h-4 w-4" /> {busy && !upload ? "Uploading selected document…" : "2. Upload selected document"}
           </button>
           <button type="button" className="btn-secondary" disabled={!canRefresh} onClick={() => void refreshStatus()}>
@@ -229,7 +334,16 @@ export function DocumentSandbox() {
           <button type="button" className="btn-secondary" disabled={!canRefreshJob} onClick={() => void refreshJob()}>
             <RefreshCw className="h-4 w-4" /> Refresh OCR
           </button>
+          <button type="button" className="btn-secondary" disabled={!canCancelJob} onClick={() => void cancelJob()}>
+            <X className="h-4 w-4" /> Cancel OCR
+          </button>
         </div>
+
+        {jobInProgress && (
+          <p className="mt-3 text-xs" style={{ color: "var(--ink-muted)" }}>
+            OCR is active. Document selection, upload, inspection refresh, and starting another OCR job are locked until this job finishes or is cancelled.
+          </p>
+        )}
 
         <div className="mt-6 rounded-md border px-4 py-3 text-sm" style={{ borderColor: "var(--border-subtle)" }} aria-live="polite">
           <p style={{ color: "var(--ink-soft)" }}>{message}</p>
@@ -272,6 +386,22 @@ export function DocumentSandbox() {
                         </li>
                       );
                     })}
+                  </ol>
+                </section>
+              )}
+              {activityEvents.length > 0 && (
+                <section className="mt-4" aria-label="OCR activity events" aria-live="polite">
+                  <p className="label-eyebrow">OCR activity events</p>
+                  <p className="mt-1 text-xs" style={{ color: "var(--ink-muted)" }}>
+                    Safe lifecycle events observed by this browser session. Worker logs and document contents are not exposed here.
+                  </p>
+                  <ol className="mt-3 space-y-2 border-l pl-4 text-xs" style={{ borderColor: "var(--border-subtle)" }}>
+                    {activityEvents.map((event) => (
+                      <li key={event.id}>
+                        <p style={{ color: "var(--ink-strong)" }}>{event.message}</p>
+                        <p className="mt-1 font-mono" style={{ color: "var(--ink-muted)" }}>{new Date(event.occurredAt).toLocaleTimeString()}</p>
+                      </li>
+                    ))}
                   </ol>
                 </section>
               )}

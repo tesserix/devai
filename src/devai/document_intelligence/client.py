@@ -221,6 +221,33 @@ class DocumentIntelligenceClient:
             raise DocumentIntelligenceError("document-intelligence response is invalid")
         return {"job_id": job_id, "status": str(payload["status"])}
 
+    async def cancel_job(
+        self,
+        http: httpx.AsyncClient,
+        principal: Principal,
+        *,
+        job_id: str,
+    ) -> dict[str, str]:
+        if not _JOB_ID_PATTERN.fullmatch(job_id):
+            raise DocumentIntelligenceError("document job identifier is invalid")
+        path = f"/v1/ocr/jobs/{job_id}/cancel"
+        response = await http.post(
+            f"{self._job_base_url}{path}",
+            headers=self._signed_headers(principal, "POST", path),
+        )
+        if response.is_error:
+            raise DocumentIntelligenceError(f"document-intelligence request failed with status {response.status_code}")
+        payload = response.json()
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"job_id", "status", "created_at"}
+            or payload.get("job_id") != job_id
+            or payload.get("status") not in _JOB_STATUSES
+            or not isinstance(payload.get("created_at"), str)
+        ):
+            raise DocumentIntelligenceError("document-intelligence response is invalid")
+        return {"job_id": job_id, "status": str(payload["status"])}
+
     async def get_job_result(
         self,
         http: httpx.AsyncClient,

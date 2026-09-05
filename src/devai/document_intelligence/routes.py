@@ -116,6 +116,19 @@ async def get_document_job_status(request: Request, job_id: str) -> dict[str, st
         raise HTTPException(status_code=503, detail="document service is unavailable") from error
 
 
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_document_job(request: Request, job_id: str) -> dict[str, str]:
+    principal = await require_principal(request)
+    try:
+        client = _client(request)
+        async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
+            return await client.cancel_job(http, principal, job_id=job_id)
+    except DocumentIntelligenceError as error:
+        raise HTTPException(status_code=422, detail="document job cancellation was rejected") from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="document service is unavailable") from error
+
+
 @router.get("/jobs/{job_id}/result")
 async def get_document_job_result(request: Request, job_id: str) -> dict[str, Any]:
     principal = await _sandbox_principal(request)

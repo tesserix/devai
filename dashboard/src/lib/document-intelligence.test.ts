@@ -2,12 +2,57 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  cancelSandboxDocumentJob,
+  canCancelDocumentJob,
   documentJobProgress,
+  isDocumentJobActive,
   documentUploadFailureMessage,
   parseDocumentJobResult,
   parseDocumentJobState,
+  parseDocumentSandboxSession,
   parseDocumentUploadState,
 } from "./document-intelligence.ts";
+
+test("restores only opaque sandbox identifiers from a browser session", () => {
+  assert.deepEqual(
+    parseDocumentSandboxSession('{"upload_id":"upl_01TEST","job_id":"job_01TEST"}'),
+    { upload_id: "upl_01TEST", job_id: "job_01TEST" },
+  );
+});
+
+test("rejects browser session data that includes document content or invalid identifiers", () => {
+  assert.equal(parseDocumentSandboxSession('{"upload_id":"upl_01TEST","text":"private"}'), null);
+  assert.equal(parseDocumentSandboxSession('{"job_id":"not-a-job"}'), null);
+  assert.equal(parseDocumentSandboxSession("not json"), null);
+});
+
+test("allows cancellation only while an OCR job is non-terminal", () => {
+  assert.equal(canCancelDocumentJob("accepted"), true);
+  assert.equal(canCancelDocumentJob("processing"), true);
+  assert.equal(canCancelDocumentJob("cancelling"), false);
+  assert.equal(canCancelDocumentJob("completed"), false);
+  assert.equal(canCancelDocumentJob("cancelled"), false);
+  assert.equal(isDocumentJobActive("cancelling"), true);
+  assert.equal(isDocumentJobActive("cancelled"), false);
+});
+
+test("cancels a job through the scoped sandbox endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let method = "";
+  let path = "";
+  globalThis.fetch = async (input, init) => {
+    method = init?.method ?? "GET";
+    path = String(input);
+    return new Response(JSON.stringify({ job_id: "job_01TEST", status: "cancelling" }), { status: 200 });
+  };
+  try {
+    assert.deepEqual(await cancelSandboxDocumentJob("job_01TEST"), { job_id: "job_01TEST", status: "cancelling" });
+    assert.equal(method, "POST");
+    assert.equal(path, "/api/document-intelligence/jobs/job_01TEST/cancel");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("derives progress only from the durable OCR lifecycle", () => {
   assert.deepEqual(documentJobProgress("accepted"), {
