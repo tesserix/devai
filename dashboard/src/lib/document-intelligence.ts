@@ -37,6 +37,13 @@ export type DocumentSandboxSession = {
   job_id?: string;
 };
 
+export type DocumentSandboxSessionRestore = {
+  upload: DocumentUploadState | null;
+  job: DocumentJobState | null;
+  uploadUnavailable: boolean;
+  jobUnavailable: boolean;
+};
+
 export type DocumentJobProgress = {
   stage: "queued" | "preparing" | "extracting" | "validating" | "complete" | "attention" | "cancelled";
   message: string;
@@ -157,6 +164,18 @@ export function parseDocumentSandboxSession(value: string | null): DocumentSandb
   } catch {
     return null;
   }
+}
+
+export function resolveDocumentSandboxSessionRestore(
+  upload: PromiseSettledResult<DocumentUploadState | null>,
+  job: PromiseSettledResult<DocumentJobState | null>,
+): DocumentSandboxSessionRestore {
+  return {
+    upload: upload.status === "fulfilled" ? upload.value : null,
+    job: job.status === "fulfilled" ? job.value : null,
+    uploadUnavailable: upload.status === "rejected",
+    jobUnavailable: job.status === "rejected",
+  };
 }
 
 export function serializeDocumentSandboxSession(session: DocumentSandboxSession): string {
