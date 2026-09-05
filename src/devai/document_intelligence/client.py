@@ -44,6 +44,10 @@ _STABLE_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _VERSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
+class DocumentResultNotReadyError(ValueError):
+    """Raised when the OCR job has not produced a result yet."""
+
+
 class DocumentIntelligenceError(ValueError):
     """Raised when a document-intelligence request cannot be safely sent."""
 
@@ -231,6 +235,8 @@ class DocumentIntelligenceClient:
             f"{self._job_base_url}{path}",
             headers=self._signed_headers(principal, "GET", path),
         )
+        if response.status_code == 409:
+            raise DocumentResultNotReadyError("document result is not ready")
         if response.is_error:
             raise DocumentIntelligenceError(f"document-intelligence request failed with status {response.status_code}")
         return _sandbox_result_view(response.json(), job_id)
@@ -386,7 +392,7 @@ def _result_fields(value: dict[object, object]) -> list[dict[str, Any]]:
         ):
             raise DocumentIntelligenceError("document-intelligence result is invalid")
         pages = sorted(
-            {item.get("page") for item in evidence if isinstance(item, dict) and isinstance(item.get("page"), int)}
+            {page for item in evidence if isinstance(item, dict) and isinstance(page := item.get("page"), int)}
         )
         if not pages or any(page < 1 or page > 300 for page in pages):
             raise DocumentIntelligenceError("document-intelligence result is invalid")
