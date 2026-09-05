@@ -93,7 +93,7 @@ async def test_cancel_job_proxies_only_the_scoped_opaque_lifecycle(monkeypatch: 
     app.include_router(routes.router)
 
     async def principal(_: object) -> Principal:
-        return Principal(email="user@example.test", tenant_id="tenant-a")
+        return Principal(email="user@example.test", tenant_id="tenant-a", roles=["admin"])
 
     class FakeClient:
         async def cancel_job(self, *_: object, **kwargs: object) -> dict[str, str]:
@@ -323,6 +323,7 @@ async def test_job_result_reports_conflict_until_the_result_is_ready(monkeypatch
         ("GET", "/api/document-intelligence/documents/upl_01TEST"),
         ("POST", "/api/document-intelligence/documents/upl_01TEST/jobs"),
         ("GET", "/api/document-intelligence/jobs/job_01TEST"),
+        ("POST", "/api/document-intelligence/jobs/job_01TEST/cancel"),
         ("GET", "/api/document-intelligence/jobs/job_01TEST/result"),
     ],
 )
