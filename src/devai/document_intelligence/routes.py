@@ -118,7 +118,7 @@ async def get_document_job_status(request: Request, job_id: str) -> dict[str, st
 
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_document_job(request: Request, job_id: str) -> dict[str, str]:
-    principal = await require_principal(request)
+    principal = await _sandbox_principal(request)
     try:
         client = _client(request)
         async with httpx.AsyncClient(timeout=request.app.state.config.document_intelligence_timeout_seconds) as http:
