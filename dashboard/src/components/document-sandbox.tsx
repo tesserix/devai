@@ -18,7 +18,8 @@ import {
 const TERMINAL_UPLOAD_STATUSES = new Set(["accepted", "rejected", "expired"]);
 const TERMINAL_JOB_STATUSES = new Set(["cancelled", "rejected", "partial", "review_required", "completed"]);
 const RESULT_READY_JOB_STATUSES = new Set(["partial", "review_required", "completed"]);
-const AUTO_REFRESH_LIMIT = 10;
+const UPLOAD_AUTO_REFRESH_LIMIT = 10;
+const JOB_AUTO_REFRESH_LIMIT = 150;
 
 function percentage(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -38,7 +39,7 @@ export function DocumentSandbox() {
 
   async function refreshStatus(automatic = false) {
     if (!upload || busy) return;
-    if (automatic && refreshesRef.current >= AUTO_REFRESH_LIMIT) return;
+    if (automatic && refreshesRef.current >= UPLOAD_AUTO_REFRESH_LIMIT) return;
 
     setBusy(true);
     try {
@@ -77,7 +78,7 @@ export function DocumentSandbox() {
 
   async function refreshJob(automatic = false) {
     if (!job || busy) return;
-    if (automatic && jobRefreshesRef.current >= AUTO_REFRESH_LIMIT) return;
+    if (automatic && jobRefreshesRef.current >= JOB_AUTO_REFRESH_LIMIT) return;
 
     setBusy(true);
     try {
@@ -105,7 +106,7 @@ export function DocumentSandbox() {
   }
 
   useEffect(() => {
-    if (!upload || TERMINAL_UPLOAD_STATUSES.has(upload.status) || refreshes >= AUTO_REFRESH_LIMIT) return;
+    if (!upload || TERMINAL_UPLOAD_STATUSES.has(upload.status) || refreshes >= UPLOAD_AUTO_REFRESH_LIMIT) return;
     const timer = window.setTimeout(() => {
       void refreshStatus(true);
     }, 2_000);
@@ -113,7 +114,7 @@ export function DocumentSandbox() {
   }, [busy, refreshes, upload]);
 
   useEffect(() => {
-    if (!job || TERMINAL_JOB_STATUSES.has(job.status) || jobRefreshes >= AUTO_REFRESH_LIMIT) return;
+    if (!job || TERMINAL_JOB_STATUSES.has(job.status) || jobRefreshes >= JOB_AUTO_REFRESH_LIMIT) return;
     const timer = window.setTimeout(() => {
       void refreshJob(true);
     }, 2_000);
