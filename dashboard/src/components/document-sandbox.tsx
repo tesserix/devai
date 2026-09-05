@@ -15,6 +15,7 @@ import {
   isDocumentJobActive,
   DocumentUploadError,
   parseDocumentSandboxSession,
+  resolveDocumentSandboxSessionRestore,
   SANDBOX_FORBIDDEN_MESSAGE,
   serializeDocumentSandboxSession,
   type DocumentJobResult,
@@ -79,7 +80,14 @@ export function DocumentSandbox() {
   }
 
   useEffect(() => {
-    const session = parseDocumentSandboxSession(window.sessionStorage.getItem(SANDBOX_SESSION_STORAGE_KEY));
+    let session: ReturnType<typeof parseDocumentSandboxSession>;
+    try {
+      session = parseDocumentSandboxSession(window.sessionStorage.getItem(SANDBOX_SESSION_STORAGE_KEY));
+    } catch {
+      setMessage("This browser cannot access the previous sandbox OCR session.");
+      setRestoring(false);
+      return;
+    }
     if (!session) {
       setRestoring(false);
       return;
@@ -89,24 +97,35 @@ export function DocumentSandbox() {
     setMessage("Restoring the last sandbox OCR session…");
     void (async () => {
       try {
-        const [restoredUpload, restoredJob] = await Promise.all([
+        const [uploadResult, jobResult] = await Promise.allSettled([
           session.upload_id ? getSandboxDocumentStatus(session.upload_id) : Promise.resolve(null),
           session.job_id ? getSandboxDocumentJobStatus(session.job_id) : Promise.resolve(null),
         ]);
         if (cancelled) return;
+        const restored = resolveDocumentSandboxSessionRestore(uploadResult, jobResult);
+        const { upload: restoredUpload, job: restoredJob } = restored;
         if (restoredUpload) setUpload(restoredUpload);
+        if (restored.uploadUnavailable) recordActivity("The previous sandbox upload is no longer available.");
         if (restoredJob) {
           setJob(restoredJob);
           recordActivity(`OCR job status restored: ${restoredJob.status}.`);
           if (RESULT_READY_JOB_STATUSES.has(restoredJob.status)) {
             try {
-              setResult(await getSandboxDocumentJobResult(restoredJob.job_id));
+              const restoredResult = await getSandboxDocumentJobResult(restoredJob.job_id);
+              if (!cancelled) setResult(restoredResult);
             } catch (error) {
               if (!(error instanceof DocumentResultNotReadyError)) throw error;
             }
           }
         }
-        if (!cancelled) setMessage("The last sandbox OCR session was restored.");
+        if (restored.jobUnavailable) recordActivity("The previous sandbox OCR job is no longer available.");
+        if (!cancelled) {
+          setMessage(
+            restoredUpload || restoredJob
+              ? "The last sandbox OCR session was restored."
+              : "The previous sandbox OCR session is no longer available.",
+          );
+        }
       } catch (error) {
         if (!cancelled) {
           setMessage(describe(error, "The previous sandbox OCR session could not be restored. Try refreshing again shortly."));

@@ -11,6 +11,7 @@ import {
   parseDocumentJobState,
   parseDocumentSandboxSession,
   parseDocumentUploadState,
+  resolveDocumentSandboxSessionRestore,
 } from "./document-intelligence.ts";
 
 test("restores only opaque sandbox identifiers from a browser session", () => {
@@ -24,6 +25,21 @@ test("rejects browser session data that includes document content or invalid ide
   assert.equal(parseDocumentSandboxSession('{"upload_id":"upl_01TEST","text":"private"}'), null);
   assert.equal(parseDocumentSandboxSession('{"job_id":"not-a-job"}'), null);
   assert.equal(parseDocumentSandboxSession("not json"), null);
+});
+
+test("keeps an authorized OCR job when its upload record can no longer be restored", () => {
+  assert.deepEqual(
+    resolveDocumentSandboxSessionRestore(
+      { status: "rejected", reason: new Error("upload expired") },
+      { status: "fulfilled", value: { job_id: "job_01TEST", status: "completed" } },
+    ),
+    {
+      upload: null,
+      job: { job_id: "job_01TEST", status: "completed" },
+      uploadUnavailable: true,
+      jobUnavailable: false,
+    },
+  );
 });
 
 test("allows cancellation only while an OCR job is non-terminal", () => {
