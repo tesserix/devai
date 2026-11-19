@@ -74,7 +74,7 @@ dependencies = [
     # (MCPServer, Streamable HTTP) exposes DevAI at /mcp; slack_sdk backs the
     # Slack Events API channel. Both are imported lazily inside their channels,
     # so a deployment with those channels disabled never loads them.
-    "mcp>=2.1.1,<3",
+    "mcp>=2.2.0,<3",
     "httpx2>=2.5,<3",
     "slack-sdk>=3.43.0,<4",
     # Secrets adapter family (src/devai/adapters/secrets/gcp_sm.py). Auto-
