@@ -95,7 +95,7 @@ dependencies = [
 
 [project.optional-dependencies]
 docs = [
-    "pypdf>=6.16.1",
+    "pypdf>=6.19.0",
     "pdfplumber>=0.11.9",
     "pyyaml>=6.0.3",
 ]
